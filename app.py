@@ -21,7 +21,7 @@
 
 import os, io, json, base64, re, sqlite3, datetime, ipaddress
 import requests
-from flask import Flask, request, render_template_string, redirect, url_for, abort, send_file
+from flask import Flask, request, render_template_string, redirect, url_for, abort, send_file, send_from_directory
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import inch
@@ -296,10 +296,10 @@ INDEX_HTML = """
 <html lang="en"><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>{{app_name}} — My Homework & Life Skills Buddy</title>
-<link rel="icon" href="/static/favicon.ico">
-<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/favicon-192x192.png">
-<link rel="apple-touch-icon" href="/static/favicon-512x512.png">
+<link rel="icon" href="/static/favicon/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/favicon/favicon-192x192.png">
+<link rel="apple-touch-icon" href="/static/favicon/favicon-512x512.png">
 <link rel="manifest" href="/static/manifest.json">
 <style>
   :root{--bg:#0b0f14;--card:#101823;--ink:#e8eef7;--muted:#94a3b8;--brd:#1f2b3a;--pri:#22c55e}
@@ -325,7 +325,10 @@ INDEX_HTML = """
 </style>
 </head><body>
 <header>
-  <h1>{{app_name}} — My Homework & Life Skills Buddy</h1>
+  <div style="display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:8px">
+    <img src="/static/logo/Mini Assistant.png" alt="Mini Assistant" style="width:48px;height:48px;border-radius:8px">
+    <h1 style="margin:0">{{app_name}} — My Homework & Life Skills Buddy</h1>
+  </div>
   <div class="fine">Type a question or upload a photo. Choose mode. Always ends with "Why this is correct" & "Check Your Work". {{limit_note}}</div>
 </header>
 <main>
@@ -484,10 +487,10 @@ COACH_HTML = """
 <html><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Mini Assistant — Guided Session</title>
-<link rel="icon" href="/static/favicon.ico">
-<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/favicon-192x192.png">
-<link rel="apple-touch-icon" href="/static/favicon-512x512.png">
+<link rel="icon" href="/static/favicon/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/favicon/favicon-192x192.png">
+<link rel="apple-touch-icon" href="/static/favicon/favicon-512x512.png">
 <link rel="manifest" href="/static/manifest.json">
 <style>
   body{margin:0;background:#0b0f14;color:#e8eef7;font:16px/1.5 system-ui,Segoe UI,Roboto,Inter,Helvetica,Arial}
@@ -663,10 +666,10 @@ PRIVACY_HTML = """
 <!doctype html><html><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Mini Assistant — Privacy</title>
-<link rel="icon" href="/static/favicon.ico">
-<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/favicon-192x192.png">
-<link rel="apple-touch-icon" href="/static/favicon-512x512.png">
+<link rel="icon" href="/static/favicon/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/favicon/favicon-192x192.png">
+<link rel="apple-touch-icon" href="/static/favicon/favicon-512x512.png">
 <link rel="manifest" href="/static/manifest.json">
 <style>
   body{margin:0;background:#0b0f14;color:#e8eef7;font:16px/1.6 system-ui,Segoe UI,Roboto,Inter,Helvetica,Arial}
@@ -696,6 +699,10 @@ PRIVACY_HTML = """
 @app.get("/privacy")
 def privacy():
     return PRIVACY_HTML
+
+@app.route('/static/<path:filename>')
+def static_files(filename):
+    return send_from_directory('static', filename)
 
 @app.get("/health")
 def health():
