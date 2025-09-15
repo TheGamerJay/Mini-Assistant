@@ -476,7 +476,7 @@ INDEX_HTML = """
 
 </main>
 <footer>
-  <span>Made for busy families & real life. | <a href="https://github.com/new">Fork & self-host</a></span>
+  <span>Made for busy families & real life.</span>
   {% if stripe_link %} | <a href="{{stripe_link}}">Upgrade</a>{% endif %}
 </footer>
 </body></html>
