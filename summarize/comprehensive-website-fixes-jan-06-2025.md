@@ -30,6 +30,10 @@
 - Increased brand logo size from 48px to 64px for better visibility
 - Enhanced logo styling with larger border radius (12px)
 
+## UI and Content Cleanup
+- Removed 'Fork & self-host' GitHub link from footer to prevent user access to repo
+- Cleaned footer to show only 'Made for busy families & real life.'
+
 ## Current Status
 - All changes committed and pushed to GitHub repository
 - Railway deployment configured for automatic redeploy
