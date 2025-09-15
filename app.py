@@ -326,7 +326,7 @@ INDEX_HTML = """
 </head><body>
 <header>
   <div style="display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:8px">
-    <img src="/static/logo/Mini Assistant.png" alt="Mini Assistant" style="width:48px;height:48px;border-radius:8px">
+    <img src="/static/logo/Mini Assistant.png" alt="Mini Assistant" style="width:64px;height:64px;border-radius:12px">
     <h1 style="margin:0">{{app_name}} — My Homework & Life Skills Buddy</h1>
   </div>
   <div class="fine">Type a question or upload a photo. Choose mode. Always ends with "Why this is correct" & "Check Your Work". {{limit_note}}</div>
