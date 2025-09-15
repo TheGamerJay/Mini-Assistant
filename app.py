@@ -34,7 +34,7 @@ MODEL   = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 FREE_DAILY_LIMIT = int(os.getenv("FREE_DAILY_LIMIT", "5"))
 STRIPE_PAY_LINK  = os.getenv("STRIPE_PAY_LINK", "")
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-mini-assistant-change-me")
-DB_PATH = "mini_assistant.sqlite"
+DB_PATH = os.getenv("DB_PATH", "mini_assistant.sqlite")
 
 if not API_KEY:
     raise SystemExit("Missing OPENAI_API_KEY")
@@ -296,6 +296,11 @@ INDEX_HTML = """
 <html lang="en"><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>{{app_name}} — My Homework & Life Skills Buddy</title>
+<link rel="icon" href="/static/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/favicon-192x192.png">
+<link rel="apple-touch-icon" href="/static/favicon-512x512.png">
+<link rel="manifest" href="/static/manifest.json">
 <style>
   :root{--bg:#0b0f14;--card:#101823;--ink:#e8eef7;--muted:#94a3b8;--brd:#1f2b3a;--pri:#22c55e}
   *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,Segoe UI,Roboto,Inter,Helvetica,Arial}
@@ -479,6 +484,11 @@ COACH_HTML = """
 <html><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Mini Assistant — Guided Session</title>
+<link rel="icon" href="/static/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/favicon-192x192.png">
+<link rel="apple-touch-icon" href="/static/favicon-512x512.png">
+<link rel="manifest" href="/static/manifest.json">
 <style>
   body{margin:0;background:#0b0f14;color:#e8eef7;font:16px/1.5 system-ui,Segoe UI,Roboto,Inter,Helvetica,Arial}
   header{padding:20px;text-align:center;background:#0f1620;border-bottom:1px solid #1f2b3a}
@@ -648,6 +658,44 @@ def form_fields():
     allowed = can_use_free()
     note = f"(Free: {FREE_DAILY_LIMIT}/day/IP)" if FREE_DAILY_LIMIT>0 else "(Unlimited demo)"
     return render_template_string(INDEX_HTML, app_name=APP_NAME, allowed=allowed, answer=None, limit_note=note, stripe_link=STRIPE_PAY_LINK, fields=json.dumps(fields, indent=2))
+
+PRIVACY_HTML = """
+<!doctype html><html><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Mini Assistant — Privacy</title>
+<link rel="icon" href="/static/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/favicon-192x192.png">
+<link rel="apple-touch-icon" href="/static/favicon-512x512.png">
+<link rel="manifest" href="/static/manifest.json">
+<style>
+  body{margin:0;background:#0b0f14;color:#e8eef7;font:16px/1.6 system-ui,Segoe UI,Roboto,Inter,Helvetica,Arial}
+  main{max-width:900px;margin:6vh auto;padding:0 16px}
+  .card{background:#101823;border:1px solid #1f2b3a;border-radius:14px;padding:18px}
+  h1{margin:0 0 12px 0}
+  a{color:#9ad1ff}
+</style>
+</head><body>
+<main>
+  <div class="card">
+    <h1>Privacy Policy</h1>
+    <p>We store minimal data to run the app:</p>
+    <ul>
+      <li>IP/day count for free-usage limits (if enabled)</li>
+      <li>Account email & password hash (only if you create an account)</li>
+      <li>No worksheets, photos, or form PDFs are stored after processing</li>
+    </ul>
+    <p>Model requests are sent to OpenAI to generate answers. Do not upload sensitive information.</p>
+    <p>Contact: support@example.com</p>
+    <p><a href="/">← Back to app</a></p>
+  </div>
+</main>
+</body></html>
+"""
+
+@app.get("/privacy")
+def privacy():
+    return PRIVACY_HTML
 
 @app.get("/health")
 def health():
