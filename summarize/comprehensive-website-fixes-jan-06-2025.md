@@ -24,8 +24,15 @@
 - Established AUTO PUSH POLICY for immediate deployment workflow
 - Added Railway deployment configuration guide
 
+## PWA and Asset Fixes
+- Fixed manifest.json favicon paths to use correct `/static/favicon/` subfolder
+- Resolved PWA manifest download errors (404s for favicon assets)
+- Increased brand logo size from 48px to 64px for better visibility
+- Enhanced logo styling with larger border radius (12px)
+
 ## Current Status
 - All changes committed and pushed to GitHub repository
 - Railway deployment configured for automatic redeploy
 - App ready for production with persistent data storage
 - Professional branding and PWA support implemented
+- PWA manifest errors resolved - proper favicon asset loading
