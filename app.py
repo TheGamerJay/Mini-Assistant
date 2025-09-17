@@ -603,6 +603,61 @@ def history_transactions():
     finally:
         s.close()
 
+# ---------------------- ROUTES ----------------------------
+@app.get("/intro")
+def intro():
+    return """<!DOCTYPE html>
+<html>
+<head>
+    <title>Mini Casino World</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: linear-gradient(135deg, #1e1e1e, #2d2d2d); color: white; min-height: 100vh; }
+        .container { max-width: 800px; margin: 0 auto; text-align: center; }
+        h1 { color: #ff6b6b; font-size: 3em; margin-bottom: 20px; }
+        p { font-size: 1.2em; margin-bottom: 30px; }
+        .cta { background: #ff6b6b; color: white; padding: 15px 30px; text-decoration: none; border-radius: 10px; font-size: 1.1em; display: inline-block; }
+        .cta:hover { background: #ff5252; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎰 Mini Casino World</h1>
+        <p>Experience the thrill of casino gaming with Blackjack, Roulette, and Slots!</p>
+        <p>Features include:</p>
+        <ul style="text-align: left; display: inline-block; font-size: 1.1em;">
+            <li>🃏 Classic Blackjack (21 vs House)</li>
+            <li>🎯 Red/Black Roulette</li>
+            <li>🎰 Lucky Slots</li>
+            <li>💰 Chip Store & Daily Bonuses</li>
+            <li>🏆 Community Leaderboards</li>
+            <li>⚖️ Responsible Gaming Limits</li>
+        </ul>
+        <p><a href="/" class="cta">Enter Casino</a></p>
+    </div>
+</body>
+</html>"""
+
+@app.get("/")
+def index():
+    return """<!DOCTYPE html>
+<html>
+<head>
+    <title>Mini Casino World</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel" src="/static/MiniCasinoUI.jsx"></script>
+</body>
+</html>"""
+
 # ---------------------- HEALTH ----------------------------
 @app.get("/healthz")
 def health():
