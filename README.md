@@ -12,12 +12,27 @@ A CPU-friendly Flask app for entertainment casino gaming:
 
 ## Quick start (local)
 ```bash
+# 1) Create venv and install deps
 python -m venv .venv
-. .venv/Scripts/activate   # Windows (PowerShell)
+.venv\Scripts\activate     # Windows
 # source .venv/bin/activate  # Mac/Linux
 pip install -r requirements.txt
+
+# 2) Set up environment
 cp .env.example .env
-# Edit .env with your settings
+# Edit .env with your PostgreSQL DATABASE_URL
+
+# 3) Initialize database schema
+# Windows PowerShell:
+$env:DATABASE_URL="postgresql://USERNAME:PASSWORD@HOST:PORT/railway"
+$env:LOAD_SEED="1"  # Optional: load demo games
+# Mac/Linux:
+# export DATABASE_URL="postgresql://USERNAME:PASSWORD@HOST:PORT/railway"
+# export LOAD_SEED="1"
+
+python scripts/init_db.py
+
+# 4) Run the app
 python app.py
 # open http://localhost:5000
 ```
