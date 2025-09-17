@@ -7,7 +7,7 @@ VALUES
   ('MCW Roulette', 'roulette', 5.26)
 ON CONFLICT DO NOTHING;
 
--- demo user with zero balance; store a real hash in production
+-- demo user with starting balance for testing; store a real hash in production
 INSERT INTO users (username, email, password_hash, balance)
-VALUES ('demo', 'demo@mcw.local', '$2b$12$DEMO_HASH_REPLACE_ME', 100.00)
-ON CONFLICT DO NOTHING;
+VALUES ('demo', 'demo@mcw.local', '$2b$12$DEMO_HASH_REPLACE_ME', 1000.00)
+ON CONFLICT (email) DO UPDATE SET balance = 1000.00;

@@ -40,6 +40,7 @@ app.config.update(
 
 # Mail backend selection (resend → smtp → echo → disabled)
 from mailer import Mailer
+from app_games import casino
 mailer = Mailer(
     resend_api_key=os.getenv("RESEND_API_KEY"),
     resend_from=os.getenv("RESEND_FROM"),
@@ -63,6 +64,9 @@ with app.app_context():
 login_manager = LoginManager()
 login_manager.login_view = "login"
 login_manager.init_app(app)
+
+# Register casino gaming blueprint
+app.register_blueprint(casino)
 
 @login_manager.user_loader
 def load_user(uid):
@@ -173,6 +177,10 @@ def reset_token(token):
 @login_required
 def intro():
     return render_template("intro.html", title="Mini Casino World")
+
+@app.get("/healthz")
+def health():
+    return {"ok": True, "service": "Mini Casino World"}
 
 @app.get("/games/blackjack")
 @login_required
