@@ -1,12 +1,13 @@
 import os, random
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from sqlalchemy import create_engine, Column, BigInteger, String, Numeric, Boolean, TIMESTAMP, ForeignKey, JSON, func, desc
 from sqlalchemy.orm import declarative_base, sessionmaker
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -26,6 +27,11 @@ MAX_BET_BLACKJACK = float(os.getenv("MAX_BET_BLACKJACK", "10000"))
 MAX_BET_ROULETTE  = float(os.getenv("MAX_BET_ROULETTE", "10000"))
 MAX_BET_SLOTS     = float(os.getenv("MAX_BET_SLOTS", "10000"))
 DAILY_BONUS_CHIPS = float(os.getenv("DAILY_BONUS_CHIPS", "500"))
+
+# File upload configuration
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(os.getcwd(), "uploads"))
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+ALLOWED_EXTS = {"png","jpg","jpeg","gif","mp4","webm","mov"}
 
 app = Flask(__name__)
 app.config["JWT_SECRET_KEY"] = SECRET_KEY
@@ -87,6 +93,7 @@ class UserSettings(Base):
     daily_loss_limit = Column(Numeric(12,2))       # nullable = no limit
     daily_deposit_limit = Column(Numeric(12,2))    # nullable = no limit
     last_bonus_at = Column(TIMESTAMP)              # for daily bonus timestamp
+    profile_media_url = Column(String(500))        # for profile images/videos
 
 # ---------------------- BOOTSTRAP -------------------------
 def ensure_tables_and_games():
@@ -110,7 +117,31 @@ def ensure_tables_and_games():
 
 ensure_tables_and_games()
 
+# ---------------------- CONTENT ---------------------------
+TERMS_TEXT = """Mini Casino World — Terms & Policy
+
+• Chips are virtual entertainment credits only. They have no monetary value.
+• No cash-out, conversion, or redemption outside the game.
+• Users must keep login credentials secure. One account per person.
+• Suspicious or abusive behavior may lead to account action.
+• The service is provided "as is" without warranties. Play responsibly.
+"""
+
+GUIDE_TEXT = """Game Guide
+
+• Blackjack: Bet chips. Player aims for 21 or less, beating dealer total. Push returns your bet. Wins pay 1:1, natural blackjack 3:2.
+• Roulette (Red/Black): Choose red or black. Win pays 1:1.
+• Slots (Chips only): Spin three symbols. Payouts follow the paytable in API.
+• Wallet/Store: Add chips (virtual). No real currency out.
+• Leaderboard: Ranks by net winnings (payout - bet) over selected window.
+• Daily Bonus: Claim once every 24h for a small chip grant.
+• Limits: You can set daily loss/deposit limits in Profile.
+"""
+
 # ---------------------- HELPERS ---------------------------
+def allowed_file(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTS
+
 def as_money(x) -> float:
     # Normalize Decimals/Numerics to float for JSON
     if isinstance(x, Decimal):
@@ -235,6 +266,7 @@ def get_user_settings():
             "daily_loss_limit": as_money(us.daily_loss_limit) if us.daily_loss_limit is not None else None,
             "daily_deposit_limit": as_money(us.daily_deposit_limit) if us.daily_deposit_limit is not None else None,
             "last_bonus_at": us.last_bonus_at.isoformat() if us.last_bonus_at else None,
+            "profile_media_url": us.profile_media_url or None,
         }
     finally:
         s.close()
@@ -253,6 +285,8 @@ def put_user_settings():
         if "daily_deposit_limit" in d:
             v = d["daily_deposit_limit"]
             us.daily_deposit_limit = None if v in ("", None) else Decimal(str(v))
+        if "profile_media_url" in d:
+            us.profile_media_url = d["profile_media_url"] or None
         s.commit()
         return {"ok": True}
     finally:
@@ -661,6 +695,46 @@ def index():
     <script type="text/babel" src="/static/MiniCasinoUI.jsx"></script>
 </body>
 </html>"""
+
+# ---------------------- CONTENT ROUTES --------------------
+@app.get("/api/content/terms")
+def content_terms():
+    return TERMS_TEXT, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+@app.get("/api/content/guide")
+def content_guide():
+    return GUIDE_TEXT, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+# ---------------------- MEDIA UPLOAD ----------------------
+@app.post("/api/users/me/media")
+@jwt_required()
+def upload_profile_media():
+    if "file" not in request.files:
+        return {"error": "file_missing"}, 400
+    file = request.files["file"]
+    if file.filename == "":
+        return {"error": "empty_filename"}, 400
+    if not allowed_file(file.filename):
+        return {"error": "unsupported_type"}, 400
+
+    s = SessionLocal()
+    try:
+        u = get_user(s, get_jwt_identity())
+        fname = f"user_{u.id}_" + secure_filename(file.filename)
+        fpath = os.path.join(UPLOAD_DIR, fname)
+        file.save(fpath)
+        # Public URL served by /uploads/<fname>
+        public_url = f"/uploads/{fname}"
+        us = get_settings(s, u.id)
+        us.profile_media_url = public_url
+        s.commit()
+        return {"ok": True, "url": public_url}
+    finally:
+        s.close()
+
+@app.get("/uploads/<path:filename>")
+def serve_upload(filename):
+    return send_from_directory(UPLOAD_DIR, filename, as_attachment=False)
 
 # ---------------------- HEALTH ----------------------------
 @app.get("/healthz")

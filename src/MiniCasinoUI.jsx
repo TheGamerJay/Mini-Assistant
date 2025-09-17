@@ -46,6 +46,22 @@ function JsonBox({ data }) {
   );
 }
 
+function Modal({ open, onClose, title, children, actions }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white dark:bg-zinc-900 rounded-xl p-6 max-w-md w-full mx-4 border border-zinc-200 dark:border-zinc-800">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-lg font-semibold">{title}</h3>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">✕</button>
+        </div>
+        <div className="mb-4">{children}</div>
+        {actions && <div className="flex gap-2 justify-end">{actions}</div>}
+      </div>
+    </div>
+  );
+}
+
 export default function MiniCasinoUI() {
   const [token, setToken] = useState(() => localStorage.getItem("mcw_token") || "");
   const [me, setMe] = useState(null);
@@ -86,6 +102,15 @@ export default function MiniCasinoUI() {
   const [newUsername, setNewUsername] = useState("");
   const [betHistory, setBetHistory] = useState([]);
   const [txHistory, setTxHistory] = useState([]);
+  const [betsPage, setBetsPage] = useState(0);
+  const [txPage, setTxPage] = useState(0);
+
+  // Legal/Content
+  const [termsText, setTermsText] = useState("");
+  const [guideText, setGuideText] = useState("");
+
+  // Modals and UX
+  const [storePromptOpen, setStorePromptOpen] = useState(false);
 
   const authHeaders = useMemo(() => (token ? { Authorization: `Bearer ${token}` } : {}), [token]);
 
@@ -196,6 +221,28 @@ export default function MiniCasinoUI() {
           body: JSON.stringify({ bet }),
           credentials: "include"
         }).then(r => r.json()),
+
+      // Content endpoints
+      getTerms: () =>
+        fetch(`${base}/api/content/terms`, {
+          credentials: "include"
+        }).then(r => r.text()),
+      getGuide: () =>
+        fetch(`${base}/api/content/guide`, {
+          credentials: "include"
+        }).then(r => r.text()),
+
+      // Media upload
+      uploadMedia: (file) => {
+        const formData = new FormData();
+        formData.append("file", file);
+        return fetch(`${base}/api/users/me/media`, {
+          method: "POST",
+          headers: { ...authHeaders },
+          body: formData,
+          credentials: "include"
+        }).then(r => r.json());
+      },
     };
   }, [authHeaders]);
 
@@ -216,6 +263,22 @@ export default function MiniCasinoUI() {
     } finally {
       setLoading(false);
     }
+  }
+
+  // Helper functions for enhanced UX
+  function checkLowBalance(betAmount) {
+    if (balance && balance - betAmount < 10) {
+      return "Warning: This bet will leave you with less than 10 chips. Consider visiting the Store.";
+    }
+    return null;
+  }
+
+  function checkOutOfChips() {
+    if (balance === 0) {
+      setStorePromptOpen(true);
+      return true;
+    }
+    return false;
   }
 
   const doRegister = () => withLoad(async () => {
@@ -292,7 +355,29 @@ export default function MiniCasinoUI() {
     }
   });
 
+  // Load content functions
+  const loadContent = () => withLoad(async () => {
+    const [terms, guide] = await Promise.all([
+      api.getTerms(),
+      api.getGuide()
+    ]);
+    setTermsText(terms);
+    setGuideText(guide);
+  });
+
+  const refreshHistory = () => withLoad(async () => {
+    const [bets, txs] = await Promise.all([
+      api.betHistory(betsPage),
+      api.txHistory(txPage)
+    ]);
+    setBetHistory(bets.results || []);
+    setTxHistory(txs.results || []);
+  });
+
   const playBJ = () => withLoad(async () => {
+    if (checkOutOfChips()) return;
+    const warning = checkLowBalance(Number(bjBet));
+    if (warning) setErr(warning);
     const res = await api.blackjack(Number(bjBet));
     setBjRes(res);
     if (res.balance !== undefined) setBalance(res.balance);
@@ -300,6 +385,9 @@ export default function MiniCasinoUI() {
   });
 
   const betRoulette = () => withLoad(async () => {
+    if (checkOutOfChips()) return;
+    const warning = checkLowBalance(Number(rlBet));
+    if (warning) setErr(warning);
     const res = await api.roulette(Number(rlBet), rlColor);
     setRlRes(res);
     if (res.balance !== undefined) setBalance(res.balance);
@@ -307,6 +395,9 @@ export default function MiniCasinoUI() {
   });
 
   const spinSlots = () => withLoad(async () => {
+    if (checkOutOfChips()) return;
+    const warning = checkLowBalance(Number(slBet));
+    if (warning) setErr(warning);
     const res = await api.slots(Number(slBet));
     setSlRes(res);
     if (res.balance !== undefined) setBalance(res.balance);
@@ -328,7 +419,8 @@ export default function MiniCasinoUI() {
   useEffect(() => {
     if (token && tab === "store" && products.length === 0) fetchStore();
     if (token && tab === "community") fetchLeaderboard();
-    if (token && tab === "profile" && betHistory.length === 0) fetchHistory();
+    if (token && tab === "profile") refreshHistory();
+    if (tab === "legal" && !termsText) loadContent();
   }, [token, tab]);
 
   return (
@@ -409,7 +501,7 @@ export default function MiniCasinoUI() {
 
             {/* Tab Navigation */}
             <div className="flex gap-2 border-b border-zinc-300 dark:border-zinc-700">
-              {["games", "wallet", "store", "community", "profile"].map(t => (
+              {["games", "wallet", "store", "community", "profile", "legal"].map(t => (
                 <button
                   key={t}
                   onClick={() => setTab(t)}

@@ -83,6 +83,15 @@ function MiniCasinoUI() {
   const [newUsername, setNewUsername] = useState("");
   const [betHistory, setBetHistory] = useState([]);
   const [txHistory, setTxHistory] = useState([]);
+  const [betsPage, setBetsPage] = useState(0);
+  const [txPage, setTxPage] = useState(0);
+
+  // Legal/Content
+  const [termsText, setTermsText] = useState("");
+  const [guideText, setGuideText] = useState("");
+
+  // Modals and UX
+  const [storePromptOpen, setStorePromptOpen] = useState(false);
 
   const authHeaders = useMemo(() => (token ? { Authorization: `Bearer ${token}` } : {}), [token]);
 
