@@ -1,7 +1,10 @@
 {% extends "_base.html" %}
 {% block content %}
 <section class="card auth">
-  <h1>Choose a new password</h1>
+  <div class="auth-header">
+    <img src="{{ url_for('static', filename='logo/Mini Casino World Logo.png') }}" alt="Mini Casino World" class="auth-logo">
+    <h1>Choose a new password</h1>
+  </div>
   <form method="post" novalidate>
     <label for="password">New password</label>
     <div class="password-field">

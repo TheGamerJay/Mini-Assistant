@@ -1,7 +1,10 @@
 {% extends "_base.html" %}
 {% block content %}
 <section class="card auth">
-  <h1>Reset password</h1>
+  <div class="auth-header">
+    <img src="{{ url_for('static', filename='logo/Mini Casino World Logo.png') }}" alt="Mini Casino World" class="auth-logo">
+    <h1>Reset password</h1>
+  </div>
   <form method="post" novalidate>
     <label for="email">Email</label>
     <input id="email" type="email" name="email" required />
