@@ -9,7 +9,9 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
-      "Bash(git config:*)"
+      "Bash(git config:*)",
+      "Read(//c/Users/jaaye/**)",
+      "Bash(git remote set-url:*)"
     ],
     "deny": [],
     "ask": []
