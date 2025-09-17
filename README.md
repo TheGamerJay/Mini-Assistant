@@ -1,13 +1,13 @@
-# Mini Assistant
+# Mini Casino World
 
-A CPU-friendly Flask app for step-by-step homework & life-skills coaching:
-- Text + Photo (vision) help
-- Kid / Parent / Step-by-Step modes
-- Guided coach (one step at a time)
-- Always ends with "Why this is correct" + "Check Your Work"
-- Printable worksheet PDF
-- Fillable PDF form filler
-- Auth (optional) + IP/day free limit
+A CPU-friendly Flask app for entertainment casino gaming:
+- User authentication with Flask-Login
+- Casino games (Blackjack, Roulette, Slots)
+- Entertainment chips with no monetary value
+- Password reset with email tokens
+- Multi-backend mailer (Resend/SMTP/echo)
+- Responsive casino-themed UI
+- Secure session management
 - PWA manifest + favicons
 
 ## Quick start (local)
@@ -16,9 +16,10 @@ python -m venv .venv
 . .venv/Scripts/activate   # Windows (PowerShell)
 # source .venv/bin/activate  # Mac/Linux
 pip install -r requirements.txt
-set OPENAI_API_KEY=sk-...   # (Windows)  export OPENAI_API_KEY=sk-... (Mac/Linux)
+cp .env.example .env
+# Edit .env with your settings
 python app.py
-# open http://localhost:8080
+# open http://localhost:5000
 ```
 
 ## Deploy (Railway)
@@ -27,13 +28,14 @@ Create project from GitHub
 
 Variables:
 
-- `OPENAI_API_KEY`
-- `SECRET_KEY`
-- `FREE_DAILY_LIMIT=5` (optional)
-- `DB_PATH=/data/mini_assistant.sqlite` (if using a Volume)
-- `STRIPE_PAY_LINK` (optional)
+- `SECRET_KEY` (required)
+- `DATABASE_URL=sqlite:///mcw.db` (or PostgreSQL URL)
+- `APP_BASE_URL=https://your-domain.com` (for email links)
+- `RESEND_API_KEY` and `RESEND_FROM` (for email)
+- OR `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` (SMTP fallback)
+- `DEV_MAIL_ECHO=true` (for development)
 
-Add Volume: mount at `/data` (for SQLite persistence)
+Add Volume: mount at `/data` (for SQLite persistence) - optional
 
 Custom domain: add CNAME → enable HTTPS
 

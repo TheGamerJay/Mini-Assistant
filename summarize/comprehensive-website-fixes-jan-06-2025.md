@@ -1,4 +1,4 @@
-# Comprehensive Website Fixes - January 06, 2025
+# Mini Casino World - Complete System Replacement - January 06, 2025
 
 ## Project Setup and Environment
 - Created virtual environment (.venv)
@@ -34,9 +34,24 @@
 - Removed 'Fork & self-host' GitHub link from footer to prevent user access to repo
 - Cleaned footer to show only 'Made for busy families & real life.'
 
+## Complete System Replacement (September 16, 2025)
+- **MAJOR CHANGE**: Completely replaced homework assistant with Mini Casino World
+- Implemented Flask-Login authentication system with user registration/login
+- Added password reset functionality with email tokens (Resend/SMTP)
+- Created proper MVC architecture: app.py, models.py, mailer.py
+- Built casino-themed UI with black/red color scheme and chip graphics
+- Added responsive design with password toggle functionality
+- Implemented multi-backend mailer (Resend → SMTP → echo for dev)
+- Created complete template system with Jinja2 inheritance
+- Fixed password toggle styling issue (text field sizing)
+- Updated requirements.txt for new Flask-Login dependencies
+- Updated README.md to reflect casino gaming focus
+- All entertainment-only disclaimers and responsible gaming features
+
 ## Current Status
+- Complete casino authentication system deployed
 - All changes committed and pushed to GitHub repository
 - Railway deployment configured for automatic redeploy
-- App ready for production with persistent data storage
-- Professional branding and PWA support implemented
-- PWA manifest errors resolved - proper favicon asset loading
+- App ready for production with user authentication
+- Professional casino branding and PWA support implemented
+- Password toggle functionality working correctly
