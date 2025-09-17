@@ -581,4 +581,5 @@ function MiniCasinoUI() {
 }
 
 // Render the app
-ReactDOM.render(React.createElement(MiniCasinoUI), document.getElementById('root'));
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(React.createElement(MiniCasinoUI));
