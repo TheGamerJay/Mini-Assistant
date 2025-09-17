@@ -11,7 +11,10 @@
       "Bash(git push:*)",
       "Bash(git config:*)",
       "Read(//c/Users/jaaye/**)",
-      "Bash(git remote set-url:*)"
+      "Bash(git remote set-url:*)",
+      "Bash(pip install:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)"
     ],
     "deny": [],
     "ask": []

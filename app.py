@@ -7,6 +7,10 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required, ge
 from sqlalchemy import create_engine, Column, BigInteger, String, Numeric, Boolean, TIMESTAMP, ForeignKey, JSON, func, desc
 from sqlalchemy.orm import declarative_base, sessionmaker
 from werkzeug.security import generate_password_hash, check_password_hash
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # ---------------------- ENV / CONFIG ----------------------
 DATABASE_URL = os.getenv("DATABASE_URL")

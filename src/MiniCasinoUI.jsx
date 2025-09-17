@@ -53,6 +53,7 @@ export default function MiniCasinoUI() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [tab, setTab] = useState("games");
+  const [showRegister, setShowRegister] = useState(false);
 
   // Auth forms
   const [regUsername, setRegUsername] = useState("");
@@ -350,38 +351,52 @@ export default function MiniCasinoUI() {
         {err && <div className="rounded-xl border border-red-300 bg-red-50 text-red-800 p-3">{err}</div>}
 
         {!token ? (
-          <div className="grid md:grid-cols-2 gap-6">
-            <Card title="Create Account">
-              <div className="grid gap-3">
-                <Field label="Username">
-                  <input value={regUsername} onChange={e=>setRegUsername(e.target.value)}
-                         className="px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/60 dark:bg-zinc-800/60" />
-                </Field>
-                <Field label="Email">
-                  <input value={regEmail} onChange={e=>setRegEmail(e.target.value)}
-                         className="px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/60 dark:bg-zinc-800/60" />
-                </Field>
-                <Field label="Password (min 6)">
-                  <input type="password" value={regPassword} onChange={e=>setRegPassword(e.target.value)}
-                         className="px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/60 dark:bg-zinc-800/60" />
-                </Field>
-                <Button onClick={doRegister} disabled={loading}>Sign Up</Button>
-              </div>
-            </Card>
-
-            <Card title="Sign In">
-              <div className="grid gap-3">
-                <Field label="Email or Username">
-                  <input value={idIdentifier} onChange={e=>setIdIdentifier(e.target.value)}
-                         className="px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/60 dark:bg-zinc-800/60" />
-                </Field>
-                <Field label="Password">
-                  <input type="password" value={idPassword} onChange={e=>setIdPassword(e.target.value)}
-                         className="px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/60 dark:bg-zinc-800/60" />
-                </Field>
-                <Button onClick={doLogin} disabled={loading}>Login</Button>
-              </div>
-            </Card>
+          <div className="max-w-md mx-auto">
+            {!showRegister ? (
+              <Card title="Welcome Back">
+                <div className="grid gap-3">
+                  <Field label="Email or Username">
+                    <input value={idIdentifier} onChange={e=>setIdIdentifier(e.target.value)}
+                           className="px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/60 dark:bg-zinc-800/60" />
+                  </Field>
+                  <Field label="Password">
+                    <input type="password" value={idPassword} onChange={e=>setIdPassword(e.target.value)}
+                           className="px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/60 dark:bg-zinc-800/60" />
+                  </Field>
+                  <Button onClick={doLogin} disabled={loading}>Sign In</Button>
+                  <div className="text-center mt-4">
+                    <Button onClick={() => setShowRegister(true)}>Create Account</Button>
+                  </div>
+                </div>
+              </Card>
+            ) : (
+              <Card title="Join the Casino">
+                <div className="grid gap-3">
+                  <Field label="Username">
+                    <input value={regUsername} onChange={e=>setRegUsername(e.target.value)}
+                           className="px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/60 dark:bg-zinc-800/60" />
+                  </Field>
+                  <Field label="Email">
+                    <input value={regEmail} onChange={e=>setRegEmail(e.target.value)}
+                           className="px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/60 dark:bg-zinc-800/60" />
+                  </Field>
+                  <Field label="Password (min 6)">
+                    <input type="password" value={regPassword} onChange={e=>setRegPassword(e.target.value)}
+                           className="px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/60 dark:bg-zinc-800/60" />
+                  </Field>
+                  <div className="flex items-center gap-2 mt-2">
+                    <input type="checkbox" id="terms" className="rounded" />
+                    <label htmlFor="terms" className="text-sm">I agree to the terms and policy</label>
+                  </div>
+                  <Button onClick={() => { doRegister(); setShowRegister(false); }} disabled={loading}>Create Account</Button>
+                  <div className="text-center mt-4">
+                    <button onClick={() => setShowRegister(false)} className="text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 hover:dark:text-zinc-100">
+                      Back to Login
+                    </button>
+                  </div>
+                </div>
+              </Card>
+            )}
           </div>
         ) : (
           <>
