@@ -4,12 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>{{ title or "Mini Casino World" }}</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon/favicon.ico') }}">
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon/favicon.png') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}?v={{ config.get('ASSET_VERSION') }}">
 </head>
 <body class="mcw">
   <header class="site-header">
     <div class="brand">
-      <div class="chip"></div>
+      <img src="{{ url_for('static', filename='logo/Mini Casino World Logo.png') }}" alt="Mini Casino World" class="brand-logo">
       <span class="brand-title"><strong>Mini</strong> <span class="accent">Casino</span> World</span>
     </div>
     {% if current_user.is_authenticated %}

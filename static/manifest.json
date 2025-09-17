@@ -7,7 +7,7 @@
   "background_color": "#0b0f14",
   "theme_color": "#22c55e",
   "icons": [
-    { "src": "/static/favicon/favicon-192x192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/static/favicon/favicon-512x512.png", "sizes": "512x512", "type": "image/png" }
+    { "src": "/static/favicon/favicon.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/static/logo/Mini Casino World Logo.png", "sizes": "512x512", "type": "image/png" }
   ]
 }

@@ -10,7 +10,7 @@ body.mcw .container:has(.card.auth){background:radial-gradient(800px 600px at 50
 .container{max-width:860px;margin:32px auto;padding:0 16px}
 .site-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #1c1d22;background:#0A0A0C;position:sticky;top:0}
 .brand{display:flex;align-items:center;gap:12px}
-.brand .chip{width:28px;height:28px;border-radius:50%;background:radial-gradient(circle at 35% 30%, #ff7a92, #E11D48 60%, #8a0f2a 100%);box-shadow:0 0 0 3px #2a0f15 inset,0 6px 16px rgba(0,0,0,.5)}
+.brand-logo{width:32px;height:32px;border-radius:8px}
 .brand-title{font-weight:700;letter-spacing:.3px}
 .accent{color:var(--mcw-red)}
 .linklike{background:none;border:none;color:var(--ink);cursor:pointer}
