@@ -1,0 +1,18 @@
+{% extends "_base.html" %}
+{% block content %}
+<section class="hero">
+  <div class="hero-text">
+    <h1>Welcome to <span class="accent">Mini</span> Casino World</h1>
+    <p>Entertainment only. Chips have no monetary value. You vs the house.</p>
+    <div class="chip-row">
+      <img src="{{ url_for('static', filename='img/chip_red.png') }}" alt="Red MCW chip" />
+      <img src="{{ url_for('static', filename='img/chip_black.png') }}" alt="Black MCW chip" />
+    </div>
+  </div>
+</section>
+<section class="grid">
+  <a class="tile" href="#"><h3>Blackjack</h3><p>Classic 21 vs the house.</p></a>
+  <a class="tile" href="#"><h3>Roulette</h3><p>Red or black?</p></a>
+  <a class="tile" href="#"><h3>Slots</h3><p>Spin to win—chips only.</p></a>
+</section>
+{% endblock %}

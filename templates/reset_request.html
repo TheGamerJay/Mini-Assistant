@@ -1,0 +1,12 @@
+{% extends "_base.html" %}
+{% block content %}
+<section class="card auth">
+  <h1>Reset password</h1>
+  <form method="post" novalidate>
+    <label for="email">Email</label>
+    <input id="email" type="email" name="email" required />
+    <button class="btn-primary" type="submit">Send reset link</button>
+    <div class="row"><a href="{{ url_for('login') }}">Back to sign in</a></div>
+  </form>
+</section>
+{% endblock %}

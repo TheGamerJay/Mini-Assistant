@@ -1,0 +1,27 @@
+{% extends "_base.html" %}
+{% block content %}
+<section class="card auth">
+  <h1>Choose a new password</h1>
+  <form method="post" novalidate>
+    <label for="password">New password</label>
+    <div class="password-field">
+      <input id="password" type="password" name="password" autocomplete="new-password" required />
+      <button type="button" class="password-toggle" aria-label="Show password" aria-pressed="false" onclick="togglePassword('password', this)">
+        <span class="show-text" aria-hidden="true">👁️</span>
+        <span class="hide-text" style="display:none;" aria-hidden="true">🙈</span>
+      </button>
+    </div>
+
+    <label for="confirm_password">Confirm new password</label>
+    <div class="password-field">
+      <input id="confirm_password" type="password" name="confirm_password" autocomplete="new-password" required />
+      <button type="button" class="password-toggle" aria-label="Show password" aria-pressed="false" onclick="togglePassword('confirm_password', this)">
+        <span class="show-text" aria-hidden="true">👁️</span>
+        <span class="hide-text" style="display:none;" aria-hidden="true">🙈</span>
+      </button>
+    </div>
+
+    <button class="btn-primary" type="submit">Update password</button>
+  </form>
+</section>
+{% endblock %}

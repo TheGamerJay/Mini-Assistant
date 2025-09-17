@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{{ title or "Mini Casino World" }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}?v={{ config.get('ASSET_VERSION') }}">
+</head>
+<body class="mcw">
+  <header class="site-header">
+    <div class="brand">
+      <div class="chip"></div>
+      <span class="brand-title"><strong>Mini</strong> <span class="accent">Casino</span> World</span>
+    </div>
+    {% if current_user.is_authenticated %}
+    <form action="{{ url_for('logout') }}" method="post"><button class="linklike">Sign out</button></form>
+    {% endif %}
+  </header>
+
+  <main class="container">
+    {% with msgs = get_flashed_messages(with_categories=true) %}
+      {% if msgs %}
+        <div class="flash-wrap">
+          {% for cat,msg in msgs %}
+            <div class="flash {{ cat }}">{{ msg }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </main>
+
+  <script defer src="{{ url_for('static', filename='js/password-toggle.js') }}?v={{ config.get('ASSET_VERSION') }}"></script>
+</body>
+</html>
