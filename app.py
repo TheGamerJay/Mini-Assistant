@@ -1,207 +1,446 @@
-import os, re, logging
-from datetime import timedelta
-from flask import Flask, render_template, redirect, url_for, request, flash, jsonify
-from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from dotenv import load_dotenv
-from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+import os, random
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
-load_dotenv()
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from flask_jwt_extended import (
+    JWTManager, create_access_token, jwt_required, get_jwt_identity
+)
+from sqlalchemy import (
+    create_engine, Column, Integer, BigInteger, String, Numeric, Boolean,
+    TIMESTAMP, ForeignKey, JSON
+)
+from sqlalchemy.orm import declarative_base, sessionmaker
+from werkzeug.security import generate_password_hash, check_password_hash
 
-def int_env(name: str, default: int) -> int:
-    raw = os.getenv(name, str(default))
-    cleaned = (raw or "").strip()
+# ---------------------- ENV / CONFIG ----------------------
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL environment variable is not set")
+
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY environment variable is not set")
+
+app = Flask(__name__)
+app.config["JWT_SECRET_KEY"] = SECRET_KEY
+app.config["JSON_SORT_KEYS"] = False
+
+CORS(app, supports_credentials=True)
+jwt = JWTManager(app)
+
+# ---------------------- DB SETUP --------------------------
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+Base = declarative_base()
+
+# ---------------------- MODELS ----------------------------
+class User(Base):
+    __tablename__ = "users"
+    id = Column(BigInteger, primary_key=True)
+    username = Column(String(50), unique=True, nullable=False)
+    email = Column(String(100), unique=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+    balance = Column(Numeric(12,2), nullable=False, default=0)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(TIMESTAMP, default=datetime.utcnow)
+    updated_at = Column(TIMESTAMP, default=datetime.utcnow)
+
+class Game(Base):
+    __tablename__ = "games"
+    id = Column(BigInteger, primary_key=True)
+    name = Column(String(100), nullable=False, unique=True)
+    type = Column(String(50), nullable=False)
+    house_edge = Column(Numeric(5,2))
+    is_active = Column(Boolean, default=True)
+    created_at = Column(TIMESTAMP, default=datetime.utcnow)
+
+class Bet(Base):
+    __tablename__ = "bets"
+    id = Column(BigInteger, primary_key=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    game_id = Column(BigInteger, ForeignKey("games.id", ondelete="RESTRICT"), nullable=False)
+    amount = Column(Numeric(12,2), nullable=False)
+    outcome = Column(String(20))      # win / lose / push
+    payout = Column(Numeric(12,2), default=0)
+    result_meta = Column(JSON)
+    created_at = Column(TIMESTAMP, default=datetime.utcnow)
+
+# ---------------------- BOOTSTRAP -------------------------
+def ensure_tables_and_games():
+    # Create all tables first
+    Base.metadata.create_all(bind=engine)
+
+    # Then ensure games exist
+    s = SessionLocal()
     try:
-        return int(cleaned)
-    except ValueError:
-        m = re.search(r'\d+', cleaned)
-        if m:
-            logging.warning("Coercing %s from %r to %s", name, raw, m.group(0))
-            return int(m.group(0))
-        logging.warning("Falling back to default for %s: %r", name, raw)
-        return default
+        catalog = [
+            ("Blackjack", "blackjack"),
+            ("Roulette Red/Black", "roulette"),
+            ("Slots – Chips Only", "slots"),
+        ]
+        for name, gtype in catalog:
+            if not s.query(Game).filter_by(name=name).first():
+                s.add(Game(name=name, type=gtype))
+        s.commit()
+    finally:
+        s.close()
 
-def bool_env(name: str, default: bool=False) -> bool:
-    raw = str(os.getenv(name, str(default))).strip().lower()
-    return raw in {"1","true","t","yes","y","on"}
+ensure_tables_and_games()
 
-# ----- Flask setup
-app = Flask(__name__, static_folder="static", template_folder="templates")
-app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
-app.config.update(
-    SQLALCHEMY_DATABASE_URI=os.getenv("DATABASE_URL", "sqlite:///mcw.db"),
-    SQLALCHEMY_TRACK_MODIFICATIONS=False,
-    REMEMBER_COOKIE_DURATION=timedelta(days=30),
-    SESSION_COOKIE_SECURE=True,
-    SESSION_COOKIE_HTTPONLY=True,
-    PERMANENT_SESSION_LIFETIME=timedelta(days=7),
-    PREFERRED_URL_SCHEME=os.getenv("PREFERRED_URL_SCHEME", "https"),
-    ASSET_VERSION=os.getenv("ASSET_VERSION", "v1"),
-)
+# ---------------------- HELPERS ---------------------------
+def as_money(x) -> float:
+    # Normalize Decimals/Numerics to float for JSON
+    if isinstance(x, Decimal):
+        return float(x)
+    return float(Decimal(str(x)))
 
-# Mail backend selection (resend → smtp → echo → disabled)
-from mailer import Mailer
-from app_games import casino
-mailer = Mailer(
-    resend_api_key=os.getenv("RESEND_API_KEY"),
-    resend_from=os.getenv("RESEND_FROM"),
-    smtp_host=os.getenv("SMTP_HOST") or os.getenv("SMTP_SERVER"),
-    smtp_port=int_env("SMTP_PORT", 587),
-    smtp_user=os.getenv("SMTP_USER"),
-    smtp_pass=os.getenv("SMTP_PASS"),
-    smtp_from=os.getenv("SMTP_FROM"),
-    use_tls=bool_env("SMTP_USE_TLS", True),
-    dev_echo=bool_env("DEV_MAIL_ECHO", False),
-)
+def get_user(session, identity) -> User:
+    u = session.query(User).filter(User.id == int(identity), User.is_active.is_(True)).first()
+    if not u:
+        raise ValueError("user_not_found_or_inactive")
+    return u
 
-# DB + User model
-from models import db, User, password_valid
-db.init_app(app)
+def get_game(session, gtype: str) -> Game:
+    g = session.query(Game).filter(Game.type == gtype, Game.is_active.is_(True)).first()
+    if not g:
+        raise ValueError("game_not_active")
+    return g
 
-with app.app_context():
-    db.create_all()
+def debit(session, user: User, amt: float):
+    if as_money(user.balance) < amt:
+        raise ValueError("insufficient_balance")
+    user.balance = Decimal(str(as_money(user.balance) - amt))
+    session.flush()
 
-# Login manager
-login_manager = LoginManager()
-login_manager.login_view = "login"
-login_manager.init_app(app)
+def credit(session, user: User, amt: float):
+    user.balance = Decimal(str(as_money(user.balance) + amt))
+    session.flush()
 
-# Register casino gaming blueprint
-app.register_blueprint(casino)
-
-@login_manager.user_loader
-def load_user(uid):
-    return db.session.get(User, int(uid))
-
-# Token utils
-def token_serializer():
-    return URLSafeTimedSerializer(app.secret_key, salt="mcw-password-reset")
-
-def abs_url(path: str) -> str:
-    base = os.getenv("APP_BASE_URL")  # e.g., https://mini-casino.world
-    if base:
-        return base.rstrip("/") + path
-    return url_for("intro", _external=True).replace("/intro","") + path
-
-# ----- Routes
-
-@app.get("/")
-def root():
-    return redirect(url_for("intro") if current_user.is_authenticated else url_for("login"))
-
-@app.route("/login", methods=["GET","POST"])
-def login():
-    if request.method == "POST":
-        email = (request.form.get("email") or "").strip().lower()
-        pw = request.form.get("password") or ""
-        user = User.query.filter_by(email=email).first()
-        if user and user.check_password(pw):
-            login_user(user, remember=True)
-            return redirect(url_for("intro"))
-        flash("Invalid email or password.", "error")
-    return render_template("login.html", title="Sign in • MCW")
-
-@app.route("/register", methods=["GET","POST"])
+# ---------------------- AUTH ------------------------------
+@app.post("/api/auth/register")
 def register():
-    if request.method == "POST":
-        email = (request.form.get("email") or "").strip().lower()
-        pw = request.form.get("password") or ""
-        agree = request.form.get("agree_terms")
-        if not password_valid(pw):
-            flash("Password must be at least 8 chars and include a letter & a number.", "error")
-        elif not agree:
-            flash("Please accept the terms.", "error")
-        elif User.query.filter_by(email=email).first():
-            flash("An account with this email already exists.", "error")
-        else:
-            u = User(email=email)
-            u.set_password(pw)
-            db.session.add(u)
-            db.session.commit()
-            login_user(u, remember=True)
-            return redirect(url_for("intro"))
-    return render_template("register.html", title="Create account • MCW")
+    data = request.get_json(force=True)
+    username = (data.get("username") or "").strip()
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
 
-@app.post("/logout")
-@login_required
-def logout():
-    logout_user()
-    return redirect(url_for("login"))
+    if not username or not email or not password:
+        return {"error": "missing_fields"}, 400
+    if len(password) < 6:
+        return {"error": "weak_password"}, 400
 
-@app.route("/reset", methods=["GET","POST"])
-def reset_request():
-    if request.method == "POST":
-        email = (request.form.get("email") or "").strip().lower()
-        user = User.query.filter_by(email=email).first()
-        if user:
-            s = token_serializer()
-            token = s.dumps({"uid": user.id, "email": user.email})
-            link = abs_url(url_for("reset_token", token=token))
-            mailer.send(
-                to=email,
-                subject="MCW password reset",
-                text=f"Reset your password: {link}",
-                html=f"<p>Reset your password:</p><p><a href='{link}'>{link}</a></p>",
-            )
-        flash("If that email exists, a reset link has been sent.", "info")
-        return redirect(url_for("login"))
-    return render_template("reset_request.html", title="Reset password • MCW")
-
-@app.route("/reset/<token>", methods=["GET","POST"])
-def reset_token(token):
-    s = token_serializer()
+    s = SessionLocal()
     try:
-        data = s.loads(token, max_age=int_env("PASSWORD_RESET_TOKEN_MAX_AGE", 3600))
-        user = db.session.get(User, int(data["uid"]))
-    except (BadSignature, SignatureExpired, KeyError):
-        user = None
-    if not user:
-        flash("Reset link is invalid or expired.", "error")
-        return redirect(url_for("reset_request"))
+        if s.query(User).filter((User.username == username)|(User.email == email)).first():
+            return {"error": "user_exists"}, 409
+        u = User(
+            username=username,
+            email=email,
+            password_hash=generate_password_hash(password),
+            balance=Decimal("0.00")
+        )
+        s.add(u)
+        s.commit()
+        # Issue token
+        token = create_access_token(identity=str(u.id), expires_delta=timedelta(days=7))
+        return {"access_token": token, "user": {"id": u.id, "username": u.username, "email": u.email}}, 201
+    finally:
+        s.close()
 
-    if request.method == "POST":
-        pw = request.form.get("password") or ""
-        pw2 = request.form.get("confirm_password") or ""
-        if pw != pw2:
-            flash("Passwords do not match.", "error")
-        elif not password_valid(pw):
-            flash("Password must be at least 8 chars and include a letter & a number.", "error")
+@app.post("/api/auth/login")
+def login():
+    data = request.get_json(force=True)
+    email_or_username = (data.get("identifier") or "").strip()
+    password = data.get("password") or ""
+    if not email_or_username or not password:
+        return {"error": "missing_fields"}, 400
+
+    s = SessionLocal()
+    try:
+        q = s.query(User).filter(
+            (User.email == email_or_username.lower()) | (User.username == email_or_username)
+        ).first()
+        if not q or not check_password_hash(q.password_hash, password):
+            return {"error": "invalid_credentials"}, 401
+        if not q.is_active:
+            return {"error": "inactive_user"}, 403
+        token = create_access_token(identity=str(q.id), expires_delta=timedelta(days=7))
+        return {"access_token": token, "user": {"id": q.id, "username": q.username, "email": q.email}}
+    finally:
+        s.close()
+
+# ---------------------- PROFILE / WALLET ------------------
+@app.get("/api/users/me/balance")
+@jwt_required()
+def my_balance():
+    s = SessionLocal()
+    try:
+        u = get_user(s, get_jwt_identity())
+        return {"balance": as_money(u.balance)}
+    finally:
+        s.close()
+
+@app.post("/api/wallet/deposit")
+@jwt_required()
+def deposit():
+    data = request.get_json(force=True)
+    try:
+        amount = Decimal(str(data.get("amount")))
+    except Exception:
+        return {"error": "invalid_amount"}, 400
+    if amount <= 0:
+        return {"error": "amount_must_be_positive"}, 400
+
+    s = SessionLocal()
+    try:
+        u = get_user(s, get_jwt_identity())
+        credit(s, u, as_money(amount))
+        s.commit()
+        return {"ok": True, "balance": as_money(u.balance)}
+    except ValueError as e:
+        s.rollback()
+        return {"error": str(e)}, 400
+    finally:
+        s.close()
+
+# ---------------------- GAMES: BLACKJACK ------------------
+RANKS = list(range(2, 11)) + ['J','Q','K','A']
+SUITS = ['♠','♥','♦','♣']
+
+def fresh_shoe():
+    deck = [(r,s) for r in RANKS for s in SUITS] * 6
+    random.shuffle(deck)
+    return deck
+
+def hand_value(cards):
+    total, aces = 0, 0
+    for r,_ in cards:
+        if isinstance(r, int):
+            total += r
+        elif r in ['J','Q','K']:
+            total += 10
         else:
-            user.set_password(pw)
-            db.session.commit()
-            flash("Password updated. Please sign in.", "success")
-            return redirect(url_for("login"))
+            total += 11; aces += 1
+    while total > 21 and aces:
+        total -= 10; aces -= 1
+    return total
 
-    return render_template("reset_token.html", title="Choose a new password • MCW", token=token)
+def play_dealer(deck, dealer):
+    while hand_value(dealer) < 17:
+        dealer.append(deck.pop())
 
-@app.get("/intro")
-@login_required
-def intro():
-    return render_template("intro.html", title="Mini Casino World")
+@app.post("/api/blackjack/play")
+@jwt_required()
+def blackjack_play():
+    data = request.get_json(force=True)
+    try:
+        bet = Decimal(str(data.get("bet")))
+    except Exception:
+        return {"error": "invalid_bet"}, 400
+    if bet <= 0:
+        return {"error": "bet_must_be_positive"}, 400
 
+    s = SessionLocal()
+    try:
+        u = get_user(s, get_jwt_identity())
+        g = get_game(s, "blackjack")
+        debit(s, u, as_money(bet))
+
+        deck = fresh_shoe()
+        player = [deck.pop(), deck.pop()]
+        dealer = [deck.pop(), deck.pop()]
+
+        # simple auto strategy: hit until 17+
+        while hand_value(player) < 17:
+            player.append(deck.pop())
+        play_dealer(deck, dealer)
+
+        pv, dv = hand_value(player), hand_value(dealer)
+
+        if pv > 21:
+            outcome, payout = "lose", Decimal("0")
+        elif dv > 21 or pv > dv:
+            if len(player) == 2 and pv == 21:
+                payout = bet * Decimal("2.5")   # 3:2 (bet + 1.5x profit)
+            else:
+                payout = bet * Decimal("2.0")   # even money (bet + profit)
+            outcome = "win"
+            credit(s, u, as_money(payout))
+        elif pv == dv:
+            payout = bet                        # push (return stake)
+            outcome = "push"
+            credit(s, u, as_money(payout))
+        else:
+            outcome, payout = "lose", Decimal("0")
+
+        b = Bet(
+            user_id=u.id, game_id=g.id, amount=bet, outcome=outcome,
+            payout=payout, result_meta={
+                "player": player, "dealer": dealer,
+                "player_value": pv, "dealer_value": dv
+            }
+        )
+        s.add(b)
+        s.commit()
+
+        return {
+            "ok": True,
+            "outcome": outcome,
+            "payout": as_money(payout),
+            "balance": as_money(u.balance),
+            "cards": {
+                "player": player, "dealer": dealer,
+                "player_value": pv, "dealer_value": dv
+            }
+        }
+    except ValueError as e:
+        s.rollback()
+        return {"error": str(e)}, 400
+    except Exception:
+        s.rollback()
+        return {"error": "server_error"}, 500
+    finally:
+        s.close()
+
+# ---------------------- GAMES: SLOTS ----------------------
+SLOTS_REEL = ["7","BAR","🍒","💎","🔔","⭐","🍋"]
+PAYTABLE = {
+    ("7","7","7"): 50,
+    ("BAR","BAR","BAR"): 20,
+    ("💎","💎","💎"): 10,
+    ("🍒","🍒","🍒"): 8,
+    ("🔔","🔔","🔔"): 6,
+    ("⭐","⭐","⭐"): 4,
+    ("🍋","🍋","🍋"): 3,
+    "ANY_CHERRY": 2
+}
+
+def slots_symbols():
+    return [random.choice(SLOTS_REEL) for _ in range(3)]
+
+def slots_multiplier(symbols):
+    tup = tuple(symbols)
+    if tup in PAYTABLE: return PAYTABLE[tup]
+    if symbols.count("🍒") == 2: return 3
+    if symbols.count("🍒") == 1: return PAYTABLE["ANY_CHERRY"]
+    return 0
+
+@app.post("/api/slots/spin")
+@jwt_required()
+def slots_spin():
+    data = request.get_json(force=True)
+    try:
+        bet = Decimal(str(data.get("bet")))
+    except Exception:
+        return {"error": "invalid_bet"}, 400
+    if bet <= 0:
+        return {"error": "bet_must_be_positive"}, 400
+
+    s = SessionLocal()
+    try:
+        u = get_user(s, get_jwt_identity())
+        g = get_game(s, "slots")
+        debit(s, u, as_money(bet))
+
+        symbols = slots_symbols()
+        mult = slots_multiplier(symbols)
+        payout = bet * Decimal(str(mult))
+        outcome = "win" if payout > 0 else "lose"
+
+        if payout > 0:
+            credit(s, u, as_money(payout))
+
+        b = Bet(
+            user_id=u.id, game_id=g.id, amount=bet, outcome=outcome,
+            payout=payout, result_meta={"symbols": symbols, "multiplier": mult}
+        )
+        s.add(b)
+        s.commit()
+
+        return {
+            "ok": True,
+            "outcome": outcome,
+            "symbols": symbols,
+            "multiplier": mult,
+            "payout": as_money(payout),
+            "balance": as_money(u.balance)
+        }
+    except ValueError as e:
+        s.rollback()
+        return {"error": str(e)}, 400
+    except Exception:
+        s.rollback()
+        return {"error": "server_error"}, 500
+    finally:
+        s.close()
+
+# ---------------------- GAMES: ROULETTE -------------------
+RED_NUMS = {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36}
+BLACK_NUMS = set(range(1,37)) - RED_NUMS
+
+def spin_wheel():
+    return random.randint(0,36)  # 0..36 (single-zero European)
+
+@app.post("/api/roulette/bet")
+@jwt_required()
+def roulette_bet():
+    data = request.get_json(force=True)
+    color = (data.get("color") or "").lower()
+    if color not in ("red","black"):
+        return {"error": "color_must_be_red_or_black"}, 400
+    try:
+        bet = Decimal(str(data.get("bet")))
+    except Exception:
+        return {"error": "invalid_bet"}, 400
+    if bet <= 0:
+        return {"error": "bet_must_be_positive"}, 400
+
+    s = SessionLocal()
+    try:
+        u = get_user(s, get_jwt_identity())
+        g = get_game(s, "roulette")
+        debit(s, u, as_money(bet))
+
+        n = spin_wheel()
+        won = (n in RED_NUMS and color == "red") or (n in BLACK_NUMS and color == "black")
+        payout = bet * Decimal("2.0") if won else Decimal("0")
+        if payout > 0:
+            credit(s, u, as_money(payout))
+
+        outcome = "win" if won else "lose"
+        res_color = "green" if n == 0 else ("red" if n in RED_NUMS else "black")
+
+        b = Bet(
+            user_id=u.id, game_id=g.id, amount=bet, outcome=outcome, payout=payout,
+            result_meta={"number": n, "color": res_color}
+        )
+        s.add(b)
+        s.commit()
+
+        return {
+            "ok": True,
+            "outcome": outcome,
+            "roll": n,
+            "roll_color": res_color,
+            "payout": as_money(payout),
+            "balance": as_money(u.balance)
+        }
+    except ValueError as e:
+        s.rollback()
+        return {"error": str(e)}, 400
+    except Exception:
+        s.rollback()
+        return {"error": "server_error"}, 500
+    finally:
+        s.close()
+
+# ---------------------- HEALTH ----------------------------
 @app.get("/healthz")
 def health():
-    return {"ok": True, "service": "Mini Casino World"}
-
-@app.get("/games/blackjack")
-@login_required
-def blackjack():
-    return render_template("games/blackjack.html", title="Blackjack • MCW")
-
-@app.get("/games/roulette")
-@login_required
-def roulette():
-    return render_template("games/roulette.html", title="Roulette • MCW")
-
-@app.get("/games/slots")
-@login_required
-def slots():
-    return render_template("games/slots.html", title="Slots • MCW")
-
-# Optional: dev-only diagnostic
-if os.getenv("ENABLE_DIAG_MAIL") == "1" and os.getenv("FLASK_ENV") != "production":
-    @app.get("/__diag/mail")
-    def __diag_mail():
-        return jsonify(mailer.describe()), 200
+    return {"ok": True}
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int_env("PORT", 5000), debug=bool_env("FLASK_DEBUG", False))
+    port = int(os.getenv("PORT", "8080"))
+    app.run(host="0.0.0.0", port=port, debug=True)

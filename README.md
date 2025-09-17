@@ -1,14 +1,13 @@
 # Mini Casino World
 
-A CPU-friendly Flask app for entertainment casino gaming:
-- User authentication with Flask-Login
-- Casino games (Blackjack, Roulette, Slots)
-- Entertainment chips with no monetary value
-- Password reset with email tokens
-- Multi-backend mailer (Resend/SMTP/echo)
-- Responsive casino-themed UI
-- Secure session management
-- PWA manifest + favicons
+A modern casino gaming platform with JWT authentication and React frontend:
+- JWT-based user authentication
+- Three casino games (Blackjack, Roulette, Slots)
+- Wallet system with chip deposits
+- Single-file Flask API backend
+- React frontend with Tailwind CSS
+- PostgreSQL database with SQLAlchemy
+- CORS-enabled API for cross-origin requests
 
 ## Quick start (local)
 ```bash
@@ -20,39 +19,62 @@ pip install -r requirements.txt
 
 # 2) Set up environment
 cp .env.example .env
-# Edit .env with your PostgreSQL DATABASE_URL
+# Edit .env with your PostgreSQL DATABASE_URL and SECRET_KEY
 
-# 3) Initialize database schema
+# 3) Initialize database
+# Set environment variables:
 # Windows PowerShell:
-$env:DATABASE_URL="postgresql://USERNAME:PASSWORD@HOST:PORT/railway"
-$env:LOAD_SEED="1"  # Optional: load demo games
+$env:DATABASE_URL="postgresql://USERNAME:PASSWORD@HOST:PORT/dbname"
+$env:SECRET_KEY="your-secret-key-here"
 # Mac/Linux:
-# export DATABASE_URL="postgresql://USERNAME:PASSWORD@HOST:PORT/railway"
-# export LOAD_SEED="1"
+# export DATABASE_URL="postgresql://USERNAME:PASSWORD@HOST:PORT/dbname"
+# export SECRET_KEY="your-secret-key-here"
 
-python scripts/init_db.py
+# Create tables (run app.py once to auto-create)
+python app.py
+# Press Ctrl+C to stop after "Running on http://0.0.0.0:8080"
 
 # 4) Run the app
 python app.py
-# open http://localhost:5000
+# Frontend: Open http://localhost:8080 and use the React UI
+# API: Backend runs on same port with /api/* endpoints
 ```
 
 ## Deploy (Railway)
 
 Create project from GitHub
 
-Variables:
+Required Variables:
 
-- `SECRET_KEY` (required)
-- `DATABASE_URL=sqlite:///mcw.db` (or PostgreSQL URL)
-- `APP_BASE_URL=https://your-domain.com` (for email links)
-- `RESEND_API_KEY` and `RESEND_FROM` (for email)
-- OR `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` (SMTP fallback)
-- `DEV_MAIL_ECHO=true` (for development)
+- `SECRET_KEY` (required for JWT tokens)
+- `DATABASE_URL` (PostgreSQL connection string)
+- `PORT=8080` (optional, defaults to 8080)
 
-Add Volume: mount at `/data` (for SQLite persistence) - optional
+Optional Variables:
+
+- `LOAD_SEED=1` (creates demo games on startup)
 
 Custom domain: add CNAME → enable HTTPS
+
+## API Endpoints
+
+### Authentication
+- `POST /api/auth/register` - Create account
+- `POST /api/auth/login` - Login and get JWT token
+
+### Wallet
+- `GET /api/users/me/balance` - Get current balance
+- `POST /api/wallet/deposit` - Add chips to account
+
+### Games
+- `POST /api/blackjack/play` - Play blackjack hand
+- `POST /api/roulette/bet` - Place roulette bet
+- `POST /api/slots/spin` - Spin slot machine
+
+### Health
+- `GET /healthz` - Health check
+
+All authenticated endpoints require `Authorization: Bearer <jwt_token>` header.
 
 ## AUTO PUSH POLICY
 
