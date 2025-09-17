@@ -1,0 +1,79 @@
+{% extends "_base.html" %}
+{% block content %}
+<section class="game-header">
+  <div class="game-info">
+    <h1>🎰 Roulette</h1>
+    <p>Red or black? Place your bets and spin the wheel!</p>
+    <div class="game-stats">
+      <span class="stat">Balance: <strong>$1,000</strong></span>
+      <span class="stat">House Edge: <strong>5.26%</strong></span>
+    </div>
+  </div>
+</section>
+
+<section class="game-area">
+  <div class="roulette-wheel">
+    <div class="wheel">
+      <div class="ball"></div>
+      <div class="numbers">0 32 15 19 4 21 2 25 17 34 6 27 13 36 11 30 8 23 10 5 24 16 33 1 20 14 31 9 22 18 29 7 28 12 35 3 26</div>
+    </div>
+    <div class="last-numbers">
+      <span>Last: <strong class="red">32</strong></span>
+    </div>
+  </div>
+
+  <div class="betting-board">
+    <div class="bet-section">
+      <h3>Color Bets</h3>
+      <div class="color-bets">
+        <button class="bet-option red" data-bet="red">Red (1:1)</button>
+        <button class="bet-option black" data-bet="black">Black (1:1)</button>
+        <button class="bet-option green" data-bet="zero">0 (35:1)</button>
+      </div>
+    </div>
+
+    <div class="bet-section">
+      <h3>Number Bets</h3>
+      <div class="number-grid">
+        <button class="number-bet green" data-number="0">0</button>
+        {% for i in range(1, 37) %}
+        <button class="number-bet {% if i in [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36] %}red{% else %}black{% endif %}" data-number="{{ i }}">{{ i }}</button>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="betting-controls">
+    <div class="bet-amount">
+      <label>Bet Amount:</label>
+      <div class="bet-buttons">
+        <button class="bet-btn">$1</button>
+        <button class="bet-btn">$5</button>
+        <button class="bet-btn">$10</button>
+        <button class="bet-btn">$25</button>
+      </div>
+      <input type="number" class="bet-input" placeholder="Custom" min="1" max="500">
+    </div>
+
+    <div class="game-actions">
+      <button class="btn-game btn-spin">Spin Wheel</button>
+      <button class="btn-game btn-clear">Clear Bets</button>
+    </div>
+  </div>
+</section>
+
+<section class="game-footer">
+  <a href="{{ url_for('intro') }}" class="btn-back">← Back to Casino</a>
+  <div class="game-rules">
+    <details>
+      <summary>Game Rules</summary>
+      <ul>
+        <li>Red/Black pays 1:1 (even money)</li>
+        <li>Single numbers pay 35:1</li>
+        <li>Green 0 wins for house on color bets</li>
+        <li>Place multiple bets and spin</li>
+      </ul>
+    </details>
+  </div>
+</section>
+{% endblock %}

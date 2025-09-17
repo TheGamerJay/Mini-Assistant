@@ -1,0 +1,70 @@
+{% extends "_base.html" %}
+{% block content %}
+<section class="game-header">
+  <div class="game-info">
+    <h1>🃏 Blackjack</h1>
+    <p>Classic 21 vs the house. Get as close to 21 as possible without going over.</p>
+    <div class="game-stats">
+      <span class="stat">Balance: <strong>$1,000</strong></span>
+      <span class="stat">House Edge: <strong>0.5%</strong></span>
+    </div>
+  </div>
+</section>
+
+<section class="game-area">
+  <div class="card-table">
+    <div class="dealer-area">
+      <h3>Dealer</h3>
+      <div class="cards">
+        <div class="card">🂠</div>
+        <div class="card hidden">🂠</div>
+      </div>
+      <div class="total">Total: ?</div>
+    </div>
+
+    <div class="player-area">
+      <h3>You</h3>
+      <div class="cards">
+        <div class="card">🂡</div>
+        <div class="card">🂧</div>
+      </div>
+      <div class="total">Total: 18</div>
+    </div>
+  </div>
+
+  <div class="betting-area">
+    <div class="bet-controls">
+      <label>Bet Amount:</label>
+      <div class="bet-buttons">
+        <button class="bet-btn">$5</button>
+        <button class="bet-btn">$10</button>
+        <button class="bet-btn">$25</button>
+        <button class="bet-btn">$50</button>
+      </div>
+      <input type="number" class="bet-input" placeholder="Custom amount" min="1" max="500">
+    </div>
+
+    <div class="game-controls">
+      <button class="btn-game btn-hit">Hit</button>
+      <button class="btn-game btn-stand">Stand</button>
+      <button class="btn-game btn-double">Double Down</button>
+      <button class="btn-game btn-split" disabled>Split</button>
+    </div>
+  </div>
+</section>
+
+<section class="game-footer">
+  <a href="{{ url_for('intro') }}" class="btn-back">← Back to Casino</a>
+  <div class="game-rules">
+    <details>
+      <summary>Game Rules</summary>
+      <ul>
+        <li>Get as close to 21 as possible without going over</li>
+        <li>Aces count as 1 or 11, face cards count as 10</li>
+        <li>Dealer must hit on 16 and stand on 17</li>
+        <li>Blackjack (21 with 2 cards) pays 3:2</li>
+      </ul>
+    </details>
+  </div>
+</section>
+{% endblock %}

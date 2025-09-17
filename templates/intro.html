@@ -17,8 +17,8 @@
   </div>
 </section>
 <section class="grid">
-  <a class="tile" href="#"><h3>Blackjack</h3><p>Classic 21 vs the house.</p></a>
-  <a class="tile" href="#"><h3>Roulette</h3><p>Red or black?</p></a>
-  <a class="tile" href="#"><h3>Slots</h3><p>Spin to win—chips only.</p></a>
+  <a class="tile" href="{{ url_for('blackjack') }}"><h3>🃏 Blackjack</h3><p>Classic 21 vs the house.</p></a>
+  <a class="tile" href="{{ url_for('roulette') }}"><h3>🎰 Roulette</h3><p>Red or black?</p></a>
+  <a class="tile" href="{{ url_for('slots') }}"><h3>🎰 Slots</h3><p>Spin to win—chips only.</p></a>
 </section>
 {% endblock %}

@@ -1,0 +1,102 @@
+{% extends "_base.html" %}
+{% block content %}
+<section class="game-header">
+  <div class="game-info">
+    <h1>🎰 Red Hearts Slots</h1>
+    <p>Spin to win—chips only. Match symbols across the paylines!</p>
+    <div class="game-stats">
+      <span class="stat">Balance: <strong>$1,000</strong></span>
+      <span class="stat">House Edge: <strong>4.0%</strong></span>
+    </div>
+  </div>
+</section>
+
+<section class="game-area">
+  <div class="slot-machine">
+    <div class="reels">
+      <div class="reel">
+        <div class="symbol">🍒</div>
+        <div class="symbol">🍋</div>
+        <div class="symbol">🔔</div>
+      </div>
+      <div class="reel">
+        <div class="symbol">🍒</div>
+        <div class="symbol">⭐</div>
+        <div class="symbol">🍊</div>
+      </div>
+      <div class="reel">
+        <div class="symbol">🍒</div>
+        <div class="symbol">🔔</div>
+        <div class="symbol">💎</div>
+      </div>
+    </div>
+
+    <div class="paylines">
+      <div class="payline active"></div>
+      <div class="payline"></div>
+      <div class="payline"></div>
+    </div>
+
+    <div class="win-display">
+      <div class="last-win">Last Win: <strong>$15</strong></div>
+      <div class="win-combo">🍒 🍒 🍒</div>
+    </div>
+  </div>
+
+  <div class="paytable">
+    <h3>Paytable</h3>
+    <div class="payout-list">
+      <div class="payout">💎 💎 💎 = 1000x</div>
+      <div class="payout">⭐ ⭐ ⭐ = 100x</div>
+      <div class="payout">🔔 🔔 🔔 = 50x</div>
+      <div class="payout">🍒 🍒 🍒 = 25x</div>
+      <div class="payout">🍊 🍊 🍊 = 15x</div>
+      <div class="payout">🍋 🍋 🍋 = 10x</div>
+    </div>
+  </div>
+
+  <div class="betting-controls">
+    <div class="bet-settings">
+      <div class="bet-amount">
+        <label>Bet per Line:</label>
+        <div class="bet-buttons">
+          <button class="bet-btn">$0.25</button>
+          <button class="bet-btn">$0.50</button>
+          <button class="bet-btn">$1.00</button>
+          <button class="bet-btn">$2.00</button>
+        </div>
+      </div>
+
+      <div class="paylines-control">
+        <label>Paylines:</label>
+        <select class="paylines-select">
+          <option value="1">1 Line</option>
+          <option value="3" selected>3 Lines</option>
+          <option value="5">5 Lines</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="game-actions">
+      <button class="btn-game btn-spin">Spin ($3.00)</button>
+      <button class="btn-game btn-max">Max Bet</button>
+      <button class="btn-game btn-auto">Auto Play</button>
+    </div>
+  </div>
+</section>
+
+<section class="game-footer">
+  <a href="{{ url_for('intro') }}" class="btn-back">← Back to Casino</a>
+  <div class="game-rules">
+    <details>
+      <summary>Game Rules</summary>
+      <ul>
+        <li>Match 3 symbols on active paylines to win</li>
+        <li>Higher value symbols pay more</li>
+        <li>More paylines = more chances to win</li>
+        <li>Total bet = bet per line × number of lines</li>
+      </ul>
+    </details>
+  </div>
+</section>
+{% endblock %}

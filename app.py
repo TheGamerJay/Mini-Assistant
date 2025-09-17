@@ -174,6 +174,21 @@ def reset_token(token):
 def intro():
     return render_template("intro.html", title="Mini Casino World")
 
+@app.get("/games/blackjack")
+@login_required
+def blackjack():
+    return render_template("games/blackjack.html", title="Blackjack • MCW")
+
+@app.get("/games/roulette")
+@login_required
+def roulette():
+    return render_template("games/roulette.html", title="Roulette • MCW")
+
+@app.get("/games/slots")
+@login_required
+def slots():
+    return render_template("games/slots.html", title="Slots • MCW")
+
 # Optional: dev-only diagnostic
 if os.getenv("ENABLE_DIAG_MAIL") == "1" and os.getenv("FLASK_ENV") != "production":
     @app.get("/__diag/mail")
