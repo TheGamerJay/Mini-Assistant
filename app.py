@@ -1,12 +1,13 @@
-# Mini Assistant — "My Homework Buddy" + Life Skills + Forms
+# Mini Casino World — Entertainment Casino Games
 # CPU-friendly, single-file Flask app with:
-# - Text & Photo (vision) homework help
-# - Kid / Parent / Step-by-Step modes
-# - Guided Coach sessions (one-step-at-a-time, hints, reveal)
-# - Always ends with "Why this answer is correct" + "Check Your Work"
-# - Printable worksheet PDF generator
-# - Generic fillable PDF form filler & flattener
-# - Daily free IP limit + optional Stripe Payment Link
+# - Casino games (Blackjack, Roulette, Slots)
+# - Entertainment chips with no monetary value
+# - Multiple game modes and betting options
+# - Game statistics and progress tracking
+# - Session management and game history
+# - Printable game summaries and statistics
+# - Daily free play limits + optional premium features
+# - Responsible gaming features and disclaimers
 #
 # ENV (Railway):
 #   OPENAI_API_KEY=sk-...
@@ -28,13 +29,13 @@ from reportlab.lib.units import inch
 from reportlab.lib.utils import simpleSplit
 from pypdf import PdfReader, PdfWriter
 
-APP_NAME = "Mini Assistant"
+APP_NAME = "Mini Casino World"
 API_KEY = os.getenv("OPENAI_API_KEY", "")
 MODEL   = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 FREE_DAILY_LIMIT = int(os.getenv("FREE_DAILY_LIMIT", "5"))
 STRIPE_PAY_LINK  = os.getenv("STRIPE_PAY_LINK", "")
-SECRET_KEY = os.getenv("SECRET_KEY", "dev-mini-assistant-change-me")
-DB_PATH = os.getenv("DB_PATH", "mini_assistant.sqlite")
+SECRET_KEY = os.getenv("SECRET_KEY", "dev-mini-casino-world-change-me")
+DB_PATH = os.getenv("DB_PATH", "mini_casino_world.sqlite")
 
 if not API_KEY:
     raise SystemExit("Missing OPENAI_API_KEY")
@@ -154,21 +155,22 @@ def call_openai_chat(messages, temperature=0.3):
     return r.json()["choices"][0]["message"]["content"]
 
 def build_text_messages(subject, mode, question, coach_mode=False):
-    sys = f"""You are Mini Assistant, a friendly tutor.
-Subject: {subject}.
+    sys = f"""You are Mini Casino World, a friendly casino game instructor.
+Game: {subject}.
 {SUBJECT_GUIDES.get(subject,'')}
 Mode: {mode}.
 {MODE_GUIDES.get(mode,'')}
 {POLICY_REMINDER}
 {COACH_RULES if coach_mode else ''}"""
     user = f"""
-Homework or life-skill question:
+Casino game question or strategy inquiry:
 {(question or '').strip()}
 
 Respond in Markdown with clear headings and bullets.
+Always emphasize entertainment value and remind that chips have no monetary value.
 Always end with:
-- Why this answer is correct (2–4 sentences)
-- Check Your Work (a quick verification)
+- Why this strategy works (2–4 sentences)
+- Responsible Gaming Reminder (entertainment only disclaimer)
 """
     return [{"role": "system", "content": sys}, {"role": "user", "content": user}]
 
@@ -177,32 +179,33 @@ def build_vision_messages(subject, mode, image_bytes, filename, extra_text, coac
     b64 = base64.b64encode(image_bytes).decode("utf-8")
     data_url = f"data:{mime};base64,{b64}"
 
-    sys = f"""You are Mini Assistant, a friendly tutor who can read problems from photos.
-Extract the question(s) from the image, then teach the method.
-Subject: {subject}.
+    sys = f"""You are Mini Casino World, a friendly casino game instructor who can analyze game images.
+Extract the game situation from the image, then provide strategic guidance.
+Game: {subject}.
 {SUBJECT_GUIDES.get(subject,'')}
 Mode: {mode}.
 {MODE_GUIDES.get(mode,'')}
 {POLICY_REMINDER}
 {COACH_RULES if coach_mode else ''}"""
     user_content = [
-        {"type": "text", "text": "Read the homework/life-skill problem in this image and coach the student."},
+        {"type": "text", "text": "Analyze this casino game image and provide strategic guidance to the player."},
         {"type": "image_url", "image_url": {"url": data_url}},
     ]
     if (extra_text or "").strip():
-        user_content.append({"type": "text", "text": f"Extra context from user: {(extra_text or '').strip()}."})
-    user_content.append({"type": "text", "text": "Respond in Markdown. Include 'Why this answer is correct' and 'Check Your Work' at the end."})
+        user_content.append({"type": "text", "text": f"Extra context from player: {(extra_text or '').strip()}."})
+    user_content.append({"type": "text", "text": "Respond in Markdown. Include 'Why this strategy works' and 'Responsible Gaming Reminder' at the end."})
     return [{"role": "system", "content": sys}, {"role": "user", "content": user_content}]
 
 # ---------- Guided (Socratic) session ----------
-SOCRATIC_SYS = """You are Mini Assistant, a strict Socratic homework coach.
+SOCRATIC_SYS = """You are Mini Casino World, a strategic casino game coach.
 Rules:
-- Proceed with EXACTLY ONE next step at a time, then ask ONE short question.
+- Proceed with EXACTLY ONE strategic step at a time, then ask ONE short question.
 - Keep steps small, numbered, clear.
-- Give hints when the student is stuck.
-- Reveal final answer only on explicit 'Reveal'. When revealing, include:
-  (1) Why this answer is correct (2–4 sentences)
-  (2) Check Your Work (a quick verification).
+- Give hints when the player is stuck.
+- Reveal optimal strategy only on explicit 'Reveal'. When revealing, include:
+  (1) Why this strategy works (2–4 sentences)
+  (2) Responsible Gaming Reminder (entertainment only disclaimer).
+- Always emphasize this is for entertainment only.
 - Friendly and concise.
 """
 
@@ -253,7 +256,7 @@ def build_worksheet_pdf(problem, steps_md, final_answer, why_correct, check_work
     margin = 0.8*inch
     x = margin; y = H - margin
     width = W - 2*margin
-    title = "Mini Assistant – Homework Worksheet"
+    title = "Mini Casino World – Game Strategy Guide"
     if student_name: title += f"  ·  {student_name}"
     c.setTitle(title)
     y = _draw_block(c, title, "", x, y, width); y -= 6
@@ -295,7 +298,7 @@ INDEX_HTML = """
 <!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>{{app_name}} — My Homework & Life Skills Buddy</title>
+<title>{{app_name}} — Entertainment Casino Games</title>
 <link rel="icon" href="/static/favicon/favicon.ico">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="192x192" href="/static/favicon/favicon-192x192.png">
@@ -326,8 +329,8 @@ INDEX_HTML = """
 </head><body>
 <header>
   <div style="display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:8px">
-    <img src="/static/logo/Mini Assistant.png" alt="Mini Assistant" style="width:64px;height:64px;border-radius:12px">
-    <h1 style="margin:0">{{app_name}} — My Homework & Life Skills Buddy</h1>
+    <img src="/static/logo/Mini Casino World.png" alt="Mini Casino World" style="width:64px;height:64px;border-radius:12px">
+    <h1 style="margin:0">{{app_name}} — Entertainment Casino Games</h1>
   </div>
   <div class="fine">Type a question or upload a photo. Choose mode. Always ends with "Why this is correct" & "Check Your Work". {{limit_note}}</div>
 </header>
@@ -399,9 +402,9 @@ INDEX_HTML = """
       </div>
 
       <label>Type your question (optional if you upload a photo)</label>
-      <textarea name="q" placeholder="e.g., Solve 3x + 5 = 20 (show steps), or 'Explain deductibles vs premiums'"></textarea>
+      <textarea name="q" placeholder="e.g., 'Should I hit or stand with 16 vs dealer 10?' or 'Explain roulette betting strategies'"></textarea>
 
-      <label>Or upload a photo (JPG/PNG) of your homework / document</label>
+      <label>Or upload a photo (JPG/PNG) of your casino game situation</label>
       <input type="file" name="photo" accept=".jpg,.jpeg,.png"/>
 
       <div class="row">
@@ -439,7 +442,7 @@ INDEX_HTML = """
         <div></div>
       </div>
       <label>Problem</label>
-      <textarea name="problem" placeholder="Paste the homework prompt here." required></textarea>
+      <textarea name="problem" placeholder="Describe your casino game question or scenario here." required></textarea>
       <label>Guided Steps (paste from Coach Mode if you want)</label>
       <textarea name="steps" placeholder="1) ... 2) ... 3) ..."></textarea>
       <label>Final Answer</label>
@@ -486,7 +489,7 @@ COACH_HTML = """
 <!doctype html>
 <html><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Mini Assistant — Guided Session</title>
+<title>Mini Casino World — Strategy Session</title>
 <link rel="icon" href="/static/favicon/favicon.ico">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="192x192" href="/static/favicon/favicon-192x192.png">
@@ -507,7 +510,7 @@ COACH_HTML = """
 </style>
 </head>
 <body>
-<header><h2>Mini Assistant — Guided Session</h2></header>
+<header><h2>Mini Casino World — Strategy Session</h2></header>
 <main>
   {% if last_step %}
   <div class="card">
@@ -529,7 +532,7 @@ COACH_HTML = """
   </div>
 
   <div class="card">
-    <a href="{{ url_for('index') }}">← Back to Mini Assistant</a>
+    <a href="{{ url_for('index') }}">← Back to Mini Casino World</a>
   </div>
 </main>
 </body></html>
@@ -665,7 +668,7 @@ def form_fields():
 PRIVACY_HTML = """
 <!doctype html><html><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Mini Assistant — Privacy</title>
+<title>Mini Casino World — Privacy</title>
 <link rel="icon" href="/static/favicon/favicon.ico">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="192x192" href="/static/favicon/favicon-192x192.png">

@@ -1,6 +1,6 @@
 {
-  "name": "Mini Assistant",
-  "short_name": "MiniAssist",
+  "name": "Mini Casino World",
+  "short_name": "MiniCasino",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
