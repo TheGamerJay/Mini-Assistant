@@ -16,7 +16,7 @@ body.mcw .container:has(.card.auth){background:radial-gradient(800px 600px at 50
 .linklike{background:none;border:none;color:var(--ink);cursor:pointer}
 .card{background:#0f0f12;border:1px solid #1d1e23;border-radius:16px;padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
 .card.auth{max-width:420px;margin:40px auto}
-.auth-header{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+.auth-header{display:flex;flex-direction:column;align-items:center;gap:12px;margin-bottom:20px}
 .auth-logo{width:48px;height:48px;border-radius:10px}
 label{display:block;margin:14px 0 6px}
 input[type="email"],input[type="password"],input[type="text"]{width:100%;padding:12px 14px;border:1px solid #2a2b33;border-radius:10px;background:#121318;color:var(--ink)}
