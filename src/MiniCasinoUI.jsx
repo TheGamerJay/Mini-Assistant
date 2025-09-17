@@ -51,6 +51,7 @@ export default function MiniCasinoUI() {
   const [balance, setBalance] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  const [tab, setTab] = useState("games");
 
   // Auth forms
   const [regUsername, setRegUsername] = useState("");
@@ -72,6 +73,16 @@ export default function MiniCasinoUI() {
   const [rlRes, setRlRes] = useState(null);
   const [slRes, setSlRes] = useState(null);
 
+  // Store
+  const [products, setProducts] = useState([]);
+  const [storeRes, setStoreRes] = useState(null);
+
+  // Community
+  const [top, setTop] = useState([]);
+
+  // Profile
+  const [newUsername, setNewUsername] = useState("");
+
   const authHeaders = useMemo(() => (token ? { Authorization: `Bearer ${token}` } : {}), [token]);
 
   const api = useMemo(() => {
@@ -91,6 +102,18 @@ export default function MiniCasinoUI() {
           body: JSON.stringify({ identifier, password }),
           credentials: "include"
         }).then(r => r.json()),
+      me: () =>
+        fetch(`${base}/api/users/me`, {
+          headers: { ...authHeaders },
+          credentials: "include"
+        }).then(r => r.json()),
+      updateMe: (username) =>
+        fetch(`${base}/api/users/me`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          body: JSON.stringify({ username }),
+          credentials: "include"
+        }).then(r => r.json()),
       balance: () =>
         fetch(`${base}/api/users/me/balance`, {
           headers: { ...authHeaders },
@@ -101,6 +124,23 @@ export default function MiniCasinoUI() {
           method: "POST",
           headers: { "Content-Type": "application/json", ...authHeaders },
           body: JSON.stringify({ amount }),
+          credentials: "include"
+        }).then(r => r.json()),
+      storeProducts: () =>
+        fetch(`${base}/api/store/products`, {
+          headers: { ...authHeaders },
+          credentials: "include"
+        }).then(r => r.json()),
+      storeCheckout: (product_id) =>
+        fetch(`${base}/api/store/checkout`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          body: JSON.stringify({ product_id }),
+          credentials: "include"
+        }).then(r => r.json()),
+      leaderboard: () =>
+        fetch(`${base}/api/leaderboard`, {
+          headers: { ...authHeaders },
           credentials: "include"
         }).then(r => r.json()),
       blackjack: (bet) =>
@@ -131,6 +171,7 @@ export default function MiniCasinoUI() {
     localStorage.setItem("mcw_token", token);
     setToken(token);
     setMe(user);
+    setNewUsername(user?.username || "");
   }
 
   async function withLoad(fn) {
@@ -179,6 +220,37 @@ export default function MiniCasinoUI() {
     else setErr(res.error || "Deposit failed");
   });
 
+  const fetchStore = () => withLoad(async () => {
+    const res = await api.storeProducts();
+    if (Array.isArray(res)) setProducts(res);
+    else setErr(res.error || "Store fetch failed");
+  });
+
+  const buyProduct = (pid) => withLoad(async () => {
+    const res = await api.storeCheckout(pid);
+    if (res.ok) {
+      setStoreRes(res);
+      setBalance(res.balance);
+    } else {
+      setErr(res.error || "Purchase failed");
+    }
+  });
+
+  const fetchLeaderboard = () => withLoad(async () => {
+    const res = await api.leaderboard();
+    if (Array.isArray(res)) setTop(res);
+    else setErr(res.error || "Leaderboard fetch failed");
+  });
+
+  const saveProfile = () => withLoad(async () => {
+    const res = await api.updateMe(newUsername);
+    if (res.user) {
+      setMe(res.user);
+    } else {
+      setErr(res.error || "Profile update failed");
+    }
+  });
+
   const playBJ = () => withLoad(async () => {
     const res = await api.blackjack(Number(bjBet));
     setBjRes(res);
@@ -201,9 +273,21 @@ export default function MiniCasinoUI() {
   });
 
   useEffect(() => {
-    if (token) refreshBalance();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (token) {
+      refreshBalance();
+      api.me().then(res => {
+        if (res.user) {
+          setMe(res.user);
+          setNewUsername(res.user.username);
+        }
+      });
+    }
   }, [token]);
+
+  useEffect(() => {
+    if (token && tab === "store" && products.length === 0) fetchStore();
+    if (token && tab === "community") fetchLeaderboard();
+  }, [token, tab]);
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-zinc-50 to-zinc-200 dark:from-zinc-950 dark:to-zinc-900 text-zinc-900 dark:text-zinc-100 p-6">
@@ -262,64 +346,144 @@ export default function MiniCasinoUI() {
           <>
             <div className="flex flex-wrap items-center gap-3">
               <div className="text-sm">Logged in as <b>{me?.username}</b></div>
-              <Button onClick={() => { localStorage.removeItem("mcw_token"); setToken(""); setMe(null); setBalance(null); }}>
+              <Button onClick={() => { localStorage.removeItem("mcw_token"); setToken(""); setMe(null); setBalance(null); setTab("games"); }}>
                 Logout
               </Button>
             </div>
 
-            <Card title="Wallet — Add Funds">
-              <div className="flex items-end gap-3">
-                <Field label="Amount">
-                  <input type="number" min={1} value={depositAmt} onChange={e=>setDepositAmt(e.target.value)}
-                         className="px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/60 dark:bg-zinc-800/60" />
-                </Field>
-                <Button onClick={doDeposit} disabled={loading}>Deposit</Button>
-              </div>
-            </Card>
+            {/* Tab Navigation */}
+            <div className="flex gap-2 border-b border-zinc-300 dark:border-zinc-700">
+              {["games", "wallet", "store", "community", "profile"].map(t => (
+                <button
+                  key={t}
+                  onClick={() => setTab(t)}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition ${
+                    tab === t
+                      ? "border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100"
+                      : "border-transparent text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 hover:dark:text-zinc-100"
+                  }`}
+                >
+                  {t.charAt(0).toUpperCase() + t.slice(1)}
+                </button>
+              ))}
+            </div>
 
-            <div className="grid md:grid-cols-3 gap-6">
-              <Card title="Blackjack — Classic 21 vs House">
-                <div className="flex flex-col gap-3">
-                  <Field label="Bet (chips)">
-                    <input type="number" min={1} value={bjBet} onChange={e=>setBjBet(e.target.value)}
-                           className="px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/60 dark:bg-zinc-800/60" />
-                  </Field>
-                  <Button onClick={playBJ} disabled={loading}>Play Blackjack</Button>
-                  <JsonBox data={bjRes} />
-                </div>
-              </Card>
-
-              <Card title="Roulette — Red or Black?">
-                <div className="flex flex-col gap-3">
-                  <div className="flex gap-3">
+            {tab === "games" && (
+              <div className="grid md:grid-cols-3 gap-6">
+                <Card title="Blackjack — Classic 21 vs House">
+                  <div className="flex flex-col gap-3">
                     <Field label="Bet (chips)">
-                      <input type="number" min={1} value={rlBet} onChange={e=>setRlBet(e.target.value)}
+                      <input type="number" min={1} value={bjBet} onChange={e=>setBjBet(e.target.value)}
                              className="px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/60 dark:bg-zinc-800/60" />
                     </Field>
-                    <Field label="Color">
-                      <select value={rlColor} onChange={e=>setRlColor(e.target.value)}
-                              className="px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/60 dark:bg-zinc-800/60">
-                        <option value="red">Red</option>
-                        <option value="black">Black</option>
-                      </select>
-                    </Field>
+                    <Button onClick={playBJ} disabled={loading}>Play Blackjack</Button>
+                    <JsonBox data={bjRes} />
                   </div>
-                  <Button onClick={betRoulette} disabled={loading}>Spin Wheel</Button>
-                  <JsonBox data={rlRes} />
-                </div>
-              </Card>
+                </Card>
 
-              <Card title="Slots — Spin to Win (Chips Only)">
-                <div className="flex flex-col gap-3">
-                  <Field label="Bet (chips)">
-                    <input type="number" min={1} value={slBet} onChange={e=>setSlBet(e.target.value)}
+                <Card title="Roulette — Red or Black?">
+                  <div className="flex flex-col gap-3">
+                    <div className="flex gap-3">
+                      <Field label="Bet (chips)">
+                        <input type="number" min={1} value={rlBet} onChange={e=>setRlBet(e.target.value)}
+                               className="px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/60 dark:bg-zinc-800/60" />
+                      </Field>
+                      <Field label="Color">
+                        <select value={rlColor} onChange={e=>setRlColor(e.target.value)}
+                                className="px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/60 dark:bg-zinc-800/60">
+                          <option value="red">Red</option>
+                          <option value="black">Black</option>
+                        </select>
+                      </Field>
+                    </div>
+                    <Button onClick={betRoulette} disabled={loading}>Spin Wheel</Button>
+                    <JsonBox data={rlRes} />
+                  </div>
+                </Card>
+
+                <Card title="Slots — Spin to Win (Chips Only)">
+                  <div className="flex flex-col gap-3">
+                    <Field label="Bet (chips)">
+                      <input type="number" min={1} value={slBet} onChange={e=>setSlBet(e.target.value)}
+                             className="px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/60 dark:bg-zinc-800/60" />
+                    </Field>
+                    <Button onClick={spinSlots} disabled={loading}>Spin</Button>
+                    <JsonBox data={slRes} />
+                  </div>
+                </Card>
+              </div>
+            )}
+
+            {tab === "wallet" && (
+              <Card title="Wallet — Add Funds">
+                <div className="flex items-end gap-3">
+                  <Field label="Amount">
+                    <input type="number" min={1} value={depositAmt} onChange={e=>setDepositAmt(e.target.value)}
                            className="px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/60 dark:bg-zinc-800/60" />
                   </Field>
-                  <Button onClick={spinSlots} disabled={loading}>Spin</Button>
-                  <JsonBox data={slRes} />
+                  <Button onClick={doDeposit} disabled={loading}>Deposit</Button>
                 </div>
               </Card>
-            </div>
+            )}
+
+            {tab === "store" && (
+              <div className="grid md:grid-cols-3 gap-6">
+                {products.map(p => (
+                  <Card key={p.id} title={p.name}>
+                    <div className="text-sm text-zinc-600 dark:text-zinc-400 mb-2">{p.subtitle}</div>
+                    <div className="text-3xl font-extrabold mb-3">+{p.chips.toLocaleString()} chips</div>
+                    <Button onClick={()=>buyProduct(p.id)} disabled={loading}>Buy</Button>
+                  </Card>
+                ))}
+                {storeRes && <Card title="Last Purchase"><JsonBox data={storeRes} /></Card>}
+              </div>
+            )}
+
+            {tab === "community" && (
+              <Card title="Leaderboard — Top Net Winnings">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left border-b border-zinc-200 dark:border-zinc-800">
+                        <th className="py-2">#</th>
+                        <th className="py-2">User</th>
+                        <th className="py-2">Net Winnings</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {top.map((row, i) => (
+                        <tr key={row.user_id} className="border-b border-zinc-100 dark:border-zinc-800">
+                          <td className="py-2">{i+1}</td>
+                          <td className="py-2">{row.username}</td>
+                          <td className="py-2">{Number(row.net_winnings).toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="text-xs text-zinc-500 mt-3">No chat, leaderboard only.</div>
+              </Card>
+            )}
+
+            {tab === "profile" && (
+              <div className="grid md:grid-cols-2 gap-6">
+                <Card title="Your Profile">
+                  <div className="grid gap-3">
+                    <div className="text-sm">User ID: <b>{me?.id}</b></div>
+                    <div className="text-sm">Email: <b>{me?.email}</b></div>
+                    <Field label="Username">
+                      <input value={newUsername} onChange={e=>setNewUsername(e.target.value)} className="px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/60 dark:bg-zinc-800/60" />
+                    </Field>
+                    <Button onClick={saveProfile} disabled={loading}>Save</Button>
+                  </div>
+                </Card>
+                <Card title="Stats">
+                  <div className="text-sm text-zinc-600 dark:text-zinc-400">Balance</div>
+                  <div className="text-2xl font-bold mb-2">{balance === null ? "—" : Number(balance).toFixed(2)}</div>
+                  <div className="text-xs text-zinc-500">More detailed stats endpoint can be added on request.</div>
+                </Card>
+              </div>
+            )}
           </>
         )}
 
