@@ -82,6 +82,8 @@ export default function MiniCasinoUI() {
 
   // Profile
   const [newUsername, setNewUsername] = useState("");
+  const [betHistory, setBetHistory] = useState([]);
+  const [txHistory, setTxHistory] = useState([]);
 
   const authHeaders = useMemo(() => (token ? { Authorization: `Bearer ${token}` } : {}), [token]);
 

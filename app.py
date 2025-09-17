@@ -1,10 +1,10 @@
 import os, random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
-from sqlalchemy import create_engine, Column, BigInteger, String, Numeric, Boolean, TIMESTAMP, ForeignKey, JSON, func
+from sqlalchemy import create_engine, Column, BigInteger, String, Numeric, Boolean, TIMESTAMP, ForeignKey, JSON, func, desc
 from sqlalchemy.orm import declarative_base, sessionmaker
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -16,6 +16,12 @@ if not DATABASE_URL:
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
     raise RuntimeError("SECRET_KEY environment variable is not set")
+
+# Configurable bet caps and bonus
+MAX_BET_BLACKJACK = float(os.getenv("MAX_BET_BLACKJACK", "10000"))
+MAX_BET_ROULETTE  = float(os.getenv("MAX_BET_ROULETTE", "10000"))
+MAX_BET_SLOTS     = float(os.getenv("MAX_BET_SLOTS", "10000"))
+DAILY_BONUS_CHIPS = float(os.getenv("DAILY_BONUS_CHIPS", "500"))
 
 app = Flask(__name__)
 app.config["JWT_SECRET_KEY"] = SECRET_KEY
@@ -71,6 +77,13 @@ class Transaction(Base):
     ref_code = Column(String(64))
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
 
+class UserSettings(Base):
+    __tablename__ = "user_settings"
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    daily_loss_limit = Column(Numeric(12,2))       # nullable = no limit
+    daily_deposit_limit = Column(Numeric(12,2))    # nullable = no limit
+    last_bonus_at = Column(TIMESTAMP)              # for daily bonus timestamp
+
 # ---------------------- BOOTSTRAP -------------------------
 def ensure_tables_and_games():
     # Create all tables first
@@ -116,6 +129,30 @@ def debit(s, u, amt):
 
 def credit(s, u, amt):
     u.balance = Decimal(str(as_money(u.balance) + amt)); s.flush()
+
+def get_settings(s, user_id: int):
+    us = s.get(UserSettings, user_id)
+    if not us:
+        us = UserSettings(user_id=user_id)
+        s.add(us); s.flush()
+    return us
+
+def today_bounds_utc():
+    now = datetime.now(timezone.utc)
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=1)
+    return start, end
+
+def user_today_net_loss(s, user_id: int) -> float:
+    start, end = today_bounds_utc()
+    # Loss = sum(bet - payout) where bet>payout
+    rows = (
+        s.query(func.coalesce(func.sum((Bet.amount - Bet.payout)), 0))
+        .filter(Bet.user_id == user_id, Bet.created_at >= start, Bet.created_at < end)
+        .all()
+    )
+    gross = float(rows[0][0] or 0)
+    return max(gross, 0.0)
 
 # ---------------------- AUTH ------------------------------
 @app.post("/api/auth/register")
@@ -182,6 +219,59 @@ def update_me():
     finally:
         s.close()
 
+# ---------------------- SETTINGS & BONUS ------------------
+@app.get("/api/users/me/settings")
+@jwt_required()
+def get_user_settings():
+    s = SessionLocal()
+    try:
+        u = get_user(s, get_jwt_identity())
+        us = get_settings(s, u.id)
+        return {
+            "daily_loss_limit": as_money(us.daily_loss_limit) if us.daily_loss_limit is not None else None,
+            "daily_deposit_limit": as_money(us.daily_deposit_limit) if us.daily_deposit_limit is not None else None,
+            "last_bonus_at": us.last_bonus_at.isoformat() if us.last_bonus_at else None,
+        }
+    finally:
+        s.close()
+
+@app.put("/api/users/me/settings")
+@jwt_required()
+def put_user_settings():
+    d = request.get_json(force=True)
+    s = SessionLocal()
+    try:
+        u = get_user(s, get_jwt_identity())
+        us = get_settings(s, u.id)
+        if "daily_loss_limit" in d:
+            v = d["daily_loss_limit"]
+            us.daily_loss_limit = None if v in ("", None) else Decimal(str(v))
+        if "daily_deposit_limit" in d:
+            v = d["daily_deposit_limit"]
+            us.daily_deposit_limit = None if v in ("", None) else Decimal(str(v))
+        s.commit()
+        return {"ok": True}
+    finally:
+        s.close()
+
+@app.post("/api/bonus/daily")
+@jwt_required()
+def claim_daily_bonus():
+    s = SessionLocal()
+    try:
+        u = get_user(s, get_jwt_identity())
+        us = get_settings(s, u.id)
+        now = datetime.now(timezone.utc)
+        if us.last_bonus_at and (now - us.last_bonus_at) < timedelta(hours=24):
+            return {"error": "bonus_already_claimed"}, 400
+        credit(s, u, DAILY_BONUS_CHIPS)
+        us.last_bonus_at = now
+        s.add(Transaction(user_id=u.id, amount=Decimal(str(DAILY_BONUS_CHIPS)), type="adjust", status="completed", ref_code="daily_bonus"))
+        s.commit()
+        return {"ok": True, "bonus": DAILY_BONUS_CHIPS, "balance": as_money(u.balance)}
+    finally:
+        s.close()
+
 # ---------------------- WALLET ----------------------------
 @app.get("/api/users/me/balance")
 @jwt_required()
@@ -206,6 +296,20 @@ def deposit():
     s = SessionLocal()
     try:
         u = get_user(s, get_jwt_identity())
+        us = get_settings(s, u.id)
+
+        # Enforce daily deposit limit if set
+        if us.daily_deposit_limit is not None:
+            start, end = today_bounds_utc()
+            deposited_today = s.query(func.coalesce(func.sum(Transaction.amount), 0)).filter(
+                Transaction.user_id == u.id,
+                Transaction.type.in_(["deposit", "purchase_chips"]),
+                Transaction.created_at >= start, Transaction.created_at < end
+            ).scalar() or 0
+            projected = float(deposited_today) + float(amount)
+            if projected > float(us.daily_deposit_limit):
+                return {"error": "deposit_limit_reached"}, 403
+
         credit(s, u, as_money(amount))
         s.add(Transaction(user_id=u.id, amount=amount, type="deposit", status="completed"))
         s.commit()
@@ -276,7 +380,19 @@ def blackjack_play():
 
     s = SessionLocal()
     try:
-        u = get_user(s, get_jwt_identity()); g = get_game(s, "blackjack")
+        u = get_user(s, get_jwt_identity())
+        us = get_settings(s, u.id)
+
+        # Bet size cap
+        if float(bet) > MAX_BET_BLACKJACK:
+            return {"error": f"max_bet_blackjack_{int(MAX_BET_BLACKJACK)}"}, 400
+
+        # Daily loss limit enforcement (pre-check)
+        if us.daily_loss_limit is not None:
+            if user_today_net_loss(s, u.id) + float(bet) > float(us.daily_loss_limit):
+                return {"error": "loss_limit_reached"}, 403
+
+        g = get_game(s, "blackjack")
         debit(s, u, as_money(bet))
         deck = fresh_shoe(); player=[deck.pop(),deck.pop()]; dealer=[deck.pop(),deck.pop()]
         while hand_value(player) < 17: player.append(deck.pop())
@@ -322,7 +438,19 @@ def slots_spin():
     if bet <= 0: return {"error":"bet_must_be_positive"},400
     s = SessionLocal()
     try:
-        u = get_user(s, get_jwt_identity()); g = get_game(s, "slots")
+        u = get_user(s, get_jwt_identity())
+        us = get_settings(s, u.id)
+
+        # Bet size cap
+        if float(bet) > MAX_BET_SLOTS:
+            return {"error": f"max_bet_slots_{int(MAX_BET_SLOTS)}"}, 400
+
+        # Daily loss limit enforcement (pre-check)
+        if us.daily_loss_limit is not None:
+            if user_today_net_loss(s, u.id) + float(bet) > float(us.daily_loss_limit):
+                return {"error": "loss_limit_reached"}, 403
+
+        g = get_game(s, "slots")
         debit(s, u, as_money(bet))
         symbols = slots_symbols(); mult = slots_multiplier(symbols)
         payout = bet * Decimal(str(mult)); outcome = "win" if payout>0 else "lose"
@@ -356,7 +484,19 @@ def roulette_bet():
     if bet <= 0: return {"error":"bet_must_be_positive"},400
     s = SessionLocal()
     try:
-        u = get_user(s, get_jwt_identity()); g = get_game(s, "roulette")
+        u = get_user(s, get_jwt_identity())
+        us = get_settings(s, u.id)
+
+        # Bet size cap
+        if float(bet) > MAX_BET_ROULETTE:
+            return {"error": f"max_bet_roulette_{int(MAX_BET_ROULETTE)}"}, 400
+
+        # Daily loss limit enforcement (pre-check)
+        if us.daily_loss_limit is not None:
+            if user_today_net_loss(s, u.id) + float(bet) > float(us.daily_loss_limit):
+                return {"error": "loss_limit_reached"}, 403
+
+        g = get_game(s, "roulette")
         debit(s, u, as_money(bet))
         n = spin_wheel()
         won = (n in RED_NUMS and color=="red") or (n in BLACK_NUMS and color=="black")
@@ -378,25 +518,88 @@ def roulette_bet():
 @app.get("/api/leaderboard")
 @jwt_required()
 def leaderboard():
+    window = (request.args.get("window") or "all").lower()
     s = SessionLocal()
     try:
-        # Net winnings = sum(payout - amount) per user
+        q = s.query(
+            User.id.label("user_id"),
+            User.username.label("username"),
+            func.coalesce(func.sum(Bet.payout - Bet.amount), 0).label("net_winnings")
+        ).outerjoin(Bet, Bet.user_id == User.id)
+
+        if window in ("7d","30d"):
+            days = 7 if window == "7d" else 30
+            after = datetime.utcnow() - timedelta(days=days)
+            q = q.filter(Bet.created_at >= after)
+
+        q = q.group_by(User.id, User.username).order_by(func.coalesce(func.sum(Bet.payout - Bet.amount), 0).desc()).limit(100)
+        res = [{"user_id": r.user_id, "username": r.username, "net_winnings": as_money(r.net_winnings)} for r in q.all()]
+        return jsonify(res)
+    finally:
+        s.close()
+
+# ---------------------- HISTORY ---------------------------
+@app.get("/api/history/bets")
+@jwt_required()
+def history_bets():
+    """Return recent bets for the authenticated user, newest first."""
+    try:
+        limit = max(1, min(int(request.args.get("limit", 25)), 100))
+        offset = max(0, int(request.args.get("offset", 0)))
+    except Exception:
+        return {"error": "bad_pagination"}, 400
+
+    s = SessionLocal()
+    try:
+        u = get_user(s, get_jwt_identity())
         q = (
             s.query(
-                User.id.label("user_id"),
-                User.username.label("username"),
-                func.coalesce(func.sum(Bet.payout - Bet.amount), 0).label("net_winnings")
+                Bet.id, Bet.amount, Bet.payout, Bet.outcome, Bet.created_at, Game.type.label("game_type")
             )
-            .outerjoin(Bet, Bet.user_id == User.id)
-            .group_by(User.id, User.username)
-            .order_by(func.coalesce(func.sum(Bet.payout - Bet.amount), 0).desc())
-            .limit(100)
+            .join(Game, Game.id == Bet.game_id)
+            .filter(Bet.user_id == u.id)
+            .order_by(desc(Bet.created_at))
+            .limit(limit).offset(offset)
         )
-        res = [
-            {"user_id": r.user_id, "username": r.username, "net_winnings": as_money(r.net_winnings)}
-            for r in q.all()
-        ]
-        return jsonify(res)
+        rows = [{
+            "id": r.id,
+            "amount": as_money(r.amount),
+            "payout": as_money(r.payout),
+            "outcome": r.outcome,
+            "created_at": r.created_at.isoformat(),
+            "game_type": r.game_type
+        } for r in q.all()]
+        return rows
+    finally:
+        s.close()
+
+@app.get("/api/history/transactions")
+@jwt_required()
+def history_transactions():
+    """Return recent wallet/store transactions for the authenticated user."""
+    try:
+        limit = max(1, min(int(request.args.get("limit", 25)), 100))
+        offset = max(0, int(request.args.get("offset", 0)))
+    except Exception:
+        return {"error": "bad_pagination"}, 400
+
+    s = SessionLocal()
+    try:
+        u = get_user(s, get_jwt_identity())
+        q = (
+            s.query(Transaction.id, Transaction.type, Transaction.amount, Transaction.ref_code, Transaction.created_at)
+            .filter(Transaction.user_id == u.id)
+            .order_by(desc(Transaction.created_at))
+            .limit(limit).offset(offset)
+        )
+        rows = [{
+            "id": r.id,
+            "type": r.type,
+            "amount": as_money(r.amount),
+            "ref_code": r.ref_code,
+            "created_at": r.created_at.isoformat()
+        } for r in q.all()]
+        return rows
     finally:
         s.close()
 
