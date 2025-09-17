@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 
 // Set this if API is on another origin (e.g., Vite env var)
 const API_BASE =
-  (typeof import.meta !== "undefined" && import.meta.env && (import.meta.env.VITE_API_BASE || import.meta.env.MCW_API_BASE)) ||
+  (typeof window !== "undefined" && window.API_BASE) ||
+  (typeof import !== "undefined" && typeof import.meta !== "undefined" && import.meta.env && (import.meta.env.VITE_API_BASE || import.meta.env.MCW_API_BASE)) ||
   "";
 
 function Card({ title, children, footer }) {

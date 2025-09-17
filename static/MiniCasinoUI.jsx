@@ -1,9 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+const { useState, useEffect, useMemo } = React;
 
-// Set this if API is on another origin (e.g., Vite env var)
-const API_BASE =
-  (typeof import.meta !== "undefined" && import.meta.env && (import.meta.env.VITE_API_BASE || import.meta.env.MCW_API_BASE)) ||
-  "";
+// Set this if API is on another origin
+const API_BASE = window.API_BASE || "";
 
 function Card({ title, children, footer }) {
   return (
@@ -45,7 +43,7 @@ function JsonBox({ data }) {
   );
 }
 
-export default function MiniCasinoUI() {
+function MiniCasinoUI() {
   const [token, setToken] = useState(() => localStorage.getItem("mcw_token") || "");
   const [me, setMe] = useState(null);
   const [balance, setBalance] = useState(null);
@@ -581,3 +579,6 @@ export default function MiniCasinoUI() {
     </div>
   );
 }
+
+// Render the app
+ReactDOM.render(React.createElement(MiniCasinoUI), document.getElementById('root'));
