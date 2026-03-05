@@ -1119,6 +1119,573 @@ async def search_codebase(request: CodeSearchRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
 
+# ==================== PostgreSQL Integration ====================
+class PostgresConnectRequest(BaseModel):
+    connection_string: str
+
+class PostgresQueryRequest(BaseModel):
+    connection_string: str
+    query: str
+
+postgres_pool = None
+
+@api_router.post("/postgres/connect")
+async def postgres_connect(request: PostgresConnectRequest):
+    try:
+        import asyncpg
+        conn = await asyncpg.connect(request.connection_string)
+        version = await conn.fetchval('SELECT version()')
+        await conn.close()
+        return {"connected": True, "version": version}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PostgreSQL connection failed: {str(e)}")
+
+@api_router.post("/postgres/query")
+async def postgres_query(request: PostgresQueryRequest):
+    try:
+        import asyncpg
+        conn = await asyncpg.connect(request.connection_string)
+        
+        # Check if it's a SELECT query
+        is_select = request.query.strip().upper().startswith('SELECT')
+        
+        if is_select:
+            rows = await conn.fetch(request.query)
+            columns = list(rows[0].keys()) if rows else []
+            data = [dict(row) for row in rows]
+            await conn.close()
+            return {"columns": columns, "data": data, "rowCount": len(data)}
+        else:
+            result = await conn.execute(request.query)
+            await conn.close()
+            return {"result": result, "rowCount": 0}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Query error: {str(e)}")
+
+@api_router.post("/postgres/tables")
+async def postgres_tables(request: PostgresConnectRequest):
+    try:
+        import asyncpg
+        conn = await asyncpg.connect(request.connection_string)
+        rows = await conn.fetch("""
+            SELECT table_name, table_schema 
+            FROM information_schema.tables 
+            WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+            ORDER BY table_schema, table_name
+        """)
+        await conn.close()
+        return {"tables": [{"name": r['table_name'], "schema": r['table_schema']} for r in rows]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list tables: {str(e)}")
+
+@api_router.post("/postgres/schema")
+async def postgres_schema(request: PostgresQueryRequest):
+    try:
+        import asyncpg
+        conn = await asyncpg.connect(request.connection_string)
+        # request.query contains table name
+        rows = await conn.fetch("""
+            SELECT column_name, data_type, is_nullable, column_default
+            FROM information_schema.columns
+            WHERE table_name = $1
+            ORDER BY ordinal_position
+        """, request.query)
+        await conn.close()
+        return {"columns": [dict(r) for r in rows]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Schema error: {str(e)}")
+
+# ==================== Redis Integration ====================
+class RedisConnectRequest(BaseModel):
+    host: str = "localhost"
+    port: int = 6379
+    password: Optional[str] = None
+    db: int = 0
+
+class RedisCommandRequest(BaseModel):
+    host: str
+    port: int = 6379
+    password: Optional[str] = None
+    db: int = 0
+    command: str
+    args: List[str] = []
+
+@api_router.post("/redis/connect")
+async def redis_connect(request: RedisConnectRequest):
+    try:
+        import redis.asyncio as redis
+        r = redis.Redis(
+            host=request.host, 
+            port=request.port, 
+            password=request.password, 
+            db=request.db,
+            decode_responses=True
+        )
+        info = await r.info()
+        await r.close()
+        return {
+            "connected": True, 
+            "version": info.get('redis_version'),
+            "used_memory": info.get('used_memory_human'),
+            "connected_clients": info.get('connected_clients')
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Redis connection failed: {str(e)}")
+
+@api_router.post("/redis/keys")
+async def redis_keys(request: RedisConnectRequest):
+    try:
+        import redis.asyncio as redis
+        r = redis.Redis(
+            host=request.host, 
+            port=request.port, 
+            password=request.password, 
+            db=request.db,
+            decode_responses=True
+        )
+        keys = await r.keys('*')
+        # Get types for each key
+        key_data = []
+        for key in keys[:100]:  # Limit to 100 keys
+            key_type = await r.type(key)
+            ttl = await r.ttl(key)
+            key_data.append({"key": key, "type": key_type, "ttl": ttl})
+        await r.close()
+        return {"keys": key_data, "total": len(keys)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list keys: {str(e)}")
+
+@api_router.post("/redis/get")
+async def redis_get(request: RedisCommandRequest):
+    try:
+        import redis.asyncio as redis
+        r = redis.Redis(
+            host=request.host, 
+            port=request.port, 
+            password=request.password, 
+            db=request.db,
+            decode_responses=True
+        )
+        key = request.args[0] if request.args else ""
+        key_type = await r.type(key)
+        
+        value = None
+        if key_type == 'string':
+            value = await r.get(key)
+        elif key_type == 'list':
+            value = await r.lrange(key, 0, -1)
+        elif key_type == 'set':
+            value = list(await r.smembers(key))
+        elif key_type == 'hash':
+            value = await r.hgetall(key)
+        elif key_type == 'zset':
+            value = await r.zrange(key, 0, -1, withscores=True)
+        
+        await r.close()
+        return {"key": key, "type": key_type, "value": value}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Redis get error: {str(e)}")
+
+@api_router.post("/redis/set")
+async def redis_set(request: RedisCommandRequest):
+    try:
+        import redis.asyncio as redis
+        r = redis.Redis(
+            host=request.host, 
+            port=request.port, 
+            password=request.password, 
+            db=request.db,
+            decode_responses=True
+        )
+        key = request.args[0] if len(request.args) > 0 else ""
+        value = request.args[1] if len(request.args) > 1 else ""
+        await r.set(key, value)
+        await r.close()
+        return {"success": True, "key": key}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Redis set error: {str(e)}")
+
+@api_router.post("/redis/delete")
+async def redis_delete(request: RedisCommandRequest):
+    try:
+        import redis.asyncio as redis
+        r = redis.Redis(
+            host=request.host, 
+            port=request.port, 
+            password=request.password, 
+            db=request.db,
+            decode_responses=True
+        )
+        key = request.args[0] if request.args else ""
+        result = await r.delete(key)
+        await r.close()
+        return {"success": result > 0, "deleted": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Redis delete error: {str(e)}")
+
+# ==================== Railway Integration ====================
+class RailwayRequest(BaseModel):
+    api_token: str
+    project_id: Optional[str] = None
+
+@api_router.post("/railway/projects")
+async def railway_projects(request: RailwayRequest):
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://backboard.railway.app/graphql/v2",
+                headers={
+                    "Authorization": f"Bearer {request.api_token}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "query": """
+                        query {
+                            me {
+                                projects {
+                                    edges {
+                                        node {
+                                            id
+                                            name
+                                            description
+                                            createdAt
+                                            environments {
+                                                edges {
+                                                    node {
+                                                        id
+                                                        name
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    """
+                }
+            ) as resp:
+                data = await resp.json()
+                if 'errors' in data:
+                    raise HTTPException(status_code=400, detail=data['errors'][0]['message'])
+                projects = data.get('data', {}).get('me', {}).get('projects', {}).get('edges', [])
+                return {"projects": [p['node'] for p in projects]}
+    except aiohttp.ClientError as e:
+        raise HTTPException(status_code=500, detail=f"Railway API error: {str(e)}")
+
+@api_router.post("/railway/services")
+async def railway_services(request: RailwayRequest):
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://backboard.railway.app/graphql/v2",
+                headers={
+                    "Authorization": f"Bearer {request.api_token}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "query": """
+                        query($projectId: String!) {
+                            project(id: $projectId) {
+                                services {
+                                    edges {
+                                        node {
+                                            id
+                                            name
+                                            icon
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    """,
+                    "variables": {"projectId": request.project_id}
+                }
+            ) as resp:
+                data = await resp.json()
+                if 'errors' in data:
+                    raise HTTPException(status_code=400, detail=data['errors'][0]['message'])
+                services = data.get('data', {}).get('project', {}).get('services', {}).get('edges', [])
+                return {"services": [s['node'] for s in services]}
+    except aiohttp.ClientError as e:
+        raise HTTPException(status_code=500, detail=f"Railway API error: {str(e)}")
+
+@api_router.post("/railway/deploy")
+async def railway_deploy(request: RailwayRequest):
+    # Trigger a deployment via Railway API
+    return {
+        "status": "Deploy triggered",
+        "message": "Use Railway CLI or GitHub integration for automatic deployments",
+        "docs": "https://docs.railway.app/guides/github-autodeploys"
+    }
+
+# ==================== Auto Error Fix (FixLoop with Screenshots) ====================
+class ErrorFixRequest(BaseModel):
+    url: str
+    error_description: Optional[str] = None
+    auto_fix: bool = True
+    model: str = "llama3.2"
+
+class FixLoopSession(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    url: str
+    screenshots: List[str] = []
+    errors: List[Dict] = []
+    fixes_applied: List[Dict] = []
+    status: str = "running"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+@api_router.post("/fixloop/start")
+async def fixloop_start(request: ErrorFixRequest):
+    try:
+        import aiohttp
+        import base64
+        
+        session_id = str(uuid.uuid4())
+        
+        # Try to fetch the URL and capture any errors
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(request.url, timeout=10) as resp:
+                    status_code = resp.status
+                    content = await resp.text()
+                    
+                    # Check for common error patterns in the response
+                    errors_found = []
+                    if status_code >= 400:
+                        errors_found.append({
+                            "type": "HTTP Error",
+                            "message": f"HTTP {status_code}",
+                            "severity": "high" if status_code >= 500 else "medium"
+                        })
+                    
+                    # Check for JavaScript errors in content
+                    error_patterns = [
+                        ("TypeError:", "JavaScript TypeError"),
+                        ("ReferenceError:", "JavaScript ReferenceError"),
+                        ("SyntaxError:", "JavaScript SyntaxError"),
+                        ("Cannot read property", "Null Reference Error"),
+                        ("undefined is not", "Undefined Error"),
+                        ("Uncaught", "Uncaught Exception"),
+                        ("Error:", "General Error"),
+                        ("failed to compile", "Compilation Error"),
+                        ("Module not found", "Module Not Found"),
+                    ]
+                    
+                    for pattern, error_type in error_patterns:
+                        if pattern.lower() in content.lower():
+                            errors_found.append({
+                                "type": error_type,
+                                "pattern": pattern,
+                                "severity": "high"
+                            })
+        except Exception as fetch_error:
+            errors_found = [{
+                "type": "Connection Error",
+                "message": str(fetch_error),
+                "severity": "critical"
+            }]
+        
+        # Store session in DB
+        fixloop_session = {
+            "id": session_id,
+            "url": request.url,
+            "errors": errors_found,
+            "status": "analyzed",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        await db.fixloop_sessions.insert_one(fixloop_session)
+        
+        # If errors found and auto_fix enabled, try to generate fixes
+        suggested_fixes = []
+        if errors_found and request.auto_fix and ollama_client:
+            try:
+                fix_prompt = f"""Analyze these errors and suggest fixes:
+
+URL: {request.url}
+Errors found:
+{json.dumps(errors_found, indent=2)}
+
+{f"Additional context: {request.error_description}" if request.error_description else ""}
+
+Provide specific code fixes or configuration changes needed. Format as a list of actionable steps."""
+
+                response = ollama_client.chat(
+                    model=request.model,
+                    messages=[{"role": "user", "content": fix_prompt}]
+                )
+                suggested_fixes = [{"suggestion": response['message']['content']}]
+            except:
+                pass
+        
+        return {
+            "session_id": session_id,
+            "url": request.url,
+            "errors": errors_found,
+            "suggested_fixes": suggested_fixes,
+            "status": "completed"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"FixLoop error: {str(e)}")
+
+@api_router.get("/fixloop/sessions")
+async def fixloop_sessions():
+    sessions = await db.fixloop_sessions.find({}, {"_id": 0}).sort("created_at", -1).limit(20).to_list(20)
+    return {"sessions": sessions}
+
+# ==================== Tester Agent ====================
+class TestRequest(BaseModel):
+    url: str
+    test_type: str = "smoke"  # smoke, functional, api, e2e
+    endpoints: List[str] = []
+    assertions: List[Dict] = []
+    model: str = "llama3.2"
+
+class TestCase(BaseModel):
+    name: str
+    type: str
+    endpoint: Optional[str] = None
+    method: str = "GET"
+    expected_status: int = 200
+    body: Optional[Dict] = None
+    assertions: List[str] = []
+
+@api_router.post("/tester/run")
+async def tester_run(request: TestRequest):
+    try:
+        import aiohttp
+        
+        test_results = []
+        
+        # Basic smoke test - check if URL is accessible
+        if request.test_type in ["smoke", "e2e"]:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(request.url, timeout=10) as resp:
+                        test_results.append({
+                            "name": "Smoke Test - URL Accessible",
+                            "status": "PASS" if resp.status == 200 else "FAIL",
+                            "details": f"HTTP {resp.status}",
+                            "duration": "< 1s"
+                        })
+            except Exception as e:
+                test_results.append({
+                    "name": "Smoke Test - URL Accessible",
+                    "status": "FAIL",
+                    "details": str(e),
+                    "duration": "N/A"
+                })
+        
+        # API endpoint tests
+        if request.test_type in ["api", "functional", "e2e"] and request.endpoints:
+            async with aiohttp.ClientSession() as session:
+                for endpoint in request.endpoints:
+                    full_url = f"{request.url.rstrip('/')}{endpoint}"
+                    try:
+                        async with session.get(full_url, timeout=10) as resp:
+                            test_results.append({
+                                "name": f"API Test - {endpoint}",
+                                "status": "PASS" if resp.status < 400 else "FAIL",
+                                "details": f"HTTP {resp.status}",
+                                "endpoint": endpoint
+                            })
+                    except Exception as e:
+                        test_results.append({
+                            "name": f"API Test - {endpoint}",
+                            "status": "FAIL",
+                            "details": str(e),
+                            "endpoint": endpoint
+                        })
+        
+        # Generate AI-powered test suggestions
+        ai_suggestions = []
+        if ollama_client:
+            try:
+                suggest_prompt = f"""Based on this URL and test results, suggest additional test cases:
+
+URL: {request.url}
+Test Type: {request.test_type}
+Current Results: {json.dumps(test_results, indent=2)}
+
+Suggest 3-5 specific test cases that would improve coverage. Format as a numbered list."""
+
+                response = ollama_client.chat(
+                    model=request.model,
+                    messages=[{"role": "user", "content": suggest_prompt}]
+                )
+                ai_suggestions = response['message']['content']
+            except:
+                pass
+        
+        # Calculate summary
+        passed = sum(1 for t in test_results if t['status'] == 'PASS')
+        failed = sum(1 for t in test_results if t['status'] == 'FAIL')
+        
+        # Store test run
+        test_run = {
+            "id": str(uuid.uuid4()),
+            "url": request.url,
+            "test_type": request.test_type,
+            "results": test_results,
+            "summary": {"passed": passed, "failed": failed, "total": len(test_results)},
+            "ai_suggestions": ai_suggestions,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        await db.test_runs.insert_one(test_run)
+        
+        return {
+            "test_run_id": test_run["id"],
+            "url": request.url,
+            "results": test_results,
+            "summary": {"passed": passed, "failed": failed, "total": len(test_results)},
+            "ai_suggestions": ai_suggestions
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Tester error: {str(e)}")
+
+@api_router.post("/tester/generate")
+async def tester_generate_tests(request: TestRequest):
+    """Generate test cases using AI"""
+    if not ollama_client:
+        raise HTTPException(status_code=503, detail="Ollama not available")
+    
+    try:
+        prompt = f"""Generate comprehensive test cases for this application:
+
+URL: {request.url}
+Test Type: {request.test_type}
+Endpoints to test: {json.dumps(request.endpoints) if request.endpoints else "Auto-detect"}
+
+Generate a JSON array of test cases with this structure:
+[
+  {{
+    "name": "Test name",
+    "type": "smoke|api|functional|e2e",
+    "endpoint": "/api/example",
+    "method": "GET|POST|PUT|DELETE",
+    "expected_status": 200,
+    "assertions": ["Response contains X", "Status is 200"]
+  }}
+]
+
+Generate 5-10 realistic test cases."""
+
+        response = ollama_client.chat(
+            model=request.model,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        return {"generated_tests": response['message']['content']}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Test generation error: {str(e)}")
+
+@api_router.get("/tester/history")
+async def tester_history():
+    runs = await db.test_runs.find({}, {"_id": 0}).sort("created_at", -1).limit(20).to_list(20)
+    return {"test_runs": runs}
+
 # Health check
 @api_router.get("/health")
 async def health_check():

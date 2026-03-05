@@ -19,6 +19,11 @@ import EnvManager from '../components/EnvManager/EnvManager';
 import SnippetLibrary from '../components/SnippetLibrary/SnippetLibrary';
 import DevTools from '../components/DevTools/DevTools';
 import AdvancedTools from '../components/AdvancedTools/AdvancedTools';
+import PostgresManager from '../components/PostgreSQL/PostgresManager';
+import RedisManager from '../components/Redis/RedisManager';
+import RailwayManager from '../components/Railway/RailwayManager';
+import FixLoop from '../components/FixLoop/FixLoop';
+import TesterAgent from '../components/TesterAgent/TesterAgent';
 import { 
   MessageSquare, 
   Mic, 
@@ -39,7 +44,10 @@ import {
   Settings,
   BookMarked,
   Wrench,
-  Rocket
+  Rocket,
+  Train,
+  Bug,
+  FlaskConical
 } from 'lucide-react';
 
 const Dashboard = () => {
@@ -69,7 +77,12 @@ const Dashboard = () => {
     { id: 'codereview', label: 'CODE REVIEW', icon: Shield },
     { id: 'coderunner', label: 'CODE RUNNER', icon: Play },
     { id: 'apitester', label: 'API TESTER', icon: Send },
-    { id: 'database', label: 'DATABASE', icon: Database },
+    { id: 'tester', label: 'TESTER AGENT', icon: FlaskConical },
+    { id: 'fixloop', label: 'FIX LOOP', icon: Bug },
+    { id: 'postgres', label: 'POSTGRESQL', icon: Database },
+    { id: 'redis', label: 'REDIS', icon: Database },
+    { id: 'railway', label: 'RAILWAY', icon: Train },
+    { id: 'database', label: 'DB DESIGNER', icon: Database },
     { id: 'git', label: 'GIT & GITHUB', icon: GitBranch },
     { id: 'packages', label: 'PACKAGES', icon: Package },
     { id: 'env', label: 'ENV VARS', icon: Settings },
@@ -122,7 +135,7 @@ const Dashboard = () => {
       {/* Main Content */}
       <div className="flex h-[calc(100vh-81px)]">
         {/* Sidebar */}
-        <aside className="w-64 border-r border-cyan-500/20 bg-black/20 backdrop-blur-sm">
+        <aside className="w-64 border-r border-cyan-500/20 bg-black/20 backdrop-blur-sm overflow-y-auto">
           <nav className="p-4 space-y-2">
             {tabs.map((tab) => {
               const Icon = tab.icon;
@@ -152,6 +165,11 @@ const Dashboard = () => {
           {activeTab === 'codereview' && <CodeReview />}
           {activeTab === 'coderunner' && <CodeRunner />}
           {activeTab === 'apitester' && <APITester />}
+          {activeTab === 'tester' && <TesterAgent />}
+          {activeTab === 'fixloop' && <FixLoop />}
+          {activeTab === 'postgres' && <PostgresManager />}
+          {activeTab === 'redis' && <RedisManager />}
+          {activeTab === 'railway' && <RailwayManager />}
           {activeTab === 'database' && <DatabaseDesigner />}
           {activeTab === 'git' && <GitIntegration />}
           {activeTab === 'packages' && <PackageManager />}
