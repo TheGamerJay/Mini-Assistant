@@ -14,6 +14,10 @@ import GitIntegration from '../components/Git/GitIntegration';
 import CodeRunner from '../components/CodeRunner/CodeRunner';
 import APITester from '../components/APITester/APITester';
 import DatabaseDesigner from '../components/DatabaseDesigner/DatabaseDesigner';
+import PackageManager from '../components/PackageManager/PackageManager';
+import EnvManager from '../components/EnvManager/EnvManager';
+import SnippetLibrary from '../components/SnippetLibrary/SnippetLibrary';
+import DevTools from '../components/DevTools/DevTools';
 import { 
   MessageSquare, 
   Mic, 
@@ -29,7 +33,11 @@ import {
   GitBranch,
   Play,
   Send,
-  Database
+  Database,
+  Package,
+  Settings,
+  BookMarked,
+  Wrench
 } from 'lucide-react';
 
 const Dashboard = () => {
@@ -61,6 +69,10 @@ const Dashboard = () => {
     { id: 'apitester', label: 'API TESTER', icon: Send },
     { id: 'database', label: 'DATABASE', icon: Database },
     { id: 'git', label: 'GIT & GITHUB', icon: GitBranch },
+    { id: 'packages', label: 'PACKAGES', icon: Package },
+    { id: 'env', label: 'ENV VARS', icon: Settings },
+    { id: 'snippets', label: 'SNIPPETS', icon: BookMarked },
+    { id: 'devtools', label: 'DEV TOOLS', icon: Wrench },
     { id: 'files', label: 'FILES', icon: FolderOpen },
     { id: 'terminal', label: 'TERMINAL', icon: Terminal },
     { id: 'websearch', label: 'WEB SEARCH', icon: Search },
@@ -139,6 +151,10 @@ const Dashboard = () => {
           {activeTab === 'apitester' && <APITester />}
           {activeTab === 'database' && <DatabaseDesigner />}
           {activeTab === 'git' && <GitIntegration />}
+          {activeTab === 'packages' && <PackageManager />}
+          {activeTab === 'env' && <EnvManager />}
+          {activeTab === 'snippets' && <SnippetLibrary />}
+          {activeTab === 'devtools' && <DevTools />}
           {activeTab === 'voice' && <VoiceControl />}
           {activeTab === 'files' && <FileExplorer />}
           {activeTab === 'terminal' && <CommandTerminal />}

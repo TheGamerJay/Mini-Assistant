@@ -424,6 +424,20 @@ class APITestRequest(BaseModel):
     headers: Dict[str, str] = {}
     body: Optional[str] = None
 
+class PackageInstallRequest(BaseModel):
+    package: str
+    type: str = "npm"
+
+class EnvVarRequest(BaseModel):
+    type: str
+    variables: List[Dict[str, str]] = []
+
+class SnippetCreate(BaseModel):
+    title: str
+    code: str
+    language: str = "javascript"
+    tags: Optional[str] = None
+
 @api_router.post("/code-review/analyze")
 async def review_code(request: CodeReviewRequest):
     if not ollama_client:
@@ -763,6 +777,152 @@ async def test_api(request: APITestRequest):
         raise HTTPException(status_code=500, detail=f"Request failed: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"API test error: {str(e)}")
+
+# Package Manager
+@api_router.get("/packages/list")
+async def list_packages(type: str = "npm"):
+    try:
+        if type == "npm":
+            result = subprocess.run(
+                "cd /app/frontend && npm list --depth=0 --json",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                packages = [{"name": k, "version": v.get("version")} for k, v in data.get("dependencies", {}).items()]
+                return {"packages": packages}
+        elif type == "pip":
+            result = subprocess.run(
+                "pip list --format=json",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                packages = json.loads(result.stdout)
+                return {"packages": packages}
+        
+        return {"packages": []}
+    except Exception as e:
+        return {"packages": []}
+
+@api_router.post("/packages/install")
+async def install_package(request: PackageInstallRequest):
+    try:
+        if request.type == "npm":
+            result = subprocess.run(
+                f"cd /app/frontend && yarn add {request.package}",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+        elif request.type == "pip":
+            result = subprocess.run(
+                f"pip install {request.package} && pip freeze > /app/backend/requirements.txt",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+        else:
+            raise HTTPException(status_code=400, detail="Invalid package type")
+        
+        if result.returncode == 0:
+            return {"success": True, "message": f"{request.package} installed"}
+        else:
+            raise HTTPException(status_code=500, detail=result.stderr)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Install error: {str(e)}")
+
+@api_router.post("/packages/uninstall")
+async def uninstall_package(request: PackageInstallRequest):
+    try:
+        if request.type == "npm":
+            result = subprocess.run(
+                f"cd /app/frontend && yarn remove {request.package}",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+        elif request.type == "pip":
+            result = subprocess.run(
+                f"pip uninstall -y {request.package} && pip freeze > /app/backend/requirements.txt",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+        else:
+            raise HTTPException(status_code=400, detail="Invalid package type")
+        
+        if result.returncode == 0:
+            return {"success": True, "message": f"{request.package} uninstalled"}
+        else:
+            raise HTTPException(status_code=500, detail=result.stderr)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Uninstall error: {str(e)}")
+
+# Environment Manager
+@api_router.get("/env/read")
+async def read_env(type: str = "frontend"):
+    try:
+        env_path = "/app/frontend/.env" if type == "frontend" else "/app/backend/.env"
+        if not Path(env_path).exists():
+            return {"variables": []}
+        
+        variables = []
+        with open(env_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    variables.append({"id": len(variables), "key": key, "value": value})
+        
+        return {"variables": variables}
+    except Exception as e:
+        return {"variables": []}
+
+@api_router.post("/env/write")
+async def write_env(request: EnvVarRequest):
+    try:
+        env_path = "/app/frontend/.env" if request.type == "frontend" else "/app/backend/.env"
+        
+        with open(env_path, 'w') as f:
+            for var in request.variables:
+                if var.get('key'):
+                    f.write(f"{var['key']}={var.get('value', '')}\\n")
+        
+        return {"success": True, "message": "Environment variables saved"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Write error: {str(e)}")
+
+# Snippet Library
+@api_router.get("/snippets/list")
+async def list_snippets():
+    snippets = await db.snippets.find({}, {"_id": 0}).to_list(1000)
+    return {"snippets": snippets}
+
+@api_router.post("/snippets/create")
+async def create_snippet(snippet: SnippetCreate):
+    snippet_dict = snippet.model_dump()
+    snippet_dict["id"] = str(uuid.uuid4())
+    snippet_dict["created_at"] = datetime.now(timezone.utc).isoformat()
+    
+    await db.snippets.insert_one(snippet_dict)
+    return {"success": True, "id": snippet_dict["id"]}
+
+@api_router.delete("/snippets/delete/{snippet_id}")
+async def delete_snippet(snippet_id: str):
+    result = await db.snippets.delete_one({"id": snippet_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Snippet not found")
+    return {"success": True}
 
 # Codebase search
 @api_router.post("/search/codebase")
