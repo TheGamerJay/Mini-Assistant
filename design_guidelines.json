@@ -1,0 +1,166 @@
+{
+  "typography": {
+    "font_family": {
+      "headings": "Rajdhani, Orbitron, sans-serif",
+      "body": "Inter, system-ui, sans-serif",
+      "code": "JetBrains Mono, Fira Code, monospace"
+    },
+    "scale": {
+      "h1": "text-5xl font-bold tracking-tight uppercase",
+      "h2": "text-4xl font-semibold tracking-tight uppercase",
+      "h3": "text-2xl font-medium tracking-wide text-cyan-400",
+      "body": "text-base font-normal leading-relaxed text-slate-300",
+      "caption": "text-xs font-mono text-cyan-500/70 uppercase tracking-widest"
+    }
+  },
+  "colors": {
+    "palette": {
+      "background": {
+        "primary": "#050505",
+        "secondary": "#0a0a0f",
+        "card": "rgba(10, 10, 15, 0.6)"
+      },
+      "text": {
+        "primary": "#ffffff",
+        "secondary": "#94a3b8",
+        "muted": "#64748b",
+        "accent": "#00f3ff"
+      },
+      "brand": {
+        "primary": "#00f3ff",
+        "primary_dim": "rgba(0, 243, 255, 0.1)",
+        "secondary": "#0066cc",
+        "accent": "#ff2a6d"
+      },
+      "status": {
+        "success": "#00ff9d",
+        "warning": "#ffb86c",
+        "error": "#ff5555",
+        "info": "#8be9fd"
+      }
+    },
+    "gradients": {
+      "glow": "linear-gradient(135deg, rgba(0,243,255,0.1) 0%, rgba(0,0,0,0) 100%)",
+      "beam": "linear-gradient(to right, transparent, rgba(0, 243, 255, 0.5), transparent)"
+    }
+  },
+  "visual_enhancers": {
+    "borders": {
+      "default": "1px solid rgba(0, 243, 255, 0.15)",
+      "active": "1px solid #00f3ff",
+      "glow": "box-shadow: 0 0 10px rgba(0, 243, 255, 0.3), inset 0 0 5px rgba(0, 243, 255, 0.1)"
+    },
+    "glassmorphism": {
+      "default": "backdrop-filter: blur(12px); background: rgba(10, 10, 15, 0.7); border: 1px solid rgba(255, 255, 255, 0.08);",
+      "heavy": "backdrop-filter: blur(24px); background: rgba(5, 5, 10, 0.85); border-bottom: 1px solid rgba(0, 243, 255, 0.2);"
+    },
+    "shadows": {
+      "neon": "0 0 20px rgba(0, 243, 255, 0.15)",
+      "depth": "0 10px 30px -10px rgba(0, 0, 0, 0.5)"
+    },
+    "decorations": {
+      "scanlines": "background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06)); background-size: 100% 2px, 3px 100%;",
+      "hud_corners": "Use 4px cyan border segments at corners of containers"
+    }
+  },
+  "layout_strategy": {
+    "grid": {
+      "dashboard": "grid grid-cols-1 md:grid-cols-12 gap-6 p-6",
+      "bento": "grid grid-cols-1 md:grid-cols-4 gap-4"
+    },
+    "spacing": {
+      "container_padding": "p-6 md:p-8",
+      "section_gap": "gap-8"
+    },
+    "containers": {
+      "card": "rounded-xl border border-cyan-500/20 bg-black/40 backdrop-blur-md overflow-hidden relative group hover:border-cyan-500/50 transition-colors duration-300",
+      "panel": "h-full flex flex-col bg-background/50 border-r border-border/10"
+    }
+  },
+  "components": {
+    "Button": {
+      "default": "bg-cyan-500/10 text-cyan-400 border border-cyan-500/50 hover:bg-cyan-500/20 hover:text-cyan-300 hover:shadow-[0_0_15px_rgba(0,243,255,0.3)] transition-all uppercase tracking-wider text-sm font-semibold rounded-sm px-6 py-2",
+      "primary": "bg-cyan-500 text-black font-bold hover:bg-cyan-400 hover:shadow-[0_0_20px_rgba(0,243,255,0.5)] uppercase tracking-wider rounded-sm",
+      "ghost": "text-slate-400 hover:text-white hover:bg-white/5 uppercase tracking-wide"
+    },
+    "Card": {
+      "base": "bg-black/40 border border-cyan-900/30 backdrop-blur-sm rounded-lg relative overflow-hidden",
+      "header": "p-4 border-b border-cyan-900/30 flex justify-between items-center",
+      "title": "text-cyan-400 font-mono text-sm uppercase tracking-wider",
+      "content": "p-4 text-slate-300"
+    },
+    "Input": {
+      "base": "bg-black/50 border-cyan-900/50 text-cyan-100 placeholder:text-cyan-900/50 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 rounded-sm font-mono"
+    },
+    "Badge": {
+      "base": "bg-cyan-950/30 text-cyan-400 border border-cyan-500/30 font-mono text-xs uppercase px-2 py-0.5 rounded-none"
+    }
+  },
+  "motion": {
+    "transitions": {
+      "default": "transition-all duration-300 ease-out",
+      "hover": "transition-colors duration-200 ease-in-out"
+    },
+    "animations": {
+      "pulse_slow": "animate-pulse duration-[3000ms]",
+      "scan": "animate-[scan_2s_ease-in-out_infinite]",
+      "fade_in": "animate-in fade-in zoom-in-95 duration-300"
+    }
+  },
+  "image_urls": {
+    "backgrounds": [
+      {
+        "url": "https://images.unsplash.com/photo-1550751827-4bd374c3f58b",
+        "category": "hero_bg",
+        "description": "Cyberpunk city HUD texture"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1518770660439-4636190af475",
+        "category": "tech_texture",
+        "description": "Circuit board dark texture"
+      }
+    ],
+    "placeholders": [
+      {
+        "url": "https://images.unsplash.com/photo-1614064641938-3e8529433017",
+        "category": "user_avatar",
+        "description": "Futuristic silhouette avatar"
+      }
+    ]
+  },
+  "accessibility": {
+    "contrast": "Ensure cyan text is readable against black backgrounds. Use text-shadow if needed.",
+    "focus_states": "Focus rings must be high-contrast cyan (#00f3ff).",
+    "reduced_motion": "Disable scanning animations if prefers-reduced-motion is active."
+  },
+  "instructions_to_main_agent": [
+    "Install 'lucide-react' for icons if not present. Use thin, technical icons.",
+    "Install 'recharts' for data visualization.",
+    "Implement a global 'Store' (Context/Zustand) for the FixLoop and Voice state.",
+    "Use 'sonner' for system notifications (styled as HUD alerts).",
+    "Create a 'Terminal' component that looks like a real code editor/shell.",
+    "Wrap the entire app in a 'dark' class by default.",
+    "Use absolute positioning and z-indexes to create layered HUD effects."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "You tend to converge toward generic, 'on distribution' outputs. In frontend design, this creates what users call the 'AI slop' aesthetic. Avoid this: make creative, distinctive frontends that surprise and delight.",
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients",
+    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
+    "Create depth through layered design elements with z-index hierarchy",
+    "Use glass-morphism effects with backdrop filters (12-24px blur)",
+    "You MUST NOT apply universal transition. Eg: transition: all. This results in breaking transforms. Always add transitions for specific interactive elements like button, input excluding transforms",
+    "You MUST NOT center align the app container, ie do not add .App { text-align: center; } in the css file. This disrupts the human natural reading flow of text",
+    "Always use modern button styles like pill-shaped, or sharp button with interaction animations & color relevant to the app style",
+    "NEVER: use AI assistant Emoji characters like 🤖🧠💭💡🔮🎯📚🎭🎬🎪🎉🎊🎁🎀🎂🍰🎈🎨🎰💰💵💳🏦💎🪙💸🤑📊📈📉💹🔢🏆🥇 etc for icons.",
+    "Every interaction needs micro-animations - hover states, transitions, parallax effects, and entrance animations. Static = dead.",
+    "Use 2-3x more spacing than feels comfortable. Cramped designs look cheap.",
+    "Subtle grain textures, noise overlays, custom cursors, selection states, and loading animations: separates good from extraordinary.",
+    "Main agent relies on these image URLs. Missing categories (especially sponsor logos) = main agent will use placeholder text which is FORBIDDEN",
+    "Prioritize using pre-existing components from src/components/ui when applicable",
+    "Create new components that match the style and conventions of existing components when needed",
+    "Examine existing components to understand the project's component patterns before creating new ones",
+    "Components MUST use named exports (export const ComponentName = ...)",
+    "Pages MUST use default exports (export default function PageName() {...})",
+    "Use 'sonner' for toasts. Sonner component are located in /app/src/components/ui/sonner.tsx"
+  ]
+}
