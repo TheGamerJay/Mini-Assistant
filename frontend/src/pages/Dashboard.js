@@ -8,6 +8,8 @@ import CommandTerminal from '../components/Terminal/CommandTerminal';
 import WebSearch from '../components/Search/WebSearch';
 import CodebaseSearch from '../components/Search/CodebaseSearch';
 import ProjectProfiles from '../components/Profiles/ProjectProfiles';
+import AppBuilder from '../components/AppBuilder/AppBuilder';
+import CodeReview from '../components/CodeReview/CodeReview';
 import { 
   MessageSquare, 
   Mic, 
@@ -17,7 +19,9 @@ import {
   Code, 
   Layers,
   Activity,
-  Zap
+  Zap,
+  Wand2,
+  Shield
 } from 'lucide-react';
 
 const Dashboard = () => {
@@ -43,6 +47,8 @@ const Dashboard = () => {
 
   const tabs = [
     { id: 'chat', label: 'CHAT', icon: MessageSquare },
+    { id: 'appbuilder', label: 'APP BUILDER', icon: Wand2 },
+    { id: 'codereview', label: 'CODE REVIEW', icon: Shield },
     { id: 'voice', label: 'VOICE', icon: Mic },
     { id: 'files', label: 'FILES', icon: FolderOpen },
     { id: 'terminal', label: 'TERMINAL', icon: Terminal },
@@ -115,6 +121,8 @@ const Dashboard = () => {
         {/* Content Area */}
         <main className="flex-1 overflow-hidden" data-testid="main-content">
           {activeTab === 'chat' && <ChatInterface />}
+          {activeTab === 'appbuilder' && <AppBuilder />}
+          {activeTab === 'codereview' && <CodeReview />}
           {activeTab === 'voice' && <VoiceControl />}
           {activeTab === 'files' && <FileExplorer />}
           {activeTab === 'terminal' && <CommandTerminal />}

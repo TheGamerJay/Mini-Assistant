@@ -325,6 +325,139 @@ Provide:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analysis error: {str(e)}")
 
+# App Builder
+class AppBuilderRequest(BaseModel):
+    description: str
+    framework: str = "react"
+
+@api_router.post("/app-builder/generate")
+async def generate_app(request: AppBuilderRequest):
+    if not ollama_client:
+        raise HTTPException(status_code=503, detail="Ollama service not available")
+    
+    try:
+        prompt = f"""Generate a complete {request.framework} application based on this description:
+
+{request.description}
+
+Provide:
+1. Project structure (folders and files)
+2. Complete code for each file
+3. Installation instructions
+4. Key features implemented
+
+Format the response as JSON with this structure:
+{{
+  "name": "app-name",
+  "description": "...",
+  "files": [
+    {{"path": "...", "content": "..."}},
+    ...
+  ],
+  "install_commands": ["..."],
+  "features": ["..."]
+}}"""
+        
+        response = ollama_client.chat(
+            model="llama3.2",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        # Try to parse JSON from response
+        content = response['message']['content']
+        try:
+            # Extract JSON from markdown code blocks if present
+            if "```json" in content:
+                json_start = content.find("```json") + 7
+                json_end = content.find("```", json_start)
+                content = content[json_start:json_end].strip()
+            elif "```" in content:
+                json_start = content.find("```") + 3
+                json_end = content.find("```", json_start)
+                content = content[json_start:json_end].strip()
+            
+            app_data = json.loads(content)
+        except:
+            # If JSON parsing fails, return raw content
+            app_data = {
+                "name": "generated-app",
+                "description": request.description,
+                "raw_output": content,
+                "files": []
+            }
+        
+        return app_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Generation error: {str(e)}")
+
+# Code Review
+class CodeReviewRequest(BaseModel):
+    code: str
+    language: str = "javascript"
+
+@api_router.post("/code-review/analyze")
+async def review_code(request: CodeReviewRequest):
+    if not ollama_client:
+        raise HTTPException(status_code=503, detail="Ollama service not available")
+    
+    try:
+        prompt = f"""Review this {request.language} code and provide:
+
+1. Issues found (errors, warnings, best practices)
+2. Security vulnerabilities
+3. Performance improvements
+4. Fixed/improved version of the code
+
+Code:
+```{request.language}
+{request.code}
+```
+
+Format response as JSON:
+{{
+  "issues": [
+    {{"severity": "error|warning|info", "title": "...", "description": "...", "line": 0, "suggestion": "..."}},
+    ...
+  ],
+  "summary": "Overall assessment...",
+  "fixed_code": "Fixed version of the code..."
+}}"""
+        
+        response = ollama_client.chat(
+            model="llama3.2",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        content = response['message']['content']
+        try:
+            # Extract JSON from markdown code blocks if present
+            if "```json" in content:
+                json_start = content.find("```json") + 7
+                json_end = content.find("```", json_start)
+                content = content[json_start:json_end].strip()
+            elif "```" in content:
+                json_start = content.find("```") + 3
+                json_end = content.find("```", json_start)
+                content = content[json_start:json_end].strip()
+            
+            analysis = json.loads(content)
+        except:
+            # If JSON parsing fails, create structured response from text
+            analysis = {
+                "issues": [{
+                    "severity": "info",
+                    "title": "Analysis Complete",
+                    "description": content[:500],
+                    "suggestion": "Review the full analysis"
+                }],
+                "summary": content,
+                "fixed_code": ""
+            }
+        
+        return {"analysis": analysis, "fixed_code": analysis.get("fixed_code", "")}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Review error: {str(e)}")
+
 # Codebase search
 @api_router.post("/search/codebase")
 async def search_codebase(request: CodeSearchRequest):
