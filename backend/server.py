@@ -395,6 +395,24 @@ class CodeReviewRequest(BaseModel):
     code: str
     language: str = "javascript"
 
+class GitRemoteRequest(BaseModel):
+    name: str
+    url: str
+
+class GitCommitRequest(BaseModel):
+    message: str
+
+class GitPushRequest(BaseModel):
+    remote: str = "origin"
+    branch: str = "main"
+
+class GitPullRequest(BaseModel):
+    remote: str = "origin"
+    branch: str = "main"
+
+class GitBranchRequest(BaseModel):
+    name: str
+
 @api_router.post("/code-review/analyze")
 async def review_code(request: CodeReviewRequest):
     if not ollama_client:
@@ -457,6 +475,197 @@ Format response as JSON:
         return {"analysis": analysis, "fixed_code": analysis.get("fixed_code", "")}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Review error: {str(e)}")
+
+# Git Integration
+@api_router.get("/git/status")
+async def git_status():
+    try:
+        result = subprocess.run(
+            "cd /app && git status --porcelain -b",
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        
+        # Check if git repo exists
+        if result.returncode != 0:
+            return {
+                "initialized": False,
+                "branch": None,
+                "modified": [],
+                "staged": []
+            }
+        
+        lines = result.stdout.strip().split('\n')
+        branch = lines[0].split('/')[-1] if lines else 'main'
+        
+        modified = []
+        staged = []
+        for line in lines[1:]:
+            if line:
+                status = line[:2]
+                filename = line[3:]
+                if 'M' in status or '?' in status:
+                    modified.append(filename)
+                if status[0] in ['A', 'M', 'D']:
+                    staged.append(filename)
+        
+        return {
+            "initialized": True,
+            "branch": branch,
+            "modified": modified,
+            "staged": staged,
+            "branches": []
+        }
+    except Exception as e:
+        return {
+            "initialized": False,
+            "branch": None,
+            "modified": [],
+            "staged": []
+        }
+
+@api_router.post("/git/init")
+async def git_init():
+    try:
+        result = subprocess.run(
+            "cd /app && git init",
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        
+        if result.returncode == 0:
+            # Configure git user
+            subprocess.run("cd /app && git config user.name 'Mini Assistant'", shell=True)
+            subprocess.run("cd /app && git config user.email 'mini@assistant.ai'", shell=True)
+            return {"success": True, "message": "Repository initialized"}
+        else:
+            raise HTTPException(status_code=500, detail=result.stderr)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Init error: {str(e)}")
+
+@api_router.post("/git/add")
+async def git_add(files: List[str] = ["."])  :
+    try:
+        file_list = " ".join(files)
+        result = subprocess.run(
+            f"cd /app && git add {file_list}",
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result.returncode == 0:
+            return {"success": True, "message": "Files staged"}
+        else:
+            raise HTTPException(status_code=500, detail=result.stderr)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Add error: {str(e)}")
+
+@api_router.post("/git/commit")
+async def git_commit(request: GitCommitRequest):
+    try:
+        result = subprocess.run(
+            f'cd /app && git commit -m "{request.message}"',
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result.returncode == 0 or "nothing to commit" in result.stdout:
+            return {"success": True, "message": "Changes committed"}
+        else:
+            raise HTTPException(status_code=500, detail=result.stderr or result.stdout)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Commit error: {str(e)}")
+
+@api_router.post("/git/push")
+async def git_push(request: GitPushRequest):
+    try:
+        result = subprocess.run(
+            f"cd /app && git push {request.remote} {request.branch}",
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode == 0:
+            return {"success": True, "message": "Pushed successfully"}
+        else:
+            raise HTTPException(status_code=500, detail=result.stderr or "Push failed. Make sure remote is configured and you have permissions.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Push error: {str(e)}")
+
+@api_router.post("/git/pull")
+async def git_pull(request: GitPullRequest):
+    try:
+        result = subprocess.run(
+            f"cd /app && git pull {request.remote} {request.branch}",
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode == 0:
+            return {"success": True, "message": "Pulled successfully"}
+        else:
+            raise HTTPException(status_code=500, detail=result.stderr or "Pull failed")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Pull error: {str(e)}")
+
+@api_router.post("/git/remote/add")
+async def git_add_remote(request: GitRemoteRequest):
+    try:
+        result = subprocess.run(
+            f"cd /app && git remote add {request.name} {request.url}",
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        
+        if result.returncode == 0:
+            return {"success": True, "message": f"Remote '{request.name}' added"}
+        else:
+            # Try removing and re-adding if already exists
+            subprocess.run(f"cd /app && git remote remove {request.name}", shell=True, capture_output=True)
+            result = subprocess.run(
+                f"cd /app && git remote add {request.name} {request.url}",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                return {"success": True, "message": f"Remote '{request.name}' updated"}
+            raise HTTPException(status_code=500, detail=result.stderr)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Remote add error: {str(e)}")
+
+@api_router.post("/git/branch/create")
+async def git_create_branch(request: GitBranchRequest):
+    try:
+        result = subprocess.run(
+            f"cd /app && git checkout -b {request.name}",
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        
+        if result.returncode == 0:
+            return {"success": True, "message": f"Branch '{request.name}' created"}
+        else:
+            raise HTTPException(status_code=500, detail=result.stderr)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Branch create error: {str(e)}")
 
 # Codebase search
 @api_router.post("/search/codebase")

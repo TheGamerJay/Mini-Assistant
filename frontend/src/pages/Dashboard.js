@@ -10,6 +10,7 @@ import CodebaseSearch from '../components/Search/CodebaseSearch';
 import ProjectProfiles from '../components/Profiles/ProjectProfiles';
 import AppBuilder from '../components/AppBuilder/AppBuilder';
 import CodeReview from '../components/CodeReview/CodeReview';
+import GitIntegration from '../components/Git/GitIntegration';
 import { 
   MessageSquare, 
   Mic, 
@@ -21,7 +22,8 @@ import {
   Activity,
   Zap,
   Wand2,
-  Shield
+  Shield,
+  GitBranch
 } from 'lucide-react';
 
 const Dashboard = () => {
@@ -49,6 +51,7 @@ const Dashboard = () => {
     { id: 'chat', label: 'CHAT', icon: MessageSquare },
     { id: 'appbuilder', label: 'APP BUILDER', icon: Wand2 },
     { id: 'codereview', label: 'CODE REVIEW', icon: Shield },
+    { id: 'git', label: 'GIT & GITHUB', icon: GitBranch },
     { id: 'voice', label: 'VOICE', icon: Mic },
     { id: 'files', label: 'FILES', icon: FolderOpen },
     { id: 'terminal', label: 'TERMINAL', icon: Terminal },
@@ -123,6 +126,7 @@ const Dashboard = () => {
           {activeTab === 'chat' && <ChatInterface />}
           {activeTab === 'appbuilder' && <AppBuilder />}
           {activeTab === 'codereview' && <CodeReview />}
+          {activeTab === 'git' && <GitIntegration />}
           {activeTab === 'voice' && <VoiceControl />}
           {activeTab === 'files' && <FileExplorer />}
           {activeTab === 'terminal' && <CommandTerminal />}
