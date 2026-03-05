@@ -117,8 +117,9 @@ Build an "all-in-one Jarvis" AI assistant application with the following feature
 - `POST /api/railway/deploy` - Trigger deployment
 
 ### FixLoop
-- `POST /api/fixloop/start` - Analyze URL for errors
+- `POST /api/fixloop/start` - Analyze URL for errors with real screenshot capture
 - `GET /api/fixloop/sessions` - Get session history
+- `GET /api/fixloop/screenshot/{session_id}` - Get captured screenshot image
 
 ### Tester Agent
 - `POST /api/tester/run` - Run automated tests

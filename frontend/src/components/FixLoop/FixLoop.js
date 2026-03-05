@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
-import { Bug, Camera, Wrench, Play, Loader2, AlertTriangle, CheckCircle, XCircle, RefreshCw, History } from 'lucide-react';
+import { Bug, Camera, Wrench, Play, Loader2, AlertTriangle, CheckCircle, XCircle, RefreshCw, History, Image, ZoomIn, X } from 'lucide-react';
+
+const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const FixLoop = () => {
   const [url, setUrl] = useState('');
@@ -10,6 +12,7 @@ const FixLoop = () => {
   const [result, setResult] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [showScreenshot, setShowScreenshot] = useState(false);
 
   useEffect(() => {
     loadHistory();
@@ -37,7 +40,8 @@ const FixLoop = () => {
       const response = await axiosInstance.post('/fixloop/start', {
         url: url,
         error_description: errorDescription,
-        auto_fix: true
+        auto_fix: true,
+        capture_screenshot: true
       });
       
       setResult(response.data);
@@ -178,6 +182,30 @@ const FixLoop = () => {
           </div>
         ) : result ? (
           <div className="space-y-6">
+            {/* Screenshot */}
+            {result.screenshot && (
+              <div>
+                <h3 className="text-lg font-semibold text-cyan-400 uppercase flex items-center gap-2 mb-4">
+                  <Camera className="w-5 h-5" />
+                  Page Screenshot
+                </h3>
+                <div className="relative group">
+                  <img 
+                    src={`${API_URL}${result.screenshot.url}`}
+                    alt="Page screenshot"
+                    className="w-full rounded-lg border border-cyan-500/30 cursor-pointer hover:border-cyan-500/50 transition-all"
+                    onClick={() => setShowScreenshot(true)}
+                  />
+                  <button
+                    onClick={() => setShowScreenshot(true)}
+                    className="absolute top-4 right-4 p-2 bg-black/70 text-cyan-400 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <ZoomIn className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Errors Found */}
             <div>
               <h3 className="text-lg font-semibold text-cyan-400 uppercase flex items-center gap-2 mb-4">
@@ -283,6 +311,29 @@ const FixLoop = () => {
           </div>
         )}
       </div>
+
+      {/* Screenshot Modal */}
+      {showScreenshot && result?.screenshot && (
+        <div 
+          className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => setShowScreenshot(false)}
+        >
+          <div className="relative max-w-6xl w-full max-h-[90vh]">
+            <button
+              onClick={() => setShowScreenshot(false)}
+              className="absolute -top-12 right-0 p-2 text-white/70 hover:text-white transition-colors"
+            >
+              <X className="w-8 h-8" />
+            </button>
+            <img 
+              src={`${API_URL}${result.screenshot.url}`}
+              alt="Page screenshot full view"
+              className="w-full h-auto rounded-lg border border-cyan-500/30"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

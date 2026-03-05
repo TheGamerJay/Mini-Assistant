@@ -1427,6 +1427,7 @@ class ErrorFixRequest(BaseModel):
     error_description: Optional[str] = None
     auto_fix: bool = True
     model: str = "llama3.2"
+    capture_screenshot: bool = True
 
 class FixLoopSession(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -1437,6 +1438,85 @@ class FixLoopSession(BaseModel):
     status: str = "running"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+# Screenshot storage directory
+SCREENSHOT_DIR = Path("/app/backend/screenshots")
+SCREENSHOT_DIR.mkdir(exist_ok=True)
+
+async def capture_page_screenshot(url: str, session_id: str) -> Dict:
+    """Capture a screenshot of a webpage using Playwright"""
+    try:
+        from playwright.async_api import async_playwright
+        
+        screenshot_path = SCREENSHOT_DIR / f"{session_id}.png"
+        console_logs = []
+        page_errors = []
+        
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context(viewport={"width": 1920, "height": 1080})
+            page = await context.new_page()
+            
+            # Capture console logs
+            page.on("console", lambda msg: console_logs.append({
+                "type": msg.type,
+                "text": msg.text,
+                "location": str(msg.location) if msg.location else None
+            }))
+            
+            # Capture page errors
+            page.on("pageerror", lambda err: page_errors.append({
+                "type": "PageError",
+                "message": str(err),
+                "severity": "critical"
+            }))
+            
+            try:
+                # Navigate to URL
+                response = await page.goto(url, timeout=30000, wait_until="networkidle")
+                
+                # Wait a bit for any dynamic content
+                await page.wait_for_timeout(2000)
+                
+                # Take screenshot
+                await page.screenshot(path=str(screenshot_path), full_page=False)
+                
+                # Get HTTP status
+                status_code = response.status if response else 0
+                
+                await browser.close()
+                
+                return {
+                    "success": True,
+                    "screenshot_path": str(screenshot_path),
+                    "screenshot_filename": f"{session_id}.png",
+                    "status_code": status_code,
+                    "console_logs": console_logs[-20:],  # Last 20 logs
+                    "page_errors": page_errors
+                }
+            except Exception as nav_error:
+                # Still try to take a screenshot of the error state
+                try:
+                    await page.screenshot(path=str(screenshot_path), full_page=False)
+                except:
+                    pass
+                await browser.close()
+                
+                return {
+                    "success": False,
+                    "screenshot_path": str(screenshot_path) if screenshot_path.exists() else None,
+                    "screenshot_filename": f"{session_id}.png" if screenshot_path.exists() else None,
+                    "error": str(nav_error),
+                    "console_logs": console_logs[-20:],
+                    "page_errors": page_errors
+                }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Screenshot capture failed: {str(e)}",
+            "console_logs": [],
+            "page_errors": []
+        }
+
 @api_router.post("/fixloop/start")
 async def fixloop_start(request: ErrorFixRequest):
     try:
@@ -1444,55 +1524,98 @@ async def fixloop_start(request: ErrorFixRequest):
         import base64
         
         session_id = str(uuid.uuid4())
+        errors_found = []
+        screenshot_data = None
+        console_errors = []
         
-        # Try to fetch the URL and capture any errors
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(request.url, timeout=10) as resp:
-                    status_code = resp.status
-                    content = await resp.text()
-                    
-                    # Check for common error patterns in the response
-                    errors_found = []
-                    if status_code >= 400:
-                        errors_found.append({
-                            "type": "HTTP Error",
-                            "message": f"HTTP {status_code}",
-                            "severity": "high" if status_code >= 500 else "medium"
-                        })
-                    
-                    # Check for JavaScript errors in content
-                    error_patterns = [
-                        ("TypeError:", "JavaScript TypeError"),
-                        ("ReferenceError:", "JavaScript ReferenceError"),
-                        ("SyntaxError:", "JavaScript SyntaxError"),
-                        ("Cannot read property", "Null Reference Error"),
-                        ("undefined is not", "Undefined Error"),
-                        ("Uncaught", "Uncaught Exception"),
-                        ("Error:", "General Error"),
-                        ("failed to compile", "Compilation Error"),
-                        ("Module not found", "Module Not Found"),
-                    ]
-                    
-                    for pattern, error_type in error_patterns:
-                        if pattern.lower() in content.lower():
+        # Capture screenshot if enabled
+        if request.capture_screenshot:
+            screenshot_result = await capture_page_screenshot(request.url, session_id)
+            
+            if screenshot_result.get("screenshot_path"):
+                screenshot_data = {
+                    "filename": screenshot_result.get("screenshot_filename"),
+                    "url": f"/api/fixloop/screenshot/{session_id}"
+                }
+            
+            # Extract errors from console logs
+            for log in screenshot_result.get("console_logs", []):
+                if log["type"] in ["error", "warning"]:
+                    console_errors.append({
+                        "type": f"Console {log['type'].title()}",
+                        "message": log["text"][:500],  # Limit message length
+                        "severity": "high" if log["type"] == "error" else "medium"
+                    })
+            
+            # Add page errors
+            errors_found.extend(screenshot_result.get("page_errors", []))
+            
+            # Check HTTP status
+            status_code = screenshot_result.get("status_code", 0)
+            if status_code >= 400:
+                errors_found.append({
+                    "type": "HTTP Error",
+                    "message": f"HTTP {status_code}",
+                    "severity": "high" if status_code >= 500 else "medium"
+                })
+            
+            # Add console errors
+            errors_found.extend(console_errors[:10])  # Limit to 10 console errors
+            
+            if not screenshot_result.get("success") and screenshot_result.get("error"):
+                errors_found.append({
+                    "type": "Navigation Error",
+                    "message": screenshot_result.get("error"),
+                    "severity": "critical"
+                })
+        else:
+            # Fallback to HTTP fetch without screenshot
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(request.url, timeout=10) as resp:
+                        status_code = resp.status
+                        content = await resp.text()
+                        
+                        if status_code >= 400:
                             errors_found.append({
-                                "type": error_type,
-                                "pattern": pattern,
-                                "severity": "high"
+                                "type": "HTTP Error",
+                                "message": f"HTTP {status_code}",
+                                "severity": "high" if status_code >= 500 else "medium"
                             })
-        except Exception as fetch_error:
-            errors_found = [{
-                "type": "Connection Error",
-                "message": str(fetch_error),
-                "severity": "critical"
-            }]
+                        
+                        # Check for error patterns in content
+                        error_patterns = [
+                            ("TypeError:", "JavaScript TypeError"),
+                            ("ReferenceError:", "JavaScript ReferenceError"),
+                            ("SyntaxError:", "JavaScript SyntaxError"),
+                            ("Cannot read property", "Null Reference Error"),
+                            ("undefined is not", "Undefined Error"),
+                            ("Uncaught", "Uncaught Exception"),
+                            ("Error:", "General Error"),
+                            ("failed to compile", "Compilation Error"),
+                            ("Module not found", "Module Not Found"),
+                        ]
+                        
+                        for pattern, error_type in error_patterns:
+                            if pattern.lower() in content.lower():
+                                errors_found.append({
+                                    "type": error_type,
+                                    "pattern": pattern,
+                                    "severity": "high"
+                                })
+            except Exception as fetch_error:
+                errors_found.append({
+                    "type": "Connection Error",
+                    "message": str(fetch_error),
+                    "severity": "critical"
+                })
         
         # Store session in DB
         fixloop_session = {
             "id": session_id,
             "url": request.url,
             "errors": errors_found,
+            "screenshot": screenshot_data,
             "status": "analyzed",
             "created_at": datetime.now(timezone.utc).isoformat()
         }
@@ -1524,11 +1647,20 @@ Provide specific code fixes or configuration changes needed. Format as a list of
             "session_id": session_id,
             "url": request.url,
             "errors": errors_found,
+            "screenshot": screenshot_data,
             "suggested_fixes": suggested_fixes,
             "status": "completed"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"FixLoop error: {str(e)}")
+
+@api_router.get("/fixloop/screenshot/{session_id}")
+async def get_fixloop_screenshot(session_id: str):
+    """Serve the screenshot image for a FixLoop session"""
+    screenshot_path = SCREENSHOT_DIR / f"{session_id}.png"
+    if not screenshot_path.exists():
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+    return FileResponse(screenshot_path, media_type="image/png")
 
 @api_router.get("/fixloop/sessions")
 async def fixloop_sessions():
