@@ -413,6 +413,17 @@ class GitPullRequest(BaseModel):
 class GitBranchRequest(BaseModel):
     name: str
 
+class CodeRunRequest(BaseModel):
+    code: str
+    language: str = "python"
+    timeout: int = 10
+
+class APITestRequest(BaseModel):
+    url: str
+    method: str = "GET"
+    headers: Dict[str, str] = {}
+    body: Optional[str] = None
+
 @api_router.post("/code-review/analyze")
 async def review_code(request: CodeReviewRequest):
     if not ollama_client:
@@ -666,6 +677,92 @@ async def git_create_branch(request: GitBranchRequest):
             raise HTTPException(status_code=500, detail=result.stderr)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Branch create error: {str(e)}")
+
+# Code Runner
+@api_router.post("/code-runner/execute")
+async def execute_code(request: CodeRunRequest):
+    try:
+        if request.language == "python":
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+                f.write(request.code)
+                temp_file = f.name
+            
+            result = subprocess.run(
+                f"python3 {temp_file}",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=request.timeout
+            )
+            os.unlink(temp_file)
+            
+        elif request.language in ["javascript", "nodejs"]:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False) as f:
+                f.write(request.code)
+                temp_file = f.name
+            
+            result = subprocess.run(
+                f"node {temp_file}",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=request.timeout
+            )
+            os.unlink(temp_file)
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported language")
+        
+        return {
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "returncode": result.returncode
+        }
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=408, detail="Execution timeout")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Execution error: {str(e)}")
+
+# API Tester
+@api_router.post("/api-tester/request")
+async def test_api(request: APITestRequest):
+    try:
+        import requests as req_lib
+        
+        method = request.method.upper()
+        headers = request.headers or {}
+        
+        if method == "GET":
+            response = req_lib.get(request.url, headers=headers, timeout=10)
+        elif method == "POST":
+            body_data = json.loads(request.body) if request.body else None
+            response = req_lib.post(request.url, json=body_data, headers=headers, timeout=10)
+        elif method == "PUT":
+            body_data = json.loads(request.body) if request.body else None
+            response = req_lib.put(request.url, json=body_data, headers=headers, timeout=10)
+        elif method == "PATCH":
+            body_data = json.loads(request.body) if request.body else None
+            response = req_lib.patch(request.url, json=body_data, headers=headers, timeout=10)
+        elif method == "DELETE":
+            response = req_lib.delete(request.url, headers=headers, timeout=10)
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported method")
+        
+        try:
+            response_data = response.json()
+        except:
+            response_data = response.text
+        
+        return {
+            "status": response.status_code,
+            "headers": dict(response.headers),
+            "data": response_data
+        }
+    except req_lib.exceptions.Timeout:
+        raise HTTPException(status_code=408, detail="Request timeout")
+    except req_lib.exceptions.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Request failed: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"API test error: {str(e)}")
 
 # Codebase search
 @api_router.post("/search/codebase")

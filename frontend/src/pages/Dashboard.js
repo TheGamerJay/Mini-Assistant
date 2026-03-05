@@ -11,6 +11,9 @@ import ProjectProfiles from '../components/Profiles/ProjectProfiles';
 import AppBuilder from '../components/AppBuilder/AppBuilder';
 import CodeReview from '../components/CodeReview/CodeReview';
 import GitIntegration from '../components/Git/GitIntegration';
+import CodeRunner from '../components/CodeRunner/CodeRunner';
+import APITester from '../components/APITester/APITester';
+import DatabaseDesigner from '../components/DatabaseDesigner/DatabaseDesigner';
 import { 
   MessageSquare, 
   Mic, 
@@ -23,7 +26,10 @@ import {
   Zap,
   Wand2,
   Shield,
-  GitBranch
+  GitBranch,
+  Play,
+  Send,
+  Database
 } from 'lucide-react';
 
 const Dashboard = () => {
@@ -51,12 +57,15 @@ const Dashboard = () => {
     { id: 'chat', label: 'CHAT', icon: MessageSquare },
     { id: 'appbuilder', label: 'APP BUILDER', icon: Wand2 },
     { id: 'codereview', label: 'CODE REVIEW', icon: Shield },
+    { id: 'coderunner', label: 'CODE RUNNER', icon: Play },
+    { id: 'apitester', label: 'API TESTER', icon: Send },
+    { id: 'database', label: 'DATABASE', icon: Database },
     { id: 'git', label: 'GIT & GITHUB', icon: GitBranch },
-    { id: 'voice', label: 'VOICE', icon: Mic },
     { id: 'files', label: 'FILES', icon: FolderOpen },
     { id: 'terminal', label: 'TERMINAL', icon: Terminal },
     { id: 'websearch', label: 'WEB SEARCH', icon: Search },
     { id: 'codesearch', label: 'CODE SEARCH', icon: Code },
+    { id: 'voice', label: 'VOICE', icon: Mic },
     { id: 'profiles', label: 'PROFILES', icon: Layers },
   ];
 
@@ -126,6 +135,9 @@ const Dashboard = () => {
           {activeTab === 'chat' && <ChatInterface />}
           {activeTab === 'appbuilder' && <AppBuilder />}
           {activeTab === 'codereview' && <CodeReview />}
+          {activeTab === 'coderunner' && <CodeRunner />}
+          {activeTab === 'apitester' && <APITester />}
+          {activeTab === 'database' && <DatabaseDesigner />}
           {activeTab === 'git' && <GitIntegration />}
           {activeTab === 'voice' && <VoiceControl />}
           {activeTab === 'files' && <FileExplorer />}
