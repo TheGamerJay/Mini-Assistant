@@ -88,7 +88,7 @@ const ProjectProfiles = () => {
         <button
           data-testid="create-profile-btn"
           onClick={() => setShowCreate(!showCreate)}
-          className="px-6 py-2 bg-cyan-500 text-black font-bold hover:bg-cyan-400 rounded-sm uppercase text-sm flex items-center gap-2"
+          className="px-6 py-2 bg-gradient-to-r from-cyan-500 to-violet-600 text-white font-bold hover:from-cyan-400 hover:to-violet-500 rounded-sm uppercase text-sm flex items-center gap-2"
         >
           <Plus className="w-4 h-4" />
           NEW PROFILE
@@ -164,7 +164,7 @@ const ProjectProfiles = () => {
               <button
                 data-testid="save-profile-btn"
                 onClick={createProfile}
-                className="px-6 py-2 bg-cyan-500 text-black font-bold hover:bg-cyan-400 rounded-sm uppercase"
+                className="px-6 py-2 bg-gradient-to-r from-cyan-500 to-violet-600 text-white font-bold hover:from-cyan-400 hover:to-violet-500 rounded-sm uppercase"
               >
                 SAVE PROFILE
               </button>

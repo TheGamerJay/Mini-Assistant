@@ -58,14 +58,14 @@ const Dashboard = () => {
         <div className="px-8 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="relative">
-              <div className="absolute inset-0 bg-cyan-500/20 blur-xl"></div>
-              <div className="relative w-12 h-12 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center">
-                <Zap className="w-7 h-7 text-black" strokeWidth={2.5} />
+              <div className="absolute inset-0 bg-gradient-to-r from-cyan-500 to-violet-600 blur-xl opacity-50"></div>
+              <div className="relative w-12 h-12 rounded-lg bg-gradient-to-br from-cyan-500 via-violet-500 to-violet-600 flex items-center justify-center">
+                <Zap className="w-7 h-7 text-white" strokeWidth={2.5} />
               </div>
             </div>
             <div>
               <h1 
-                className="text-3xl font-bold tracking-tight uppercase" 
+                className="text-3xl font-bold tracking-tight uppercase bg-gradient-to-r from-cyan-400 to-violet-400 bg-clip-text text-transparent" 
                 style={{ fontFamily: 'Orbitron, sans-serif' }}
                 data-testid="jarvis-title"
               >
@@ -100,12 +100,12 @@ const Dashboard = () => {
                   onClick={() => setActiveTab(tab.id)}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-sm text-left uppercase tracking-wider text-sm font-semibold transition-all ${
                     activeTab === tab.id
-                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 shadow-[0_0_15px_rgba(0,243,255,0.3)]'
+                      ? 'bg-gradient-to-r from-cyan-500/20 to-violet-500/20 text-transparent bg-clip-text border border-cyan-500/50 shadow-[0_0_15px_rgba(0,243,255,0.3),0_0_10px_rgba(147,51,234,0.2)]'
                       : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
                   }`}
                 >
-                  <Icon className="w-5 h-5" />
-                  {tab.label}
+                  <Icon className={`w-5 h-5 ${activeTab === tab.id ? 'text-cyan-400' : ''}`} />
+                  <span className={activeTab === tab.id ? 'bg-gradient-to-r from-cyan-400 to-violet-400 bg-clip-text text-transparent' : ''}>{tab.label}</span>
                 </button>
               );
             })}

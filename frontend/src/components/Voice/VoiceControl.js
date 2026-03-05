@@ -130,7 +130,7 @@ const VoiceControl = () => {
           className={`px-12 py-4 rounded-sm font-bold uppercase tracking-wider text-lg transition-all ${
             isRecording
               ? 'bg-red-500 hover:bg-red-400 text-white shadow-[0_0_20px_rgba(255,0,0,0.5)]'
-              : 'bg-cyan-500 hover:bg-cyan-400 text-black shadow-[0_0_20px_rgba(0,243,255,0.5)]'
+              : 'bg-gradient-to-r from-cyan-500 to-violet-600 hover:from-cyan-400 hover:to-violet-500 text-white shadow-[0_0_20px_rgba(0,243,255,0.5),0_0_15px_rgba(147,51,234,0.3)]'
           } disabled:opacity-50 disabled:cursor-not-allowed`}
         >
           {isProcessing ? 'PROCESSING...' : isRecording ? 'STOP RECORDING' : 'START RECORDING'}

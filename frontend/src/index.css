@@ -10,7 +10,9 @@
   --bg-card: rgba(10, 10, 15, 0.6);
   --cyan-primary: #00f3ff;
   --cyan-dim: rgba(0, 243, 255, 0.1);
-  --blue-secondary: #0066cc;
+  --violet-primary: #9333ea;
+  --violet-secondary: #a855f7;
+  --violet-dim: rgba(147, 51, 234, 0.1);
 }
 
 * {
@@ -42,12 +44,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--cyan-primary);
+  background: linear-gradient(135deg, var(--cyan-primary) 0%, var(--violet-primary) 100%);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #00d4e4;
+  background: linear-gradient(135deg, #00d4e4 0%, #a855f7 100%);
 }
 
 /* Glow effects */
@@ -59,13 +61,25 @@ body {
   box-shadow: 0 0 20px rgba(0, 243, 255, 0.5), 0 0 40px rgba(0, 243, 255, 0.2);
 }
 
+.glow-violet {
+  box-shadow: 0 0 15px rgba(147, 51, 234, 0.3);
+}
+
+.glow-violet-strong {
+  box-shadow: 0 0 20px rgba(147, 51, 234, 0.5), 0 0 40px rgba(147, 51, 234, 0.2);
+}
+
+.glow-gradient {
+  box-shadow: 0 0 20px rgba(0, 243, 255, 0.3), 0 0 40px rgba(147, 51, 234, 0.2);
+}
+
 /* Animations */
 @keyframes pulse-glow {
   0%, 100% {
-    box-shadow: 0 0 5px rgba(0, 243, 255, 0.3);
+    box-shadow: 0 0 5px rgba(0, 243, 255, 0.3), 0 0 10px rgba(147, 51, 234, 0.2);
   }
   50% {
-    box-shadow: 0 0 20px rgba(0, 243, 255, 0.6), 0 0 30px rgba(0, 243, 255, 0.3);
+    box-shadow: 0 0 20px rgba(0, 243, 255, 0.6), 0 0 30px rgba(147, 51, 234, 0.4);
   }
 }
 
