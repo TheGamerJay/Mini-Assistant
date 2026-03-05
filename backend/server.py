@@ -924,6 +924,174 @@ async def delete_snippet(snippet_id: str):
         raise HTTPException(status_code=404, detail="Snippet not found")
     return {"success": True}
 
+# Conversation Summarization
+class SummarizeRequest(BaseModel):
+    messages: List[ChatMessage]
+    model: str = "llama3.2"
+
+@api_router.post("/chat/summarize")
+async def summarize_conversation(request: SummarizeRequest):
+    if not ollama_client:
+        raise HTTPException(status_code=503, detail="Ollama service not available")
+    
+    try:
+        conversation_text = "\n".join([f"{msg.role}: {msg.content}" for msg in request.messages])
+        
+        summary_prompt = f"""Please provide a concise summary of this conversation. Include:
+1. Key topics discussed
+2. Important decisions or conclusions
+3. Any action items mentioned
+
+Conversation:
+{conversation_text}
+
+Summary:"""
+        
+        response = ollama_client.chat(
+            model=request.model,
+            messages=[{"role": "user", "content": summary_prompt}]
+        )
+        
+        return {"summary": response['message']['content']}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Summarization error: {str(e)}")
+
+# Security Scanner
+class SecurityScanRequest(BaseModel):
+    code: str
+
+@api_router.post("/security/scan")
+async def security_scan(request: SecurityScanRequest):
+    vulnerabilities = []
+    code = request.code
+    
+    # Check for common security issues
+    security_patterns = [
+        {"pattern": "eval(", "title": "Dangerous eval() usage", "severity": "critical", "description": "eval() can execute arbitrary code", "fix": "Use safer alternatives like JSON.parse()"},
+        {"pattern": "exec(", "title": "Dangerous exec() usage", "severity": "critical", "description": "exec() can execute arbitrary system commands", "fix": "Use subprocess with proper input validation"},
+        {"pattern": "dangerouslySetInnerHTML", "title": "XSS Risk", "severity": "high", "description": "May allow XSS attacks", "fix": "Sanitize HTML content before rendering"},
+        {"pattern": "password", "title": "Hardcoded Password", "severity": "high", "description": "Password found in code", "fix": "Use environment variables for secrets"},
+        {"pattern": "api_key", "title": "Exposed API Key", "severity": "high", "description": "API key found in code", "fix": "Use environment variables"},
+        {"pattern": "secret", "title": "Potential Secret Exposure", "severity": "medium", "description": "Secret keyword found", "fix": "Review and secure sensitive data"},
+        {"pattern": "http://", "title": "Insecure HTTP", "severity": "medium", "description": "Using HTTP instead of HTTPS", "fix": "Use HTTPS for secure communication"},
+        {"pattern": "SELECT * FROM", "title": "SQL Injection Risk", "severity": "high", "description": "Raw SQL query detected", "fix": "Use parameterized queries"},
+        {"pattern": "pickle.load", "title": "Unsafe Deserialization", "severity": "critical", "description": "Pickle can execute arbitrary code", "fix": "Use safer formats like JSON"},
+        {"pattern": "shell=True", "title": "Shell Injection Risk", "severity": "high", "description": "subprocess with shell=True is risky", "fix": "Use shell=False with argument list"},
+    ]
+    
+    for i, line in enumerate(code.split('\n'), 1):
+        for pattern in security_patterns:
+            if pattern["pattern"].lower() in line.lower():
+                vulnerabilities.append({
+                    "line": i,
+                    "code": line.strip(),
+                    **{k: v for k, v in pattern.items() if k != "pattern"}
+                })
+    
+    return {"vulnerabilities": vulnerabilities, "scanned_lines": len(code.split('\n'))}
+
+# Deployment
+class DeployRequest(BaseModel):
+    platform: str
+    project_path: str = "/app"
+
+@api_router.post("/deploy/start")
+async def start_deployment(request: DeployRequest):
+    # Mock deployment - in real scenario, this would integrate with Vercel/Netlify/Railway APIs
+    return {
+        "status": "initiated",
+        "platform": request.platform,
+        "message": f"Deployment to {request.platform} would be initiated here. Configure your {request.platform} API token to enable real deployments.",
+        "url": f"https://your-app.{request.platform}.app"
+    }
+
+# Docker Management (Mock - requires Docker to be available)
+@api_router.get("/docker/containers")
+async def list_docker_containers():
+    try:
+        result = subprocess.run(
+            "docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}'",
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        containers = []
+        for line in result.stdout.strip().split('\n'):
+            if line:
+                parts = line.split('|')
+                if len(parts) >= 4:
+                    containers.append({
+                        "id": parts[0],
+                        "name": parts[1],
+                        "image": parts[2],
+                        "status": "running" if "Up" in parts[3] else "stopped"
+                    })
+        
+        return {"containers": containers}
+    except Exception as e:
+        return {"containers": [], "error": str(e)}
+
+@api_router.post("/docker/start/{container_id}")
+async def start_docker_container(container_id: str):
+    try:
+        result = subprocess.run(
+            f"docker start {container_id}",
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        return {"success": result.returncode == 0, "output": result.stdout}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/docker/stop/{container_id}")
+async def stop_docker_container(container_id: str):
+    try:
+        result = subprocess.run(
+            f"docker stop {container_id}",
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        return {"success": result.returncode == 0, "output": result.stdout}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Performance Monitor
+@api_router.get("/monitor/performance")
+async def get_performance_metrics():
+    try:
+        import psutil
+        
+        cpu_percent = psutil.cpu_percent(interval=1)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        boot_time = psutil.boot_time()
+        
+        uptime_seconds = datetime.now().timestamp() - boot_time
+        hours, remainder = divmod(int(uptime_seconds), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        uptime_str = f"{hours}h {minutes}m {seconds}s"
+        
+        return {
+            "cpu": round(cpu_percent, 1),
+            "memory": round(memory.percent, 1),
+            "disk": round(disk.percent, 1),
+            "uptime": uptime_str
+        }
+    except ImportError:
+        return {
+            "cpu": 0,
+            "memory": 0,
+            "disk": 0,
+            "uptime": "N/A",
+            "error": "psutil not installed"
+        }
+
 # Codebase search
 @api_router.post("/search/codebase")
 async def search_codebase(request: CodeSearchRequest):

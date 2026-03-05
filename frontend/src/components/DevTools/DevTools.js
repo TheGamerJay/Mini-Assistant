@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { Wand2, Check, Copy, Palette, FileJson, FileText, TestTube } from 'lucide-react';
 
@@ -71,7 +71,6 @@ const DevTools = () => {
 
   // Markdown Functions
   const renderMarkdown = (text) => {
-    // Simple markdown parser
     let html = text
       .replace(/^### (.*$)/gim, '<h3 class="text-lg font-bold text-cyan-400 mb-2">$1</h3>')
       .replace(/^## (.*$)/gim, '<h2 class="text-xl font-bold text-cyan-400 mb-3">$1</h2>')
@@ -135,7 +134,7 @@ const DevTools = () => {
     }
   };
 
-  React.useEffect(() => {
+  useEffect(() => {
     updateColorFormats(selectedColor);
   }, [selectedColor]);
 
@@ -152,19 +151,19 @@ const DevTools = () => {
   ];
 
   return (
-    <div className=\"h-full flex flex-col bg-[#0a0a0f]/50\" data-testid=\"dev-tools\">
-      <div className=\"p-6 border-b border-cyan-500/20 bg-black/40\">
-        <div className=\"flex items-center gap-3 mb-6\">
-          <Wand2 className=\"w-7 h-7 text-cyan-400\" />
+    <div className="h-full flex flex-col bg-[#0a0a0f]/50" data-testid="dev-tools">
+      <div className="p-6 border-b border-cyan-500/20 bg-black/40">
+        <div className="flex items-center gap-3 mb-6">
+          <Wand2 className="w-7 h-7 text-cyan-400" />
           <div>
-            <h2 className=\"text-2xl font-bold text-transparent bg-gradient-to-r from-cyan-400 to-violet-400 bg-clip-text uppercase\" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+            <h2 className="text-2xl font-bold text-transparent bg-gradient-to-r from-cyan-400 to-violet-400 bg-clip-text uppercase" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
               DEV UTILITIES
             </h2>
-            <p className=\"text-xs text-slate-400 font-mono mt-1\">ESSENTIAL DEVELOPER TOOLS</p>
+            <p className="text-xs text-slate-400 font-mono mt-1">ESSENTIAL DEVELOPER TOOLS</p>
           </div>
         </div>
 
-        <div className=\"flex gap-2\">
+        <div className="flex gap-2">
           {toolTabs.map(tab => {
             const Icon = tab.icon;
             return (
@@ -177,7 +176,7 @@ const DevTools = () => {
                     : 'bg-black/30 text-slate-400 hover:text-cyan-400'
                 }`}
               >
-                <Icon className=\"w-4 h-4 inline mr-2\" />
+                <Icon className="w-4 h-4 inline mr-2" />
                 {tab.label}
               </button>
             );
@@ -185,14 +184,174 @@ const DevTools = () => {
         </div>
       </div>
 
-      <div className=\"flex-1 overflow-auto p-6\">
+      <div className="flex-1 overflow-auto p-6">
         {/* REGEX TESTER */}
         {activeToolTab === 'regex' && (
-          <div className=\"space-y-4\">
+          <div className="space-y-4">
             <div>
-              <label className=\"text-sm text-cyan-400 font-mono uppercase mb-2 block\">Regex Pattern</label>
-              <div className=\"flex gap-3\">
+              <label className="text-sm text-cyan-400 font-mono uppercase mb-2 block">Regex Pattern</label>
+              <div className="flex gap-3">
                 <input
                   placeholder="Enter regex pattern (e.g., \d+|[a-z]+)"
                   value={regex}
-                  onChange={(e) => setRegex(e.target.value)}\n                  className=\"flex-1 bg-black/50 border border-cyan-900/50 text-cyan-100 placeholder:text-cyan-900/50 rounded-sm font-mono px-4 py-3 outline-none\"\n                />\n                <input\n                  placeholder=\"Flags\"\n                  value={regexFlags}\n                  onChange={(e) => setRegexFlags(e.target.value)}\n                  className=\"w-20 bg-black/50 border border-cyan-900/50 text-cyan-100 rounded-sm font-mono px-3 py-3 outline-none text-center\"\n                />\n                <button\n                  onClick={testRegex}\n                  className=\"px-6 bg-gradient-to-r from-cyan-500 to-violet-600 text-white font-bold hover:from-cyan-400 hover:to-violet-500 rounded-sm uppercase\"\n                >\n                  TEST\n                </button>\n              </div>\n            </div>\n\n            <div>\n              <label className=\"text-sm text-cyan-400 font-mono uppercase mb-2 block\">Test String</label>\n              <textarea\n                placeholder=\"Enter text to test against...\"\n                value={testString}\n                onChange={(e) => setTestString(e.target.value)}\n                className=\"w-full bg-black/50 border border-cyan-900/50 text-cyan-100 placeholder:text-cyan-900/50 rounded-sm font-mono p-4 outline-none resize-none\"\n                rows={6}\n              />\n            </div>\n\n            {regexMatches.length > 0 && (\n              <div>\n                <label className=\"text-sm text-cyan-400 font-mono uppercase mb-2 block\">Matches ({regexMatches.length})</label>\n                <div className=\"space-y-2\">\n                  {regexMatches.map((match, idx) => (\n                    <div key={idx} className=\"p-3 bg-green-500/10 border border-green-500/30 rounded\">\n                      <div className=\"text-xs text-green-400 mb-1\">Match {idx + 1} at index {match.index}</div>\n                      <div className=\"text-sm text-green-100 font-mono\">{match[0]}</div>\n                    </div>\n                  ))}\n                </div>\n              </div>\n            )}\n          </div>\n        )}\n\n        {/* JSON FORMATTER */}\n        {activeToolTab === 'json' && (\n          <div className=\"grid grid-cols-2 gap-6 h-full\">\n            <div className=\"flex flex-col\">\n              <label className=\"text-sm text-cyan-400 font-mono uppercase mb-2\">Input JSON</label>\n              <textarea\n                placeholder='{ \"key\": \"value\" }'\n                value={jsonInput}\n                onChange={(e) => setJsonInput(e.target.value)}\n                className=\"flex-1 bg-black/50 border border-cyan-900/50 text-cyan-100 placeholder:text-cyan-900/50 rounded-sm font-mono p-4 outline-none resize-none\"\n              />\n              <div className=\"flex gap-2 mt-3\">\n                <button\n                  onClick={formatJSON}\n                  className=\"flex-1 px-4 py-2 bg-cyan-500/20 text-cyan-400 border border-cyan-500/50 hover:bg-cyan-500/30 rounded-sm uppercase text-sm font-semibold\"\n                >\n                  FORMAT\n                </button>\n                <button\n                  onClick={minifyJSON}\n                  className=\"flex-1 px-4 py-2 bg-violet-500/20 text-violet-400 border border-violet-500/50 hover:bg-violet-500/30 rounded-sm uppercase text-sm font-semibold\"\n                >\n                  MINIFY\n                </button>\n              </div>\n              {jsonError && (\n                <div className=\"mt-2 p-2 bg-red-500/10 border border-red-500/30 rounded text-xs text-red-400\">\n                  {jsonError}\n                </div>\n              )}\n            </div>\n\n            <div className=\"flex flex-col\">\n              <div className=\"flex items-center justify-between mb-2\">\n                <label className=\"text-sm text-cyan-400 font-mono uppercase\">Output</label>\n                {jsonOutput && (\n                  <button\n                    onClick={copyJSON}\n                    className=\"text-xs text-violet-400 hover:text-violet-300 flex items-center gap-1\"\n                  >\n                    <Copy className=\"w-3 h-3\" /> COPY\n                  </button>\n                )}\n              </div>\n              <pre className=\"flex-1 bg-black/50 border border-cyan-900/50 text-cyan-100 rounded-sm font-mono p-4 overflow-auto\">\n                {jsonOutput || 'Formatted JSON will appear here...'}\n              </pre>\n            </div>\n          </div>\n        )}\n\n        {/* MARKDOWN PREVIEW */}\n        {activeToolTab === 'markdown' && (\n          <div className=\"grid grid-cols-2 gap-6 h-full\">\n            <div className=\"flex flex-col\">\n              <label className=\"text-sm text-cyan-400 font-mono uppercase mb-2\">Markdown Editor</label>\n              <textarea\n                value={markdown}\n                onChange={(e) => setMarkdown(e.target.value)}\n                className=\"flex-1 bg-black/50 border border-cyan-900/50 text-cyan-100 rounded-sm font-mono p-4 outline-none resize-none text-sm\"\n              />\n            </div>\n\n            <div className=\"flex flex-col\">\n              <label className=\"text-sm text-cyan-400 font-mono uppercase mb-2\">Preview</label>\n              <div \n                className=\"flex-1 bg-black/50 border border-cyan-900/50 rounded-sm p-6 overflow-auto\"\n                dangerouslySetInnerHTML={{ __html: renderMarkdown(markdown) }}\n              />\n            </div>\n          </div>\n        )}\n\n        {/* COLOR PICKER */}\n        {activeToolTab === 'color' && (\n          <div className=\"max-w-2xl mx-auto space-y-6\">\n            <div className=\"flex items-center gap-6\">\n              <div className=\"flex-1\">\n                <label className=\"text-sm text-cyan-400 font-mono uppercase mb-2 block\">Pick Color</label>\n                <input\n                  type=\"color\"\n                  value={selectedColor}\n                  onChange={(e) => setSelectedColor(e.target.value)}\n                  className=\"w-full h-32 rounded-lg border-4 border-cyan-500/50 cursor-pointer\"\n                />\n              </div>\n              <div \n                className=\"w-64 h-32 rounded-lg border-4 border-cyan-500/50\"\n                style={{ backgroundColor: selectedColor }}\n              />\n            </div>\n\n            <div className=\"grid grid-cols-2 gap-4\">\n              {Object.entries(colorFormats).map(([format, value]) => (\n                <div key={format} className=\"p-4 bg-black/40 border border-cyan-900/30 rounded-lg\">\n                  <div className=\"flex items-center justify-between mb-2\">\n                    <span className=\"text-xs text-cyan-400 font-mono uppercase\">{format}</span>\n                    <button\n                      onClick={() => copyColor(format)}\n                      className=\"p-1 text-violet-400 hover:text-violet-300\"\n                    >\n                      <Copy className=\"w-3 h-3\" />\n                    </button>\n                  </div>\n                  <code className=\"text-sm text-slate-300 font-mono\">{value}</code>\n                </div>\n              ))}\n            </div>\n          </div>\n        )}\n      </div>\n    </div>\n  );\n};\n\nexport default DevTools;
+                  onChange={(e) => setRegex(e.target.value)}
+                  className="flex-1 bg-black/50 border border-cyan-900/50 text-cyan-100 placeholder:text-cyan-900/50 rounded-sm font-mono px-4 py-3 outline-none"
+                />
+                <input
+                  placeholder="Flags"
+                  value={regexFlags}
+                  onChange={(e) => setRegexFlags(e.target.value)}
+                  className="w-20 bg-black/50 border border-cyan-900/50 text-cyan-100 rounded-sm font-mono px-3 py-3 outline-none text-center"
+                />
+                <button
+                  onClick={testRegex}
+                  className="px-6 bg-gradient-to-r from-cyan-500 to-violet-600 text-white font-bold hover:from-cyan-400 hover:to-violet-500 rounded-sm uppercase"
+                >
+                  TEST
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-sm text-cyan-400 font-mono uppercase mb-2 block">Test String</label>
+              <textarea
+                placeholder="Enter text to test against..."
+                value={testString}
+                onChange={(e) => setTestString(e.target.value)}
+                className="w-full bg-black/50 border border-cyan-900/50 text-cyan-100 placeholder:text-cyan-900/50 rounded-sm font-mono p-4 outline-none resize-none"
+                rows={6}
+              />
+            </div>
+
+            {regexMatches.length > 0 && (
+              <div>
+                <label className="text-sm text-cyan-400 font-mono uppercase mb-2 block">Matches ({regexMatches.length})</label>
+                <div className="space-y-2">
+                  {regexMatches.map((match, idx) => (
+                    <div key={idx} className="p-3 bg-green-500/10 border border-green-500/30 rounded">
+                      <div className="text-xs text-green-400 mb-1">Match {idx + 1} at index {match.index}</div>
+                      <div className="text-sm text-green-100 font-mono">{match[0]}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* JSON FORMATTER */}
+        {activeToolTab === 'json' && (
+          <div className="grid grid-cols-2 gap-6 h-full">
+            <div className="flex flex-col">
+              <label className="text-sm text-cyan-400 font-mono uppercase mb-2">Input JSON</label>
+              <textarea
+                placeholder='{ "key": "value" }'
+                value={jsonInput}
+                onChange={(e) => setJsonInput(e.target.value)}
+                className="flex-1 bg-black/50 border border-cyan-900/50 text-cyan-100 placeholder:text-cyan-900/50 rounded-sm font-mono p-4 outline-none resize-none"
+              />
+              <div className="flex gap-2 mt-3">
+                <button
+                  onClick={formatJSON}
+                  className="flex-1 px-4 py-2 bg-cyan-500/20 text-cyan-400 border border-cyan-500/50 hover:bg-cyan-500/30 rounded-sm uppercase text-sm font-semibold"
+                >
+                  FORMAT
+                </button>
+                <button
+                  onClick={minifyJSON}
+                  className="flex-1 px-4 py-2 bg-violet-500/20 text-violet-400 border border-violet-500/50 hover:bg-violet-500/30 rounded-sm uppercase text-sm font-semibold"
+                >
+                  MINIFY
+                </button>
+              </div>
+              {jsonError && (
+                <div className="mt-2 p-2 bg-red-500/10 border border-red-500/30 rounded text-xs text-red-400">
+                  {jsonError}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm text-cyan-400 font-mono uppercase">Output</label>
+                {jsonOutput && (
+                  <button
+                    onClick={copyJSON}
+                    className="text-xs text-violet-400 hover:text-violet-300 flex items-center gap-1"
+                  >
+                    <Copy className="w-3 h-3" /> COPY
+                  </button>
+                )}
+              </div>
+              <pre className="flex-1 bg-black/50 border border-cyan-900/50 text-cyan-100 rounded-sm font-mono p-4 overflow-auto">
+                {jsonOutput || 'Formatted JSON will appear here...'}
+              </pre>
+            </div>
+          </div>
+        )}
+
+        {/* MARKDOWN PREVIEW */}
+        {activeToolTab === 'markdown' && (
+          <div className="grid grid-cols-2 gap-6 h-full">
+            <div className="flex flex-col">
+              <label className="text-sm text-cyan-400 font-mono uppercase mb-2">Markdown Editor</label>
+              <textarea
+                value={markdown}
+                onChange={(e) => setMarkdown(e.target.value)}
+                className="flex-1 bg-black/50 border border-cyan-900/50 text-cyan-100 rounded-sm font-mono p-4 outline-none resize-none text-sm"
+              />
+            </div>
+
+            <div className="flex flex-col">
+              <label className="text-sm text-cyan-400 font-mono uppercase mb-2">Preview</label>
+              <div 
+                className="flex-1 bg-black/50 border border-cyan-900/50 rounded-sm p-6 overflow-auto"
+                dangerouslySetInnerHTML={{ __html: renderMarkdown(markdown) }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* COLOR PICKER */}
+        {activeToolTab === 'color' && (
+          <div className="max-w-2xl mx-auto space-y-6">
+            <div className="flex items-center gap-6">
+              <div className="flex-1">
+                <label className="text-sm text-cyan-400 font-mono uppercase mb-2 block">Pick Color</label>
+                <input
+                  type="color"
+                  value={selectedColor}
+                  onChange={(e) => setSelectedColor(e.target.value)}
+                  className="w-full h-32 rounded-lg border-4 border-cyan-500/50 cursor-pointer"
+                />
+              </div>
+              <div 
+                className="w-64 h-32 rounded-lg border-4 border-cyan-500/50"
+                style={{ backgroundColor: selectedColor }}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              {Object.entries(colorFormats).map(([format, value]) => (
+                <div key={format} className="p-4 bg-black/40 border border-cyan-900/30 rounded-lg">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs text-cyan-400 font-mono uppercase">{format}</span>
+                    <button
+                      onClick={() => copyColor(format)}
+                      className="p-1 text-violet-400 hover:text-violet-300"
+                    >
+                      <Copy className="w-3 h-3" />
+                    </button>
+                  </div>
+                  <code className="text-sm text-slate-300 font-mono">{value}</code>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default DevTools;

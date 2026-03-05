@@ -1,13 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
-import { Send, Loader2, Trash2 } from 'lucide-react';
+import { Send, Loader2, Trash2, FileText, X } from 'lucide-react';
 
 const ChatInterface = () => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [model, setModel] = useState('llama3.2');
+  const [showSummary, setShowSummary] = useState(false);
+  const [summary, setSummary] = useState('');
+  const [summarizing, setSummarizing] = useState(false);
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -52,7 +55,31 @@ const ChatInterface = () => {
 
   const clearChat = () => {
     setMessages([]);
+    setSummary('');
+    setShowSummary(false);
     toast.success('Chat cleared');
+  };
+
+  const summarizeConversation = async () => {
+    if (messages.length < 2) {
+      toast.error('Need at least 2 messages to summarize');
+      return;
+    }
+    
+    setSummarizing(true);
+    try {
+      const response = await axiosInstance.post('/chat/summarize', {
+        messages: messages,
+        model: model
+      });
+      setSummary(response.data.summary);
+      setShowSummary(true);
+      toast.success('Conversation summarized!');
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to summarize');
+    } finally {
+      setSummarizing(false);
+    }
   };
 
   return (
@@ -78,6 +105,15 @@ const ChatInterface = () => {
             <option value="mistral">MISTRAL</option>
             <option value="phi3">PHI-3</option>
           </select>
+          <button
+            data-testid="summarize-btn"
+            onClick={summarizeConversation}
+            disabled={summarizing || messages.length < 2}
+            className="p-2 text-slate-400 hover:text-violet-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Summarize conversation"
+          >
+            {summarizing ? <Loader2 className="w-5 h-5 animate-spin" /> : <FileText className="w-5 h-5" />}
+          </button>
           <button
             data-testid="clear-chat-btn"
             onClick={clearChat}
@@ -160,6 +196,50 @@ const ChatInterface = () => {
           </button>
         </div>
       </div>
+
+      {/* Summary Modal */}
+      {showSummary && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+          <div className="bg-[#0a0a0f] border border-cyan-500/30 rounded-lg max-w-2xl w-full max-h-[80vh] overflow-hidden">
+            <div className="p-6 border-b border-cyan-500/20 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <FileText className="w-6 h-6 text-cyan-400" />
+                <h3 className="text-xl font-bold text-cyan-400 uppercase">Conversation Summary</h3>
+              </div>
+              <button
+                onClick={() => setShowSummary(false)}
+                className="p-2 text-slate-400 hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 overflow-auto max-h-[60vh]">
+              <div className="prose prose-invert max-w-none">
+                <div className="whitespace-pre-wrap text-slate-300 leading-relaxed">
+                  {summary}
+                </div>
+              </div>
+            </div>
+            <div className="p-4 border-t border-cyan-500/20 flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(summary);
+                  toast.success('Summary copied!');
+                }}
+                className="px-4 py-2 bg-cyan-500/20 text-cyan-400 border border-cyan-500/50 hover:bg-cyan-500/30 rounded-sm text-sm font-semibold uppercase"
+              >
+                Copy Summary
+              </button>
+              <button
+                onClick={() => setShowSummary(false)}
+                className="px-4 py-2 bg-violet-500/20 text-violet-400 border border-violet-500/50 hover:bg-violet-500/30 rounded-sm text-sm font-semibold uppercase"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

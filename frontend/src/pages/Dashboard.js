@@ -18,6 +18,7 @@ import PackageManager from '../components/PackageManager/PackageManager';
 import EnvManager from '../components/EnvManager/EnvManager';
 import SnippetLibrary from '../components/SnippetLibrary/SnippetLibrary';
 import DevTools from '../components/DevTools/DevTools';
+import AdvancedTools from '../components/AdvancedTools/AdvancedTools';
 import { 
   MessageSquare, 
   Mic, 
@@ -37,7 +38,8 @@ import {
   Package,
   Settings,
   BookMarked,
-  Wrench
+  Wrench,
+  Rocket
 } from 'lucide-react';
 
 const Dashboard = () => {
@@ -73,6 +75,7 @@ const Dashboard = () => {
     { id: 'env', label: 'ENV VARS', icon: Settings },
     { id: 'snippets', label: 'SNIPPETS', icon: BookMarked },
     { id: 'devtools', label: 'DEV TOOLS', icon: Wrench },
+    { id: 'advanced', label: 'ADVANCED', icon: Rocket },
     { id: 'files', label: 'FILES', icon: FolderOpen },
     { id: 'terminal', label: 'TERMINAL', icon: Terminal },
     { id: 'websearch', label: 'WEB SEARCH', icon: Search },
@@ -155,6 +158,7 @@ const Dashboard = () => {
           {activeTab === 'env' && <EnvManager />}
           {activeTab === 'snippets' && <SnippetLibrary />}
           {activeTab === 'devtools' && <DevTools />}
+          {activeTab === 'advanced' && <AdvancedTools />}
           {activeTab === 'voice' && <VoiceControl />}
           {activeTab === 'files' && <FileExplorer />}
           {activeTab === 'terminal' && <CommandTerminal />}
