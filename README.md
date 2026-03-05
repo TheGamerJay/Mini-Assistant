@@ -1,6 +1,6 @@
-# JARVIS - All-in-One Local AI Assistant
+# Mini Assistant - All-in-One Local AI Assistant
 
-An Iron Man-inspired AI assistant system powered by local and free models. Features include chat, voice control, file management, command execution, web search, codebase search, and project profiles.
+A sleek, modern AI assistant system powered by local and free models with cyan and violet theme. Features include chat, voice control, file management, command execution, web search, codebase search, and project profiles.
 
 ## Features
 
@@ -12,7 +12,7 @@ An Iron Man-inspired AI assistant system powered by local and free models. Featu
 ✅ **Codebase Search** - Fast grep-based code search across your projects
 ✅ **Project Profiles** - Save and manage project-specific commands
 ✅ **FixLoop Ready** - Error analysis using AI (future enhancement)
-✅ **Futuristic UI** - Iron Man HUD-inspired dark theme with cyan accents
+✅ **Futuristic UI** - Modern dark theme with cyan and violet gradient accents
 
 ## Tech Stack
 
@@ -245,10 +245,10 @@ ollama pull llama3.2
 
 ## Design System
 
-The UI follows an Iron Man/Jarvis inspired design:
-- **Colors:** Deep black backgrounds with electric cyan (#00f3ff) accents
+The UI follows a modern, futuristic design:
+- **Colors:** Deep black backgrounds with electric cyan (#00f3ff) and violet (#9333ea) gradient accents
 - **Typography:** Orbitron/Rajdhani for headers, JetBrains Mono for code, Inter for body
-- **Effects:** Glass-morphism, neon glows, HUD-style corners, scan-line animations
+- **Effects:** Glass-morphism, gradient glows, smooth animations
 - **Layout:** Bento grid, sidebar navigation, dark theme by default
 
 ## License

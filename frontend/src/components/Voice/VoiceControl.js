@@ -149,7 +149,7 @@ const VoiceControl = () => {
           <div className="w-full max-w-2xl p-6 bg-cyan-500/10 border border-cyan-500/50 rounded-lg backdrop-blur-sm" data-testid="response-display">
             <div className="flex items-center gap-2 text-xs font-mono text-cyan-400 uppercase mb-2">
               <Volume2 className="w-4 h-4" />
-              JARVIS RESPONSE
+              MINI ASSISTANT RESPONSE
             </div>
             <p className="text-cyan-100">{response}</p>
           </div>

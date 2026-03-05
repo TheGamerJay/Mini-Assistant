@@ -69,7 +69,7 @@ const Dashboard = () => {
                 style={{ fontFamily: 'Orbitron, sans-serif' }}
                 data-testid="jarvis-title"
               >
-                JARVIS
+                MINI ASSISTANT
               </h1>
               <p className="text-xs text-cyan-400/70 font-mono uppercase tracking-widest">AI ASSISTANT SYSTEM</p>
             </div>

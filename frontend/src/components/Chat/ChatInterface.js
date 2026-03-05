@@ -116,7 +116,7 @@ const ChatInterface = () => {
               }`}
             >
               <div className="text-xs font-mono text-cyan-400/70 uppercase mb-2">
-                {msg.role === 'user' ? 'YOU' : 'JARVIS'}
+                {msg.role === 'user' ? 'YOU' : 'MINI ASSISTANT'}
               </div>
               <div className="whitespace-pre-wrap font-sans">{msg.content}</div>
             </div>
