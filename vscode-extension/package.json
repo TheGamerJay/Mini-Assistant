@@ -1,0 +1,181 @@
+{
+  "name": "mini-assistant",
+  "displayName": "Mini Assistant",
+  "description": "All-in-one AI development assistant with code review, API testing, and more",
+  "version": "1.0.0",
+  "publisher": "mini-assistant",
+  "icon": "icon.png",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Testing",
+    "Debuggers",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "assistant",
+    "code review",
+    "api testing",
+    "ollama",
+    "git"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "mini-assistant.open",
+        "title": "Open Mini Assistant",
+        "category": "Mini Assistant",
+        "icon": "$(zap)"
+      },
+      {
+        "command": "mini-assistant.reviewFile",
+        "title": "Review Current File",
+        "category": "Mini Assistant",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "mini-assistant.fixCode",
+        "title": "Fix Code Issues",
+        "category": "Mini Assistant",
+        "icon": "$(wrench)"
+      },
+      {
+        "command": "mini-assistant.runCode",
+        "title": "Run in Code Runner",
+        "category": "Mini Assistant",
+        "icon": "$(play)"
+      },
+      {
+        "command": "mini-assistant.testAPI",
+        "title": "Test API",
+        "category": "Mini Assistant",
+        "icon": "$(debug-alt)"
+      },
+      {
+        "command": "mini-assistant.askAI",
+        "title": "Ask AI About This",
+        "category": "Mini Assistant",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "mini-assistant.gitCommit",
+        "title": "Quick Git Commit",
+        "category": "Mini Assistant",
+        "icon": "$(git-commit)"
+      },
+      {
+        "command": "mini-assistant.formatJSON",
+        "title": "Format JSON",
+        "category": "Mini Assistant"
+      },
+      {
+        "command": "mini-assistant.saveSnippet",
+        "title": "Save as Snippet",
+        "category": "Mini Assistant"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "mini-assistant.reviewFile",
+          "group": "mini-assistant@1",
+          "when": "editorHasSelection || editorTextFocus"
+        },
+        {
+          "command": "mini-assistant.fixCode",
+          "group": "mini-assistant@2",
+          "when": "editorHasSelection || editorTextFocus"
+        },
+        {
+          "command": "mini-assistant.runCode",
+          "group": "mini-assistant@3",
+          "when": "resourceLangId == python || resourceLangId == javascript"
+        },
+        {
+          "command": "mini-assistant.askAI",
+          "group": "mini-assistant@4",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "mini-assistant.saveSnippet",
+          "group": "mini-assistant@5",
+          "when": "editorHasSelection"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "mini-assistant.reviewFile",
+          "group": "mini-assistant@1",
+          "when": "resourceLangId =~ /javascript|typescript|python|jsx|tsx/"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "mini-assistant-sidebar",
+          "title": "Mini Assistant",
+          "icon": "$(zap)"
+        }
+      ]
+    },
+    "views": {
+      "mini-assistant-sidebar": [
+        {
+          "id": "mini-assistant.webview",
+          "name": "Assistant",
+          "type": "webview"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "mini-assistant.open",
+        "key": "ctrl+shift+m",
+        "mac": "cmd+shift+m"
+      },
+      {
+        "command": "mini-assistant.askAI",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a",
+        "when": "editorHasSelection"
+      },
+      {
+        "command": "mini-assistant.reviewFile",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r"
+      }
+    ],
+    "configuration": {
+      "title": "Mini Assistant",
+      "properties": {
+        "miniAssistant.serverUrl": {
+          "type": "string",
+          "default": "https://jarvis-hub-12.preview.emergentagent.com",
+          "description": "Mini Assistant server URL"
+        },
+        "miniAssistant.autoOpen": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically open Mini Assistant on startup"
+        },
+        "miniAssistant.showInStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Mini Assistant in status bar"
+        }
+      }
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/mini-assistant-vscode"
+  }
+}
