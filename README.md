@@ -274,3 +274,8 @@ Built with ❤️ using local and free AI models.
 ---
 
 **Status:** ✅ ONLINE | **Version:** 1.0.0 | **Powered by:** Local AI Models
+=======
+# Mini Assistant
+
+This repository contains the Mini Assistant project.
+>>>>>>> 1a48297 (Add README)
