@@ -1848,6 +1848,128 @@ async def health_check():
         "whisper": "loaded" if whisper_model else "not_loaded"
     }
 
+# ==================== Multi-Brain Assistant API ====================
+from mini_assistant import MiniAssistant
+from mini_assistant.router import route as _route_msg, get_registered_matchers
+
+_assistant: MiniAssistant | None = None
+
+def _get_assistant() -> MiniAssistant:
+    global _assistant
+    if _assistant is None:
+        _assistant = MiniAssistant()
+    return _assistant
+
+
+class AssistantChatRequest(BaseModel):
+    message: str
+    images: List[str] = []
+    history: List[Dict[str, Any]] = []
+    metadata: Dict[str, Any] = {}
+
+
+class AssistantLearnTextRequest(BaseModel):
+    text: str
+    source: str = "manual"
+
+
+class AssistantLearnFileRequest(BaseModel):
+    file_path: str
+
+
+@api_router.post("/assistant/chat")
+async def assistant_chat(request: AssistantChatRequest):
+    try:
+        assistant = _get_assistant()
+        response = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: assistant.chat(
+                message=request.message,
+                images=request.images or [],
+                history=request.history or [],
+                metadata=request.metadata or {},
+            ),
+        )
+        return {
+            "reply": response.reply,
+            "brain": response.brain,
+            "task": response.task,
+            "model": response.model,
+            "routing_method": response.routing_method,
+            "tool_results": response.tool_results,
+        }
+    except Exception as exc:
+        logger.exception("assistant_chat failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@api_router.post("/assistant/learn/text")
+async def assistant_learn_text(request: AssistantLearnTextRequest):
+    try:
+        assistant = _get_assistant()
+        chunks = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: assistant.learn_text(request.text, source=request.source),
+        )
+        return {"success": True, "chunks_added": chunks}
+    except Exception as exc:
+        logger.exception("assistant_learn_text failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@api_router.post("/assistant/learn/file")
+async def assistant_learn_file(request: AssistantLearnFileRequest):
+    try:
+        assistant = _get_assistant()
+        chunks = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: assistant.learn_file(request.file_path),
+        )
+        return {"success": True, "chunks_added": chunks}
+    except Exception as exc:
+        logger.exception("assistant_learn_file failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@api_router.get("/assistant/memory/search")
+async def assistant_memory_search(q: str, top_k: int = 5):
+    try:
+        assistant = _get_assistant()
+        results = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: assistant.memory_search(q, top_k=top_k),
+        )
+        return {"results": results}
+    except Exception as exc:
+        logger.exception("assistant_memory_search failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@api_router.get("/assistant/route/info")
+async def assistant_route_info(message: str):
+    try:
+        result = _route_msg(message)
+        return {
+            "brain": result.brain,
+            "task": result.task,
+            "model": result.model,
+            "routing_method": result.routing_method,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@api_router.get("/assistant/matchers")
+async def assistant_matchers():
+    matchers = get_registered_matchers()
+    return {
+        "matchers": [
+            {"name": type(m).__name__, "priority": m.priority}
+            for m in matchers
+        ]
+    }
+
+
 app.include_router(api_router)
 
 app.add_middleware(
