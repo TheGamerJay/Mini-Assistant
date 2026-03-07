@@ -143,18 +143,39 @@ def _should_search(text: str) -> bool:
     return any(trigger in lower for trigger in _SEARCH_TRIGGERS)
 
 def _run_web_search(query: str, max_results: int = 5) -> str:
-    try:
-        ddgs = DDGS(timeout=10)
-        results = list(ddgs.text(query, max_results=max_results))
-        if not results:
-            return ""
-        lines = ["Web search results (use these to answer):"]
-        for r in results:
-            lines.append(f"- {r.get('title', '')}: {r.get('href', '')} — {r.get('body', '')[:200]}")
-        return "\n".join(lines)
-    except Exception as e:
-        print(f"[SEARCH ERROR] {e}")
-        return ""
+    # Try Tavily first (most reliable on cloud IPs)
+    tavily_key = os.environ.get("TAVILY_API_KEY", "")
+    if tavily_key:
+        try:
+            import requests as _req
+            resp = _req.post(
+                "https://api.tavily.com/search",
+                json={"api_key": tavily_key, "query": query, "max_results": max_results},
+                timeout=10,
+            )
+            data = resp.json()
+            results = data.get("results", [])
+            if results:
+                lines = ["Web search results (use these to answer):"]
+                for r in results:
+                    lines.append(f"- {r.get('title', '')}: {r.get('url', '')} — {r.get('content', '')[:200]}")
+                return "\n".join(lines)
+        except Exception as e:
+            print(f"[TAVILY ERROR] {e}")
+
+    # Fallback: DuckDuckGo with multiple backends
+    for backend in ("lite", "html", "auto"):
+        try:
+            ddgs = DDGS(timeout=15)
+            results = list(ddgs.text(query, max_results=max_results, backend=backend))
+            if results:
+                lines = ["Web search results (use these to answer):"]
+                for r in results:
+                    lines.append(f"- {r.get('title', '')}: {r.get('href', '')} — {r.get('body', '')[:200]}")
+                return "\n".join(lines)
+        except Exception as e:
+            print(f"[DDGS {backend} ERROR] {e}")
+    return ""
 
 @api_router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
@@ -232,31 +253,48 @@ async def text_to_speech(request: TTSRequest):
 # Web search endpoint
 @api_router.post("/search/web", response_model=List[WebSearchResult])
 async def web_search(request: WebSearchRequest):
-    try:
-        print(f"[SEARCH] Executing real-time web search for: '{request.query}' (max results: {request.max_results})")
-        
-        # Create a new DDGS instance for fresh search
-        ddgs = DDGS(timeout=10)
-        results = []
-        
-        # Perform the search
+    print(f"[SEARCH] Query: '{request.query}' (max: {request.max_results})")
+
+    # Try Tavily first (most reliable on cloud IPs)
+    tavily_key = os.environ.get("TAVILY_API_KEY", "")
+    if tavily_key:
         try:
-            for result in ddgs.text(request.query, max_results=request.max_results):
-                results.append(result)
-        except Exception as search_error:
-            print(f"[SEARCH ERROR] {search_error}")
-            # Continue with partial results if available
-        
-        print(f"[SEARCH COMPLETE] Found {len(results)} real-time results for: '{request.query}'")
-        
-        return [WebSearchResult(
-            title=r.get('title', ''),
-            url=r.get('href', ''),
-            body=r.get('body', '')
-        ) for r in results]
-    except Exception as e:
-        print(f"[SEARCH FAILED] {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
+            import requests as _req
+            resp = _req.post(
+                "https://api.tavily.com/search",
+                json={"api_key": tavily_key, "query": request.query, "max_results": request.max_results},
+                timeout=10,
+            )
+            data = resp.json()
+            tv_results = data.get("results", [])
+            if tv_results:
+                print(f"[SEARCH] Tavily returned {len(tv_results)} results")
+                return [WebSearchResult(
+                    title=r.get("title", ""),
+                    url=r.get("url", ""),
+                    body=r.get("content", "")
+                ) for r in tv_results]
+        except Exception as e:
+            print(f"[TAVILY ERROR] {e}")
+
+    # Fallback: DuckDuckGo with multiple backends
+    last_error = "No results found. DuckDuckGo may be blocking this server's IP. Add a TAVILY_API_KEY env var for reliable search."
+    for backend in ("lite", "html", "auto"):
+        try:
+            ddgs = DDGS(timeout=15)
+            results = list(ddgs.text(request.query, max_results=request.max_results, backend=backend))
+            if results:
+                print(f"[SEARCH] DDGS({backend}) returned {len(results)} results")
+                return [WebSearchResult(
+                    title=r.get("title", ""),
+                    url=r.get("href", ""),
+                    body=r.get("body", "")
+                ) for r in results]
+        except Exception as e:
+            last_error = str(e)
+            print(f"[DDGS {backend} ERROR] {e}")
+
+    raise HTTPException(status_code=503, detail=last_error)
 
 # File operations
 @api_router.post("/files/list")
