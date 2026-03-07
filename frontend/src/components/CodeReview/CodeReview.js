@@ -3,12 +3,38 @@ import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import { Shield, Loader2, AlertTriangle, CheckCircle, XCircle, Zap } from 'lucide-react';
 
+const detectLanguage = (code) => {
+  const c = code.trim();
+  if (!c) return null;
+  if (/^<!DOCTYPE|^<html/i.test(c)) return 'html';
+  if (/^\s*[.#][\w-]+\s*\{|:\s*(margin|padding|color|font|display)\s*:/m.test(c)) return 'css';
+  if (/\bimport\s+React|jsx|<[A-Z][A-Za-z]+|className=/.test(c)) return 'jsx';
+  if (/:\s*(string|number|boolean|any)\b|interface\s+\w+\s*\{|<[A-Z]\w*>/.test(c)) return 'typescript';
+  if (/^def |^class |^import |^from |^\s*print\(|^if __name__|^\s*elif /.test(c) || /\bdef\s+\w+\s*\(/.test(c)) return 'python';
+  if (/\bconsole\.\w+|require\(|module\.exports|process\.env/.test(c)) return 'javascript';
+  if (/\bconst |let |var |=>\s*\{|function\s+\w+/.test(c)) return 'javascript';
+  return null;
+};
+
 const CodeReview = () => {
   const [code, setCode] = useState('');
   const [language, setLanguage] = useState('javascript');
+  const [autoDetected, setAutoDetected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState(null);
   const [fixedCode, setFixedCode] = useState('');
+
+  const handleCodeChange = (e) => {
+    const val = e.target.value;
+    setCode(val);
+    const detected = detectLanguage(val);
+    if (detected) {
+      setLanguage(detected);
+      setAutoDetected(true);
+    } else {
+      setAutoDetected(false);
+    }
+  };
 
   const analyzeCode = async () => {
     if (!code.trim() || loading) return;
@@ -61,20 +87,25 @@ const CodeReview = () => {
             </h2>
           </div>
           
-          <div className="flex gap-4">
-            <select
-              data-testid="language-select"
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-              className="bg-black/50 border border-cyan-500/50 text-cyan-100 px-4 py-2 rounded-sm font-mono text-sm focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 outline-none"
-            >
-              <option value="javascript">JavaScript</option>
-              <option value="python">Python</option>
-              <option value="typescript">TypeScript</option>
-              <option value="jsx">React/JSX</option>
-              <option value="html">HTML</option>
-              <option value="css">CSS</option>
-            </select>
+          <div className="flex gap-4 items-center">
+            <div className="flex flex-col gap-1">
+              <select
+                data-testid="language-select"
+                value={language}
+                onChange={(e) => { setLanguage(e.target.value); setAutoDetected(false); }}
+                className="bg-black/50 border border-cyan-500/50 text-cyan-100 px-4 py-2 rounded-sm font-mono text-sm focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 outline-none"
+              >
+                <option value="javascript">JavaScript</option>
+                <option value="python">Python</option>
+                <option value="typescript">TypeScript</option>
+                <option value="jsx">React/JSX</option>
+                <option value="html">HTML</option>
+                <option value="css">CSS</option>
+              </select>
+              {autoDetected && (
+                <span className="text-xs text-cyan-400 font-mono text-center">AUTO-DETECTED</span>
+              )}
+            </div>
             
             <button
               data-testid="analyze-code-btn"
@@ -101,8 +132,8 @@ const CodeReview = () => {
           <textarea
             data-testid="code-input"
             value={code}
-            onChange={(e) => setCode(e.target.value)}
-            placeholder="Paste your code here for AI-powered review and automatic fixes..."
+            onChange={handleCodeChange}
+            placeholder="Paste your code here — language will be auto-detected..."
             className="w-full h-full bg-black/50 border border-cyan-900/50 text-cyan-100 placeholder:text-cyan-900/50 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 rounded-sm font-mono text-sm p-4 outline-none resize-none"
             disabled={loading}
           />
