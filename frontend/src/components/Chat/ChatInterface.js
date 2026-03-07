@@ -7,7 +7,7 @@ const ChatInterface = () => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [model, setModel] = useState('qwen2.5:3b');
+  const [model, setModel] = useState('glm-4.7:cloud');
   const [showSummary, setShowSummary] = useState(false);
   const [summary, setSummary] = useState('');
   const [summarizing, setSummarizing] = useState(false);
@@ -117,7 +117,8 @@ const ChatInterface = () => {
             onChange={(e) => setModel(e.target.value)}
             className="bg-black/50 border border-cyan-500/50 text-cyan-100 px-4 py-2 rounded-sm font-mono text-sm focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 outline-none"
           >
-            <option value="qwen2.5:3b">QWEN 2.5:3B</option>
+            <option value="glm-4.7:cloud">GLM 4.7 Cloud</option>
+            <option value="minimax-m2.1:cloud">MiniMax M2.1 Cloud</option>
           </select>
           <button
             data-testid="summarize-btn"
