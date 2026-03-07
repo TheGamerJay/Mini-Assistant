@@ -1,3 +1,17 @@
+# ── Stage 1: Build React frontend ────────────────────────────────────────────
+FROM node:20-slim AS frontend-builder
+
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci --legacy-peer-deps
+
+COPY frontend/ ./
+# Bake the Railway backend URL at build time
+ARG REACT_APP_BACKEND_URL=https://mini-assistant-production.up.railway.app
+ENV REACT_APP_BACKEND_URL=$REACT_APP_BACKEND_URL
+RUN npm run build
+
+# ── Stage 2: Python backend + built frontend ──────────────────────────────────
 FROM python:3.11-slim
 
 # System deps needed by heavy packages
@@ -33,6 +47,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # Copy backend source
 COPY backend/ ./backend/
+
+# Copy built React app into backend/static so FastAPI can serve it
+COPY --from=frontend-builder /frontend/build ./backend/static
 
 WORKDIR /app/backend
 

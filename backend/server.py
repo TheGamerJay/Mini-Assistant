@@ -1,5 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -2138,6 +2139,16 @@ async def swarm_run(body: SwarmRunRequest):
 
 
 app.include_router(api_router)
+
+# Serve React frontend static files if the build directory exists
+_static_dir = Path(__file__).parent / "static"
+if _static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(_static_dir / "static")), name="static-assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        index = _static_dir / "index.html"
+        return FileResponse(str(index))
 
 app.add_middleware(
     CORSMiddleware,
