@@ -7,6 +7,7 @@ FROM python:3.11-slim
 # - libxml2/xslt: lxml
 # - libopenblas: faiss-cpu, scipy, numpy
 # - libgomp: torch, faiss-cpu (OpenMP)
+# - libjq: jq Python package
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
@@ -19,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxslt1-dev \
     libopenblas-dev \
     libgomp1 \
+    libjq-dev \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
