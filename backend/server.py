@@ -131,17 +131,50 @@ class CodeSearchRequest(BaseModel):
     max_results: int = 5
 
 # Chat endpoint
+_SEARCH_TRIGGERS = [
+    "link", "links", "url", "urls", "where to buy", "where can i buy",
+    "find me", "search for", "look up", "latest", "current", "price",
+    "amazon", "ebay", "shop", "purchase", "available", "release date",
+    "news", "today", "2024", "2025", "2026", "recently", "new model",
+]
+
+def _should_search(text: str) -> bool:
+    lower = text.lower()
+    return any(trigger in lower for trigger in _SEARCH_TRIGGERS)
+
+def _run_web_search(query: str, max_results: int = 5) -> str:
+    try:
+        ddgs = DDGS(timeout=10)
+        results = list(ddgs.text(query, max_results=max_results))
+        if not results:
+            return ""
+        lines = ["Web search results (use these to answer):"]
+        for r in results:
+            lines.append(f"- {r.get('title', '')}: {r.get('href', '')} — {r.get('body', '')[:200]}")
+        return "\n".join(lines)
+    except Exception as e:
+        print(f"[SEARCH ERROR] {e}")
+        return ""
+
 @api_router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     if not ollama_client:
         raise HTTPException(status_code=503, detail="Ollama service not available. Please ensure Ollama is running on localhost:11434")
-    
+
     try:
-        system_prompt = {"role": "system", "content": "You are Mini Assistant, a helpful AI assistant. Never mention that you are GLM, Z.ai, or any other underlying model. Always refer to yourself as Mini Assistant."}
+        system_prompt = {"role": "system", "content": "You are Mini Assistant, a helpful AI assistant. Never mention that you are GLM, Z.ai, or any other underlying model. Always refer to yourself as Mini Assistant. When you have web search results provided, use them to give accurate, up-to-date answers including real links."}
         messages = [system_prompt] + [{"role": msg.role, "content": msg.content} for msg in request.messages]
-        
+
+        # Auto web search: if the last user message looks like a search query, fetch live results
+        last_user = next((m.content for m in reversed(request.messages) if m.role == "user"), "")
+        if last_user and _should_search(last_user):
+            search_context = await asyncio.get_event_loop().run_in_executor(None, _run_web_search, last_user)
+            if search_context:
+                print(f"[CHAT] Injecting web search context for: {last_user[:80]}")
+                # Insert search results as a system message just before the last user turn
+                messages.insert(-1, {"role": "system", "content": search_context})
+
         if request.stream:
-            # For streaming, we'll aggregate chunks for simplicity
             response_text = ""
             stream = ollama_client.chat(model=request.model, messages=messages, stream=True)
             for chunk in stream:
@@ -150,7 +183,7 @@ async def chat(request: ChatRequest):
         else:
             response = ollama_client.chat(model=request.model, messages=messages)
             response_text = response['message']['content']
-        
+
         return ChatResponse(response=response_text, model=request.model)
     except Exception as e:
         import traceback
