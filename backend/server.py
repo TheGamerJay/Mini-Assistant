@@ -527,57 +527,39 @@ async def generate_app(request: AppBuilderRequest):
         raise HTTPException(status_code=503, detail="Ollama service not available")
     
     try:
-        prompt = f"""Generate a complete {request.framework} application based on this description:
+        prompt = f"""You are an expert web developer. Generate a complete, self-contained single HTML file for the following app:
 
 {request.description}
 
-Provide:
-1. Project structure (folders and files)
-2. Complete code for each file
-3. Installation instructions
-4. Key features implemented
+STRICT REQUIREMENTS:
+- Output ONLY raw HTML — no markdown, no code fences, no explanation before or after.
+- Start with <!DOCTYPE html> and end with </html>.
+- Everything (CSS and JavaScript) must be inline inside the HTML file — no external files, no CDN links EXCEPT for well-known libraries like Three.js, Chart.js, or similar that are essential to the app.
+- The app must be fully functional when opened directly in a browser (double-click the .html file).
+- Write complete, production-quality code. Do not leave TODOs or placeholders.
+- If it's a game, make it fully playable with keyboard and mobile touch controls.
+- Make the UI polished and visually attractive."""
 
-Format the response as JSON with this structure:
-{{
-  "name": "app-name",
-  "description": "...",
-  "files": [
-    {{"path": "...", "content": "..."}},
-    ...
-  ],
-  "install_commands": ["..."],
-  "features": ["..."]
-}}"""
-        
         response = ollama_client.chat(
-            model=_default_model,
+            model="devstral-2:cloud",
             messages=[{"role": "user", "content": prompt}]
         )
-        
-        # Try to parse JSON from response
-        content = response['message']['content']
-        try:
-            # Extract JSON from markdown code blocks if present
-            if "```json" in content:
-                json_start = content.find("```json") + 7
-                json_end = content.find("```", json_start)
-                content = content[json_start:json_end].strip()
-            elif "```" in content:
-                json_start = content.find("```") + 3
-                json_end = content.find("```", json_start)
-                content = content[json_start:json_end].strip()
-            
-            app_data = json.loads(content)
-        except:
-            # If JSON parsing fails, return raw content
-            app_data = {
-                "name": "generated-app",
-                "description": request.description,
-                "raw_output": content,
-                "files": []
-            }
-        
-        return app_data
+
+        content = response['message']['content'].strip()
+
+        # Strip markdown fences if the model added them
+        if content.startswith("```"):
+            first_newline = content.find("\n")
+            content = content[first_newline + 1:]
+        if content.endswith("```"):
+            content = content[:content.rfind("```")]
+        content = content.strip()
+
+        # Derive a simple app name from the description
+        name_words = request.description.split()[:4]
+        app_name = "-".join(w.lower() for w in name_words if w.isalpha()) or "generated-app"
+
+        return {"name": app_name, "description": request.description, "html": content}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Generation error: {str(e)}")
 

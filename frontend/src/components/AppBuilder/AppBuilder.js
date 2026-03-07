@@ -246,15 +246,15 @@ const AppBuilder = () => {
   };
 
   const downloadApp = () => {
-    if (!generatedApp) return;
-    const blob = new Blob([JSON.stringify(generatedApp, null, 2)], { type: 'application/json' });
+    if (!generatedApp?.html) return;
+    const blob = new Blob([generatedApp.html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'generated-app.json';
+    a.download = `${generatedApp.name || 'generated-app'}.html`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success('Downloaded!');
+    toast.success('Downloaded! Open the .html file in your browser.');
   };
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -466,22 +466,19 @@ const AppBuilder = () => {
                 </div>
               </div>
 
-              <div className="flex-1 overflow-auto p-5">
+              <div className="flex-1 overflow-hidden flex flex-col">
                 {activeView === 'preview' ? (
-                  <div className="p-5 bg-black/40 border border-cyan-900/30 rounded-lg">
-                    <h3 className="text-sm font-mono text-cyan-400 uppercase mb-3">Generated Application</h3>
-                    <pre className="text-slate-300 text-sm bg-black/30 p-4 rounded border border-cyan-900/20 overflow-auto">
-                      {JSON.stringify(generatedApp, null, 2)}
-                    </pre>
-                  </div>
+                  <iframe
+                    srcDoc={generatedApp.html}
+                    title="Generated App Preview"
+                    className="w-full flex-1 border-0 bg-white"
+                    sandbox="allow-scripts allow-same-origin"
+                  />
                 ) : (
-                  <div className="space-y-4">
-                    {generatedApp.files?.map((file, idx) => (
-                      <div key={idx} className="p-4 bg-black/40 border border-cyan-900/30 rounded-lg">
-                        <div className="text-sm font-mono text-cyan-400 mb-2">{file.path}</div>
-                        <pre className="text-slate-300 text-sm bg-black/30 p-4 rounded border border-cyan-900/20 overflow-auto">{file.content}</pre>
-                      </div>
-                    ))}
+                  <div className="flex-1 overflow-auto p-5">
+                    <pre className="text-slate-300 text-xs font-mono bg-black/30 p-4 rounded border border-cyan-900/20 overflow-auto whitespace-pre-wrap">
+                      {generatedApp.html}
+                    </pre>
                   </div>
                 )}
               </div>
