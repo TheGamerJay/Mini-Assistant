@@ -68,6 +68,7 @@ class ChatRequest(BaseModel):
     messages: List[ChatMessage]
     model: str = _default_model
     stream: bool = False
+    system_override: Optional[str] = None  # custom system prompt (e.g. coach mode)
 
 class ChatResponse(BaseModel):
     response: str
@@ -241,7 +242,7 @@ async def chat(request: ChatRequest):
     try:
         from datetime import date as _date
         today = _date.today().strftime("%B %d, %Y")
-        system_prompt = {"role": "system", "content": (
+        default_system = (
             f"You are Mini Assistant, a helpful AI assistant. Today's date is {today}. "
             "Never mention that you are GLM, Z.ai, or any other underlying model. Always refer to yourself as Mini Assistant. "
             "CRITICAL: When web search results are provided in this conversation, you MUST use them as your primary source of truth — "
@@ -250,7 +251,9 @@ async def chat(request: ChatRequest):
             "Always extract and share the actual URLs from the search results. "
             "Format every link as markdown: [title](url) so it is clickable. "
             "If search results contain product links, list them directly — do not make up or paraphrase URLs."
-        )}
+        )
+        system_content = request.system_override if request.system_override else default_system
+        system_prompt = {"role": "system", "content": system_content}
         messages = [system_prompt] + [{"role": msg.role, "content": msg.content} for msg in request.messages]
 
         # Auto web search: if the last user message looks like a search query, fetch live results
