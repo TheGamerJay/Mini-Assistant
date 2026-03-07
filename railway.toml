@@ -5,7 +5,7 @@ builder = "nixpacks"
 nixPkgs = ["python311", "nodejs_20"]
 
 [build.nixpacksPlan.phases.install]
-cmds = ["cd backend && python3 -m pip install -r requirements.txt"]
+cmds = ["python3 -m ensurepip --upgrade", "python3 -m pip install --upgrade pip", "cd backend && python3 -m pip install -r requirements.txt"]
 
 [deploy]
 startCommand = "cd backend && uvicorn server:app --host 0.0.0.0 --port $PORT"
