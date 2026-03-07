@@ -39,14 +39,16 @@ def _require_db():
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
-# Initialize Ollama client (will connect to localhost:11434)
+# Initialize Ollama client using OLLAMA_HOST / OLLAMA_API_KEY env vars
+_ollama_host = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
+_ollama_api_key = os.environ.get('OLLAMA_API_KEY', '')
+_ollama_headers = {"Authorization": f"Bearer {_ollama_api_key}"} if _ollama_api_key else {}
+
 try:
-    ollama_client = Client(host='http://localhost:11434')
-    # Test connection
-    ollama_client.chat(model='qwen2.5:3b', messages=[{'role': 'user', 'content': 'test'}])
-    print("✓ Ollama client initialized successfully")
+    ollama_client = Client(host=_ollama_host, headers=_ollama_headers)
+    print(f"✓ Ollama client initialised (host={_ollama_host})")
 except Exception as e:
-    print(f"✗ Failed to initialize Ollama client: {e}")
+    print(f"✗ Failed to initialise Ollama client: {e}")
     ollama_client = None
 
 # Initialize Whisper model for STT (lazy loading)
