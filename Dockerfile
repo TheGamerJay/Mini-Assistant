@@ -45,6 +45,9 @@ COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
+# Install Playwright and Chromium for FixLoop screenshots
+RUN playwright install-deps chromium && playwright install chromium
+
 # Copy backend source
 COPY backend/ ./backend/
 
