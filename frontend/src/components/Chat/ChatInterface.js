@@ -221,7 +221,7 @@ const ChatInterface = () => {
           <div
             key={idx}
             data-testid={`message-${msg.role}`}
-            className={`flex items-end gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            className={`flex items-center gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             {msg.role === 'assistant' && (
               <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-cyan-500 via-violet-500 to-violet-600 flex items-center justify-center overflow-hidden flex-shrink-0">
@@ -249,7 +249,7 @@ const ChatInterface = () => {
         ))}
 
         {loading && (
-          <div className="flex items-end gap-3 justify-start" data-testid="loading-indicator">
+          <div className="flex items-center gap-3 justify-start" data-testid="loading-indicator">
             <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-cyan-500 via-violet-500 to-violet-600 flex items-center justify-center overflow-hidden flex-shrink-0">
               <img
                 src="/Logo.png"
