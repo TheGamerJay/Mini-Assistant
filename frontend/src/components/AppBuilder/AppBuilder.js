@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import {
-  Wand2, Loader2, Download, Eye, Code,
+  Wand2, Loader2, Download, Eye,
   MessageSquare, Send, ChevronRight, RotateCcw, Sparkles
 } from 'lucide-react';
 
@@ -63,7 +63,6 @@ const AppBuilder = () => {
   const [buildLoading, setBuildLoading] = useState(false);
   const [buildMsg, setBuildMsg] = useState('');
   const [generatedApp, setGeneratedApp] = useState(null);
-  const [activeView, setActiveView] = useState('preview');
 
   const CHAT_LOADING_MSGS = [
     'Thinking...', 'Processing your idea...', 'Crafting the perfect question...',
@@ -245,6 +244,13 @@ const AppBuilder = () => {
     }
   };
 
+  const openInBrowser = () => {
+    if (!generatedApp?.html) return;
+    const blob = new Blob([generatedApp.html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+  };
+
   const downloadApp = () => {
     if (!generatedApp?.html) return;
     const blob = new Blob([generatedApp.html], { type: 'text/html' });
@@ -254,7 +260,7 @@ const AppBuilder = () => {
     a.download = `${generatedApp.name || 'generated-app'}.html`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success('Downloaded! Open the .html file in your browser.');
+    toast.success('Downloaded!');
   };
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -434,55 +440,39 @@ const AppBuilder = () => {
               </div>
             </div>
           ) : (
-            <>
-              <div className="p-4 border-b border-cyan-500/20 bg-black/30 flex items-center justify-between flex-shrink-0">
-                <div className="flex gap-2">
-                  {['preview', 'code'].map(v => (
-                    <button
-                      key={v}
-                      onClick={() => setActiveView(v)}
-                      className={`px-4 py-2 rounded-sm text-sm font-semibold uppercase transition-all flex items-center gap-2 ${
-                        activeView === v ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/50' : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      {v === 'preview' ? <Eye className="w-4 h-4" /> : <Code className="w-4 h-4" />}
-                      {v.toUpperCase()}
-                    </button>
-                  ))}
+            <div className="flex-1 flex items-center justify-center p-8">
+              <div className="text-center space-y-6 max-w-md">
+                <div className="w-20 h-20 mx-auto rounded-full bg-gradient-to-br from-cyan-500 to-violet-600 flex items-center justify-center">
+                  <Wand2 className="w-10 h-10 text-white" />
                 </div>
-                <div className="flex gap-2">
+                <div>
+                  <h3 className="text-2xl font-bold text-cyan-400 uppercase" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+                    Your App is Ready!
+                  </h3>
+                  <p className="text-slate-400 font-mono text-sm mt-1">{generatedApp.name}</p>
+                </div>
+                <div className="flex flex-col gap-3">
                   <button
-                    onClick={() => { setGeneratedApp(null); setDescription(''); }}
-                    className="px-4 py-2 border border-slate-600/50 text-slate-400 hover:text-white rounded-sm text-sm font-semibold uppercase flex items-center gap-2"
+                    onClick={openInBrowser}
+                    className="w-full py-4 bg-gradient-to-r from-cyan-500 to-violet-600 text-white font-bold hover:from-cyan-400 hover:to-violet-500 hover:shadow-[0_0_20px_rgba(0,243,255,0.4)] uppercase tracking-wider rounded-sm transition-all flex items-center justify-center gap-2 text-lg"
                   >
-                    <RotateCcw className="w-4 h-4" /> RESET
+                    <Eye className="w-5 h-5" /> OPEN IN BROWSER
                   </button>
                   <button
                     onClick={downloadApp}
-                    className="px-4 py-2 bg-violet-500/20 text-violet-400 border border-violet-500/50 hover:bg-violet-500/30 rounded-sm text-sm font-semibold uppercase flex items-center gap-2"
+                    className="w-full py-3 bg-violet-500/20 text-violet-400 border border-violet-500/50 hover:bg-violet-500/30 rounded-sm font-semibold uppercase flex items-center justify-center gap-2 transition-all"
                   >
-                    <Download className="w-4 h-4" /> DOWNLOAD
+                    <Download className="w-4 h-4" /> DOWNLOAD .HTML
+                  </button>
+                  <button
+                    onClick={() => { setGeneratedApp(null); setDescription(''); }}
+                    className="w-full py-2 text-slate-500 hover:text-slate-300 text-sm font-mono uppercase flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" /> BUILD ANOTHER
                   </button>
                 </div>
               </div>
-
-              <div className="flex-1 overflow-hidden flex flex-col">
-                {activeView === 'preview' ? (
-                  <iframe
-                    srcDoc={generatedApp.html}
-                    title="Generated App Preview"
-                    className="w-full flex-1 border-0 bg-white"
-                    sandbox="allow-scripts allow-same-origin"
-                  />
-                ) : (
-                  <div className="flex-1 overflow-auto p-5">
-                    <pre className="text-slate-300 text-xs font-mono bg-black/30 p-4 rounded border border-cyan-900/20 overflow-auto whitespace-pre-wrap">
-                      {generatedApp.html}
-                    </pre>
-                  </div>
-                )}
-              </div>
-            </>
+            </div>
           )}
         </div>
       )}
