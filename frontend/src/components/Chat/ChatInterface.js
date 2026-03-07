@@ -158,8 +158,31 @@ const ChatInterface = () => {
             onChange={(e) => setModel(e.target.value)}
             className="bg-black/50 border border-cyan-500/50 text-cyan-100 px-4 py-2 rounded-sm font-mono text-sm focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 outline-none"
           >
-            <option value="glm-4.7:cloud">GLM 4.7 Cloud</option>
-            <option value="minimax-m2.1:cloud">MiniMax M2.1 Cloud</option>
+            <optgroup label="─── Newest ───────────────">
+              <option value="glm-5:cloud">GLM 5 Cloud (744B MoE)</option>
+              <option value="qwen3.5:cloud">Qwen 3.5 Cloud</option>
+              <option value="minimax-m2.5:cloud">MiniMax M2.5 Cloud</option>
+              <option value="kimi-k2.5:cloud">Kimi K2.5 Cloud</option>
+              <option value="gemini-3-flash-preview:cloud">Gemini 3 Flash Cloud</option>
+              <option value="deepseek-v3.2:cloud">DeepSeek V3.2 Cloud</option>
+            </optgroup>
+            <optgroup label="─── General ───────────────">
+              <option value="glm-4.7:cloud">GLM 4.7 Cloud</option>
+              <option value="minimax-m2.1:cloud">MiniMax M2.1 Cloud</option>
+              <option value="gpt-oss:cloud">GPT OSS Cloud</option>
+              <option value="qwen3-next:cloud">Qwen3 Next Cloud (80B)</option>
+              <option value="mistral-large-3:cloud">Mistral Large 3 Cloud</option>
+              <option value="cogito-2.1:cloud">Cogito 2.1 Cloud (671B)</option>
+            </optgroup>
+            <optgroup label="─── Coding ────────────────">
+              <option value="qwen3-coder-next:cloud">Qwen3 Coder Next Cloud</option>
+              <option value="devstral-small-2:cloud">Devstral Small 2 Cloud (24B)</option>
+              <option value="devstral-2:cloud">Devstral 2 Cloud (123B)</option>
+            </optgroup>
+            <optgroup label="─── Thinking ──────────────">
+              <option value="kimi-k2-thinking:cloud">Kimi K2 Thinking Cloud</option>
+              <option value="qwen3-coder:480b-cloud">Qwen3 Coder 480B Cloud</option>
+            </optgroup>
           </select>
           <button
             data-testid="summarize-btn"
