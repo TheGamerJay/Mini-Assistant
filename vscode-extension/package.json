@@ -158,7 +158,7 @@
       "properties": {
         "miniAssistant.serverUrl": {
           "type": "string",
-          "default": "https://jarvis-hub-12.preview.emergentagent.com",
+          "default": "http://localhost:8000",
           "description": "Mini Assistant server URL"
         },
         "miniAssistant.autoOpen": {

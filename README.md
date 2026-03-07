@@ -87,7 +87,7 @@ The application is already running! Just ensure:
 
 1. ✅ Ollama is installed and running (`ollama serve`)
 2. ✅ At least one model is downloaded (`ollama pull llama3.2`)
-3. ✅ Visit the app at: `https://jarvis-hub-12.preview.emergentagent.com`
+3. ✅ Visit the app at: `http://localhost:8000`
 
 ## Usage Guide
 

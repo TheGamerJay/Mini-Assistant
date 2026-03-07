@@ -7,11 +7,28 @@ const ChatInterface = () => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [model, setModel] = useState('llama3.2');
+  const [model, setModel] = useState('qwen2.5:3b');
   const [showSummary, setShowSummary] = useState(false);
   const [summary, setSummary] = useState('');
   const [summarizing, setSummarizing] = useState(false);
   const messagesEndRef = useRef(null);
+
+  // Load messages from localStorage on mount
+  useEffect(() => {
+    const savedMessages = localStorage.getItem('chatMessages');
+    if (savedMessages) {
+      try {
+        setMessages(JSON.parse(savedMessages));
+      } catch (error) {
+        console.error('Failed to load chat messages:', error);
+      }
+    }
+  }, []);
+
+  // Save messages to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('chatMessages', JSON.stringify(messages));
+  }, [messages]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -57,6 +74,7 @@ const ChatInterface = () => {
     setMessages([]);
     setSummary('');
     setShowSummary(false);
+    localStorage.removeItem('chatMessages');
     toast.success('Chat cleared');
   };
 
@@ -99,11 +117,7 @@ const ChatInterface = () => {
             onChange={(e) => setModel(e.target.value)}
             className="bg-black/50 border border-cyan-500/50 text-cyan-100 px-4 py-2 rounded-sm font-mono text-sm focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 outline-none"
           >
-            <option value="llama3.2">LLAMA 3.2</option>
-            <option value="llama3.2:1b">LLAMA 3.2:1B</option>
-            <option value="llama3.2:3b">LLAMA 3.2:3B</option>
-            <option value="mistral">MISTRAL</option>
-            <option value="phi3">PHI-3</option>
+            <option value="qwen2.5:3b">QWEN 2.5:3B</option>
           </select>
           <button
             data-testid="summarize-btn"

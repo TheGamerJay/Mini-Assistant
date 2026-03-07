@@ -72,7 +72,7 @@ Open VS Code settings (`Ctrl+,`) and search for "Mini Assistant":
 
 ```json
 {
-  \"miniAssistant.serverUrl\": \"https://jarvis-hub-12.preview.emergentagent.com\",
+  \"miniAssistant.serverUrl\": \"http://localhost:8000\",
   \"miniAssistant.autoOpen\": false,
   \"miniAssistant.showInStatusBar\": true
 }

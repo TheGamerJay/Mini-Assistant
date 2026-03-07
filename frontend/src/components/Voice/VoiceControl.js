@@ -60,7 +60,7 @@ const VoiceControl = () => {
 
       const chatResponse = await axiosInstance.post('/chat', {
         messages: [{ role: 'user', content: transcript }],
-        model: 'llama3.2'
+        model: 'qwen2.5:3b'
       });
 
       const aiResponse = chatResponse.data.response;

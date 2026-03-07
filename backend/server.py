@@ -15,7 +15,7 @@ import asyncio
 from ollama import Client
 from faster_whisper import WhisperModel
 from gtts import gTTS
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 import tempfile
 import subprocess
 
@@ -32,7 +32,11 @@ api_router = APIRouter(prefix="/api")
 # Initialize Ollama client (will connect to localhost:11434)
 try:
     ollama_client = Client(host='http://localhost:11434')
-except:
+    # Test connection
+    ollama_client.chat(model='qwen2.5:3b', messages=[{'role': 'user', 'content': 'test'}])
+    print("✓ Ollama client initialized successfully")
+except Exception as e:
+    print(f"✗ Failed to initialize Ollama client: {e}")
     ollama_client = None
 
 # Initialize Whisper model for STT (lazy loading)
@@ -45,7 +49,7 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: List[ChatMessage]
-    model: str = "llama3.2"
+    model: str = "qwen2.5:3b"
     stream: bool = False
 
 class ChatResponse(BaseModel):
@@ -132,6 +136,9 @@ async def chat(request: ChatRequest):
         
         return ChatResponse(response=response_text, model=request.model)
     except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"Chat error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Chat error: {str(e)}")
 
 # Voice endpoints
@@ -176,8 +183,21 @@ async def text_to_speech(request: TTSRequest):
 @api_router.post("/search/web", response_model=List[WebSearchResult])
 async def web_search(request: WebSearchRequest):
     try:
-        with DDGS() as ddgs:
-            results = list(ddgs.text(request.query, max_results=request.max_results))
+        print(f"[SEARCH] Executing real-time web search for: '{request.query}' (max results: {request.max_results})")
+        
+        # Create a new DDGS instance for fresh search
+        ddgs = DDGS(timeout=10)
+        results = []
+        
+        # Perform the search
+        try:
+            for result in ddgs.text(request.query, max_results=request.max_results):
+                results.append(result)
+        except Exception as search_error:
+            print(f"[SEARCH ERROR] {search_error}")
+            # Continue with partial results if available
+        
+        print(f"[SEARCH COMPLETE] Found {len(results)} real-time results for: '{request.query}'")
         
         return [WebSearchResult(
             title=r.get('title', ''),
@@ -185,6 +205,7 @@ async def web_search(request: WebSearchRequest):
             body=r.get('body', '')
         ) for r in results]
     except Exception as e:
+        print(f"[SEARCH FAILED] {str(e)}")
         raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
 
 # File operations
@@ -314,7 +335,7 @@ Provide:
 3. Explanation"""
         
         response = ollama_client.chat(
-            model="llama3.2",
+            model="qwen2.5:3b",
             messages=[{"role": "user", "content": prompt}]
         )
         
@@ -359,7 +380,7 @@ Format the response as JSON with this structure:
 }}"""
         
         response = ollama_client.chat(
-            model="llama3.2",
+            model="qwen2.5:3b",
             messages=[{"role": "user", "content": prompt}]
         )
         
@@ -467,7 +488,7 @@ Format response as JSON:
 }}"""
         
         response = ollama_client.chat(
-            model="llama3.2",
+            model="qwen2.5:3b",
             messages=[{"role": "user", "content": prompt}]
         )
         
@@ -927,7 +948,7 @@ async def delete_snippet(snippet_id: str):
 # Conversation Summarization
 class SummarizeRequest(BaseModel):
     messages: List[ChatMessage]
-    model: str = "llama3.2"
+    model: str = "qwen2.5:3b"
 
 @api_router.post("/chat/summarize")
 async def summarize_conversation(request: SummarizeRequest):
@@ -1426,7 +1447,7 @@ class ErrorFixRequest(BaseModel):
     url: str
     error_description: Optional[str] = None
     auto_fix: bool = True
-    model: str = "llama3.2"
+    model: str = "qwen2.5:3b"
     capture_screenshot: bool = True
 
 class FixLoopSession(BaseModel):
@@ -1439,7 +1460,7 @@ class FixLoopSession(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 # Screenshot storage directory
-SCREENSHOT_DIR = Path("/app/backend/screenshots")
+SCREENSHOT_DIR = ROOT_DIR / "screenshots"
 SCREENSHOT_DIR.mkdir(exist_ok=True)
 
 async def capture_page_screenshot(url: str, session_id: str) -> Dict:
@@ -1673,7 +1694,7 @@ class TestRequest(BaseModel):
     test_type: str = "smoke"  # smoke, functional, api, e2e
     endpoints: List[str] = []
     assertions: List[Dict] = []
-    model: str = "llama3.2"
+    model: str = "qwen2.5:3b"
 
 class TestCase(BaseModel):
     name: str
@@ -1846,3 +1867,7 @@ logger = logging.getLogger(__name__)
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

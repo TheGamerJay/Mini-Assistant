@@ -85,7 +85,7 @@ After installation, configure Mini Assistant:
 
 ```json
 {
-  "miniAssistant.serverUrl": "https://jarvis-hub-12.preview.emergentagent.com",
+  "miniAssistant.serverUrl": "http://localhost:8000",
   "miniAssistant.autoOpen": false,
   "miniAssistant.showInStatusBar": true
 }
@@ -261,7 +261,7 @@ All 17 Mini Assistant features work in VS Code:
 ### **Panel not opening**
 1. Check status bar for errors
 2. Verify Mini Assistant is running
-3. Test in browser first: https://jarvis-hub-12.preview.emergentagent.com
+3. Test in browser first: http://localhost:8000
 4. Check settings: `Ctrl+,` → search "Mini Assistant"
 
 ### **Commands not working**
