@@ -40,6 +40,9 @@ def _require_db():
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
+# Default model for basic endpoints (override with FAST_MODEL env var)
+_default_model = os.environ.get('FAST_MODEL', 'gemma3:4b')
+
 # Initialize Ollama client using OLLAMA_HOST / OLLAMA_API_KEY env vars
 _ollama_host = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
 _ollama_api_key = os.environ.get('OLLAMA_API_KEY', '')
@@ -62,7 +65,7 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: List[ChatMessage]
-    model: str = "qwen2.5:3b"
+    model: str = _default_model
     stream: bool = False
 
 class ChatResponse(BaseModel):
@@ -351,7 +354,7 @@ Provide:
 3. Explanation"""
         
         response = ollama_client.chat(
-            model="qwen2.5:3b",
+            model=_default_model,
             messages=[{"role": "user", "content": prompt}]
         )
         
@@ -396,7 +399,7 @@ Format the response as JSON with this structure:
 }}"""
         
         response = ollama_client.chat(
-            model="qwen2.5:3b",
+            model=_default_model,
             messages=[{"role": "user", "content": prompt}]
         )
         
@@ -504,7 +507,7 @@ Format response as JSON:
 }}"""
         
         response = ollama_client.chat(
-            model="qwen2.5:3b",
+            model=_default_model,
             messages=[{"role": "user", "content": prompt}]
         )
         
@@ -967,7 +970,7 @@ async def delete_snippet(snippet_id: str):
 # Conversation Summarization
 class SummarizeRequest(BaseModel):
     messages: List[ChatMessage]
-    model: str = "qwen2.5:3b"
+    model: str = _default_model
 
 @api_router.post("/chat/summarize")
 async def summarize_conversation(request: SummarizeRequest):
@@ -1466,7 +1469,7 @@ class ErrorFixRequest(BaseModel):
     url: str
     error_description: Optional[str] = None
     auto_fix: bool = True
-    model: str = "qwen2.5:3b"
+    model: str = _default_model
     capture_screenshot: bool = True
 
 class FixLoopSession(BaseModel):
@@ -1715,7 +1718,7 @@ class TestRequest(BaseModel):
     test_type: str = "smoke"  # smoke, functional, api, e2e
     endpoints: List[str] = []
     assertions: List[Dict] = []
-    model: str = "qwen2.5:3b"
+    model: str = _default_model
 
 class TestCase(BaseModel):
     name: str
