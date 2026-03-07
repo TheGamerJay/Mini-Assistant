@@ -527,33 +527,90 @@ async def generate_app(request: AppBuilderRequest):
         raise HTTPException(status_code=503, detail="Ollama service not available")
     
     try:
-        prompt = f"""You are an expert web developer. Generate a complete, self-contained single HTML file for the following app:
+        prompt = f"""You are a world-class web developer and UI designer. Your job is to generate a single, complete, self-contained HTML file for the following app:
 
 {request.description}
 
-STRICT REQUIREMENTS:
-- Output ONLY raw HTML — no markdown, no code fences, no explanation before or after.
-- Start with <!DOCTYPE html> and end with </html>.
-- Everything (CSS and JavaScript) must be inline inside the HTML file — no external files, no CDN links EXCEPT for well-known libraries like Three.js, Chart.js, or similar that are essential to the app.
-- The app must be fully functional when opened directly in a browser (double-click the .html file).
-- Write complete, production-quality code. Do not leave TODOs or placeholders.
-- If it's a game, make it fully playable with keyboard and mobile touch controls.
-- Make the UI polished and visually attractive."""
+═══════════════════════════════════════════
+OUTPUT FORMAT — NON-NEGOTIABLE
+═══════════════════════════════════════════
+- Output ONLY the raw HTML file. Nothing else.
+- No markdown. No code fences. No explanation. No preamble. No commentary after.
+- The VERY FIRST character of your response must be < (the start of <!DOCTYPE html>).
+- The VERY LAST character must be > (the end of </html>).
+- Never truncate. Never use placeholders like "// add logic here" or "TODO". Write every single line of real, working code.
+
+═══════════════════════════════════════════
+TECHNICAL REQUIREMENTS
+═══════════════════════════════════════════
+- Everything must be inline: all CSS inside <style>, all JavaScript inside <script>.
+- No external files. No relative imports. Self-contained means it works when you double-click the .html file on any computer with no internet connection (except for CDN libraries if truly needed).
+- You MAY use CDN links ONLY for well-known, essential libraries (e.g., Three.js for 3D, Tone.js for audio, Chart.js for charts). Prefer inline when feasible.
+- Use modern JavaScript (ES6+). Use the Canvas API, Web Audio API, localStorage, or any browser API that makes the app better.
+- Handle edge cases and errors gracefully. The app must never crash or freeze.
+
+═══════════════════════════════════════════
+QUALITY STANDARDS — EXCEED EXPECTATIONS
+═══════════════════════════════════════════
+VISUAL DESIGN:
+- Dark, premium aesthetic by default. Use rich gradients, subtle glassmorphism, and smooth drop shadows.
+- Typography: use system font stack or a Google Font (via @import if internet available, fallback gracefully).
+- Consistent color palette. Every interactive element has hover/active states with smooth CSS transitions.
+- The UI should look like a polished commercial product, not a demo or homework project.
+- Fully responsive — works on mobile, tablet, and desktop. Use CSS Grid or Flexbox layouts.
+
+FOR GAMES specifically:
+- Implement a proper game loop using requestAnimationFrame.
+- Full physics: gravity, collision detection, momentum, and friction where appropriate.
+- Particle effects for impacts, explosions, pickups, deaths, or level-ups.
+- Sound effects using the Web Audio API (synthesized — no external audio files needed).
+- Keyboard controls (WASD / arrow keys / space) AND mobile touch controls (on-screen buttons or swipe).
+- Score system with high score saved to localStorage. Show current score and best score.
+- Multiple difficulty levels or progressive difficulty scaling (gets harder over time).
+- Start screen with title, instructions, and a START button. Game over screen with score and RESTART button.
+- Smooth 60fps animations. No jank, no flicker.
+- Rich game feel: screen shake on impact, flash effects, combo counters, satisfying feedback.
+
+FOR UTILITY APPS / TOOLS:
+- Every feature described must be fully implemented — no skeleton buttons that do nothing.
+- Use localStorage to persist user data across sessions automatically.
+- Include keyboard shortcuts for common actions.
+- Validate inputs and show clear, styled error/success messages.
+- Add subtle animations for state changes (fade in, slide in, etc.).
+
+FOR DATA / VISUALIZATION APPS:
+- Generate realistic sample/demo data so the app looks populated immediately on open.
+- Animate chart renders and transitions between data states.
+- Include interactive controls (filters, sliders, date pickers) that actually work.
+
+═══════════════════════════════════════════
+COMPLETENESS CHECKLIST (verify before outputting)
+═══════════════════════════════════════════
+✓ Does the app fully implement everything described in the request?
+✓ Is every button, input, and control functional?
+✓ Is the visual design polished and consistent?
+✓ Does it work offline (no broken CDN-dependent features)?
+✓ Is the code complete — no TODOs, no truncation, no "..." shortcuts?
+✓ Starts with <!DOCTYPE html> and ends with </html>?
+
+Now generate the complete HTML file:"""
 
         response = ollama_client.chat(
             model="devstral-2:cloud",
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            options={"num_predict": 16384, "temperature": 0.3}
         )
 
         content = response['message']['content'].strip()
 
-        # Strip markdown fences if the model added them
-        if content.startswith("```"):
-            first_newline = content.find("\n")
-            content = content[first_newline + 1:]
-        if content.endswith("```"):
-            content = content[:content.rfind("```")]
+        # Strip markdown fences if the model added them (handles ```html, ```htm, ``` etc.)
+        import re as _re
+        content = _re.sub(r'^```[a-zA-Z]*\n?', '', content)
+        content = _re.sub(r'\n?```\s*$', '', content)
         content = content.strip()
+        # Ensure it starts with a proper doctype
+        if not content.lower().startswith('<!doctype') and '<!doctype' in content.lower():
+            content = content[content.lower().find('<!doctype'):]
 
         # Derive a simple app name from the description
         name_words = request.description.split()[:4]
