@@ -39,6 +39,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from .config   import ASSISTANT_MODE
 from .router   import route, RouteResult
 from .planner  import plan as make_plan, Plan
 from .executor import Executor, ExecutionResult
@@ -104,7 +105,15 @@ class MiniAssistant:
     All components are lazily instantiated on first use.
     """
 
-    def __init__(self, store_path: Optional[str] = None):
+    def __init__(
+        self,
+        store_path: Optional[str] = None,
+        mode: Optional[str] = None,
+    ):
+        # ── Mode: "single" or "swarm" ────────────────────────────────────────
+        # Priority: constructor arg > env var (ASSISTANT_MODE)
+        self._mode = mode or ASSISTANT_MODE
+
         # ── Memory layers ─────────────────────────────────────────────────────
         self._vector_store   = VectorStore(store_path)
         self._conversation   = ConversationMemory(max_turns=30)
@@ -117,9 +126,10 @@ class MiniAssistant:
         self._tester         = Tester()
 
         # ── Lazy registries ───────────────────────────────────────────────────
-        self._brains: dict[str, Any] = {}
+        self._brains:   dict[str, Any]     = {}
         self._executor: Optional[Executor] = None
-        self._repair: Optional[RepairLoop]  = None
+        self._repair:   Optional[RepairLoop] = None
+        self._swarm:    Optional[Any]      = None   # SwarmManager (lazy)
 
     # ── Lazy factories ────────────────────────────────────────────────────────
 
@@ -150,6 +160,13 @@ class MiniAssistant:
         if self._repair is None:
             self._repair = RepairLoop(self)
         return self._repair
+
+    def _get_swarm(self):
+        """Lazy-init the SwarmManager (avoids circular import at module level)."""
+        if self._swarm is None:
+            from .swarm.manager import SwarmManager
+            self._swarm = SwarmManager(self)
+        return self._swarm
 
     # ── Tool pre-execution ────────────────────────────────────────────────────
 
@@ -374,6 +391,19 @@ class MiniAssistant:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
+    def set_mode(self, mode: str) -> None:
+        """
+        Switch execution mode at runtime.
+
+        Args:
+            mode: "single" for the classic single-agent pipeline,
+                  "swarm"  for the multi-agent swarm.
+        """
+        if mode not in ("single", "swarm"):
+            raise ValueError(f"Invalid mode '{mode}'. Choose 'single' or 'swarm'.")
+        self._mode = mode
+        logger.info("Assistant mode set to: %s", mode)
+
     def chat(
         self,
         message: str,
@@ -383,6 +413,7 @@ class MiniAssistant:
         use_planner: bool = False,
         auto_execute_code: bool = False,
         run_tests: bool = True,
+        mode: Optional[str] = None,        # per-request mode override
     ) -> AssistantResponse:
         """
         Process a user message through the multi-brain pipeline.
@@ -402,37 +433,75 @@ class MiniAssistant:
         # Update internal conversation memory
         self._conversation.add_user(message)
 
-        # Route the request
-        route_result = route(message, images)
-        logger.info(
-            "chat: brain=%s task=%s method=%s",
-            route_result.brain, route_result.task, route_result.routing_method,
-        )
-
         # Store any user preferences from metadata
         if metadata:
             for key, val in metadata.items():
                 self._long_term.store_fact(key, val)
 
-        # Choose pipeline
-        if use_planner and len(message) >= 30:
-            response = self._planned_chat(message, route_result)
+        # ── Resolve effective mode ─────────────────────────────────────────
+        effective_mode = mode or self._mode
 
-        elif route_result.brain in ("coding", "coder") and run_tests:
-            response = self._coding_pipeline(
-                message, route_result, images=images, run_tests=run_tests
-            )
+        # ── Swarm pipeline ────────────────────────────────────────────────
+        if effective_mode == "swarm":
+            response = self._swarm_chat(message, images=images)
 
         else:
-            response = self._simple_chat(
-                message, route_result, images=images,
-                auto_execute_code=auto_execute_code,
+            # ── Single-agent pipeline ─────────────────────────────────────
+            route_result = route(message, images)
+            logger.info(
+                "single-agent: brain=%s task=%s method=%s",
+                route_result.brain, route_result.task, route_result.routing_method,
             )
+
+            if use_planner and len(message) >= 30:
+                response = self._planned_chat(message, route_result)
+            elif route_result.brain in ("coding", "coder") and run_tests:
+                response = self._coding_pipeline(
+                    message, route_result, images=images, run_tests=run_tests
+                )
+            else:
+                response = self._simple_chat(
+                    message, route_result, images=images,
+                    auto_execute_code=auto_execute_code,
+                )
 
         # Record assistant turn in conversation memory
         self._conversation.add_assistant(response.text)
-
         return response
+
+    def _swarm_chat(
+        self,
+        message: str,
+        images: Optional[list[str]] = None,
+    ) -> AssistantResponse:
+        """Route the request through the multi-agent swarm."""
+        logger.info("swarm-mode: dispatching to SwarmManager.")
+        swarm  = self._get_swarm()
+        result = swarm.run(message)
+
+        # Pull per-task metadata for enriched response
+        tests_passed:   Optional[bool] = None
+        review_passed:  Optional[bool] = None
+        review_score:   float          = 0.0
+        repair_attempts: int           = 1
+
+        for tr in result.task_results.values():
+            if tr.data.get("tests_passed") is not None:
+                tests_passed = tr.data["tests_passed"]
+            if tr.data.get("review_passed") is not None:
+                review_passed = tr.data["review_passed"]
+
+        return AssistantResponse(
+            text            = result.final_output,
+            brain           = "swarm",
+            task            = f"swarm:{len(result.tasks)}_tasks",
+            model           = "multi-agent",
+            routing_method  = "swarm",
+            tests_passed    = tests_passed,
+            review_passed   = review_passed,
+            review_score    = review_score,
+            repair_attempts = repair_attempts,
+        )
 
     def ask_brain(self, brain_name: str, prompt: str, **kwargs) -> str:
         """Direct call to a specific brain, bypassing the router."""
@@ -497,13 +566,20 @@ class MiniAssistant:
     def conversation_length(self) -> int:
         return self._conversation.length
 
+    @property
+    def mode(self) -> str:
+        """Current execution mode: 'single' or 'swarm'."""
+        return self._mode
+
     def status(self) -> dict:
         """Return a summary of all memory layers and system state."""
         return {
+            "mode":              self._mode,
             "vector_docs":       self.memory_doc_count,
             "long_term_facts":   self.fact_count,
             "solutions_stored":  self.solution_count,
             "reflections_logged":self.reflection_count,
             "conversation_turns":self.conversation_length,
             "brains_loaded":     list(self._brains.keys()),
+            "swarm_ready":       self._swarm is not None,
         }

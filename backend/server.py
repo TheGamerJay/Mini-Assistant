@@ -1866,6 +1866,7 @@ class AssistantChatRequest(BaseModel):
     images: List[str] = []
     history: List[Dict[str, Any]] = []
     metadata: Dict[str, Any] = {}
+    mode: Optional[str] = None  # "single" | "swarm" – overrides server default
 
 
 class AssistantLearnTextRequest(BaseModel):
@@ -1888,6 +1889,7 @@ async def assistant_chat(request: AssistantChatRequest):
                 images=request.images or [],
                 history=request.history or [],
                 metadata=request.metadata or {},
+                mode=request.mode,
             ),
         )
         return {
@@ -2020,6 +2022,75 @@ async def assistant_get_facts():
     try:
         return {"facts": _get_assistant()._long_term.all_facts()}
     except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+
+# ── Mode endpoints ────────────────────────────────────────────────────────────
+
+class SetModeRequest(BaseModel):
+    mode: str  # "single" | "swarm"
+
+
+@api_router.get("/assistant/mode")
+async def get_assistant_mode():
+    """Return the current assistant execution mode."""
+    try:
+        assistant = _get_assistant()
+        return {"mode": assistant.mode}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@api_router.post("/assistant/mode")
+async def set_assistant_mode(request: SetModeRequest):
+    """Switch the assistant execution mode at runtime."""
+    if request.mode not in ("single", "swarm"):
+        raise HTTPException(status_code=400, detail="mode must be 'single' or 'swarm'")
+    try:
+        assistant = _get_assistant()
+        assistant.set_mode(request.mode)
+        return {"mode": assistant.mode}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── Swarm endpoints ───────────────────────────────────────────────────────────
+
+class SwarmRunRequest(BaseModel):
+    request: str
+    mode: Optional[str] = None  # ignored – always runs swarm pipeline
+
+
+@api_router.post("/swarm/run")
+async def swarm_run(body: SwarmRunRequest):
+    """Run a request directly through the full swarm pipeline."""
+    try:
+        assistant = _get_assistant()
+        swarm_result = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: assistant._get_swarm().run(body.request),
+        )
+        return {
+            "run_id":           swarm_result.run_id,
+            "success":          swarm_result.success,
+            "final_output":     swarm_result.final_output,
+            "summary":          swarm_result.summary,
+            "errors":           swarm_result.errors,
+            "duration_seconds": swarm_result.duration_seconds,
+            "tasks": [
+                {
+                    "id":             t.id,
+                    "description":    t.description,
+                    "type":           t.type,
+                    "assigned_agent": t.assigned_agent,
+                    "status":         t.status,
+                }
+                for t in swarm_result.tasks
+            ],
+        }
+    except Exception as exc:
+        logger.exception("swarm_run failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
 

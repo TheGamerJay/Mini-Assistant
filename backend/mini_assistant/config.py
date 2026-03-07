@@ -4,6 +4,12 @@ import os
 # Override OLLAMA_HOST to point at a remote/cloud Ollama gateway if needed.
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 
+# ─── Assistant execution mode ─────────────────────────────────────────────────
+# "single" – classic single-agent pipeline (router → planner → executor)
+# "swarm"  – multi-agent swarm (manager → specialist agents run in parallel)
+# Can be overridden per-request via chat(mode="swarm") or by env variable.
+ASSISTANT_MODE = os.getenv("ASSISTANT_MODE", "single")
+
 # ─── Brain model assignment ───────────────────────────────────────────────────
 # Each brain can be overridden via environment variable.
 # "cloud" suffix models require an Ollama-compatible proxy (e.g. LiteLLM).
@@ -60,3 +66,20 @@ AUTO_TEST_ENABLED     = os.getenv("AUTO_TEST_ENABLED", "1") == "1"
 
 # Safety mode for computer control: "auto" | "confirm" | "dry-run"
 COMPUTER_SAFETY_MODE  = os.getenv("COMPUTER_SAFETY_MODE", "confirm")
+
+# ─── Swarm agent model assignment ────────────────────────────────────────────
+# Each agent independently calls its assigned Ollama model.
+# Override any via environment variable.
+AGENT_MODELS = {
+    "manager":      os.getenv("MANAGER_MODEL",       "qwen3:30b"),
+    "planner":      os.getenv("PLANNER_AGENT_MODEL", "qwen3:30b"),
+    "research":     os.getenv("RESEARCH_AGENT_MODEL","deepseek-v3:671b-cloud"),
+    "coding":       os.getenv("CODING_AGENT_MODEL",  "qwen3-coder:480b-cloud"),
+    "debug":        os.getenv("DEBUG_AGENT_MODEL",   "qwen3-coder:480b-cloud"),
+    "tester":       os.getenv("TESTER_AGENT_MODEL",  "gemma3:4b"),
+    "file_analyst": os.getenv("FILE_ANALYST_MODEL",  "qwen3:30b"),
+    "vision":       os.getenv("VISION_AGENT_MODEL",  "qwen3-vl:235b-cloud"),
+}
+
+# Number of parallel workers in the swarm execution loop
+SWARM_MAX_WORKERS = int(os.getenv("SWARM_MAX_WORKERS", "4"))
