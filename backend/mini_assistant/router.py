@@ -24,7 +24,15 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional
 
-import ollama
+try:
+    import ollama
+except ImportError as _e:
+    import logging as _log
+    _log.getLogger(__name__).error(
+        "DEPENDENCY ERROR: 'ollama' is not installed – LLM routing will be unavailable. "
+        "Run: pip install ollama  (%s)", _e,
+    )
+    ollama = None  # type: ignore[assignment]
 
 from .config import MODELS, TASK_TYPES, OLLAMA_HOST
 

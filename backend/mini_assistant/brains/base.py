@@ -11,7 +11,15 @@ All brains inherit from this. Handles:
 import logging
 from typing import Generator, Optional
 
-import ollama
+try:
+    import ollama
+except ImportError as _e:
+    import logging as _log
+    _log.getLogger(__name__).error(
+        "DEPENDENCY ERROR: 'ollama' is not installed – all brains will be unavailable. "
+        "Run: pip install ollama  (%s)", _e,
+    )
+    ollama = None  # type: ignore[assignment]
 
 from ..config import OLLAMA_HOST, MODELS
 
@@ -23,6 +31,11 @@ class BaseBrain:
     system_prompt: str = "You are a helpful AI assistant."
 
     def __init__(self, model: str):
+        if ollama is None:
+            raise ImportError(
+                "DEPENDENCY ERROR: 'ollama' is not installed. "
+                "Run: pip install ollama"
+            )
         self.model = model
         self._client = ollama.Client(host=OLLAMA_HOST)
         self._history: list[dict] = []

@@ -24,7 +24,15 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-import ollama
+try:
+    import ollama
+except ImportError as _e:
+    import logging as _log
+    _log.getLogger(__name__).error(
+        "DEPENDENCY ERROR: 'ollama' is not installed – task planner will be unavailable. "
+        "Run: pip install ollama  (%s)", _e,
+    )
+    ollama = None  # type: ignore[assignment]
 
 from .config import MODELS, OLLAMA_HOST
 

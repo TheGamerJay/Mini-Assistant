@@ -15,7 +15,15 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
-import ollama
+try:
+    import ollama
+except ImportError as _e:
+    import logging as _log
+    _log.getLogger(__name__).error(
+        "DEPENDENCY ERROR: 'ollama' is not installed – swarm agents will be unavailable. "
+        "Run: pip install ollama  (%s)", _e,
+    )
+    ollama = None  # type: ignore[assignment]
 
 from ..config import AGENT_MODELS, MODELS, OLLAMA_HOST
 from .task_models import SwarmTask, TaskResult

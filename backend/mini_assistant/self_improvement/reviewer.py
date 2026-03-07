@@ -25,7 +25,15 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
-import ollama
+try:
+    import ollama
+except ImportError as _e:
+    import logging as _log
+    _log.getLogger(__name__).error(
+        "DEPENDENCY ERROR: 'ollama' is not installed – reviewer/FixLoop will be unavailable. "
+        "Run: pip install ollama  (%s)", _e,
+    )
+    ollama = None  # type: ignore[assignment]
 
 from ..config import MODELS, OLLAMA_HOST
 
@@ -77,6 +85,11 @@ class Reviewer:
     """Evaluate assistant outputs against user requests."""
 
     def __init__(self):
+        if ollama is None:
+            raise ImportError(
+                "DEPENDENCY ERROR: 'ollama' is not installed – Reviewer/FixLoop unavailable. "
+                "Run: pip install ollama"
+            )
         self._client = ollama.Client(host=OLLAMA_HOST)
         self._model  = MODELS.get("fast", MODELS["fallback"])
 
