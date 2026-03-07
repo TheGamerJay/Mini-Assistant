@@ -41,7 +41,7 @@ app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
 # Default model for basic endpoints (override with FAST_MODEL env var)
-_default_model = os.environ.get('FAST_MODEL', 'gemma3:4b')
+_default_model = os.environ.get('FAST_MODEL', 'glm-4.7:cloud')
 
 # Initialize Ollama client using OLLAMA_HOST / OLLAMA_API_KEY env vars
 _ollama_host = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')

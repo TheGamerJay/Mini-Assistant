@@ -21,13 +21,12 @@ ASSISTANT_MODE = os.getenv("ASSISTANT_MODE", "single")
 # Each brain can be overridden via environment variable.
 # "cloud" suffix models require an Ollama-compatible proxy (e.g. LiteLLM).
 MODELS = {
-    "router":   os.getenv("ROUTER_MODEL",   "qwen3:30b"),
+    "router":   os.getenv("ROUTER_MODEL",   "glm-4.7:cloud"),
     "coder":    os.getenv("CODER_MODEL",    "qwen3-coder:480b-cloud"),
     "vision":   os.getenv("VISION_MODEL",   "qwen3-vl:235b-cloud"),
     "research": os.getenv("RESEARCH_MODEL", "deepseek-v3:671b-cloud"),
-    "fast":     os.getenv("FAST_MODEL",     "gemma3:4b"),
-    # Always-available fallback when the primary model is not pulled locally
-    "fallback": os.getenv("FALLBACK_MODEL", "qwen2.5:3b"),
+    "fast":     os.getenv("FAST_MODEL",     "glm-4.7:cloud"),
+    "fallback": os.getenv("FALLBACK_MODEL", "minimax-m2.1:cloud"),
 }
 
 # ─── Task type labels used by the router ─────────────────────────────────────
@@ -78,13 +77,13 @@ COMPUTER_SAFETY_MODE  = os.getenv("COMPUTER_SAFETY_MODE", "confirm")
 # Each agent independently calls its assigned Ollama model.
 # Override any via environment variable.
 AGENT_MODELS = {
-    "manager":      os.getenv("MANAGER_MODEL",       "qwen3:30b"),
-    "planner":      os.getenv("PLANNER_AGENT_MODEL", "qwen3:30b"),
+    "manager":      os.getenv("MANAGER_MODEL",       "glm-4.7:cloud"),
+    "planner":      os.getenv("PLANNER_AGENT_MODEL", "glm-4.7:cloud"),
     "research":     os.getenv("RESEARCH_AGENT_MODEL","deepseek-v3:671b-cloud"),
     "coding":       os.getenv("CODING_AGENT_MODEL",  "qwen3-coder:480b-cloud"),
     "debug":        os.getenv("DEBUG_AGENT_MODEL",   "qwen3-coder:480b-cloud"),
-    "tester":       os.getenv("TESTER_AGENT_MODEL",  "gemma3:4b"),
-    "file_analyst": os.getenv("FILE_ANALYST_MODEL",  "qwen3:30b"),
+    "tester":       os.getenv("TESTER_AGENT_MODEL",  "minimax-m2.1:cloud"),
+    "file_analyst": os.getenv("FILE_ANALYST_MODEL",  "glm-4.7:cloud"),
     "vision":       os.getenv("VISION_AGENT_MODEL",  "qwen3-vl:235b-cloud"),
 }
 
