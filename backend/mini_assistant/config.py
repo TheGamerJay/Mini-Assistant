@@ -44,6 +44,19 @@ CODE_TIMEOUT    = int(os.getenv("CODE_TIMEOUT", "15"))        # seconds
 CODE_MAX_OUTPUT = int(os.getenv("CODE_MAX_OUTPUT", "4096"))   # chars
 
 # ─── Memory / RAG ────────────────────────────────────────────────────────────
-VECTOR_STORE_PATH = os.getenv("VECTOR_STORE_PATH", "./memory_store")
-EMBED_MODEL       = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
-RAG_TOP_K         = int(os.getenv("RAG_TOP_K", "5"))
+VECTOR_STORE_PATH     = os.getenv("VECTOR_STORE_PATH",     "./memory_store")
+EMBED_MODEL           = os.getenv("EMBED_MODEL",           "all-MiniLM-L6-v2")
+RAG_TOP_K             = int(os.getenv("RAG_TOP_K",         "5"))
+LONG_TERM_MEMORY_PATH = os.getenv("LONG_TERM_MEMORY_PATH", "./memory_store/long_term.json")
+SOLUTION_MEMORY_PATH  = os.getenv("SOLUTION_MEMORY_PATH",  "./memory_store/solutions.json")
+REFLECTION_LOG_PATH   = os.getenv("REFLECTION_LOG_PATH",   "./memory_store/reflections.json")
+
+# ─── Self-improvement ────────────────────────────────────────────────────────
+# Maximum repair attempts before giving up and returning best-effort output
+REPAIR_MAX_RETRIES    = int(os.getenv("REPAIR_MAX_RETRIES", "3"))
+
+# Set to "0" to disable automatic test generation for coding tasks
+AUTO_TEST_ENABLED     = os.getenv("AUTO_TEST_ENABLED", "1") == "1"
+
+# Safety mode for computer control: "auto" | "confirm" | "dry-run"
+COMPUTER_SAFETY_MODE  = os.getenv("COMPUTER_SAFETY_MODE", "confirm")

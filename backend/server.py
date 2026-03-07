@@ -1891,12 +1891,16 @@ async def assistant_chat(request: AssistantChatRequest):
             ),
         )
         return {
-            "reply": response.reply,
-            "brain": response.brain,
-            "task": response.task,
-            "model": response.model,
-            "routing_method": response.routing_method,
-            "tool_results": response.tool_results,
+            "reply":           response.text,
+            "brain":           response.brain,
+            "task":            response.task,
+            "model":           response.model,
+            "routing_method":  response.routing_method,
+            "tests_passed":    response.tests_passed,
+            "tests_run":       response.tests_run,
+            "review_passed":   response.review_passed,
+            "review_score":    response.review_score,
+            "repair_attempts": response.repair_attempts,
         }
     except Exception as exc:
         logger.exception("assistant_chat failed")
@@ -1907,11 +1911,11 @@ async def assistant_chat(request: AssistantChatRequest):
 async def assistant_learn_text(request: AssistantLearnTextRequest):
     try:
         assistant = _get_assistant()
-        chunks = await asyncio.get_event_loop().run_in_executor(
+        result = await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: assistant.learn_text(request.text, source=request.source),
         )
-        return {"success": True, "chunks_added": chunks}
+        return {"success": True, "chunks_added": result.get("chunks", 0)}
     except Exception as exc:
         logger.exception("assistant_learn_text failed")
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1921,11 +1925,11 @@ async def assistant_learn_text(request: AssistantLearnTextRequest):
 async def assistant_learn_file(request: AssistantLearnFileRequest):
     try:
         assistant = _get_assistant()
-        chunks = await asyncio.get_event_loop().run_in_executor(
+        result = await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: assistant.learn_file(request.file_path),
         )
-        return {"success": True, "chunks_added": chunks}
+        return {"success": True, "chunks_added": result.get("chunks", 0)}
     except Exception as exc:
         logger.exception("assistant_learn_file failed")
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1968,6 +1972,55 @@ async def assistant_matchers():
             for m in matchers
         ]
     }
+
+
+@api_router.get("/assistant/status")
+async def assistant_status():
+    try:
+        return _get_assistant().status()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@api_router.get("/assistant/solutions")
+async def assistant_solutions(q: str = "", top_k: int = 10):
+    try:
+        assistant = _get_assistant()
+        if q:
+            return {"solutions": assistant.find_solutions(q, top_k=top_k)}
+        return {"solutions": assistant._solutions.all_solutions()}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@api_router.get("/assistant/reflections")
+async def assistant_reflections(n: int = 20):
+    try:
+        return {"reflections": _get_assistant().recent_reflections(n)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+class StoreFactRequest(BaseModel):
+    key: str
+    value: Any
+
+
+@api_router.post("/assistant/facts")
+async def assistant_store_fact(request: StoreFactRequest):
+    try:
+        _get_assistant().store_fact(request.key, request.value)
+        return {"success": True}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@api_router.get("/assistant/facts")
+async def assistant_get_facts():
+    try:
+        return {"facts": _get_assistant()._long_term.all_facts()}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 app.include_router(api_router)
