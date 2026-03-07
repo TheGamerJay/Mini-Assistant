@@ -53,14 +53,41 @@ const AppBuilder = () => {
   const [coachMessages, setCoachMessages] = useState([]);
   const [coachInput, setCoachInput] = useState('');
   const [coachLoading, setCoachLoading] = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState('');
   const [spec, setSpec] = useState('');
   const messagesEndRef = useRef(null);
+  const loadingIntervalRef = useRef(null);
 
   // Build state
   const [description, setDescription] = useState('');
   const [buildLoading, setBuildLoading] = useState(false);
+  const [buildMsg, setBuildMsg] = useState('');
   const [generatedApp, setGeneratedApp] = useState(null);
   const [activeView, setActiveView] = useState('preview');
+
+  const CHAT_LOADING_MSGS = [
+    'Thinking...', 'Processing your idea...', 'Crafting the perfect question...',
+    'Analyzing requirements...', 'Almost there...',
+  ];
+  const BUILD_LOADING_MSGS = [
+    'Reading your requirements...', 'Planning the architecture...',
+    'Writing the code...', 'Building components...', 'Wiring everything together...',
+    'Adding finishing touches...', 'Almost done...',
+  ];
+
+  const startLoadingCycle = (msgs, setter) => {
+    let i = 0;
+    setter(msgs[0]);
+    loadingIntervalRef.current = setInterval(() => {
+      i = (i + 1) % msgs.length;
+      setter(msgs[i]);
+    }, 2500);
+  };
+
+  const stopLoadingCycle = (setter) => {
+    clearInterval(loadingIntervalRef.current);
+    setter('');
+  };
 
   const templates = [
     { name: 'Todo App',      desc: 'Simple task management app with CRUD operations and local storage' },
@@ -84,6 +111,7 @@ const AppBuilder = () => {
 
   const startCoach = async () => {
     setCoachLoading(true);
+    startLoadingCycle(CHAT_LOADING_MSGS, setLoadingMsg);
     try {
       const res = await axiosInstance.post('/chat', {
         messages: [{ role: 'user', content: 'Hello, I want to build an app.' }],
@@ -98,6 +126,7 @@ const AppBuilder = () => {
         content: "What do you want to build?"
       }]);
     } finally {
+      stopLoadingCycle(setLoadingMsg);
       setCoachLoading(false);
     }
   };
@@ -109,6 +138,7 @@ const AppBuilder = () => {
     setCoachMessages(updatedMsgs);
     setCoachInput('');
     setCoachLoading(true);
+    startLoadingCycle(CHAT_LOADING_MSGS, setLoadingMsg);
 
     // Check if user typed BUILD
     if (coachInput.trim().toUpperCase() === 'BUILD') {
@@ -135,10 +165,11 @@ const AppBuilder = () => {
     } catch (err) {
       const msg = err.code === 'ECONNABORTED'
         ? 'Response timed out — try again'
-        : 'Coach response failed';
+        : 'Assistant response failed';
       toast.error(msg);
-      setCoachMessages(prev => [...prev, { role: 'assistant', content: '⚠️ Response timed out. Please try again.' }]);
+      setCoachMessages(prev => [...prev, { role: 'assistant', content: 'Response timed out. Please try again.' }]);
     } finally {
+      stopLoadingCycle(setLoadingMsg);
       setCoachLoading(false);
     }
   };
@@ -151,7 +182,7 @@ const AppBuilder = () => {
   };
 
   const compileAndBuild = async (msgs) => {
-    // Ask the coach to compile a spec, then switch to build mode
+    startLoadingCycle(BUILD_LOADING_MSGS, setLoadingMsg);
     try {
       const res = await axiosInstance.post('/chat', {
         messages: [
@@ -164,17 +195,18 @@ const AppBuilder = () => {
         ],
         model: 'glm-5:cloud',
         stream: false,
-      });
+      }, { timeout: 180000 });
       const compiled = res.data.response;
       setDescription(compiled);
       setCoachMessages(prev => [...prev, {
         role: 'assistant',
-        content: `✅ Spec compiled! Switching to Build mode...\n\n${compiled}`
+        content: `Spec compiled! Switching to Build mode...\n\n${compiled}`
       }]);
       setTimeout(() => setMode('build'), 1200);
     } catch {
-      toast.error('Failed to compile spec');
+      toast.error('Failed to compile spec — please try again');
     } finally {
+      stopLoadingCycle(setLoadingMsg);
       setCoachLoading(false);
     }
   };
@@ -197,16 +229,18 @@ const AppBuilder = () => {
   const generateApp = async () => {
     if (!description.trim() || buildLoading) return;
     setBuildLoading(true);
+    startLoadingCycle(BUILD_LOADING_MSGS, setBuildMsg);
     try {
       const response = await axiosInstance.post('/app-builder/generate', {
         description,
         framework: 'react',
-      });
+      }, { timeout: 180000 });
       setGeneratedApp(response.data);
       toast.success('App generated!');
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to generate app');
     } finally {
+      stopLoadingCycle(setBuildMsg);
       setBuildLoading(false);
     }
   };
@@ -330,11 +364,7 @@ const AppBuilder = () => {
                   <Loader2 className="w-4 h-4 text-white animate-spin" />
                 </div>
                 <div className="px-4 py-3 bg-black/40 border border-cyan-900/30 rounded-lg">
-                  <div className="flex gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </div>
+                  <span className="text-xs font-mono text-cyan-400/80 animate-pulse">{loadingMsg || 'Thinking...'}</span>
                 </div>
               </div>
             )}
@@ -391,7 +421,7 @@ const AppBuilder = () => {
                   disabled={buildLoading || !description.trim()}
                   className="px-8 py-3 bg-gradient-to-r from-cyan-500 to-violet-600 text-white font-bold hover:from-cyan-400 hover:to-violet-500 hover:shadow-[0_0_20px_rgba(0,243,255,0.4)] uppercase tracking-wider rounded-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                  {buildLoading ? <><Loader2 className="w-5 h-5 animate-spin" />GENERATING...</> : <><Wand2 className="w-5 h-5" />GENERATE APP</>}
+                  {buildLoading ? <><Loader2 className="w-5 h-5 animate-spin" />{buildMsg || 'GENERATING...'}</> : <><Wand2 className="w-5 h-5" />GENERATE APP</>}
                 </button>
                 {!spec && (
                   <button
