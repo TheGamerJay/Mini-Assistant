@@ -22,9 +22,19 @@ import subprocess
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+mongo_url = os.environ.get('MONGO_URL', '')
+if mongo_url:
+    client = AsyncIOMotorClient(mongo_url)
+    db = client[os.environ.get('DB_NAME', 'mini_assistant')]
+else:
+    logging.warning("MONGO_URL not set – MongoDB features will be unavailable")
+    client = None
+    db = None
+
+
+def _require_db():
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not configured (MONGO_URL env var not set)")
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -284,6 +294,7 @@ async def execute_command(request: CommandRequest):
 # Project Profiles
 @api_router.get("/profiles", response_model=List[ProjectProfile])
 async def get_profiles():
+    _require_db()
     profiles = await db.profiles.find({}, {"_id": 0}).to_list(1000)
     for profile in profiles:
         if isinstance(profile.get('created_at'), str):
@@ -292,6 +303,7 @@ async def get_profiles():
 
 @api_router.post("/profiles", response_model=ProjectProfile)
 async def create_profile(input: ProjectProfileCreate):
+    _require_db()
     profile_dict = input.model_dump()
     profile_obj = ProjectProfile(**profile_dict)
     
@@ -303,6 +315,7 @@ async def create_profile(input: ProjectProfileCreate):
 
 @api_router.delete("/profiles/{profile_id}")
 async def delete_profile(profile_id: str):
+    _require_db()
     result = await db.profiles.delete_one({"id": profile_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -926,11 +939,13 @@ async def write_env(request: EnvVarRequest):
 # Snippet Library
 @api_router.get("/snippets/list")
 async def list_snippets():
+    _require_db()
     snippets = await db.snippets.find({}, {"_id": 0}).to_list(1000)
     return {"snippets": snippets}
 
 @api_router.post("/snippets/create")
 async def create_snippet(snippet: SnippetCreate):
+    _require_db()
     snippet_dict = snippet.model_dump()
     snippet_dict["id"] = str(uuid.uuid4())
     snippet_dict["created_at"] = datetime.now(timezone.utc).isoformat()
@@ -940,6 +955,7 @@ async def create_snippet(snippet: SnippetCreate):
 
 @api_router.delete("/snippets/delete/{snippet_id}")
 async def delete_snippet(snippet_id: str):
+    _require_db()
     result = await db.snippets.delete_one({"id": snippet_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Snippet not found")
@@ -1640,7 +1656,8 @@ async def fixloop_start(request: ErrorFixRequest):
             "status": "analyzed",
             "created_at": datetime.now(timezone.utc).isoformat()
         }
-        await db.fixloop_sessions.insert_one(fixloop_session)
+        if db is not None:
+            await db.fixloop_sessions.insert_one(fixloop_session)
         
         # If errors found and auto_fix enabled, try to generate fixes
         suggested_fixes = []
@@ -1685,6 +1702,7 @@ async def get_fixloop_screenshot(session_id: str):
 
 @api_router.get("/fixloop/sessions")
 async def fixloop_sessions():
+    _require_db()
     sessions = await db.fixloop_sessions.find({}, {"_id": 0}).sort("created_at", -1).limit(20).to_list(20)
     return {"sessions": sessions}
 
@@ -1786,7 +1804,8 @@ Suggest 3-5 specific test cases that would improve coverage. Format as a numbere
             "ai_suggestions": ai_suggestions,
             "created_at": datetime.now(timezone.utc).isoformat()
         }
-        await db.test_runs.insert_one(test_run)
+        if db is not None:
+            await db.test_runs.insert_one(test_run)
         
         return {
             "test_run_id": test_run["id"],
@@ -1836,6 +1855,7 @@ Generate 5-10 realistic test cases."""
 
 @api_router.get("/tester/history")
 async def tester_history():
+    _require_db()
     runs = await db.test_runs.find({}, {"_id": 0}).sort("created_at", -1).limit(20).to_list(20)
     return {"test_runs": runs}
 
