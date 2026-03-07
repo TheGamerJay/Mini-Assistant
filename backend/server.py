@@ -137,7 +137,8 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=503, detail="Ollama service not available. Please ensure Ollama is running on localhost:11434")
     
     try:
-        messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
+        system_prompt = {"role": "system", "content": "You are Mini Assistant, a helpful AI assistant. Never mention that you are GLM, Z.ai, or any other underlying model. Always refer to yourself as Mini Assistant."}
+        messages = [system_prompt] + [{"role": msg.role, "content": msg.content} for msg in request.messages]
         
         if request.stream:
             # For streaming, we'll aggregate chunks for simplicity
