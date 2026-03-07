@@ -24,7 +24,8 @@ import RedisManager from '../components/Redis/RedisManager';
 import RailwayManager from '../components/Railway/RailwayManager';
 import FixLoop from '../components/FixLoop/FixLoop';
 import TesterAgent from '../components/TesterAgent/TesterAgent';
-import { 
+import AgentPipeline from '../components/AgentPipeline/AgentPipeline';
+import {
   MessageSquare, 
   Mic, 
   FolderOpen, 
@@ -47,7 +48,8 @@ import {
   Rocket,
   Train,
   Bug,
-  FlaskConical
+  FlaskConical,
+  Brain
 } from 'lucide-react';
 
 const Dashboard = () => {
@@ -73,6 +75,7 @@ const Dashboard = () => {
 
   const tabs = [
     { id: 'chat', label: 'CHAT', icon: MessageSquare },
+    { id: 'agent', label: 'AGENT PIPELINE', icon: Brain },
     { id: 'appbuilder', label: 'APP BUILDER', icon: Wand2 },
     { id: 'codereview', label: 'CODE REVIEW', icon: Shield },
     { id: 'coderunner', label: 'CODE RUNNER', icon: Play },
@@ -172,6 +175,7 @@ const Dashboard = () => {
         {/* Content Area */}
         <main className="flex-1 overflow-hidden" data-testid="main-content">
           {activeTab === 'chat' && <ChatInterface />}
+          {activeTab === 'agent' && <AgentPipeline />}
           {activeTab === 'appbuilder' && <AppBuilder />}
           {activeTab === 'codereview' && <CodeReview />}
           {activeTab === 'coderunner' && <CodeRunner />}

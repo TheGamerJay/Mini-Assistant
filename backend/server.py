@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File
+from agents import run_agent_pipeline
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
@@ -2249,6 +2250,55 @@ async def swarm_run(body: SwarmRunRequest):
     except Exception as exc:
         logger.exception("swarm_run failed")
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── Agent Pipeline ────────────────────────────────────────────────────────────
+class AgentRunRequest(BaseModel):
+    task: str
+
+@api_router.post("/agent/run")
+async def agent_run(request: AgentRunRequest):
+    """Stream multi-brain agent pipeline execution via SSE."""
+    if not ollama_client:
+        raise HTTPException(status_code=503, detail="Ollama not available")
+
+    loop = asyncio.get_event_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+
+    def on_update(ctx):
+        loop.call_soon_threadsafe(queue.put_nowait, ctx.to_dict())
+
+    async def generate():
+        pipeline_task = asyncio.create_task(
+            run_agent_pipeline(request.task, ollama_client, on_update)
+        )
+        try:
+            while True:
+                try:
+                    update = await asyncio.wait_for(queue.get(), timeout=2.0)
+                    yield f"data: {json.dumps(update)}\n\n"
+                    if update.get("status") in ("done", "failed"):
+                        break
+                except asyncio.TimeoutError:
+                    if pipeline_task.done():
+                        try:
+                            ctx = pipeline_task.result()
+                            yield f"data: {json.dumps(ctx.to_dict())}\n\n"
+                        except Exception as e:
+                            yield f"data: {json.dumps({'status': 'failed', 'errors': str(e)})}\n\n"
+                        break
+                    yield f"data: {json.dumps({'status': 'thinking'})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'status': 'failed', 'errors': str(e)})}\n\n"
+        finally:
+            if not pipeline_task.done():
+                pipeline_task.cancel()
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 app.include_router(api_router)
