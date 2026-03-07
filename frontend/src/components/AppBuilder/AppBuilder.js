@@ -251,7 +251,7 @@ const AppBuilder = () => {
               }`}
             >
               <MessageSquare className="w-3.5 h-3.5" />
-              COACH
+              ASSISTANT
             </button>
             <button
               onClick={() => setMode('build')}
@@ -318,7 +318,7 @@ const AppBuilder = () => {
                     : 'bg-black/40 border border-cyan-900/30 text-slate-300'
                 }`}>
                   <div className="text-xs font-mono text-cyan-400/60 uppercase mb-1.5">
-                    {msg.role === 'user' ? 'YOU' : 'COACH'}
+                    {msg.role === 'user' ? 'YOU' : 'ASSISTANT'}
                   </div>
                   <div className="whitespace-pre-wrap leading-relaxed">{renderLinks(msg.content)}</div>
                 </div>
@@ -345,7 +345,7 @@ const AppBuilder = () => {
           <div className="p-4 border-t border-cyan-500/20 bg-black/30 flex gap-3 items-end">
             <button
               onClick={resetCoach}
-              title="Restart coach"
+              title="Restart assistant"
               className="p-2.5 text-slate-500 hover:text-cyan-400 transition-colors flex-shrink-0"
             >
               <RotateCcw className="w-4 h-4" />
@@ -354,7 +354,7 @@ const AppBuilder = () => {
               value={coachInput}
               onChange={e => setCoachInput(e.target.value)}
               onKeyDown={handleCoachKey}
-              placeholder='Answer the coach... type BUILD when ready'
+              placeholder='Tell the assistant what you want... type BUILD when ready'
               className="flex-1 bg-black/50 border border-cyan-900/50 text-cyan-100 placeholder:text-cyan-900/40 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 rounded-sm font-mono text-sm p-3 outline-none resize-none"
               rows={2}
               disabled={coachLoading}
@@ -398,7 +398,7 @@ const AppBuilder = () => {
                     onClick={() => setMode('coach')}
                     className="px-4 py-3 border border-cyan-500/30 text-cyan-400 text-sm font-mono uppercase rounded-sm hover:bg-cyan-500/10 flex items-center gap-2 transition-all"
                   >
-                    <MessageSquare className="w-4 h-4" /> USE COACH
+                    <MessageSquare className="w-4 h-4" /> USE ASSISTANT
                   </button>
                 )}
               </div>
