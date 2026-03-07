@@ -218,7 +218,7 @@ def _auto_select_model(message: str, has_search_context: bool = False) -> str:
         'deploy', 'docker', 'git', 'test', 'unit test', 'endpoint',
     ]
     if any(k in lower for k in code_keywords):
-        return 'devstral-2:cloud'
+        return _default_model
 
     # Deep research / analysis / long-form → glm-5
     deep_keywords = [
@@ -585,7 +585,7 @@ FOR DATA/VISUALIZATION APPS:
 Now generate the complete HTML file:"""
 
         response = ollama_client.chat(
-            model="devstral-2:cloud",
+            model=_default_model,
             messages=[{"role": "user", "content": prompt}]
         )
 
