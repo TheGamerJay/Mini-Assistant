@@ -15,7 +15,7 @@ import asyncio
 from ollama import Client
 from faster_whisper import WhisperModel
 from gtts import gTTS
-from ddgs import DDGS
+from duckduckgo_search import DDGS
 import tempfile
 import subprocess
 
