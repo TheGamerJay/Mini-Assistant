@@ -1849,12 +1849,33 @@ async def health_check():
     }
 
 # ==================== Multi-Brain Assistant API ====================
-from mini_assistant import MiniAssistant
-from mini_assistant.router import route as _route_msg, get_registered_matchers
+try:
+    from mini_assistant import MiniAssistant
+    from mini_assistant.router import route as _route_msg, get_registered_matchers
+    _MINI_ASSISTANT_OK = True
+except ImportError as _import_err:
+    logger.error(
+        "DEPENDENCY ERROR: mini_assistant failed to import: %s. "
+        "Ensure all packages in requirements.txt are installed.",
+        _import_err,
+    )
+    MiniAssistant = None  # type: ignore[assignment,misc]
+    _route_msg = None  # type: ignore[assignment]
+    get_registered_matchers = lambda: []  # type: ignore[assignment]
+    _MINI_ASSISTANT_OK = False
 
-_assistant: MiniAssistant | None = None
+_assistant: "MiniAssistant | None" = None
 
-def _get_assistant() -> MiniAssistant:
+
+def _get_assistant() -> "MiniAssistant":
+    if not _MINI_ASSISTANT_OK:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Mini Assistant is unavailable: a required dependency failed to import. "
+                "Check the server logs for the exact missing package."
+            ),
+        )
     global _assistant
     if _assistant is None:
         _assistant = MiniAssistant()
