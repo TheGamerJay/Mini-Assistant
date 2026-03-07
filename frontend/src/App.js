@@ -10,7 +10,7 @@ const API = `${BACKEND_URL}/api`;
 
 export const axiosInstance = axios.create({
   baseURL: API,
-  timeout: 30000,
+  timeout: 180000,  // 3 min — accommodates CPU-based slow model inference
 });
 
 function App() {

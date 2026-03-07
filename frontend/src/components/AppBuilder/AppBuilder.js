@@ -87,17 +87,15 @@ const AppBuilder = () => {
     try {
       const res = await axiosInstance.post('/chat', {
         messages: [{ role: 'user', content: 'Hello, I want to build an app.' }],
-        model: 'minimax-m2.1:cloud',
+        model: 'glm-5:cloud',
         stream: false,
         system_override: COACH_SYSTEM,
-      });
-      setCoachMessages([
-        { role: 'assistant', content: res.data.response }
-      ]);
+      }, { timeout: 180000 });
+      setCoachMessages([{ role: 'assistant', content: res.data.response }]);
     } catch {
       setCoachMessages([{
         role: 'assistant',
-        content: "Hey! I'm your app coach. What do you want to build today?"
+        content: "What do you want to build?"
       }]);
     } finally {
       setCoachLoading(false);
@@ -124,9 +122,9 @@ const AppBuilder = () => {
           { role: 'system', content: COACH_SYSTEM },
           ...updatedMsgs,
         ],
-        model: 'minimax-m2.1:cloud',
+        model: 'glm-5:cloud',
         stream: false,
-      });
+      }, { timeout: 180000 });
       const reply = res.data.response;
       setCoachMessages(prev => [...prev, { role: 'assistant', content: reply }]);
 
@@ -134,8 +132,12 @@ const AppBuilder = () => {
       if (reply.toLowerCase().includes('type build') || reply.toLowerCase().includes('enough to build')) {
         setSpec(buildSpecFromHistory([...updatedMsgs, { role: 'assistant', content: reply }]));
       }
-    } catch {
-      toast.error('Coach response failed');
+    } catch (err) {
+      const msg = err.code === 'ECONNABORTED'
+        ? 'Response timed out — try again'
+        : 'Coach response failed';
+      toast.error(msg);
+      setCoachMessages(prev => [...prev, { role: 'assistant', content: '⚠️ Response timed out. Please try again.' }]);
     } finally {
       setCoachLoading(false);
     }
