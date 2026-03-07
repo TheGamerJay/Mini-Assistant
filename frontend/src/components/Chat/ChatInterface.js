@@ -3,6 +3,47 @@ import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import { Send, Loader2, Trash2, FileText, X } from 'lucide-react';
 
+// Renders text with clickable markdown links [text](url) and bare https:// URLs
+const renderMessage = (text) => {
+  // Split on markdown links [label](url) and bare URLs
+  const parts = text.split(/(\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|https?:\/\/[^\s<>"]+)/g);
+  const result = [];
+  let i = 0;
+  const mdLinkRe = /^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/;
+  const bareUrlRe = /^https?:\/\/[^\s<>"]+$/;
+  // Re-split properly to capture groups
+  const tokenRe = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|https?:\/\/[^\s<>"]+/g;
+  let last = 0;
+  let match;
+  while ((match = tokenRe.exec(text)) !== null) {
+    if (match.index > last) {
+      result.push(<span key={i++}>{text.slice(last, match.index)}</span>);
+    }
+    if (match[0].startsWith('[')) {
+      // Markdown link [label](url)
+      result.push(
+        <a key={i++} href={match[2]} target="_blank" rel="noopener noreferrer"
+           className="text-cyan-400 underline hover:text-cyan-300 break-all">
+          {match[1]}
+        </a>
+      );
+    } else {
+      // Bare URL
+      result.push(
+        <a key={i++} href={match[0]} target="_blank" rel="noopener noreferrer"
+           className="text-cyan-400 underline hover:text-cyan-300 break-all">
+          {match[0]}
+        </a>
+      );
+    }
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) {
+    result.push(<span key={i++}>{text.slice(last)}</span>);
+  }
+  return result;
+};
+
 const ChatInterface = () => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -157,8 +198,18 @@ const ChatInterface = () => {
           <div
             key={idx}
             data-testid={`message-${msg.role}`}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            className={`flex items-end gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
           >
+            {msg.role === 'assistant' && (
+              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-cyan-500 via-violet-500 to-violet-600 flex items-center justify-center overflow-hidden flex-shrink-0">
+                <img
+                  src="/Logo.png"
+                  alt="Mini Assistant"
+                  className="w-full h-full object-contain"
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+              </div>
+            )}
             <div
               className={`max-w-[80%] px-6 py-4 rounded-lg backdrop-blur-sm ${
                 msg.role === 'user'
@@ -169,13 +220,21 @@ const ChatInterface = () => {
               <div className="text-xs font-mono text-cyan-400/70 uppercase mb-2">
                 {msg.role === 'user' ? 'YOU' : 'MINI ASSISTANT'}
               </div>
-              <div className="whitespace-pre-wrap font-sans">{msg.content}</div>
+              <div className="whitespace-pre-wrap font-sans">{renderMessage(msg.content)}</div>
             </div>
           </div>
         ))}
 
         {loading && (
-          <div className="flex justify-start" data-testid="loading-indicator">
+          <div className="flex items-end gap-3 justify-start" data-testid="loading-indicator">
+            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-cyan-500 via-violet-500 to-violet-600 flex items-center justify-center overflow-hidden flex-shrink-0">
+              <img
+                src="/Logo.png"
+                alt="Mini Assistant"
+                className="w-full h-full object-contain"
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
+            </div>
             <div className="max-w-[80%] px-6 py-4 rounded-lg bg-black/40 border border-cyan-900/30 backdrop-blur-sm">
               <div className="flex items-center gap-3">
                 <Loader2 className="w-5 h-5 animate-spin text-cyan-400" />

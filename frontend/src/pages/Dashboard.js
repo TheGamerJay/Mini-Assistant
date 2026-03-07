@@ -105,8 +105,19 @@ const Dashboard = () => {
           <div className="flex items-center gap-4">
             <div className="relative">
               <div className="absolute inset-0 bg-gradient-to-r from-cyan-500 to-violet-600 blur-xl opacity-50"></div>
-              <div className="relative w-12 h-12 rounded-lg bg-gradient-to-br from-cyan-500 via-violet-500 to-violet-600 flex items-center justify-center">
-                <Zap className="w-7 h-7 text-white" strokeWidth={2.5} />
+              <div className="relative w-12 h-12 rounded-lg bg-gradient-to-br from-cyan-500 via-violet-500 to-violet-600 flex items-center justify-center overflow-hidden">
+                <img
+                  src="/Logo.png"
+                  alt="Logo"
+                  className="w-full h-full object-contain"
+                  onError={(e) => {
+                    e.target.style.display = 'none';
+                    e.target.nextSibling.style.display = 'flex';
+                  }}
+                />
+                <span style={{ display: 'none' }} className="w-full h-full items-center justify-center">
+                  <Zap className="w-7 h-7 text-white" strokeWidth={2.5} />
+                </span>
               </div>
             </div>
             <div>

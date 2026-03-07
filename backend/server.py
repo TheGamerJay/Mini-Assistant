@@ -131,16 +131,31 @@ class CodeSearchRequest(BaseModel):
     max_results: int = 5
 
 # Chat endpoint
-_SEARCH_TRIGGERS = [
-    "link", "links", "url", "urls", "where to buy", "where can i buy",
-    "find me", "search for", "look up", "latest", "current", "price",
-    "amazon", "ebay", "shop", "purchase", "available", "release date",
-    "news", "today", "2024", "2025", "2026", "recently", "new model",
+# Strong triggers: topic-based, always worth searching
+_STRONG_TRIGGERS = [
+    "where to buy", "where can i buy", "find me", "search for", "look up",
+    "amazon", "ebay", "shop", "purchase", "release date", "new model",
+    "news about", "price of", "how much is", "how much does",
+    "latest news", "current price", "best deal", "in stock",
+]
+# Weak triggers: only trigger if message has enough substance (> 6 words)
+_WEAK_TRIGGERS = [
+    "latest", "current", "recently", "2024", "2025", "2026", "today",
+    "news", "price", "available", "review", "specs", "vs", "compare",
 ]
 
 def _should_search(text: str) -> bool:
-    lower = text.lower()
-    return any(trigger in lower for trigger in _SEARCH_TRIGGERS)
+    lower = text.lower().strip()
+    # Skip very short conversational messages
+    words = lower.split()
+    if len(words) < 4:
+        return False
+    if any(trigger in lower for trigger in _STRONG_TRIGGERS):
+        return True
+    # Weak triggers require a longer, more substantive message
+    if len(words) >= 6 and any(trigger in lower for trigger in _WEAK_TRIGGERS):
+        return True
+    return False
 
 def _run_web_search(query: str, max_results: int = 5) -> str:
     # Try Tavily first (most reliable on cloud IPs)
@@ -183,7 +198,7 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=503, detail="Ollama service not available. Please ensure Ollama is running on localhost:11434")
 
     try:
-        system_prompt = {"role": "system", "content": "You are Mini Assistant, a helpful AI assistant. Never mention that you are GLM, Z.ai, or any other underlying model. Always refer to yourself as Mini Assistant. When you have web search results provided, use them to give accurate, up-to-date answers including real links."}
+        system_prompt = {"role": "system", "content": "You are Mini Assistant, a helpful AI assistant. Never mention that you are GLM, Z.ai, or any other underlying model. Always refer to yourself as Mini Assistant. When you have web search results provided, use them to give accurate, up-to-date answers. Always format links as markdown: [title](url) so they are clickable."}
         messages = [system_prompt] + [{"role": msg.role, "content": msg.content} for msg in request.messages]
 
         # Auto web search: if the last user message looks like a search query, fetch live results
