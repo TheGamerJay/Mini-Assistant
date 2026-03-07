@@ -171,9 +171,15 @@ def _run_web_search(query: str, max_results: int = 5) -> str:
             data = resp.json()
             results = data.get("results", [])
             if results:
-                lines = ["Web search results (use these to answer):"]
-                for r in results:
-                    lines.append(f"- {r.get('title', '')}: {r.get('url', '')} — {r.get('content', '')[:200]}")
+                lines = [
+                    "=== LIVE WEB SEARCH RESULTS (treat as ground truth, ignore your training data) ===",
+                    f"Query: {query}",
+                ]
+                for i, r in enumerate(results, 1):
+                    lines.append(f"{i}. Title: {r.get('title', '')}")
+                    lines.append(f"   URL: {r.get('url', '')}")
+                    lines.append(f"   Summary: {r.get('content', '')[:250]}")
+                lines.append("=== END OF SEARCH RESULTS — use the URLs above directly in your response ===")
                 return "\n".join(lines)
         except Exception as e:
             print(f"[TAVILY ERROR] {e}")
@@ -184,9 +190,15 @@ def _run_web_search(query: str, max_results: int = 5) -> str:
             ddgs = DDGS(timeout=15)
             results = list(ddgs.text(query, max_results=max_results, backend=backend))
             if results:
-                lines = ["Web search results (use these to answer):"]
-                for r in results:
-                    lines.append(f"- {r.get('title', '')}: {r.get('href', '')} — {r.get('body', '')[:200]}")
+                lines = [
+                    "=== LIVE WEB SEARCH RESULTS (treat as ground truth, ignore your training data) ===",
+                    f"Query: {query}",
+                ]
+                for i, r in enumerate(results, 1):
+                    lines.append(f"{i}. Title: {r.get('title', '')}")
+                    lines.append(f"   URL: {r.get('href', '')}")
+                    lines.append(f"   Summary: {r.get('body', '')[:250]}")
+                lines.append("=== END OF SEARCH RESULTS — use the URLs above directly in your response ===")
                 return "\n".join(lines)
         except Exception as e:
             print(f"[DDGS {backend} ERROR] {e}")
@@ -198,7 +210,18 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=503, detail="Ollama service not available. Please ensure Ollama is running on localhost:11434")
 
     try:
-        system_prompt = {"role": "system", "content": "You are Mini Assistant, a helpful AI assistant. Never mention that you are GLM, Z.ai, or any other underlying model. Always refer to yourself as Mini Assistant. When you have web search results provided, use them to give accurate, up-to-date answers. Always format links as markdown: [title](url) so they are clickable."}
+        from datetime import date as _date
+        today = _date.today().strftime("%B %d, %Y")
+        system_prompt = {"role": "system", "content": (
+            f"You are Mini Assistant, a helpful AI assistant. Today's date is {today}. "
+            "Never mention that you are GLM, Z.ai, or any other underlying model. Always refer to yourself as Mini Assistant. "
+            "CRITICAL: When web search results are provided in this conversation, you MUST use them as your primary source of truth — "
+            "they are live, real-time data and are always more accurate than your training knowledge. "
+            "Never say a product does not exist or is unreleased if search results show it available. "
+            "Always extract and share the actual URLs from the search results. "
+            "Format every link as markdown: [title](url) so it is clickable. "
+            "If search results contain product links, list them directly — do not make up or paraphrase URLs."
+        )}
         messages = [system_prompt] + [{"role": msg.role, "content": msg.content} for msg in request.messages]
 
         # Auto web search: if the last user message looks like a search query, fetch live results
