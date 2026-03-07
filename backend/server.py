@@ -205,6 +205,34 @@ def _run_web_search(query: str, max_results: int = 5) -> str:
             print(f"[DDGS {backend} ERROR] {e}")
     return ""
 
+def _auto_select_model(message: str, has_search_context: bool = False) -> str:
+    """Pick the best model based on what the user is asking."""
+    lower = message.lower().strip()
+
+    # Coding / technical work → devstral
+    code_keywords = [
+        'code', 'function', 'class', 'debug', 'error', 'bug', 'fix',
+        'script', 'python', 'javascript', 'typescript', 'sql', 'api',
+        'build', 'implement', 'write a', 'create a', 'refactor',
+        'deploy', 'docker', 'git', 'test', 'unit test', 'endpoint',
+    ]
+    if any(k in lower for k in code_keywords):
+        return 'devstral-2:cloud'
+
+    # Deep research / analysis / long-form → glm-5
+    deep_keywords = [
+        'explain', 'analyze', 'compare', 'research', 'summarize',
+        'architecture', 'design', 'strategy', 'best practice',
+        'difference between', 'pros and cons', 'how does', 'why does',
+        'recommend', 'evaluate',
+    ]
+    if any(k in lower for k in deep_keywords) or has_search_context:
+        return 'glm-5:cloud'
+
+    # Default: fast, capable general chat
+    return 'minimax-m2.1:cloud'
+
+
 @api_router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     if not ollama_client:
@@ -227,24 +255,33 @@ async def chat(request: ChatRequest):
 
         # Auto web search: if the last user message looks like a search query, fetch live results
         last_user = next((m.content for m in reversed(request.messages) if m.role == "user"), "")
+        has_search = False
         if last_user and _should_search(last_user):
             search_context = await asyncio.get_event_loop().run_in_executor(None, _run_web_search, last_user)
             if search_context:
+                has_search = True
                 print(f"[CHAT] Injecting web search context for: {last_user[:80]}")
-                # Insert search results as a system message just before the last user turn
                 messages.insert(-1, {"role": "system", "content": search_context})
+
+        # Resolve model: auto-select if not explicitly chosen
+        resolved_model = (
+            _auto_select_model(last_user, has_search_context=has_search)
+            if request.model == "auto"
+            else request.model
+        )
+        print(f"[CHAT] model={resolved_model} (requested={request.model})")
 
         if request.stream:
             response_text = ""
-            stream = ollama_client.chat(model=request.model, messages=messages, stream=True)
+            stream = ollama_client.chat(model=resolved_model, messages=messages, stream=True)
             for chunk in stream:
                 if 'message' in chunk and 'content' in chunk['message']:
                     response_text += chunk['message']['content']
         else:
-            response = ollama_client.chat(model=request.model, messages=messages)
+            response = ollama_client.chat(model=resolved_model, messages=messages)
             response_text = response['message']['content']
 
-        return ChatResponse(response=response_text, model=request.model)
+        return ChatResponse(response=response_text, model=resolved_model)
     except Exception as e:
         import traceback
         traceback.print_exc()
