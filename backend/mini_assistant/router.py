@@ -34,7 +34,7 @@ except ImportError as _e:
     )
     ollama = None  # type: ignore[assignment]
 
-from .config import MODELS, TASK_TYPES, OLLAMA_HOST
+from .config import MODELS, TASK_TYPES, make_ollama_client
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +224,7 @@ _ROUTER_SYSTEM = (
 def _llm_classify(ctx: RoutingContext) -> RouteResult:
     router_model = MODELS["router"]
     try:
-        client = ollama.Client(host=OLLAMA_HOST)
+        client = make_ollama_client(ollama)
         resp = client.chat(
             model=router_model,
             messages=[

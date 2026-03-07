@@ -25,7 +25,7 @@ except ImportError as _e:
     )
     ollama = None  # type: ignore[assignment]
 
-from ..config import AGENT_MODELS, MODELS, OLLAMA_HOST
+from ..config import AGENT_MODELS, MODELS, make_ollama_client
 from .task_models import SwarmTask, TaskResult
 
 
@@ -44,7 +44,7 @@ class BaseAgent(ABC):
 
     def __init__(self):
         self._model  = AGENT_MODELS.get(self.agent_type, MODELS["fallback"])
-        self._client = ollama.Client(host=OLLAMA_HOST)
+        self._client = make_ollama_client(ollama)
         self._logger = logging.getLogger(f"swarm.{self.agent_name}")
         self._logger.debug("Initialised %s → model=%s", self.agent_name, self._model)
 

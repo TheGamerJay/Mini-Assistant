@@ -31,7 +31,7 @@ import tempfile
 from dataclasses import dataclass, field
 from typing import Optional
 
-from ..config import MODELS, OLLAMA_HOST, CODE_TIMEOUT
+from ..config import MODELS, make_ollama_client, CODE_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +91,7 @@ def generate_tests(code: str, task_description: str) -> str:
     Falls back to a minimal placeholder if generation fails.
     """
     import ollama
-    client = ollama.Client(host=OLLAMA_HOST)
+    client = make_ollama_client(ollama)
     model  = MODELS.get("fast", MODELS["fallback"])  # fast model for test gen
 
     prompt = (

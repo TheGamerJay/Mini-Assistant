@@ -48,7 +48,7 @@ except ImportError as _e:
     )
     ollama = None  # type: ignore[assignment]
 
-from ..config import MODELS, OLLAMA_HOST
+from ..config import MODELS, make_ollama_client
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ def _generate_lesson(task: str, errors: list[str], fixes: list[str]) -> str:
         "What is the key lesson from this task?"
     )
     try:
-        client = ollama.Client(host=OLLAMA_HOST)
+        client = make_ollama_client(ollama)
         resp = client.chat(
             model=MODELS.get("fast", MODELS["fallback"]),
             messages=[

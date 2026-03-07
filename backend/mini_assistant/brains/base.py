@@ -21,7 +21,7 @@ except ImportError as _e:
     )
     ollama = None  # type: ignore[assignment]
 
-from ..config import OLLAMA_HOST, MODELS
+from ..config import MODELS, make_ollama_client
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class BaseBrain:
                 "Run: pip install ollama"
             )
         self.model = model
-        self._client = ollama.Client(host=OLLAMA_HOST)
+        self._client = make_ollama_client(ollama)
         self._history: list[dict] = []
 
     # ── Internal: call Ollama with fallback ───────────────────────────────────

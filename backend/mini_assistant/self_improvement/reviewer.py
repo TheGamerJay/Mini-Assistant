@@ -35,7 +35,7 @@ except ImportError as _e:
     )
     ollama = None  # type: ignore[assignment]
 
-from ..config import MODELS, OLLAMA_HOST
+from ..config import MODELS, make_ollama_client
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ class Reviewer:
                 "DEPENDENCY ERROR: 'ollama' is not installed – Reviewer/FixLoop unavailable. "
                 "Run: pip install ollama"
             )
-        self._client = ollama.Client(host=OLLAMA_HOST)
+        self._client = make_ollama_client(ollama)
         self._model  = MODELS.get("fast", MODELS["fallback"])
 
     def evaluate(

@@ -2,7 +2,14 @@ import os
 
 # ─── Ollama endpoints ────────────────────────────────────────────────────────
 # Override OLLAMA_HOST to point at a remote/cloud Ollama gateway if needed.
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_HOST    = os.getenv("OLLAMA_HOST",    "http://localhost:11434")
+OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "")
+
+
+def make_ollama_client(ollama_module):
+    """Create an ollama.Client with optional API key authentication."""
+    headers = {"Authorization": f"Bearer {OLLAMA_API_KEY}"} if OLLAMA_API_KEY else {}
+    return ollama_module.Client(host=OLLAMA_HOST, headers=headers)
 
 # ─── Assistant execution mode ─────────────────────────────────────────────────
 # "single" – classic single-agent pipeline (router → planner → executor)

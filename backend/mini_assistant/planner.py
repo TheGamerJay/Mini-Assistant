@@ -34,7 +34,7 @@ except ImportError as _e:
     )
     ollama = None  # type: ignore[assignment]
 
-from .config import MODELS, OLLAMA_HOST
+from .config import MODELS, make_ollama_client
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +150,7 @@ def plan(
         return _fallback_plan(message, brain=brain_hint or "fast")
 
     try:
-        client = ollama.Client(host=OLLAMA_HOST)
+        client = make_ollama_client(ollama)
         resp = client.chat(
             model=MODELS.get("fast", MODELS["fallback"]),   # planner uses fast model
             messages=[

@@ -38,7 +38,7 @@ from .file_analyst_agent import FileAnalystAgent
 from .vision_agent    import VisionAgent
 from .base_agent      import BaseAgent
 
-from ..config import AGENT_MODELS, MODELS, OLLAMA_HOST
+from ..config import AGENT_MODELS, MODELS, make_ollama_client
 
 if TYPE_CHECKING:
     from ..main import MiniAssistant
@@ -283,7 +283,7 @@ class SwarmManager:
         Ask the manager model to combine all task outputs into a final answer.
         """
         import ollama
-        client = ollama.Client(host=OLLAMA_HOST)
+        client = make_ollama_client(ollama)
         model  = AGENT_MODELS.get("manager", MODELS["fallback"])
 
         # Build a concise summary of all task outputs
