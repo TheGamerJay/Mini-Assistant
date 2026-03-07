@@ -64,7 +64,7 @@ const Dashboard = () => {
       const response = await axiosInstance.get('/health');
       setIsOllamaConnected(response.data.ollama === 'connected');
       if (response.data.ollama === 'disconnected') {
-        toast.error('Ollama not connected. Please start Ollama service on localhost:11434');
+        toast.error('AI service not connected. Check OLLAMA_HOST and OLLAMA_API_KEY settings.');
       }
     } catch (error) {
       toast.error('Backend connection error');
