@@ -531,74 +531,62 @@ async def generate_app(request: AppBuilderRequest):
 
 {request.description}
 
-═══════════════════════════════════════════
-OUTPUT FORMAT — NON-NEGOTIABLE
-═══════════════════════════════════════════
+--- OUTPUT FORMAT (NON-NEGOTIABLE) ---
 - Output ONLY the raw HTML file. Nothing else.
 - No markdown. No code fences. No explanation. No preamble. No commentary after.
 - The VERY FIRST character of your response must be < (the start of <!DOCTYPE html>).
 - The VERY LAST character must be > (the end of </html>).
 - Never truncate. Never use placeholders like "// add logic here" or "TODO". Write every single line of real, working code.
 
-═══════════════════════════════════════════
-TECHNICAL REQUIREMENTS
-═══════════════════════════════════════════
+--- TECHNICAL REQUIREMENTS ---
 - Everything must be inline: all CSS inside <style>, all JavaScript inside <script>.
-- No external files. No relative imports. Self-contained means it works when you double-click the .html file on any computer with no internet connection (except for CDN libraries if truly needed).
-- You MAY use CDN links ONLY for well-known, essential libraries (e.g., Three.js for 3D, Tone.js for audio, Chart.js for charts). Prefer inline when feasible.
-- Use modern JavaScript (ES6+). Use the Canvas API, Web Audio API, localStorage, or any browser API that makes the app better.
-- Handle edge cases and errors gracefully. The app must never crash or freeze.
+- No external files. Self-contained means it works when you double-click the .html file offline.
+- You MAY use CDN links ONLY for well-known essential libraries (Three.js, Chart.js, Tone.js). Prefer inline when possible.
+- Use modern JavaScript (ES6+), Canvas API, Web Audio API, localStorage wherever they improve the app.
+- Handle edge cases gracefully. The app must never crash or freeze.
 
-═══════════════════════════════════════════
-QUALITY STANDARDS — EXCEED EXPECTATIONS
-═══════════════════════════════════════════
+--- QUALITY STANDARDS ---
 VISUAL DESIGN:
-- Dark, premium aesthetic by default. Use rich gradients, subtle glassmorphism, and smooth drop shadows.
-- Typography: use system font stack or a Google Font (via @import if internet available, fallback gracefully).
-- Consistent color palette. Every interactive element has hover/active states with smooth CSS transitions.
-- The UI should look like a polished commercial product, not a demo or homework project.
-- Fully responsive — works on mobile, tablet, and desktop. Use CSS Grid or Flexbox layouts.
+- Dark, premium aesthetic. Rich gradients, subtle glassmorphism, smooth drop shadows.
+- Consistent color palette. Every interactive element has hover/active states with CSS transitions.
+- UI should look like a polished commercial product, not a demo or homework assignment.
+- Fully responsive: works on mobile, tablet, desktop. Use CSS Grid or Flexbox.
 
-FOR GAMES specifically:
-- Implement a proper game loop using requestAnimationFrame.
-- Full physics: gravity, collision detection, momentum, and friction where appropriate.
-- Particle effects for impacts, explosions, pickups, deaths, or level-ups.
-- Sound effects using the Web Audio API (synthesized — no external audio files needed).
-- Keyboard controls (WASD / arrow keys / space) AND mobile touch controls (on-screen buttons or swipe).
-- Score system with high score saved to localStorage. Show current score and best score.
-- Multiple difficulty levels or progressive difficulty scaling (gets harder over time).
-- Start screen with title, instructions, and a START button. Game over screen with score and RESTART button.
-- Smooth 60fps animations. No jank, no flicker.
-- Rich game feel: screen shake on impact, flash effects, combo counters, satisfying feedback.
+FOR GAMES:
+- Proper game loop using requestAnimationFrame. Target 60fps.
+- Physics: gravity, collision detection, momentum, friction as appropriate.
+- Particle effects for impacts, explosions, pickups, deaths, level-ups.
+- Sound effects via Web Audio API (synthesized tones, no external audio files).
+- Keyboard controls (WASD/arrows/space) AND on-screen touch buttons for mobile.
+- Score system with high score persisted in localStorage.
+- Progressive difficulty that scales over time.
+- Start screen with title and instructions. Game over screen with score and restart.
+- Rich game feel: screen shake on hits, flash effects, combo counters.
 
-FOR UTILITY APPS / TOOLS:
-- Every feature described must be fully implemented — no skeleton buttons that do nothing.
-- Use localStorage to persist user data across sessions automatically.
-- Include keyboard shortcuts for common actions.
-- Validate inputs and show clear, styled error/success messages.
-- Add subtle animations for state changes (fade in, slide in, etc.).
+FOR UTILITY APPS:
+- Every button and control must be fully functional, no stubs.
+- Auto-save to localStorage so data persists across sessions.
+- Keyboard shortcuts for common actions.
+- Styled error/success messages for user feedback.
+- Subtle animations for state transitions (fade, slide).
 
-FOR DATA / VISUALIZATION APPS:
-- Generate realistic sample/demo data so the app looks populated immediately on open.
-- Animate chart renders and transitions between data states.
-- Include interactive controls (filters, sliders, date pickers) that actually work.
+FOR DATA/VISUALIZATION APPS:
+- Pre-populate with realistic demo data so the app looks alive on first open.
+- Animate chart renders and data transitions.
+- Interactive controls (filters, sliders, date pickers) that actually work.
 
-═══════════════════════════════════════════
-COMPLETENESS CHECKLIST (verify before outputting)
-═══════════════════════════════════════════
-✓ Does the app fully implement everything described in the request?
-✓ Is every button, input, and control functional?
-✓ Is the visual design polished and consistent?
-✓ Does it work offline (no broken CDN-dependent features)?
-✓ Is the code complete — no TODOs, no truncation, no "..." shortcuts?
-✓ Starts with <!DOCTYPE html> and ends with </html>?
+--- CHECKLIST (verify before outputting) ---
+[x] App fully implements everything described in the request
+[x] Every button, input, and control is functional
+[x] Visual design is polished and consistent
+[x] Code is complete with no TODOs, truncation, or placeholders
+[x] Response starts with <!DOCTYPE html> and ends with </html>
 
 Now generate the complete HTML file:"""
 
         response = ollama_client.chat(
             model="devstral-2:cloud",
-            messages=[{"role": "user", "content": prompt}],
-            options={"num_predict": 16384, "temperature": 0.3}
+            messages=[{"role": "user", "content": prompt}]
         )
 
         content = response['message']['content'].strip()
