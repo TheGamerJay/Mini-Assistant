@@ -10,7 +10,9 @@ import {
   ShieldCheck, ArchiveRestore, Bug, Zap, Gauge, Terminal, Wrench,
   FilePlus, FolderTree, FileText, Folder,
   Github, Globe, Share2, LogIn, Lock, Unlock, Link, Copy, CheckSquare,
-  Columns, Command, Server
+  Columns, Command, Server,
+  Activity, StickyNote, Star, AlignLeft, Replace, ChevronDown, ChevronRight,
+  Copy as CopyIcon, Shield, ShieldOff, FileSearch, GitCommit, TrendingUp
 } from 'lucide-react';
 
 // ── Coach system prompt ────────────────────────────────────────────────────────
@@ -190,6 +192,21 @@ const AppBuilder = () => {
   const [cmdQuery, setCmdQuery] = useState('');
   const [cmdIndex, setCmdIndex] = useState(0);
 
+  // Phase 5 — Workspace intelligence
+  const [actionLog, setActionLog] = useState([]);
+  const [showActionLog, setShowActionLog] = useState(false);
+  const [projectNotes, setProjectNotes] = useState('');
+  const [showNotes, setShowNotes] = useState(false);
+  const [showFindPanel, setShowFindPanel] = useState(false);
+  const [findQuery, setFindQuery] = useState('');
+  const [replaceQuery, setReplaceQuery] = useState('');
+  const [findCaseSensitive, setFindCaseSensitive] = useState(false);
+  const [expandedFolders, setExpandedFolders] = useState({});
+  const [archLoading, setArchLoading] = useState(false);
+  const [archPanel, setArchPanel] = useState(null);
+  const [changelogPanel, setChangelogPanel] = useState(null);
+  const [changelogLoading, setChangelogLoading] = useState(false);
+
   // Undo / Redo / version history
   const [undoStack, setUndoStack] = useState([]);
   const [redoStack, setRedoStack] = useState([]);
@@ -335,6 +352,7 @@ const AppBuilder = () => {
       if (ctrl && (e.key === 'y' || (e.shiftKey && e.key === 'Z'))) { e.preventDefault(); redo(); return; }
       if (ctrl && e.key === '\\') { e.preventDefault(); setSplitView(v => !v); return; }
       if (!inInput && ctrl && e.key === 't') { e.preventDefault(); runScan(); return; }
+      if (ctrl && e.key === 'f') { e.preventDefault(); setShowFindPanel(v => !v); setFindQuery(''); return; }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -641,11 +659,16 @@ const AppBuilder = () => {
       setEditMsg(EDIT_LOADING_MSGS[i]);
     }, 2500);
     try {
+      // Collect locked file names to pass to backend
+      const meta = generatedApp.project?.file_metadata || {};
+      const lockedFiles = Object.entries(meta).filter(([, v]) => v.locked).map(([k]) => k);
       const res = await axiosInstance.post('/app-builder/edit', {
         project: generatedApp.project || null,
         html: generatedApp.project ? null : generatedApp.html,
         instruction,
+        locked_files: lockedFiles,
       }, { timeout: 300000 });
+      logAction('ai-edit', `AI edit: "${instruction.slice(0, 60)}"`, res.data.file_changed || '');
       const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
       const proposed = {
         ...generatedApp,
@@ -683,12 +706,15 @@ const AppBuilder = () => {
 
   const approveChange = () => {
     if (!pendingChange) return;
+    // Auto-checkpoint before applying (safe restore point)
+    saveVersion('checkpoint', `Before: ${editHistory.filter(m => m.role === 'user').slice(-1)[0]?.content?.slice(0, 40) || 'AI edit'}`);
     pushUndo(generatedApp);
     setGeneratedApp(pendingChange.proposed);
     setEditHistory(prev => prev.map((m, i) =>
       i === prev.length - 1 ? { ...m, content: `Applied \`${pendingChange.file_changed || 'edit'}\`. Preview updated.`, pending: false } : m
     ));
     setPendingChange(null);
+    logAction('ai-edit', `AI edit applied to ${pendingChange.file_changed || 'project'}`);
     toast.success('Change applied');
   };
 
@@ -733,20 +759,23 @@ const AppBuilder = () => {
     toast.success('Redone');
   };
 
-  const saveVersion = () => {
+  const saveVersion = (eventType = 'manual', overrideName = '') => {
     if (!generatedApp?.project) return;
-    const name = versionName.trim() || `v${versions.length + 1} — ${new Date().toLocaleTimeString()}`;
+    const name = overrideName || versionName.trim() || `v${versions.length + 1} — ${new Date().toLocaleTimeString()}`;
     const lastEdit = editHistory.filter(m => m.role === 'assistant').slice(-1)[0];
-    setVersions(prev => [...prev, {
+    const entry = {
       name,
       project: generatedApp.project,
       html: generatedApp.html,
       savedAt: new Date().toISOString(),
       file_changed: lastEdit?.file_changed || null,
       summary: editHistory.filter(m => m.role === 'user').slice(-1)[0]?.content?.slice(0, 60) || null,
-    }]);
+      eventType,  // 'manual' | 'ai-edit' | 'restore' | 'import' | 'auto-fix' | 'deploy-ready' | 'checkpoint'
+    };
+    setVersions(prev => [...prev, entry]);
     setVersionName('');
-    toast.success(`Saved "${name}"`);
+    if (eventType === 'manual') toast.success(`Saved "${name}"`);
+    logAction('save', `Version saved: ${name}`, eventType);
   };
 
   const restoreVersion = (ver) => {
@@ -922,7 +951,8 @@ const AppBuilder = () => {
             : prev.full_preview_url,
         }));
         toast.success(`Auto-fixed ${res.data.applied.length} issue(s)`);
-        // Re-scan after fix
+        saveVersion('auto-fix', `Auto-fix: ${res.data.applied.length} issue(s)`);
+        logAction('auto-fix', `Auto-fix applied ${res.data.applied.length} fix(es)`);
         setTimeout(runScan, 500);
       } else {
         toast.error(res.data.message || 'Auto-fix could not apply changes');
@@ -1147,6 +1177,200 @@ const AppBuilder = () => {
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text).then(() => toast.success('Copied!'));
   };
+
+  // ── Phase 5: Workspace intelligence handlers ──────────────────────────────────
+
+  // Action log
+  const logAction = (type, msg, detail = '') => {
+    setActionLog(prev => [...prev.slice(-99), {
+      id: Date.now(), time: new Date().toLocaleTimeString(), type, msg, detail
+    }]);
+  };
+
+  // File metadata helpers
+  const getFileMeta = (fileKey) => generatedApp?.project?.file_metadata?.[fileKey] || {};
+  const updateFileMeta = (fileKey, patch) => {
+    setGeneratedApp(prev => ({
+      ...prev,
+      project: {
+        ...prev.project,
+        file_metadata: { ...(prev.project?.file_metadata || {}), [fileKey]: { ...(prev.project?.file_metadata?.[fileKey] || {}), ...patch, updated_at: new Date().toISOString() } }
+      }
+    }));
+  };
+
+  // Map tab id → display file name (for lock checks)
+  const tabToFileName = (tab) => {
+    if (tab === 'html') return 'index.html';
+    if (tab === 'css')  return 'style.css';
+    if (tab === 'js')   return 'script.js';
+    if (tab === 'readme') return 'README.md';
+    if (tab.startsWith('extra:')) return tab.slice(6);
+    return tab;
+  };
+  const tabToKey = (tab) => {
+    if (tab === 'html') return 'index_html';
+    if (tab === 'css')  return 'style_css';
+    if (tab === 'js')   return 'script_js';
+    if (tab === 'readme') return 'readme';
+    return tab; // extra files use name as key
+  };
+  const isLocked = (tab) => !!getFileMeta(tabToFileName(tab)).locked;
+
+  const toggleLock = (tab) => {
+    const key = tabToFileName(tab);
+    const cur = !!getFileMeta(key).locked;
+    updateFileMeta(key, { locked: !cur });
+    toast.info(!cur ? `🔒 ${key} locked` : `🔓 ${key} unlocked`);
+  };
+
+  // Format file
+  const formatFile = async (tab) => {
+    if (!generatedApp?.project) return;
+    const langMap = { html: 'html', css: 'css', js: 'js', readme: 'markdown' };
+    const lang = langMap[tab] || 'html';
+    const key = tabToKey(tab);
+    const content = tab.startsWith('extra:')
+      ? (generatedApp.project.extra_files || []).find(f => f.name === tab.slice(6))?.content || ''
+      : generatedApp.project?.[key] || '';
+    if (!content.trim()) return;
+    try {
+      toast.info('Formatting...');
+      const res = await axiosInstance.post('/app-builder/format', { content, language: lang });
+      const formatted = res.data.formatted;
+      if (tab.startsWith('extra:')) {
+        const efName = tab.slice(6);
+        setGeneratedApp(prev => ({
+          ...prev,
+          project: { ...prev.project, extra_files: prev.project.extra_files.map(f => f.name === efName ? { ...f, content: formatted } : f) }
+        }));
+      } else {
+        handleDirectEdit(tab === 'html' ? 'html' : tab === 'css' ? 'css' : tab === 'js' ? 'js' : 'readme', formatted);
+      }
+      logAction('format', `Formatted ${tabToFileName(tab)}`);
+      toast.success('Formatted!');
+    } catch { toast.error('Format failed'); }
+  };
+
+  // Duplicate extra file
+  const duplicateExtraFile = (name) => {
+    const ef = (generatedApp?.project?.extra_files || []).find(f => f.name === name);
+    if (!ef) return;
+    const ext = name.includes('.') ? name.slice(name.lastIndexOf('.')) : '';
+    const base = name.slice(0, name.length - ext.length);
+    const newName = `${base}-copy${ext}`;
+    setGeneratedApp(prev => ({
+      ...prev,
+      project: { ...prev.project, extra_files: [...(prev.project.extra_files || []), { name: newName, content: ef.content }] }
+    }));
+    toast.success(`Duplicated as ${newName}`);
+  };
+
+  // Toggle folder expand/collapse in explorer
+  const toggleFolder = (folder) => setExpandedFolders(prev => ({ ...prev, [folder]: !prev[folder] }));
+
+  // Find in current file
+  const getActiveContent = () => {
+    if (!generatedApp?.project) return '';
+    if (activeTab === 'html') return generatedApp.project.index_html || '';
+    if (activeTab === 'css')  return generatedApp.project.style_css || '';
+    if (activeTab === 'js')   return generatedApp.project.script_js || '';
+    if (activeTab === 'readme') return generatedApp.project.readme || '';
+    if (activeTab.startsWith('extra:')) {
+      const ef = (generatedApp.project.extra_files || []).find(f => f.name === activeTab.slice(6));
+      return ef?.content || '';
+    }
+    return '';
+  };
+
+  const findCount = useMemo(() => {
+    if (!findQuery.trim() || !generatedApp) return 0;
+    const content = getActiveContent();
+    const q = findCaseSensitive ? findQuery : findQuery.toLowerCase();
+    const c = findCaseSensitive ? content : content.toLowerCase();
+    let count = 0, idx = 0;
+    while ((idx = c.indexOf(q, idx)) !== -1) { count++; idx += q.length; }
+    return count;
+  }, [findQuery, findCaseSensitive, activeTab, generatedApp]);
+
+  const replaceInFile = (all = false) => {
+    if (!findQuery.trim()) return;
+    const content = getActiveContent();
+    const flags = findCaseSensitive ? 'g' : 'gi';
+    const escaped = findQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const replaced = all
+      ? content.replace(new RegExp(escaped, flags), replaceQuery)
+      : content.replace(new RegExp(escaped, findCaseSensitive ? '' : 'i'), replaceQuery);
+    const count = (content.match(new RegExp(escaped, flags)) || []).length;
+    if (activeTab === 'html') handleDirectEdit('html', replaced);
+    else if (activeTab === 'css') handleDirectEdit('css', replaced);
+    else if (activeTab === 'js') handleDirectEdit('js', replaced);
+    else if (activeTab === 'readme') setGeneratedApp(prev => ({ ...prev, project: { ...prev.project, readme: replaced } }));
+    else if (activeTab.startsWith('extra:')) {
+      const efName = activeTab.slice(6);
+      setGeneratedApp(prev => ({ ...prev, project: { ...prev.project, extra_files: prev.project.extra_files.map(f => f.name === efName ? { ...f, content: replaced } : f) } }));
+    }
+    toast.success(all ? `Replaced ${count} occurrence(s)` : 'Replaced first occurrence');
+  };
+
+  // Explain diff (calls backend with before/after content from diffView)
+  const explainDiff = async () => {
+    if (!diffView) return;
+    try {
+      toast.info('Analyzing diff...');
+      const before = diffView.verA?.[diffView.fileKey] || '';
+      const after  = diffView.verB?.[diffView.fileKey] || '';
+      const res = await axiosInstance.post('/app-builder/explain-diff', {
+        file_name: diffView.file, before, after
+      });
+      toast.success('Explanation ready');
+      setExplainPanel({ file: `Diff: ${diffView.file}`, content: res.data.explanation });
+    } catch { toast.error('Explain diff failed'); }
+  };
+
+  // Explain architecture
+  const explainArchitecture = async () => {
+    if (!generatedApp?.project) return;
+    setArchLoading(true); setArchPanel(null);
+    try {
+      const res = await axiosInstance.post('/app-builder/explain-architecture', {
+        project: generatedApp.project, name: generatedApp.name
+      });
+      setArchPanel(res.data.overview);
+      logAction('explain', 'Architecture explained');
+    } catch { toast.error('Architecture explain failed'); }
+    finally { setArchLoading(false); }
+  };
+
+  // Generate changelog
+  const generateChangelog = async () => {
+    if (!versions.length) { toast.error('No versions saved yet'); return; }
+    setChangelogLoading(true); setChangelogPanel(null);
+    try {
+      const res = await axiosInstance.post('/app-builder/generate-changelog', {
+        versions, project_name: generatedApp?.name || 'project'
+      });
+      setChangelogPanel(res.data.changelog);
+      logAction('changelog', 'Changelog generated');
+    } catch { toast.error('Changelog generation failed'); }
+    finally { setChangelogLoading(false); }
+  };
+
+  // Compute project readiness score (0-100)
+  const computeReadiness = () => {
+    if (!generatedApp) return null;
+    let score = scanResult ? (scanResult.score ?? 80) : 80;
+    const consoleErrs = consoleErrors.filter(e => e.level === 'error').length;
+    score = Math.max(0, score - consoleErrs * 5);
+    if (!generatedApp.project?.readme?.trim()) score = Math.max(0, score - 8);
+    if (!generatedApp.project?.style_css?.trim()) score = Math.max(0, score - 5);
+    return Math.min(100, Math.round(score));
+  };
+  const readinessScore = computeReadiness();
+  const readinessColor = readinessScore === null ? 'text-slate-500'
+    : readinessScore >= 80 ? 'text-emerald-400'
+    : readinessScore >= 60 ? 'text-amber-400'
+    : 'text-red-400';
 
   // ── Phase 5: Command palette ──────────────────────────────────────────────────
   const ALL_COMMANDS = useMemo(() => [
@@ -1616,6 +1840,14 @@ const AppBuilder = () => {
                 <CheckCircle className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />
                 <span className="text-[11px] font-mono text-green-400 flex-1 truncate min-w-0">{generatedApp.name}</span>
 
+                {/* Readiness score */}
+                {readinessScore !== null && (
+                  <span title="Project readiness score (scan + console + readme)"
+                    className={`text-[10px] font-mono px-1.5 py-0.5 border rounded-sm ${readinessColor} border-current/30 flex items-center gap-1`}>
+                    <TrendingUp className="w-2.5 h-2.5" />{readinessScore}%
+                  </span>
+                )}
+
                 {/* Undo / Redo */}
                 <button onClick={undo} disabled={!undoStack.length}
                   title={`Undo (${undoStack.length})`}
@@ -1714,6 +1946,28 @@ const AppBuilder = () => {
                     : ''}
                 </button>
 
+                {/* Action Log */}
+                <button onClick={() => setShowActionLog(v => !v)}
+                  title="Action log — history of all workspace actions"
+                  className={`flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase transition-colors border rounded-sm ${showActionLog ? 'bg-slate-700/40 border-slate-500 text-slate-300' : 'text-slate-500 border-slate-700/30 hover:text-slate-300 hover:border-slate-500'}`}>
+                  <Activity className="w-3 h-3" />
+                  {actionLog.length > 0 ? actionLog.length : 'Log'}
+                </button>
+
+                {/* Notes */}
+                <button onClick={() => setShowNotes(v => !v)}
+                  title="Project notes"
+                  className={`flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase transition-colors border rounded-sm ${showNotes ? 'bg-yellow-500/20 border-yellow-500/50 text-yellow-300' : 'text-slate-500 border-slate-700/30 hover:text-yellow-400 hover:border-yellow-500/40'}`}>
+                  <StickyNote className="w-3 h-3" /> Notes
+                </button>
+
+                {/* Arch explain */}
+                <button onClick={explainArchitecture} disabled={archLoading}
+                  title="AI explains the project architecture"
+                  className="flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase transition-colors border rounded-sm text-slate-500 border-slate-700/30 hover:text-violet-400 hover:border-violet-500/40 disabled:opacity-30">
+                  {archLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <GitCommit className="w-3 h-3" />} Arch
+                </button>
+
                 <div className="w-px h-4 bg-slate-700/60 mx-0.5" />
 
                 <button onClick={openInBrowser} className="flex items-center gap-1 px-2 py-1 bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 text-[10px] font-mono uppercase rounded-sm hover:bg-cyan-500/30 transition-all">
@@ -1765,19 +2019,32 @@ const AppBuilder = () => {
                       placeholder="Version name..."
                       className="bg-black/50 border border-violet-900/50 text-violet-100 placeholder:text-violet-900/50 rounded-sm px-2 py-1 text-[10px] font-mono outline-none focus:border-violet-400 w-36"
                     />
-                    <button onClick={saveVersion} className="px-2 py-1 bg-violet-500/20 border border-violet-500/40 text-violet-400 text-[10px] font-mono uppercase rounded-sm hover:bg-violet-500/30">
+                    <button onClick={() => saveVersion('manual')} className="px-2 py-1 bg-violet-500/20 border border-violet-500/40 text-violet-400 text-[10px] font-mono uppercase rounded-sm hover:bg-violet-500/30">
                       + Save Now
                     </button>
+                    <button onClick={generateChangelog} disabled={changelogLoading || !versions.length}
+                      className="px-2 py-1 text-slate-400 hover:text-violet-300 text-[10px] font-mono uppercase disabled:opacity-30 flex items-center gap-1">
+                      {changelogLoading ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <AlignLeft className="w-2.5 h-2.5" />} Changelog
+                    </button>
                   </div>
+                  {changelogPanel && (
+                    <div className="mb-2 px-3 py-2 bg-black/50 border border-violet-900/30 rounded-sm text-[9px] font-mono text-slate-300 whitespace-pre-wrap max-h-32 overflow-y-auto">
+                      {changelogPanel}
+                    </div>
+                  )}
                   {versions.length === 0 ? (
                     <p className="text-[10px] text-slate-600 font-mono">No saved versions yet. Click "+ Save Now" to create a restore point.</p>
                   ) : (
                     <div className="space-y-1 max-h-40 overflow-y-auto">
-                      {versions.map((ver, i) => (
+                      {versions.map((ver, i) => {
+                        const etColors = { manual:'text-violet-400', 'ai-edit':'text-cyan-400', restore:'text-amber-400', import:'text-blue-400', 'auto-fix':'text-emerald-400', checkpoint:'text-slate-500', 'deploy-ready':'text-green-400' };
+                        const etColor = etColors[ver.eventType] || 'text-slate-600';
+                        return (
                         <div key={i} className="flex items-center gap-2 px-2.5 py-1.5 bg-black/40 border border-violet-900/40 rounded-sm group">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5">
                               <span className="text-[10px] font-mono text-violet-300 truncate">{ver.name}</span>
+                              {ver.eventType && <span className={`text-[8px] font-mono uppercase ${etColor}`}>{ver.eventType}</span>}
                               {ver.file_changed && (
                                 <span className="text-[9px] font-mono text-slate-500 bg-slate-800 px-1 rounded">{ver.file_changed}</span>
                               )}
@@ -1822,9 +2089,65 @@ const AppBuilder = () => {
                             </button>
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* ── Action log panel ── */}
+              {showActionLog && (
+                <div className="border-b border-slate-700/40 bg-black/60 flex-shrink-0" style={{ maxHeight: '180px' }}>
+                  <div className="flex items-center gap-2 px-4 py-2 border-b border-slate-700/20 sticky top-0 bg-black/80">
+                    <Activity className="w-3 h-3 text-slate-400" />
+                    <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider flex-1">Action Log</span>
+                    <button onClick={() => setActionLog([])} className="text-[9px] font-mono text-slate-600 hover:text-slate-400 uppercase">Clear</button>
+                    <button onClick={() => setShowActionLog(false)} className="text-slate-600 hover:text-slate-400 ml-2"><X className="w-3 h-3" /></button>
+                  </div>
+                  <div className="overflow-y-auto px-3 py-2 space-y-0.5 font-mono text-[9px]">
+                    {actionLog.length === 0 && <span className="text-slate-700">No actions logged yet.</span>}
+                    {[...actionLog].reverse().map(entry => {
+                      const typeColors = { generate:'text-cyan-400', 'ai-edit':'text-violet-400', scan:'text-amber-400', 'auto-fix':'text-emerald-400', save:'text-violet-300', format:'text-blue-400', explain:'text-pink-400', changelog:'text-indigo-400', restore:'text-orange-400', deploy:'text-green-400' };
+                      return (
+                        <div key={entry.id} className="flex items-center gap-2">
+                          <span className="text-slate-700 flex-shrink-0">{entry.time}</span>
+                          <span className={`flex-shrink-0 uppercase ${typeColors[entry.type] || 'text-slate-500'}`}>[{entry.type}]</span>
+                          <span className="text-slate-400 truncate">{entry.msg}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Notes panel ── */}
+              {showNotes && (
+                <div className="border-b border-yellow-500/20 bg-black/60 flex-shrink-0" style={{ maxHeight: '160px' }}>
+                  <div className="flex items-center gap-2 px-4 py-2 border-b border-yellow-500/10">
+                    <StickyNote className="w-3 h-3 text-yellow-400" />
+                    <span className="text-[10px] font-mono text-yellow-400 uppercase tracking-wider flex-1">Project Notes</span>
+                    <button onClick={() => setShowNotes(false)} className="text-slate-600 hover:text-slate-400"><X className="w-3 h-3" /></button>
+                  </div>
+                  <textarea
+                    value={projectNotes}
+                    onChange={e => setProjectNotes(e.target.value)}
+                    placeholder="Notes, ideas, TODOs for this project..."
+                    className="w-full bg-transparent text-yellow-100 placeholder:text-yellow-900/50 font-mono text-[10px] p-3 outline-none resize-none border-0"
+                    style={{ minHeight: '100px' }}
+                  />
+                </div>
+              )}
+
+              {/* ── Architecture panel ── */}
+              {archPanel && (
+                <div className="border-b border-violet-500/20 bg-black/60 flex-shrink-0" style={{ maxHeight: '200px' }}>
+                  <div className="flex items-center gap-2 px-4 py-2 border-b border-violet-500/10">
+                    <GitCommit className="w-3 h-3 text-violet-400" />
+                    <span className="text-[10px] font-mono text-violet-400 uppercase tracking-wider flex-1">Architecture Overview</span>
+                    <button onClick={() => setArchPanel(null)} className="text-slate-600 hover:text-slate-400"><X className="w-3 h-3" /></button>
+                  </div>
+                  <p className="px-4 py-3 text-[10px] font-mono text-slate-300 whitespace-pre-wrap overflow-y-auto" style={{ maxHeight: '156px' }}>{archPanel}</p>
                 </div>
               )}
 
@@ -2026,7 +2349,12 @@ const AppBuilder = () => {
                     <span className="text-[10px] font-mono text-amber-400 uppercase tracking-wider flex-1">
                       Diff — {diffView.file} · {diffView.nameA} → {diffView.nameB}
                     </span>
-                    <button onClick={() => setDiffView(null)} className="text-slate-600 hover:text-slate-300"><X className="w-3.5 h-3.5" /></button>
+                    <button
+                      onClick={() => explainDiff()}
+                      className="flex items-center gap-1 px-2 py-0.5 text-violet-400 text-[9px] font-mono uppercase border border-violet-700/40 rounded-sm hover:bg-violet-500/10">
+                      <FileSearch className="w-2.5 h-2.5" /> Explain Diff
+                    </button>
+                    <button onClick={() => setDiffView(null)} className="text-slate-600 hover:text-slate-300 ml-1"><X className="w-3.5 h-3.5" /></button>
                   </div>
                   <div className="overflow-y-auto text-[10px] font-mono px-3 py-2 space-y-0.5">
                     {computeDiff(diffView.verA?.[diffView.fileKey] || '', diffView.verB?.[diffView.fileKey] || '').map((line, i) => (
@@ -2042,14 +2370,46 @@ const AppBuilder = () => {
                 </div>
               )}
 
+              {/* ── Find/Replace panel ── */}
+              {showFindPanel && (
+                <div className="flex-shrink-0 border-b border-cyan-500/20 bg-black/40 px-3 py-2 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <Search className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" />
+                    <input
+                      value={findQuery}
+                      onChange={e => setFindQuery(e.target.value)}
+                      placeholder="Find…"
+                      className="flex-1 bg-slate-800/60 text-slate-200 text-[11px] font-mono px-2 py-1 rounded border border-slate-600/40 focus:outline-none focus:border-cyan-500/60"
+                    />
+                    <input
+                      value={replaceQuery}
+                      onChange={e => setReplaceQuery(e.target.value)}
+                      placeholder="Replace…"
+                      className="flex-1 bg-slate-800/60 text-slate-200 text-[11px] font-mono px-2 py-1 rounded border border-slate-600/40 focus:outline-none focus:border-cyan-500/60"
+                    />
+                    <label className="flex items-center gap-1 text-[10px] text-slate-400 cursor-pointer select-none">
+                      <input type="checkbox" checked={findCaseSensitive} onChange={e => setFindCaseSensitive(e.target.checked)} className="accent-cyan-500" />
+                      Aa
+                    </label>
+                    <button
+                      onClick={replaceInFile}
+                      disabled={!findQuery}
+                      className="px-2 py-1 text-[10px] rounded bg-cyan-600/20 text-cyan-300 hover:bg-cyan-600/40 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >Replace All</button>
+                    <span className="text-[10px] text-slate-500 min-w-[3rem] text-right">{findQuery ? `${findCount} match${findCount !== 1 ? 'es' : ''}` : ''}</span>
+                    <button onClick={() => setShowFindPanel(false)} className="text-slate-500 hover:text-slate-300"><X className="w-3.5 h-3.5" /></button>
+                  </div>
+                </div>
+              )}
+
               {/* ── File tabs ── */}
               <div className="flex items-center border-b border-cyan-500/20 bg-black/30 flex-shrink-0 overflow-x-auto">
                 {[
                   { id: 'preview', label: 'Preview',    icon: <MonitorPlay className="w-3 h-3" />, dirty: false },
-                  { id: 'html',    label: 'index.html', icon: <FileCode className="w-3 h-3" />,    dirty: isDirty('index_html'), fileKey: 'index_html', file: 'index.html' },
-                  { id: 'css',     label: 'style.css',  icon: <Palette className="w-3 h-3" />,     dirty: isDirty('style_css'),  fileKey: 'style_css',  file: 'style.css' },
-                  { id: 'js',      label: 'script.js',  icon: <Code2 className="w-3 h-3" />,       dirty: isDirty('script_js'),  fileKey: 'script_js',  file: 'script.js' },
-                  { id: 'readme',  label: 'README.md',  icon: <BookOpen className="w-3 h-3" />,    dirty: false },
+                  { id: 'html',    label: 'index.html', icon: <FileCode className="w-3 h-3" />,    dirty: isDirty('index_html'), file: 'index.html' },
+                  { id: 'css',     label: 'style.css',  icon: <Palette className="w-3 h-3" />,     dirty: isDirty('style_css'),  file: 'style.css' },
+                  { id: 'js',      label: 'script.js',  icon: <Code2 className="w-3 h-3" />,       dirty: isDirty('script_js'),  file: 'script.js' },
+                  { id: 'readme',  label: 'README.md',  icon: <BookOpen className="w-3 h-3" />,    dirty: false,                 file: null },
                 ].map(tab => (
                   <button
                     key={tab.id}
@@ -2061,6 +2421,7 @@ const AppBuilder = () => {
                     }`}
                   >
                     {tab.icon}{tab.label}
+                    {tab.file && isLocked(tab.file) && <Shield className="w-2.5 h-2.5 text-amber-400 flex-shrink-0" title="Locked" />}
                     {tab.dirty && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" title="Unsaved changes" />}
                   </button>
                 ))}
@@ -2076,6 +2437,7 @@ const AppBuilder = () => {
                     }`}
                   >
                     <FileText className="w-3 h-3" />{ef.name}
+                    {isLocked(ef.name) && <Shield className="w-2.5 h-2.5 text-amber-400 flex-shrink-0" title="Locked" />}
                     <span
                       onClick={e => { e.stopPropagation(); deleteExtraFile(ef.name); }}
                       className="opacity-0 group-hover:opacity-100 ml-1 hover:text-red-400 transition-opacity cursor-pointer"
@@ -2130,6 +2492,15 @@ const AppBuilder = () => {
                         className="flex items-center gap-1 px-2 py-0.5 text-cyan-500 text-[9px] font-mono uppercase border border-cyan-700/40 rounded-sm hover:bg-cyan-500/10">
                         <Wand2 className="w-2.5 h-2.5" /> Explain
                       </button>
+                      <button onClick={() => formatFile('html')}
+                        className="flex items-center gap-1 px-2 py-0.5 text-emerald-400 text-[9px] font-mono uppercase border border-emerald-700/40 rounded-sm hover:bg-emerald-500/10">
+                        <AlignLeft className="w-2.5 h-2.5" /> Format
+                      </button>
+                      <button onClick={() => toggleLock('index.html')}
+                        className={`flex items-center gap-1 px-2 py-0.5 text-[9px] font-mono uppercase border rounded-sm transition-colors ${isLocked('index.html') ? 'text-amber-400 border-amber-700/40 hover:bg-amber-500/10' : 'text-slate-500 border-slate-700/40 hover:bg-slate-500/10'}`}>
+                        {isLocked('index.html') ? <Shield className="w-2.5 h-2.5" /> : <ShieldOff className="w-2.5 h-2.5" />}
+                        {isLocked('index.html') ? 'Locked' : 'Lock'}
+                      </button>
                       {isDirty('index_html') && <span className="text-[9px] font-mono text-amber-400">● Unsaved</span>}
                     </div>
                     <textarea
@@ -2148,6 +2519,15 @@ const AppBuilder = () => {
                         className="flex items-center gap-1 px-2 py-0.5 text-cyan-500 text-[9px] font-mono uppercase border border-cyan-700/40 rounded-sm hover:bg-cyan-500/10">
                         <Wand2 className="w-2.5 h-2.5" /> Explain
                       </button>
+                      <button onClick={() => formatFile('css')}
+                        className="flex items-center gap-1 px-2 py-0.5 text-emerald-400 text-[9px] font-mono uppercase border border-emerald-700/40 rounded-sm hover:bg-emerald-500/10">
+                        <AlignLeft className="w-2.5 h-2.5" /> Format
+                      </button>
+                      <button onClick={() => toggleLock('style.css')}
+                        className={`flex items-center gap-1 px-2 py-0.5 text-[9px] font-mono uppercase border rounded-sm transition-colors ${isLocked('style.css') ? 'text-amber-400 border-amber-700/40 hover:bg-amber-500/10' : 'text-slate-500 border-slate-700/40 hover:bg-slate-500/10'}`}>
+                        {isLocked('style.css') ? <Shield className="w-2.5 h-2.5" /> : <ShieldOff className="w-2.5 h-2.5" />}
+                        {isLocked('style.css') ? 'Locked' : 'Lock'}
+                      </button>
                       {isDirty('style_css') && <span className="text-[9px] font-mono text-amber-400">● Unsaved</span>}
                     </div>
                     <textarea
@@ -2165,6 +2545,15 @@ const AppBuilder = () => {
                       <button onClick={() => explainFile('script.js', generatedApp.project?.script_js || '')}
                         className="flex items-center gap-1 px-2 py-0.5 text-cyan-500 text-[9px] font-mono uppercase border border-cyan-700/40 rounded-sm hover:bg-cyan-500/10">
                         <Wand2 className="w-2.5 h-2.5" /> Explain
+                      </button>
+                      <button onClick={() => formatFile('js')}
+                        className="flex items-center gap-1 px-2 py-0.5 text-emerald-400 text-[9px] font-mono uppercase border border-emerald-700/40 rounded-sm hover:bg-emerald-500/10">
+                        <AlignLeft className="w-2.5 h-2.5" /> Format
+                      </button>
+                      <button onClick={() => toggleLock('script.js')}
+                        className={`flex items-center gap-1 px-2 py-0.5 text-[9px] font-mono uppercase border rounded-sm transition-colors ${isLocked('script.js') ? 'text-amber-400 border-amber-700/40 hover:bg-amber-500/10' : 'text-slate-500 border-slate-700/40 hover:bg-slate-500/10'}`}>
+                        {isLocked('script.js') ? <Shield className="w-2.5 h-2.5" /> : <ShieldOff className="w-2.5 h-2.5" />}
+                        {isLocked('script.js') ? 'Locked' : 'Lock'}
                       </button>
                       {isDirty('script_js') && <span className="text-[9px] font-mono text-amber-400">● Unsaved</span>}
                     </div>
@@ -2210,6 +2599,15 @@ const AppBuilder = () => {
                       <div className="flex items-center gap-2 px-2 py-1 bg-black/40 border-b border-indigo-500/10 flex-shrink-0">
                         <FileText className="w-3 h-3 text-indigo-400" />
                         <span className="text-[9px] font-mono text-indigo-400 flex-1">{efName}</span>
+                        <button onClick={() => duplicateExtraFile(efName)}
+                          className="flex items-center gap-1 px-2 py-0.5 text-indigo-400 text-[9px] font-mono uppercase border border-indigo-700/40 rounded-sm hover:bg-indigo-500/10">
+                          <CopyIcon className="w-2.5 h-2.5" /> Dupe
+                        </button>
+                        <button onClick={() => toggleLock(efName)}
+                          className={`flex items-center gap-1 px-2 py-0.5 text-[9px] font-mono uppercase border rounded-sm transition-colors ${isLocked(efName) ? 'text-amber-400 border-amber-700/40 hover:bg-amber-500/10' : 'text-slate-500 border-slate-700/40 hover:bg-slate-500/10'}`}>
+                          {isLocked(efName) ? <Shield className="w-2.5 h-2.5" /> : <ShieldOff className="w-2.5 h-2.5" />}
+                          {isLocked(efName) ? 'Locked' : 'Lock'}
+                        </button>
                         <button onClick={() => deleteExtraFile(efName)}
                           className="flex items-center gap-1 px-2 py-0.5 text-red-500 text-[9px] font-mono uppercase border border-red-700/40 rounded-sm hover:bg-red-500/10">
                           <Trash2 className="w-2.5 h-2.5" /> Delete

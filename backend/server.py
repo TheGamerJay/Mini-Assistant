@@ -904,6 +904,7 @@ class AppBuilderEditRequest(BaseModel):
     html: Optional[str] = None          # legacy / fallback
     project: Optional[dict] = None      # structured project files
     instruction: str
+    locked_files: List[str] = []        # file names that must not be edited
 
 @api_router.post("/app-builder/edit")
 async def edit_app(request: AppBuilderEditRequest):
@@ -924,6 +925,16 @@ async def edit_app(request: AppBuilderEditRequest):
 
         # Route the edit to the most appropriate file
         target_file = _route_edit(request.instruction)
+
+        # Respect locked files — fall back to next best unlocked file
+        _fallback_order = ["index.html", "style.css", "script.js"]
+        if target_file in request.locked_files:
+            for f in _fallback_order:
+                if f not in request.locked_files:
+                    target_file = f
+                    break
+            else:
+                raise HTTPException(status_code=400, detail="All target files are locked. Unlock a file to allow AI edits.")
 
         file_map = {
             "index.html": index_html,
@@ -1067,6 +1078,132 @@ async def export_app_zip(request: AppBuilderExportRequest):
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{name}.zip"'}
     )
+
+
+# ── Phase 5: Format, Explain-Diff, Explain-Architecture, Changelog ────────────
+
+class FormatFileRequest(BaseModel):
+    content: str
+    language: str = "html"   # html | css | js | json | markdown
+
+@api_router.post("/app-builder/format")
+async def format_file(req: FormatFileRequest):
+    """Format/prettify a file's content using AI."""
+    if not ollama_client:
+        raise HTTPException(status_code=503, detail="Ollama not available")
+    if req.language == "json":
+        try:
+            return {"formatted": json.dumps(json.loads(req.content), indent=2)}
+        except Exception:
+            pass
+    lang_map = {"html": "HTML", "css": "CSS", "js": "JavaScript", "markdown": "Markdown"}
+    lang = lang_map.get(req.language, req.language.upper())
+    prompt = f"""Format and prettify this {lang} code. Apply consistent indentation (2 spaces), line breaks, and clean structure.
+Return ONLY the formatted code. No explanation. No markdown fences.
+
+{req.content[:8000]}"""
+    resp = ollama_client.chat(model=_default_model, messages=[{"role": "user", "content": prompt}])
+    raw = resp["message"]["content"].strip()
+    import re as _ref
+    raw = _ref.sub(r'^```[a-zA-Z]*\n?', '', raw)
+    raw = _ref.sub(r'\n?```\s*$', '', raw).strip()
+    return {"formatted": raw}
+
+
+class ExplainDiffRequest(BaseModel):
+    file_name: str
+    before: str
+    after: str
+    instruction: Optional[str] = None
+
+@api_router.post("/app-builder/explain-diff")
+async def explain_diff(req: ExplainDiffRequest):
+    """AI explains what changed between two versions of a file."""
+    if not ollama_client:
+        raise HTTPException(status_code=503, detail="Ollama not available")
+    prompt = f"""A developer made changes to {req.file_name}.
+{f'Edit instruction: "{req.instruction}"' if req.instruction else ''}
+
+BEFORE:
+{req.before[:3000]}
+
+AFTER:
+{req.after[:3000]}
+
+Explain what changed in plain English. Be specific — mention function names, elements, or rules that changed.
+Keep it under 6 bullet points. Use plain language, no jargon."""
+    resp = ollama_client.chat(model=_default_model, messages=[{"role": "user", "content": prompt}])
+    return {"explanation": resp["message"]["content"].strip()}
+
+
+class ExplainArchRequest(BaseModel):
+    project: dict
+    name: str = "project"
+
+@api_router.post("/app-builder/explain-architecture")
+async def explain_architecture(req: ExplainArchRequest):
+    """AI gives an architecture overview of the full project."""
+    if not ollama_client:
+        raise HTTPException(status_code=503, detail="Ollama not available")
+    p = req.project
+    files_summary = []
+    if p.get("index_html"): files_summary.append(f"index.html ({len(p['index_html'])} chars)")
+    if p.get("style_css"):  files_summary.append(f"style.css ({len(p['style_css'])} chars)")
+    if p.get("script_js"):  files_summary.append(f"script.js ({len(p['script_js'])} chars)")
+    for ef in p.get("extra_files", []):
+        files_summary.append(f"{ef['name']} ({len(ef.get('content',''))} chars)")
+    prompt = f"""Project: {req.name}
+Files: {', '.join(files_summary)}
+
+HTML (first 2000 chars):
+{p.get('index_html','')[:2000]}
+
+JS (first 2000 chars):
+{p.get('script_js','')[:2000]}
+
+CSS (first 1000 chars):
+{p.get('style_css','')[:1000]}
+
+Give a concise architecture overview covering:
+1. What this project does
+2. How files relate to each other
+3. Key patterns/libraries used
+4. Data flow (if any)
+5. How someone would extend it
+
+Be specific to THIS codebase. Plain English. Max 300 words."""
+    resp = ollama_client.chat(model=_default_model, messages=[{"role": "user", "content": prompt}])
+    return {"overview": resp["message"]["content"].strip()}
+
+
+class GenerateChangelogRequest(BaseModel):
+    versions: List[dict]
+    project_name: str = "project"
+
+@api_router.post("/app-builder/generate-changelog")
+async def generate_changelog(req: GenerateChangelogRequest):
+    """Generate a markdown changelog from version history."""
+    if not ollama_client:
+        raise HTTPException(status_code=503, detail="Ollama not available")
+    entries = []
+    for v in req.versions[-20:]:  # last 20 versions
+        line = f"- [{v.get('savedAt','?')[:10]}] {v.get('eventType','manual').upper()} — {v.get('name','Unnamed')}"
+        if v.get("summary"): line += f": {v['summary']}"
+        if v.get("file_changed"): line += f" (in {v['file_changed']})"
+        entries.append(line)
+    prompt = f"""Convert these raw version entries for "{req.project_name}" into a clean Markdown CHANGELOG.
+
+Version entries:
+{chr(10).join(entries)}
+
+Format as:
+# Changelog
+## [date] - [version name]
+- What changed (inferred from the version name and context)
+
+Group by date if multiple on same day. Be concise. No fabricated details."""
+    resp = ollama_client.chat(model=_default_model, messages=[{"role": "user", "content": prompt}])
+    return {"changelog": resp["message"]["content"].strip()}
 
 
 # ── Phase 4: GitHub push & Vercel deploy ──────────────────────────────────────
