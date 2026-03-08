@@ -3896,6 +3896,76 @@ async def agent_run(request: AgentRunRequest):
 
 app.include_router(api_router)
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Orchestrator Task API  (/api/tasks/*)
+# ══════════════════════════════════════════════════════════════════════════════
+# Provides REST access to the OrchestratorEngine – the macro-level state
+# machine that wraps SwarmManager and tracks full user-request lifecycle.
+# ──────────────────────────────────────────────────────────────────────────────
+try:
+    from mini_assistant.swarm.orchestrator_engine import OrchestratorEngine
+    from mini_assistant.swarm.task_store          import TaskStore
+
+    _task_store  = TaskStore(mongo_db=db)
+    _orchestrator = OrchestratorEngine(task_store=_task_store)
+
+    class _TaskCreateRequest(BaseModel):
+        goal:     str
+        metadata: Optional[Dict[str, Any]] = None
+
+    class _TaskResumeRequest(BaseModel):
+        task_id: str
+
+    @api_router.post("/tasks", tags=["orchestrator"])
+    async def create_task(req: _TaskCreateRequest):
+        """Create and run a new orchestrated task. Returns the completed OrchestratorTask."""
+        task = await _orchestrator.run(goal=req.goal, metadata=req.metadata)
+        return task.to_dict()
+
+    @api_router.get("/tasks", tags=["orchestrator"])
+    async def list_tasks(limit: int = 50):
+        """List recent orchestrated tasks (summary view, newest first)."""
+        return await _task_store.list_recent(limit=limit)
+
+    @api_router.get("/tasks/{task_id}", tags=["orchestrator"])
+    async def get_task(task_id: str):
+        """Get full details for a specific orchestrated task."""
+        task = await _task_store.load(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+        return task.to_dict()
+
+    @api_router.post("/tasks/{task_id}/resume", tags=["orchestrator"])
+    async def resume_task(task_id: str):
+        """Resume an interrupted or failed task from its last safe state."""
+        task = await _orchestrator.resume(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+        return task.to_dict()
+
+    @api_router.post("/tasks/{task_id}/cancel", tags=["orchestrator"])
+    async def cancel_task(task_id: str):
+        """Cancel a pending or running task."""
+        task = await _orchestrator.cancel(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+        return task.to_dict()
+
+    @api_router.delete("/tasks/{task_id}", tags=["orchestrator"])
+    async def delete_task(task_id: str):
+        """Delete a task from the store."""
+        deleted = await _task_store.delete(task_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+        return {"deleted": task_id}
+
+    logging.info("✓ Orchestrator task API registered (/api/tasks/*)")
+
+except Exception as _orch_err:
+    logging.warning("Orchestrator task API unavailable: %s", _orch_err)
+
+
 # Serve React frontend static files if the build directory exists
 _static_dir = Path(__file__).parent / "static"
 if _static_dir.exists():
