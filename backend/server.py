@@ -820,6 +820,55 @@ Now generate the complete HTML file:"""
         # Reconstruct full HTML (inlined) for preview cache
         reconstructed = _reconstruct_html(project)
 
+        # ── Full-stack: generate Node.js/Express backend alongside the frontend ──
+        if request.project_type == "fullstack":
+            try:
+                server_prompt = f"""You are a senior Node.js developer. Generate a complete, working Express.js server for this app:
+
+{request.description}
+
+The frontend is a self-contained HTML/CSS/JS app. Your server should:
+- Use Express.js (require('express'))
+- Serve the frontend at GET / by serving index.html as a static file from the same directory
+- Add any API endpoints this app needs (REST, JSON)
+- Use in-memory storage (no database required unless the app specifically needs persistence)
+- Include error handling middleware
+- Listen on process.env.PORT || 3000
+- Export the app object for testing
+
+OUTPUT FORMAT:
+- Output ONLY the raw JavaScript. No markdown. No code fences. No explanation.
+- First line must be: const express = require('express');
+- Last line must close the server or export it."""
+
+                server_resp = ollama_client.chat(
+                    model=_default_model,
+                    messages=[{"role": "user", "content": server_prompt}]
+                )
+                server_js = server_resp['message']['content'].strip()
+                # Strip fences
+                import re as _re2
+                server_js = _re2.sub(r'^```[a-zA-Z]*\n?', '', server_js)
+                server_js = _re2.sub(r'\n?```\s*$', '', server_js).strip()
+
+                package_json = json.dumps({
+                    "name": app_name,
+                    "version": "1.0.0",
+                    "description": request.description[:100],
+                    "main": "server.js",
+                    "scripts": {"start": "node server.js", "dev": "nodemon server.js"},
+                    "dependencies": {"express": "^4.18.2"},
+                    "devDependencies": {"nodemon": "^3.0.0"}
+                }, indent=2)
+
+                project["extra_files"] = [
+                    {"name": "server.js", "content": server_js},
+                    {"name": "package.json", "content": package_json},
+                    {"name": ".gitignore", "content": "node_modules/\n.env\n*.log\n"},
+                ]
+            except Exception as fs_err:
+                logging.warning(f"Full-stack server generation failed: {fs_err}")
+
         build_id = str(uuid.uuid4())
         _app_previews[build_id] = reconstructed
         r = await _get_redis()

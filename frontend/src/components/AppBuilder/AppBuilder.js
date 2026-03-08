@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import {
@@ -9,7 +9,8 @@ import {
   SortAsc, RefreshCw, Redo2, Upload, BookOpen, AlertTriangle, AlertCircle,
   ShieldCheck, ArchiveRestore, Bug, Zap, Gauge, Terminal, Wrench,
   FilePlus, FolderTree, FileText, Folder,
-  Github, Globe, Share2, LogIn, Lock, Unlock, Link, Copy, CheckSquare
+  Github, Globe, Share2, LogIn, Lock, Unlock, Link, Copy, CheckSquare,
+  Columns, Command, Server
 } from 'lucide-react';
 
 // ── Coach system prompt ────────────────────────────────────────────────────────
@@ -183,6 +184,12 @@ const AppBuilder = () => {
   const [vercelResult, setVercelResult] = useState(null);
   const importSessionJsonRef = useRef(null);
 
+  // Phase 5 — Split view & command palette
+  const [splitView, setSplitView] = useState(false);
+  const [showCmdPalette, setShowCmdPalette] = useState(false);
+  const [cmdQuery, setCmdQuery] = useState('');
+  const [cmdIndex, setCmdIndex] = useState(0);
+
   // Undo / Redo / version history
   const [undoStack, setUndoStack] = useState([]);
   const [redoStack, setRedoStack] = useState([]);
@@ -292,6 +299,47 @@ const AppBuilder = () => {
       nameB: 'proposed',
     });
   }, [pendingChange]);
+
+  // ── Keyboard shortcuts ────────────────────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e) => {
+      const ctrl = e.ctrlKey || e.metaKey;
+      // Command palette: Ctrl/Cmd+K (always, even without a project)
+      if (ctrl && e.key === 'k') {
+        e.preventDefault();
+        setShowCmdPalette(v => !v);
+        setCmdQuery('');
+        setCmdIndex(0);
+        return;
+      }
+      // Escape closes all panels/modals
+      if (e.key === 'Escape') {
+        setShowCmdPalette(false);
+        setShowGithubModal(false);
+        setShowVercelModal(false);
+        setShowFileExplorer(false);
+        return;
+      }
+      // Command palette arrow/enter navigation
+      if (showCmdPalette) {
+        if (e.key === 'ArrowDown') { e.preventDefault(); setCmdIndex(i => i + 1); return; }
+        if (e.key === 'ArrowUp')   { e.preventDefault(); setCmdIndex(i => Math.max(0, i - 1)); return; }
+        return; // don't process other shortcuts while palette is open
+      }
+      if (!generatedApp) return;
+      // Don't intercept when user is typing in textarea/input (except toolbar)
+      const tag = document.activeElement?.tagName;
+      const inInput = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT');
+      if (ctrl && e.key === 's') { e.preventDefault(); saveVersion(); return; }
+      if (ctrl && !e.shiftKey && e.key === 'z') { e.preventDefault(); undo(); return; }
+      if (ctrl && (e.key === 'y' || (e.shiftKey && e.key === 'Z'))) { e.preventDefault(); redo(); return; }
+      if (ctrl && e.key === '\\') { e.preventDefault(); setSplitView(v => !v); return; }
+      if (!inInput && ctrl && e.key === 't') { e.preventDefault(); runScan(); return; }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [generatedApp, showCmdPalette, undoStack, redoStack]);
 
   // Load sessions from backend (Postgres) on mount; fall back to localStorage
   useEffect(() => {
@@ -1100,6 +1148,33 @@ const AppBuilder = () => {
     navigator.clipboard.writeText(text).then(() => toast.success('Copied!'));
   };
 
+  // ── Phase 5: Command palette ──────────────────────────────────────────────────
+  const ALL_COMMANDS = useMemo(() => [
+    { label: 'Save Version',          shortcut: '⌃S',   icon: BookmarkPlus,  action: () => saveVersion(),             group: 'Edit' },
+    { label: 'Undo',                  shortcut: '⌃Z',   icon: Undo2,         action: () => undo(),                    group: 'Edit' },
+    { label: 'Redo',                  shortcut: '⌃Y',   icon: Redo2,         action: () => redo(),                    group: 'Edit' },
+    { label: 'Toggle Split View',     shortcut: '⌃\\',  icon: Columns,       action: () => setSplitView(v => !v),     group: 'View' },
+    { label: 'Toggle File Explorer',  shortcut: '',     icon: FolderTree,    action: () => setShowFileExplorer(v => !v), group: 'View' },
+    { label: 'Toggle Console',        shortcut: '',     icon: Terminal,      action: () => setShowConsole(v => !v),   group: 'View' },
+    { label: 'Toggle Version History',shortcut: '',     icon: History,       action: () => setShowVersions(v => !v),  group: 'View' },
+    { label: 'Run Scan / Test',       shortcut: '⌃T',  icon: Bug,           action: () => runScan(),                 group: 'Tools' },
+    { label: 'Generate README',       shortcut: '',     icon: BookOpen,      action: () => generateReadme(),          group: 'Tools' },
+    { label: 'Generate Project Brief',shortcut: '',     icon: Sparkles,      action: () => fetchProjectBrief(),       group: 'Tools' },
+    { label: 'Export HTML',           shortcut: '',     icon: Download,      action: () => downloadApp(),             group: 'Export' },
+    { label: 'Export ZIP',            shortcut: '',     icon: Package,       action: () => exportZip(),               group: 'Export' },
+    { label: 'Export Session JSON',   shortcut: '',     icon: Download,      action: () => exportSessionJson(),       group: 'Export' },
+    { label: 'Open in Browser',       shortcut: '',     icon: Eye,           action: () => openInBrowser(),           group: 'Export' },
+    { label: 'Push to GitHub',        shortcut: '',     icon: Github,        action: () => { setShowGithubModal(true); setGithubResult(null); }, group: 'Publish' },
+    { label: 'Deploy to Vercel',      shortcut: '',     icon: Globe,         action: () => { setShowVercelModal(true); setVercelResult(null); }, group: 'Publish' },
+    { label: 'New Project',           shortcut: '',     icon: RotateCcw,     action: () => { setGeneratedApp(null); setDescription(''); setEditInput(''); setEditHistory([]); setUndoStack([]); setRedoStack([]); setVersions([]); setActiveTab('preview'); setDiffView(null); setShowFileExplorer(false); setScanResult(null); setConsoleErrors([]); }, group: 'Project' },
+  ], []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const filteredCmds = useMemo(() => {
+    if (!cmdQuery.trim()) return ALL_COMMANDS;
+    const q = cmdQuery.toLowerCase();
+    return ALL_COMMANDS.filter(c => c.label.toLowerCase().includes(q) || c.group.toLowerCase().includes(q));
+  }, [cmdQuery, ALL_COMMANDS]);
+
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <div className="h-full flex flex-col bg-[#0a0a0f]/50" data-testid="app-builder">
@@ -1434,6 +1509,7 @@ const AppBuilder = () => {
                     <option value="landing">Landing Page</option>
                     <option value="creative">Creative / Art</option>
                     <option value="tool">Utility</option>
+                    <option value="fullstack">Full-stack (+ server.js)</option>
                   </select>
                 </div>
                 <div className="flex flex-col gap-1 flex-1 min-w-32">
@@ -1598,6 +1674,28 @@ const AppBuilder = () => {
                 >
                   <Terminal className="w-3 h-3" />
                   {consoleErrors.length > 0 ? consoleErrors.length : 'Console'}
+                </button>
+
+                {/* Split View */}
+                <button
+                  onClick={() => setSplitView(v => !v)}
+                  title="Toggle split view — preview + code side by side (⌃\)"
+                  className={`flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase transition-colors border rounded-sm ${
+                    splitView
+                      ? 'bg-sky-500/20 border-sky-500/50 text-sky-300'
+                      : 'text-slate-500 border-slate-700/30 hover:text-sky-400 hover:border-sky-500/40'
+                  }`}
+                >
+                  <Columns className="w-3 h-3" /> Split
+                </button>
+
+                {/* Command Palette */}
+                <button
+                  onClick={() => { setShowCmdPalette(true); setCmdQuery(''); setCmdIndex(0); }}
+                  title="Command palette (⌃K)"
+                  className="flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase transition-colors border rounded-sm text-slate-500 border-slate-700/30 hover:text-cyan-400 hover:border-cyan-500/40"
+                >
+                  <Command className="w-3 h-3" /> ⌃K
                 </button>
 
                 {/* File Explorer */}
@@ -2005,18 +2103,27 @@ const AppBuilder = () => {
                 </div>
               )}
 
-              {/* ── Content area (preview OR code editor) ── */}
-              <div className="flex-shrink-0 overflow-hidden" style={{ height: '48%' }}>
-                {activeTab === 'preview' && (
-                  <iframe
-                    key={generatedApp.html}
-                    srcDoc={injectConsoleCapture(generatedApp.html)}
-                    title="App Preview"
-                    className="w-full h-full border-0 bg-white"
-                    sandbox="allow-scripts allow-forms allow-modals allow-same-origin"
-                  />
+              {/* ── Content area (preview OR code editor, or split view) ── */}
+              <div className={`flex-shrink-0 overflow-hidden flex ${splitView ? 'flex-row' : 'flex-col'}`} style={{ height: splitView ? '62%' : '48%' }}>
+
+                {/* Preview pane: always visible in split mode; also in normal mode when activeTab=preview */}
+                {(splitView || activeTab === 'preview') && (
+                  <div className={splitView ? 'w-1/2 border-r border-cyan-500/20 flex-shrink-0 h-full' : 'h-full'}>
+                    <iframe
+                      key={generatedApp.html}
+                      srcDoc={injectConsoleCapture(generatedApp.html)}
+                      title="App Preview"
+                      className="w-full h-full border-0 bg-white"
+                      sandbox="allow-scripts allow-forms allow-modals allow-same-origin"
+                    />
+                  </div>
                 )}
-                {activeTab === 'html' && (
+
+                {/* Code editor pane: right half in split, full pane in normal (non-preview) */}
+                {(splitView || activeTab !== 'preview') && (
+                <div className={splitView ? 'flex-1 flex flex-col overflow-hidden h-full' : 'h-full'}>
+                {/* In split mode show html by default; otherwise show whichever tab is active */}
+                {(activeTab === 'html' || (splitView && activeTab === 'preview')) && (
                   <div className="h-full flex flex-col">
                     <div className="flex items-center gap-2 px-2 py-1 bg-black/40 border-b border-cyan-500/10 flex-shrink-0">
                       <button onClick={() => explainFile('index.html', generatedApp.project?.index_html || '')}
@@ -2128,7 +2235,9 @@ const AppBuilder = () => {
                     </div>
                   );
                 })()}
-              </div>
+                </div> {/* end code editor pane */}
+                )}
+              </div> {/* end content area */}
 
               {/* ── Edit conversation ── */}
               <div className="flex-1 flex flex-col overflow-hidden border-t border-cyan-500/20">
@@ -2215,6 +2324,62 @@ const AppBuilder = () => {
         </div>
       )}
     </div>
+
+    {/* ── Command Palette ── */}
+    {showCmdPalette && (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-start justify-center pt-[12vh]" onClick={() => setShowCmdPalette(false)}>
+        <div className="bg-[#0d1117] border border-cyan-500/30 rounded-lg shadow-2xl w-full max-w-xl overflow-hidden" onClick={e => e.stopPropagation()}>
+          {/* Search input */}
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-cyan-500/20">
+            <Command className="w-4 h-4 text-cyan-500 flex-shrink-0" />
+            <input
+              autoFocus
+              value={cmdQuery}
+              onChange={e => { setCmdQuery(e.target.value); setCmdIndex(0); }}
+              onKeyDown={e => {
+                if (e.key === 'ArrowDown') { e.preventDefault(); setCmdIndex(i => Math.min(i + 1, filteredCmds.length - 1)); }
+                if (e.key === 'ArrowUp')   { e.preventDefault(); setCmdIndex(i => Math.max(0, i - 1)); }
+                if (e.key === 'Enter' && filteredCmds[cmdIndex]) {
+                  filteredCmds[cmdIndex].action();
+                  setShowCmdPalette(false);
+                }
+              }}
+              placeholder="Search commands..."
+              className="flex-1 bg-transparent text-cyan-100 placeholder:text-slate-600 outline-none font-mono text-sm"
+            />
+            <span className="text-[9px] font-mono text-slate-700 flex-shrink-0">ESC to close</span>
+          </div>
+          {/* Results */}
+          <div className="max-h-80 overflow-y-auto py-1">
+            {filteredCmds.length === 0 && (
+              <p className="px-4 py-3 text-[11px] font-mono text-slate-600">No commands found</p>
+            )}
+            {filteredCmds.map((cmd, i) => {
+              const Icon = cmd.icon;
+              return (
+                <button
+                  key={cmd.label}
+                  onClick={() => { cmd.action(); setShowCmdPalette(false); }}
+                  className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
+                    i === cmdIndex ? 'bg-cyan-500/15 text-cyan-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                  }`}
+                  onMouseEnter={() => setCmdIndex(i)}
+                >
+                  <Icon className="w-3.5 h-3.5 flex-shrink-0 opacity-70" />
+                  <span className="flex-1 font-mono text-[11px]">{cmd.label}</span>
+                  {cmd.shortcut && (
+                    <span className="text-[9px] font-mono text-slate-600 bg-black/40 px-1.5 py-0.5 rounded border border-slate-700/50">
+                      {cmd.shortcut}
+                    </span>
+                  )}
+                  <span className="text-[9px] font-mono text-slate-700">{cmd.group}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    )}
 
     {/* ── GitHub Push Modal ── */}
     {showGithubModal && (
