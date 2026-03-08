@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import {
   Wand2, Loader2, Download, Eye,
   MessageSquare, Send, ChevronRight, RotateCcw, Sparkles, Pencil, CheckCircle,
-  Trash2, FolderOpen, Clock
+  Trash2, FolderOpen, Clock, Package
 } from 'lucide-react';
 
 // ── Coach system prompt ────────────────────────────────────────────────────────
@@ -366,6 +366,27 @@ const AppBuilder = () => {
     window.open(url, '_blank');
   };
 
+  const exportZip = async () => {
+    if (!generatedApp?.html) return;
+    try {
+      toast.info('Building ZIP...');
+      const res = await axiosInstance.post('/app-builder/export-zip', {
+        html: generatedApp.html,
+        name: generatedApp.name || 'generated-app',
+        description: generatedApp.description || '',
+      }, { responseType: 'blob', timeout: 60000 });
+      const url = URL.createObjectURL(new Blob([res.data], { type: 'application/zip' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${generatedApp.name || 'generated-app'}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Project ZIP downloaded!');
+    } catch {
+      toast.error('Failed to export ZIP');
+    }
+  };
+
   const downloadApp = () => {
     if (!generatedApp?.html) return;
     const blob = new Blob([generatedApp.html], { type: 'text/html' });
@@ -613,7 +634,10 @@ const AppBuilder = () => {
                   <Eye className="w-3.5 h-3.5" /> Open
                 </button>
                 <button onClick={downloadApp} className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-500/20 border border-violet-500/40 text-violet-400 text-xs font-mono uppercase rounded-sm hover:bg-violet-500/30 transition-all">
-                  <Download className="w-3.5 h-3.5" /> Download
+                  <Download className="w-3.5 h-3.5" /> .HTML
+                </button>
+                <button onClick={exportZip} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-xs font-mono uppercase rounded-sm hover:bg-emerald-500/30 transition-all">
+                  <Package className="w-3.5 h-3.5" /> ZIP
                 </button>
                 <button onClick={() => { setGeneratedApp(null); setDescription(''); setEditInput(''); setEditHistory([]); }} className="flex items-center gap-1.5 px-3 py-1.5 text-slate-500 hover:text-slate-300 text-xs font-mono uppercase transition-colors" title="Back to sessions / start new build">
                   <RotateCcw className="w-3.5 h-3.5" /> New
