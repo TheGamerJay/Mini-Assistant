@@ -553,7 +553,7 @@ const TaskMonitor = () => {
   const fetchList = useCallback(async () => {
     try {
       const res = await axiosInstance.get('/tasks', { params: { limit: 100 } });
-      setTasks(res.data || []);
+      setTasks(Array.isArray(res.data) ? res.data : []);
     } catch (_) {}
   }, []);
 
