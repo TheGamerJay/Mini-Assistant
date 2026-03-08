@@ -5,7 +5,8 @@ import {
   Wand2, Loader2, Download, Eye,
   MessageSquare, Send, ChevronRight, RotateCcw, Sparkles, Pencil, CheckCircle,
   Trash2, FolderOpen, Clock, Package, Undo2, History, MonitorPlay,
-  FileCode, Palette, Code2, BookmarkPlus, X
+  FileCode, Palette, Code2, BookmarkPlus, X, Pin, Archive, Search,
+  SortAsc, RefreshCw
 } from 'lucide-react';
 
 // ── Coach system prompt ────────────────────────────────────────────────────────
@@ -113,6 +114,9 @@ const AppBuilder = () => {
 
   // Saved sessions
   const [savedSessions, setSavedSessions] = useState(loadSessionsLocal);
+  const [sessionSearch, setSessionSearch] = useState('');
+  const [sessionSort, setSessionSort] = useState('newest');
+  const [showArchived, setShowArchived] = useState(false);
 
   const EDIT_LOADING_MSGS = [
     'Reading your app...', 'Finding what to change...', 'Applying changes...',
@@ -196,6 +200,7 @@ const AppBuilder = () => {
   // Auto-save to Postgres (and localStorage as fallback) whenever app or edit history changes
   useEffect(() => {
     if (!generatedApp) return;
+    const existing = savedSessions.find(s => s.id === (generatedApp.build_id || generatedApp.name));
     const session = {
       id: generatedApp.build_id || generatedApp.name,
       name: generatedApp.name,
@@ -206,6 +211,11 @@ const AppBuilder = () => {
       versions,
       build_id: generatedApp.build_id,
       preview_url: generatedApp.full_preview_url || null,
+      project_type: generatedApp.project_type || 'app',
+      is_pinned: existing?.is_pinned || false,
+      is_archived: existing?.is_archived || false,
+      edit_count: editHistory.filter(m => m.role === 'user').length,
+      last_edited_file: editHistory.filter(m => m.role === 'assistant' && m.file_changed).slice(-1)[0]?.file_changed || null,
       savedAt: new Date().toISOString(),
     };
     // Persist to Postgres
@@ -242,6 +252,63 @@ const AppBuilder = () => {
       return updated;
     });
   };
+
+  const pinSession = (id) => {
+    setSavedSessions(prev => {
+      const updated = prev.map(s => s.id === id ? { ...s, is_pinned: !s.is_pinned } : s);
+      try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(updated)); } catch {}
+      const session = updated.find(s => s.id === id);
+      if (session) axiosInstance.patch(`/app-builder/sessions/${id}`, { is_pinned: session.is_pinned }).catch(() => {});
+      return updated;
+    });
+  };
+
+  const archiveSession = (id) => {
+    setSavedSessions(prev => {
+      const updated = prev.map(s => s.id === id ? { ...s, is_archived: !s.is_archived } : s);
+      try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(updated)); } catch {}
+      const session = updated.find(s => s.id === id);
+      if (session) axiosInstance.patch(`/app-builder/sessions/${id}`, { is_archived: session.is_archived }).catch(() => {});
+      return updated;
+    });
+  };
+
+  const restoreBackendVersion = async (sessionId, versionIndex) => {
+    try {
+      const res = await axiosInstance.post(`/app-builder/sessions/${sessionId}/restore-version`, {
+        version_index: versionIndex,
+      });
+      const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
+      pushUndo(generatedApp);
+      setGeneratedApp(prev => ({
+        ...prev,
+        project: res.data.project,
+        html: res.data.html,
+        build_id: res.data.build_id,
+        full_preview_url: res.data.preview_url ? backendUrl.replace('/api', '') + res.data.preview_url : prev.full_preview_url,
+      }));
+      setActiveTab('preview');
+      toast.success(`Restored: ${res.data.restored_version?.name || `v${versionIndex + 1}`}`);
+    } catch {
+      toast.error('Failed to restore version');
+    }
+  };
+
+  // Filtered + sorted session list for display
+  const filteredSessions = savedSessions
+    .filter(s => {
+      if (!showArchived && s.is_archived) return false;
+      if (sessionSearch && !s.name?.toLowerCase().includes(sessionSearch.toLowerCase())) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      if (sessionSort === 'pinned') {
+        if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1;
+      }
+      if (sessionSort === 'oldest') return new Date(a.savedAt) - new Date(b.savedAt);
+      if (sessionSort === 'most_edited') return (b.edit_count || 0) - (a.edit_count || 0);
+      return new Date(b.savedAt) - new Date(a.savedAt); // newest
+    });
 
   const startCoach = async () => {
     setCoachLoading(true);
@@ -423,7 +490,7 @@ const AppBuilder = () => {
       const reply = fileChanged
         ? `Done! Edited \`${fileChanged}\`. Preview updated above.`
         : 'Done! Preview updated above.';
-      setEditHistory(prev => [...prev, { role: 'assistant', content: reply }]);
+      setEditHistory(prev => [...prev, { role: 'assistant', content: reply, file_changed: fileChanged }]);
     } catch (err) {
       const msg = err.response?.data?.detail || 'Failed to apply changes';
       toast.error(msg);
@@ -463,9 +530,14 @@ const AppBuilder = () => {
   const saveVersion = () => {
     if (!generatedApp?.project) return;
     const name = versionName.trim() || `v${versions.length + 1} — ${new Date().toLocaleTimeString()}`;
+    const lastEdit = editHistory.filter(m => m.role === 'assistant').slice(-1)[0];
     setVersions(prev => [...prev, {
-      name, project: generatedApp.project, html: generatedApp.html,
+      name,
+      project: generatedApp.project,
+      html: generatedApp.html,
       savedAt: new Date().toISOString(),
+      file_changed: lastEdit?.file_changed || null,
+      summary: editHistory.filter(m => m.role === 'user').slice(-1)[0]?.content?.slice(0, 60) || null,
     }]);
     setVersionName('');
     toast.success(`Saved "${name}"`);
@@ -690,38 +762,108 @@ const AppBuilder = () => {
               {/* Saved sessions */}
               {savedSessions.length > 0 && (
                 <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-xs font-mono text-cyan-400/70 uppercase tracking-wider">
-                    <FolderOpen className="w-3.5 h-3.5" />
-                    Saved Builds — click to continue
+                  {/* Header + controls */}
+                  <div className="flex items-center gap-2">
+                    <FolderOpen className="w-3.5 h-3.5 text-cyan-400/70" />
+                    <span className="text-xs font-mono text-cyan-400/70 uppercase tracking-wider flex-1">Saved Builds</span>
+                    <button
+                      onClick={() => setShowArchived(v => !v)}
+                      className={`text-xs font-mono px-2 py-0.5 rounded-sm border transition-all ${showArchived ? 'border-violet-500/60 text-violet-400' : 'border-slate-700 text-slate-500 hover:border-slate-500'}`}
+                      title="Show archived"
+                    >
+                      <Archive className="w-3 h-3" />
+                    </button>
                   </div>
-                  <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
-                    {savedSessions.map(session => (
-                      <div key={session.id} className="flex items-center gap-2 p-3 bg-black/40 border border-cyan-900/40 hover:border-cyan-500/40 rounded-sm group transition-all">
+
+                  {/* Search + sort row */}
+                  <div className="flex gap-2">
+                    <div className="flex-1 flex items-center gap-1.5 bg-black/40 border border-cyan-900/40 rounded-sm px-2">
+                      <Search className="w-3 h-3 text-slate-600 flex-shrink-0" />
+                      <input
+                        value={sessionSearch}
+                        onChange={e => setSessionSearch(e.target.value)}
+                        placeholder="Search builds..."
+                        className="flex-1 bg-transparent text-xs font-mono text-cyan-200 placeholder:text-slate-700 outline-none py-1.5"
+                      />
+                    </div>
+                    <select
+                      value={sessionSort}
+                      onChange={e => setSessionSort(e.target.value)}
+                      className="bg-black/40 border border-cyan-900/40 text-xs font-mono text-cyan-400 rounded-sm px-2 outline-none"
+                    >
+                      <option value="newest">Newest</option>
+                      <option value="oldest">Oldest</option>
+                      <option value="most_edited">Most Edited</option>
+                      <option value="pinned">Pinned First</option>
+                    </select>
+                  </div>
+
+                  {/* Session list */}
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                    {filteredSessions.length === 0 && (
+                      <div className="text-xs font-mono text-slate-600 text-center py-3">No builds match</div>
+                    )}
+                    {filteredSessions.map(session => (
+                      <div
+                        key={session.id}
+                        className={`flex items-center gap-2 p-3 border rounded-sm group transition-all
+                          ${session.is_pinned ? 'bg-cyan-950/30 border-cyan-600/40' : 'bg-black/40 border-cyan-900/30'}
+                          ${session.is_archived ? 'opacity-50' : ''}
+                          hover:border-cyan-500/50`}
+                      >
                         <div className="flex-1 min-w-0">
-                          <div className="text-sm font-mono text-cyan-300 truncate">{session.name}</div>
-                          <div className="flex items-center gap-1 mt-0.5">
-                            <Clock className="w-3 h-3 text-slate-600" />
-                            <span className="text-xs text-slate-600 font-mono">
-                              {new Date(session.savedAt).toLocaleString()}
+                          <div className="flex items-center gap-1.5">
+                            {session.is_pinned && <Pin className="w-3 h-3 text-cyan-500 flex-shrink-0" />}
+                            <span className="text-sm font-mono text-cyan-300 truncate">{session.name}</span>
+                            {session.project_type && session.project_type !== 'app' && (
+                              <span className="text-xs font-mono text-slate-600 bg-slate-800 px-1 rounded-sm">{session.project_type}</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                            <span className="flex items-center gap-1 text-xs text-slate-600 font-mono">
+                              <Clock className="w-3 h-3" />
+                              {new Date(session.savedAt).toLocaleDateString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}
                             </span>
-                            {session.editHistory?.length > 0 && (
-                              <span className="text-xs text-violet-500 font-mono ml-1">· {session.editHistory.length / 2 | 0} edits</span>
+                            {(session.edit_count || 0) > 0 && (
+                              <span className="text-xs text-violet-500 font-mono">{session.edit_count} edit{session.edit_count !== 1 ? 's' : ''}</span>
+                            )}
+                            {session.last_edited_file && (
+                              <span className="text-xs text-slate-600 font-mono">{session.last_edited_file}</span>
+                            )}
+                            {session.versions?.length > 0 && (
+                              <span className="text-xs text-amber-600 font-mono">{session.versions.length} versions</span>
                             )}
                           </div>
                         </div>
-                        <button
-                          onClick={() => resumeSession(session)}
-                          className="px-3 py-1.5 bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 text-xs font-mono uppercase rounded-sm hover:bg-cyan-500/30 transition-all flex-shrink-0"
-                        >
-                          Continue
-                        </button>
-                        <button
-                          onClick={() => deleteSession(session.id)}
-                          className="p-1.5 text-slate-700 hover:text-red-400 transition-colors flex-shrink-0"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <button
+                            onClick={() => resumeSession(session)}
+                            className="px-2.5 py-1 bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 text-xs font-mono uppercase rounded-sm hover:bg-cyan-500/30 transition-all"
+                          >
+                            Open
+                          </button>
+                          <button
+                            onClick={() => pinSession(session.id)}
+                            className={`p-1.5 transition-colors ${session.is_pinned ? 'text-cyan-400' : 'text-slate-700 hover:text-cyan-500'}`}
+                            title={session.is_pinned ? 'Unpin' : 'Pin'}
+                          >
+                            <Pin className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => archiveSession(session.id)}
+                            className={`p-1.5 transition-colors ${session.is_archived ? 'text-violet-400' : 'text-slate-700 hover:text-violet-500'}`}
+                            title={session.is_archived ? 'Unarchive' : 'Archive'}
+                          >
+                            <Archive className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => deleteSession(session.id)}
+                            className="p-1.5 text-slate-700 hover:text-red-400 transition-colors"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -822,14 +964,35 @@ const AppBuilder = () => {
                     </button>
                   </div>
                   {versions.length === 0 ? (
-                    <p className="text-[10px] text-slate-600 font-mono">No saved versions yet. Click "Save" to create a restore point.</p>
+                    <p className="text-[10px] text-slate-600 font-mono">No saved versions yet. Click "+ Save Now" to create a restore point.</p>
                   ) : (
-                    <div className="flex gap-2 flex-wrap">
+                    <div className="space-y-1 max-h-40 overflow-y-auto">
                       {versions.map((ver, i) => (
-                        <div key={i} className="flex items-center gap-1.5 px-2.5 py-1.5 bg-black/40 border border-violet-900/40 rounded-sm">
-                          <span className="text-[10px] font-mono text-violet-300">{ver.name}</span>
-                          <span className="text-[9px] text-slate-600 font-mono">{new Date(ver.savedAt).toLocaleTimeString()}</span>
-                          <button onClick={() => restoreVersion(ver)} className="text-[9px] font-mono text-cyan-400 hover:text-cyan-300 uppercase ml-1">Restore</button>
+                        <div key={i} className="flex items-center gap-2 px-2.5 py-1.5 bg-black/40 border border-violet-900/40 rounded-sm group">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-mono text-violet-300 truncate">{ver.name}</span>
+                              {ver.file_changed && (
+                                <span className="text-[9px] font-mono text-slate-500 bg-slate-800 px-1 rounded">{ver.file_changed}</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-[9px] text-slate-600 font-mono">
+                                {new Date(ver.savedAt).toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}
+                              </span>
+                              {ver.summary && (
+                                <span className="text-[9px] text-slate-500 font-mono truncate max-w-32">{ver.summary}</span>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => generatedApp?.build_id
+                              ? restoreBackendVersion(generatedApp.build_id, i)
+                              : restoreVersion(ver)}
+                            className="text-[9px] font-mono text-cyan-400 hover:text-cyan-300 uppercase flex-shrink-0 flex items-center gap-1"
+                          >
+                            <RefreshCw className="w-2.5 h-2.5" /> Restore
+                          </button>
                         </div>
                       ))}
                     </div>

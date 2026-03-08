@@ -579,21 +579,49 @@ _app_previews: dict = {}
 
 @api_router.get("/preview/{build_id}", response_class=HTMLResponse)
 async def serve_app_preview(build_id: str):
-    """Serve a generated app HTML by build ID — navigable by FixLoop and browsers."""
-    # Try Redis first
-    r = await _get_redis()
-    if r:
+    """Serve a generated app HTML by build ID.
+    Priority: Redis cache → in-memory dict → reconstruct from Postgres session.
+    """
+    # 1. Try Redis
+    redis = await _get_redis()
+    if redis:
         try:
-            html = await r.get(f"preview:{build_id}")
+            html = await redis.get(f"preview:{build_id}")
             if html:
                 return HTMLResponse(content=html)
         except Exception:
             pass
-    # Fallback to in-memory dict
+
+    # 2. Try in-memory dict
     html = _app_previews.get(build_id)
-    if not html:
-        raise HTTPException(status_code=404, detail="Preview not found or expired")
-    return HTMLResponse(content=html)
+    if html:
+        return HTMLResponse(content=html)
+
+    # 3. Regenerate from Postgres — find session by build_id
+    pg = await _get_pg()
+    if pg:
+        try:
+            async with pg.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT project, html FROM app_builder_sessions WHERE build_id=$1",
+                    build_id)
+            if row:
+                project = json.loads(row["project"]) if row["project"] else None
+                if project:
+                    html = _reconstruct_html(project)
+                elif row["html"]:
+                    html = row["html"]
+                if html:
+                    # Re-cache in Redis and memory
+                    _app_previews[build_id] = html
+                    if redis:
+                        try: await redis.setex(f"preview:{build_id}", 86400, html)
+                        except Exception: pass
+                    return HTMLResponse(content=html)
+        except Exception:
+            pass
+
+    raise HTTPException(status_code=404, detail="Preview not found or expired")
 
 import re as _app_re
 
@@ -959,6 +987,56 @@ async def export_app_zip(request: AppBuilderExportRequest):
     )
 
 
+# ── Migrate table to add new columns if they don't exist yet ────────────────────
+_SESSION_MIGRATIONS = [
+    "ALTER TABLE app_builder_sessions ADD COLUMN IF NOT EXISTS user_id TEXT",
+    "ALTER TABLE app_builder_sessions ADD COLUMN IF NOT EXISTS project_type TEXT DEFAULT 'app'",
+    "ALTER TABLE app_builder_sessions ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN DEFAULT FALSE",
+    "ALTER TABLE app_builder_sessions ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT FALSE",
+    "ALTER TABLE app_builder_sessions ADD COLUMN IF NOT EXISTS edit_count INTEGER DEFAULT 0",
+    "ALTER TABLE app_builder_sessions ADD COLUMN IF NOT EXISTS last_edited_file TEXT",
+    "ALTER TABLE app_builder_sessions ADD COLUMN IF NOT EXISTS last_opened_at TIMESTAMPTZ",
+    "ALTER TABLE app_builder_sessions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()",
+]
+
+async def _migrate_sessions_table(conn):
+    for stmt in _SESSION_MIGRATIONS:
+        try:
+            await conn.execute(stmt)
+        except Exception:
+            pass  # column already exists or other harmless error
+
+
+def _row_to_session(r) -> dict:
+    """Convert an asyncpg Row to a plain dict for the API response."""
+    def _j(v):
+        if v is None: return None
+        if isinstance(v, str):
+            try: return json.loads(v)
+            except Exception: return v
+        return v
+    return {
+        "id":             r["id"],
+        "name":           r["name"],
+        "description":    r["description"],
+        "html":           r["html"],
+        "project":        _j(r["project"]),
+        "editHistory":    _j(r["edit_history"]) or [],
+        "versions":       _j(r["versions"]) or [],
+        "build_id":       r["build_id"],
+        "preview_url":    r["preview_url"],
+        "user_id":        r["user_id"] if "user_id" in r.keys() else None,
+        "project_type":   r["project_type"] if "project_type" in r.keys() else "app",
+        "is_pinned":      r["is_pinned"] if "is_pinned" in r.keys() else False,
+        "is_archived":    r["is_archived"] if "is_archived" in r.keys() else False,
+        "edit_count":     r["edit_count"] if "edit_count" in r.keys() else 0,
+        "last_edited_file": r["last_edited_file"] if "last_edited_file" in r.keys() else None,
+        "last_opened_at": r["last_opened_at"].isoformat() if ("last_opened_at" in r.keys() and r["last_opened_at"]) else None,
+        "created_at":     r["created_at"].isoformat() if ("created_at" in r.keys() and r["created_at"]) else None,
+        "savedAt":        r["updated_at"].isoformat() if r["updated_at"] else None,
+    }
+
+
 class AppBuilderSessionUpsert(BaseModel):
     id: str
     name: str
@@ -969,6 +1047,17 @@ class AppBuilderSessionUpsert(BaseModel):
     versions: list = []
     build_id: Optional[str] = None
     preview_url: Optional[str] = None
+    user_id: Optional[str] = None
+    project_type: str = "app"
+    is_pinned: bool = False
+    is_archived: bool = False
+    edit_count: int = 0
+    last_edited_file: Optional[str] = None
+
+class AppBuilderSessionPatch(BaseModel):
+    is_pinned: Optional[bool] = None
+    is_archived: Optional[bool] = None
+    name: Optional[str] = None
 
 @api_router.post("/app-builder/sessions")
 async def upsert_session(req: AppBuilderSessionUpsert):
@@ -977,15 +1066,21 @@ async def upsert_session(req: AppBuilderSessionUpsert):
     if not pg:
         return {"ok": False, "reason": "postgres_unavailable"}
     async with pg.acquire() as conn:
+        await _migrate_sessions_table(conn)
         await conn.execute("""
             INSERT INTO app_builder_sessions
-                (id, name, description, html, project, edit_history, versions, build_id, preview_url, saved_at, updated_at)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW(),NOW())
+                (id, name, description, html, project, edit_history, versions,
+                 build_id, preview_url, user_id, project_type,
+                 is_pinned, is_archived, edit_count, last_edited_file,
+                 created_at, saved_at, updated_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW(),NOW(),NOW())
             ON CONFLICT (id) DO UPDATE SET
                 name=EXCLUDED.name, description=EXCLUDED.description,
                 html=EXCLUDED.html, project=EXCLUDED.project,
                 edit_history=EXCLUDED.edit_history, versions=EXCLUDED.versions,
                 build_id=EXCLUDED.build_id, preview_url=EXCLUDED.preview_url,
+                user_id=EXCLUDED.user_id, project_type=EXCLUDED.project_type,
+                edit_count=EXCLUDED.edit_count, last_edited_file=EXCLUDED.last_edited_file,
                 updated_at=NOW()
         """,
         req.id, req.name, req.description,
@@ -993,72 +1088,151 @@ async def upsert_session(req: AppBuilderSessionUpsert):
         json.dumps(req.project) if req.project else None,
         json.dumps(req.edit_history),
         json.dumps(req.versions),
-        req.build_id, req.preview_url)
+        req.build_id, req.preview_url,
+        req.user_id, req.project_type,
+        req.is_pinned, req.is_archived,
+        req.edit_count, req.last_edited_file)
+    return {"ok": True}
+
+@api_router.patch("/app-builder/sessions/{session_id}")
+async def patch_session(session_id: str, req: AppBuilderSessionPatch):
+    """Partial update — used for pin/unpin, archive/unarchive, rename."""
+    pg = await _get_pg()
+    if not pg:
+        raise HTTPException(status_code=503, detail="Postgres unavailable")
+    fields, vals = [], []
+    if req.is_pinned is not None:
+        fields.append(f"is_pinned=${len(vals)+1}"); vals.append(req.is_pinned)
+    if req.is_archived is not None:
+        fields.append(f"is_archived=${len(vals)+1}"); vals.append(req.is_archived)
+    if req.name is not None:
+        fields.append(f"name=${len(vals)+1}"); vals.append(req.name)
+    if not fields:
+        return {"ok": True}
+    fields.append(f"updated_at=NOW()")
+    vals.append(session_id)
+    async with pg.acquire() as conn:
+        await conn.execute(
+            f"UPDATE app_builder_sessions SET {', '.join(fields)} WHERE id=${len(vals)}",
+            *vals)
     return {"ok": True}
 
 @api_router.get("/app-builder/sessions")
-async def list_sessions():
-    """Return all saved app builder sessions (newest first)."""
+async def list_sessions(
+    search: Optional[str] = None,
+    sort: str = "newest",               # newest | oldest | most_edited | pinned
+    archived: bool = False,
+):
+    """Return saved sessions with optional search, sort, and archive filter."""
     pg = await _get_pg()
     if not pg:
         return []
+
+    order = {
+        "oldest":      "updated_at ASC",
+        "most_edited": "edit_count DESC, updated_at DESC",
+        "pinned":      "is_pinned DESC, updated_at DESC",
+    }.get(sort, "updated_at DESC")
+
+    conditions = ["is_archived = $1"]
+    params: list = [archived]
+
+    if search:
+        params.append(f"%{search}%")
+        conditions.append(f"name ILIKE ${len(params)}")
+
+    where = " AND ".join(conditions)
+
     async with pg.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT id, name, description, html, project, edit_history, versions,
-                   build_id, preview_url, saved_at, updated_at
-            FROM app_builder_sessions
-            ORDER BY updated_at DESC
-        """)
-    result = []
-    for r in rows:
-        result.append({
-            "id": r["id"],
-            "name": r["name"],
-            "description": r["description"],
-            "html": r["html"],
-            "project": json.loads(r["project"]) if r["project"] else None,
-            "editHistory": json.loads(r["edit_history"]) if r["edit_history"] else [],
-            "versions": json.loads(r["versions"]) if r["versions"] else [],
-            "build_id": r["build_id"],
-            "preview_url": r["preview_url"],
-            "savedAt": r["updated_at"].isoformat() if r["updated_at"] else None,
-        })
-    return result
+        await _migrate_sessions_table(conn)
+        rows = await conn.fetch(
+            f"SELECT * FROM app_builder_sessions WHERE {where} ORDER BY {order}",
+            *params)
+
+    return [_row_to_session(r) for r in rows]
 
 @api_router.get("/app-builder/sessions/{session_id}")
 async def get_session(session_id: str):
-    """Return a single session by id."""
+    """Return a single session and stamp last_opened_at."""
+    pg = await _get_pg()
+    if not pg:
+        raise HTTPException(status_code=503, detail="Postgres unavailable")
+    async with pg.acquire() as conn:
+        await _migrate_sessions_table(conn)
+        await conn.execute(
+            "UPDATE app_builder_sessions SET last_opened_at=NOW() WHERE id=$1", session_id)
+        r = await conn.fetchrow("SELECT * FROM app_builder_sessions WHERE id=$1", session_id)
+    if not r:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return _row_to_session(r)
+
+@api_router.delete("/app-builder/sessions/{session_id}")
+async def delete_session(session_id: str):
+    pg = await _get_pg()
+    if not pg:
+        raise HTTPException(status_code=503, detail="Postgres unavailable")
+    async with pg.acquire() as conn:
+        await conn.execute("DELETE FROM app_builder_sessions WHERE id=$1", session_id)
+    return {"ok": True}
+
+@api_router.get("/app-builder/sessions/{session_id}/versions")
+async def get_session_versions(session_id: str):
+    """Return the full version history for a session."""
     pg = await _get_pg()
     if not pg:
         raise HTTPException(status_code=503, detail="Postgres unavailable")
     async with pg.acquire() as conn:
         r = await conn.fetchrow(
-            "SELECT * FROM app_builder_sessions WHERE id=$1", session_id)
+            "SELECT versions FROM app_builder_sessions WHERE id=$1", session_id)
     if not r:
         raise HTTPException(status_code=404, detail="Session not found")
-    return {
-        "id": r["id"],
-        "name": r["name"],
-        "description": r["description"],
-        "html": r["html"],
-        "project": json.loads(r["project"]) if r["project"] else None,
-        "editHistory": json.loads(r["edit_history"]) if r["edit_history"] else [],
-        "versions": json.loads(r["versions"]) if r["versions"] else [],
-        "build_id": r["build_id"],
-        "preview_url": r["preview_url"],
-        "savedAt": r["updated_at"].isoformat() if r["updated_at"] else None,
-    }
+    versions = json.loads(r["versions"]) if r["versions"] else []
+    return versions
 
-@api_router.delete("/app-builder/sessions/{session_id}")
-async def delete_session(session_id: str):
-    """Delete a session from Postgres."""
+class RestoreVersionRequest(BaseModel):
+    version_index: int   # index into versions array
+
+@api_router.post("/app-builder/sessions/{session_id}/restore-version")
+async def restore_version(session_id: str, req: RestoreVersionRequest):
+    """Restore a named version: apply it as the current project and push the
+    current state as a new version first (so nothing is lost)."""
     pg = await _get_pg()
     if not pg:
         raise HTTPException(status_code=503, detail="Postgres unavailable")
     async with pg.acquire() as conn:
-        await conn.execute(
-            "DELETE FROM app_builder_sessions WHERE id=$1", session_id)
-    return {"ok": True}
+        r = await conn.fetchrow("SELECT * FROM app_builder_sessions WHERE id=$1", session_id)
+    if not r:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    versions = json.loads(r["versions"]) if r["versions"] else []
+    if req.version_index < 0 or req.version_index >= len(versions):
+        raise HTTPException(status_code=400, detail="Invalid version index")
+
+    target = versions[req.version_index]
+    project = target.get("project")
+    if not project:
+        raise HTTPException(status_code=400, detail="Version has no project data")
+
+    # Rebuild preview HTML from the restored project
+    restored_html = _reconstruct_html(project)
+
+    # Store new preview in Redis + memory
+    build_id = str(uuid.uuid4())
+    _app_previews[build_id] = restored_html
+    r2 = await _get_redis()
+    if r2:
+        try:
+            await r2.setex(f"preview:{build_id}", 86400, restored_html)
+        except Exception:
+            pass
+
+    return {
+        "project": project,
+        "html": restored_html,
+        "build_id": build_id,
+        "preview_url": f"/api/preview/{build_id}",
+        "restored_version": target,
+    }
 
 
 class GitCommitRequest(BaseModel):
