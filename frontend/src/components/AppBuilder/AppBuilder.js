@@ -2,6 +2,20 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import {
+  reconstructHtmlFromProject,
+  getContent as ptGetContent,
+  setContent as ptSetContent,
+  getExtraFiles as ptGetExtraFiles,
+  getAssets as ptGetAssets,
+  getFileMeta as ptGetFileMeta,
+  setFileMeta as ptSetFileMeta,
+  getAllPaths as ptGetAllPaths,
+  addNodeToTree as ptAddNodeToTree,
+  removeNodeFromTree as ptRemoveNodeFromTree,
+  makeFileNode as ptMakeFileNode,
+  ensureV2 as ptEnsureV2,
+} from '../../utils/projectTree';
+import {
   Wand2, Loader2, Download, Eye,
   MessageSquare, Send, ChevronRight, RotateCcw, Sparkles, Pencil, CheckCircle,
   Trash2, FolderOpen, Clock, Package, Undo2, History, MonitorPlay,
@@ -58,23 +72,9 @@ const renderLinks = (text) => {
 /**
  * Merge structured project files back into a single self-contained HTML string
  * for the iframe preview and single-file downloads.
+ * Supports both v1 (flat) and v2 (tree) project formats.
  */
-const reconstructHtml = (project) => {
-  if (!project) return '';
-  let html = project.index_html || '';
-  const css = project.style_css || '';
-  const js  = project.script_js || '';
-  html = html.replace('<link rel="stylesheet" href="style.css">', `<style>${css}</style>`);
-  html = html.replace('<script src="script.js"></script>',        `<script>${js}</script>`);
-  // Fallback: inline if placeholders weren't found
-  if (!html.includes(`<style>${css}`) && css.trim()) {
-    html = html.replace('</head>', `<style>${css}</style>\n</head>`);
-  }
-  if (!html.includes(`<script>${js}`) && js.trim()) {
-    html = html.replace('</body>', `<script>${js}</script>\n</body>`);
-  }
-  return html;
-};
+const reconstructHtml = (project) => reconstructHtmlFromProject(project);
 
 // ── Diff computation (LCS-based, line-level) ───────────────────────────────────
 const computeDiff = (oldStr, newStr) => {
@@ -224,9 +224,9 @@ const AppBuilder = () => {
 
   // Dirty-state tracking (ref to last-saved project snapshot)
   const savedProjectRef = useRef(null);
-  const isDirty = (fileKey) => {
+  const isDirty = (filePath) => {
     if (!savedProjectRef.current || !generatedApp?.project) return false;
-    return savedProjectRef.current[fileKey] !== generatedApp.project[fileKey];
+    return ptGetContent(savedProjectRef.current, filePath) !== ptGetContent(generatedApp.project, filePath);
   };
 
   // Saved sessions
@@ -305,11 +305,8 @@ const AppBuilder = () => {
   // Auto-show diff when pending change arrives
   useEffect(() => {
     if (!pendingChange) return;
-    const fileKey = pendingChange.file_changed === 'style.css' ? 'style_css'
-      : pendingChange.file_changed === 'script.js' ? 'script_js' : 'index_html';
     setDiffView({
       file: pendingChange.file_changed || 'index.html',
-      fileKey,
       verA: generatedApp?.project || null,
       verB: pendingChange.proposed?.project || null,
       nameA: 'current',
@@ -411,12 +408,13 @@ const AppBuilder = () => {
   }, [generatedApp, editHistory, versions]);
 
   const resumeSession = (session) => {
-    const html = session.project ? reconstructHtml(session.project) : session.html;
+    const project = session.project ? ptEnsureV2(session.project, session.id, session.name) : null;
+    const html = project ? reconstructHtml(project) : session.html;
     setGeneratedApp({
       name: session.name,
       description: session.description,
       html,
-      project: session.project || null,
+      project,
       build_id: session.build_id,
       full_preview_url: session.preview_url || session.full_preview_url,
     });
@@ -633,6 +631,7 @@ const AppBuilder = () => {
       const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
       const data = response.data;
       if (data.preview_url) data.full_preview_url = backendUrl.replace('/api', '') + data.preview_url;
+      if (data.project) data.project = ptEnsureV2(data.project, data.build_id || data.name, data.name);
       if (data.project) data.html = reconstructHtml(data.project);
       data.project_type = data.project_type || projectType;
       data.build_mode   = data.build_mode   || buildMode;
@@ -659,9 +658,10 @@ const AppBuilder = () => {
       setEditMsg(EDIT_LOADING_MSGS[i]);
     }, 2500);
     try {
-      // Collect locked file names to pass to backend
-      const meta = generatedApp.project?.file_metadata || {};
-      const lockedFiles = Object.entries(meta).filter(([, v]) => v.locked).map(([k]) => k);
+      // Collect locked file names to pass to backend (v1 or v2 compatible)
+      const lockedFiles = generatedApp.project
+        ? ptGetAllPaths(generatedApp.project).filter(p => ptGetFileMeta(generatedApp.project, p)?.locked)
+        : [];
       const res = await axiosInstance.post('/app-builder/edit', {
         project: generatedApp.project || null,
         html: generatedApp.project ? null : generatedApp.html,
@@ -790,10 +790,9 @@ const AppBuilder = () => {
   const handleDirectEdit = (file, value) => {
     setGeneratedApp(prev => {
       if (!prev?.project) return prev;
-      const p = { ...prev.project };
-      if (file === 'html') p.index_html = value;
-      if (file === 'css')  p.style_css  = value;
-      if (file === 'js')   p.script_js  = value;
+      const pathMap = { html: 'index.html', css: 'style.css', js: 'script.js', readme: 'README.md' };
+      const path = pathMap[file] || file;
+      const p = ptSetContent(prev.project, path, value);
       return { ...prev, project: p, html: reconstructHtml(p) };
     });
   };
@@ -831,7 +830,7 @@ const AppBuilder = () => {
       }, { timeout: 60000 });
       setGeneratedApp(prev => ({
         ...prev,
-        project: { ...prev.project, readme: res.data.readme },
+        project: ptSetContent(prev.project, 'README.md', res.data.readme),
       }));
       setActiveTab('readme');
       toast.success('README generated!');
@@ -1016,8 +1015,8 @@ const AppBuilder = () => {
         html: generatedApp.project ? null : generatedApp.html,
         name: generatedApp.name || 'generated-app',
         description: generatedApp.description || '',
-        assets: generatedApp.project?.assets || [],
-        extra_files: generatedApp.project?.extra_files || [],
+        assets: ptGetAssets(generatedApp.project),
+        extra_files: ptGetExtraFiles(generatedApp.project),
       }, { responseType: 'blob', timeout: 60000 });
       const url = URL.createObjectURL(new Blob([res.data], { type: 'application/zip' }));
       const a = document.createElement('a');
@@ -1052,12 +1051,15 @@ const AppBuilder = () => {
       reader.onload = (ev) => {
         const dataUrl = ev.target.result;
         setGeneratedApp(prev => {
-          const assets = [...(prev.project?.assets || [])];
-          // Replace if same name
-          const idx = assets.findIndex(a => a.name === file.name);
-          const entry = { name: file.name, type: file.type, dataUrl };
-          if (idx >= 0) assets[idx] = entry; else assets.push(entry);
-          return { ...prev, project: { ...prev.project, assets } };
+          // Remove existing asset with same name, then add new node at root
+          const assetPath = `assets/${file.name}`;
+          const withoutOld = ptRemoveNodeFromTree(prev.project, assetPath);
+          const newNode = ptMakeFileNode(file.name, assetPath, '', {
+            dataUrl,
+            mime: file.type,
+            source: 'imported',
+          });
+          return { ...prev, project: ptAddNodeToTree(withoutOld, newNode, null) };
         });
         toast.success(`Asset uploaded: ${file.name}`);
       };
@@ -1074,10 +1076,9 @@ const AppBuilder = () => {
       return;
     }
     setGeneratedApp(prev => {
-      const extra = [...(prev.project?.extra_files || [])];
-      if (extra.find(f => f.name === name)) { toast.error('File already exists'); return prev; }
-      extra.push({ name, content: '' });
-      return { ...prev, project: { ...prev.project, extra_files: extra } };
+      if (ptGetExtraFiles(prev.project).find(f => f.name === name)) { toast.error('File already exists'); return prev; }
+      const newNode = ptMakeFileNode(name, name, '');
+      return { ...prev, project: ptAddNodeToTree(prev.project, newNode, null) };
     });
     setActiveTab(`extra:${name}`);
     setNewFileName('');
@@ -1087,7 +1088,7 @@ const AppBuilder = () => {
   const deleteExtraFile = (name) => {
     setGeneratedApp(prev => ({
       ...prev,
-      project: { ...prev.project, extra_files: (prev.project?.extra_files || []).filter(f => f.name !== name) }
+      project: ptRemoveNodeFromTree(prev.project, name),
     }));
     if (activeTab === `extra:${name}`) setActiveTab('preview');
   };
@@ -1095,7 +1096,7 @@ const AppBuilder = () => {
   const deleteAsset = (name) => {
     setGeneratedApp(prev => ({
       ...prev,
-      project: { ...prev.project, assets: (prev.project?.assets || []).filter(a => a.name !== name) }
+      project: ptRemoveNodeFromTree(prev.project, `assets/${name}`),
     }));
     toast.success(`Removed asset: ${name}`);
   };
@@ -1122,6 +1123,7 @@ const AppBuilder = () => {
       try {
         const data = JSON.parse(ev.target.result);
         if (!data.project && !data.html) { toast.error('Not a valid session JSON'); return; }
+        if (data.project) data.project = ptEnsureV2(data.project, data.build_id || data.name, data.name);
         setGeneratedApp(data);
         if (data.versions) setVersions(data.versions);
         if (data.editHistory) setEditHistory(data.editHistory);
@@ -1146,8 +1148,8 @@ const AppBuilder = () => {
         name: generatedApp.name || 'generated-app',
         description: generatedApp.description || '',
         private: githubPrivate,
-        assets: generatedApp.project?.assets || [],
-        extra_files: generatedApp.project?.extra_files || [],
+        assets: ptGetAssets(generatedApp.project),
+        extra_files: ptGetExtraFiles(generatedApp.project),
       });
       setGithubResult(res.data);
       toast.success('Pushed to GitHub!');
@@ -1164,8 +1166,8 @@ const AppBuilder = () => {
         token: vercelToken,
         project: generatedApp.project,
         name: generatedApp.name || 'generated-app',
-        assets: generatedApp.project?.assets || [],
-        extra_files: generatedApp.project?.extra_files || [],
+        assets: ptGetAssets(generatedApp.project),
+        extra_files: ptGetExtraFiles(generatedApp.project),
       });
       setVercelResult(res.data);
       toast.success('Deployed to Vercel!');
@@ -1187,15 +1189,12 @@ const AppBuilder = () => {
     }]);
   };
 
-  // File metadata helpers
-  const getFileMeta = (fileKey) => generatedApp?.project?.file_metadata?.[fileKey] || {};
-  const updateFileMeta = (fileKey, patch) => {
+  // File metadata helpers (v1 and v2 compatible via projectTree utilities)
+  const getFileMeta = (fileName) => ptGetFileMeta(generatedApp?.project, fileName) || {};
+  const updateFileMeta = (fileName, patch) => {
     setGeneratedApp(prev => ({
       ...prev,
-      project: {
-        ...prev.project,
-        file_metadata: { ...(prev.project?.file_metadata || {}), [fileKey]: { ...(prev.project?.file_metadata?.[fileKey] || {}), ...patch, updated_at: new Date().toISOString() } }
-      }
+      project: ptSetFileMeta(prev.project, fileName, patch),
     }));
   };
 
@@ -1229,39 +1228,33 @@ const AppBuilder = () => {
     if (!generatedApp?.project) return;
     const langMap = { html: 'html', css: 'css', js: 'js', readme: 'markdown' };
     const lang = langMap[tab] || 'html';
-    const key = tabToKey(tab);
-    const content = tab.startsWith('extra:')
-      ? (generatedApp.project.extra_files || []).find(f => f.name === tab.slice(6))?.content || ''
-      : generatedApp.project?.[key] || '';
+    const filePath = tabToFileName(tab);
+    const content = ptGetContent(generatedApp.project, filePath);
     if (!content.trim()) return;
     try {
       toast.info('Formatting...');
       const res = await axiosInstance.post('/app-builder/format', { content, language: lang });
       const formatted = res.data.formatted;
-      if (tab.startsWith('extra:')) {
-        const efName = tab.slice(6);
-        setGeneratedApp(prev => ({
-          ...prev,
-          project: { ...prev.project, extra_files: prev.project.extra_files.map(f => f.name === efName ? { ...f, content: formatted } : f) }
-        }));
-      } else {
-        handleDirectEdit(tab === 'html' ? 'html' : tab === 'css' ? 'css' : tab === 'js' ? 'js' : 'readme', formatted);
-      }
-      logAction('format', `Formatted ${tabToFileName(tab)}`);
+      setGeneratedApp(prev => ({
+        ...prev,
+        project: ptSetContent(prev.project, filePath, formatted),
+      }));
+      logAction('format', `Formatted ${filePath}`);
       toast.success('Formatted!');
     } catch { toast.error('Format failed'); }
   };
 
   // Duplicate extra file
   const duplicateExtraFile = (name) => {
-    const ef = (generatedApp?.project?.extra_files || []).find(f => f.name === name);
+    const ef = ptGetExtraFiles(generatedApp?.project).find(f => f.name === name);
     if (!ef) return;
     const ext = name.includes('.') ? name.slice(name.lastIndexOf('.')) : '';
     const base = name.slice(0, name.length - ext.length);
     const newName = `${base}-copy${ext}`;
+    const newNode = ptMakeFileNode(newName, newName, ef.content || '');
     setGeneratedApp(prev => ({
       ...prev,
-      project: { ...prev.project, extra_files: [...(prev.project.extra_files || []), { name: newName, content: ef.content }] }
+      project: ptAddNodeToTree(prev.project, newNode),
     }));
     toast.success(`Duplicated as ${newName}`);
   };
@@ -1272,14 +1265,9 @@ const AppBuilder = () => {
   // Find in current file
   const getActiveContent = () => {
     if (!generatedApp?.project) return '';
-    if (activeTab === 'html') return generatedApp.project.index_html || '';
-    if (activeTab === 'css')  return generatedApp.project.style_css || '';
-    if (activeTab === 'js')   return generatedApp.project.script_js || '';
-    if (activeTab === 'readme') return generatedApp.project.readme || '';
-    if (activeTab.startsWith('extra:')) {
-      const ef = (generatedApp.project.extra_files || []).find(f => f.name === activeTab.slice(6));
-      return ef?.content || '';
-    }
+    const pathMap = { html: 'index.html', css: 'style.css', js: 'script.js', readme: 'README.md' };
+    if (pathMap[activeTab]) return ptGetContent(generatedApp.project, pathMap[activeTab]);
+    if (activeTab.startsWith('extra:')) return ptGetContent(generatedApp.project, activeTab.slice(6));
     return '';
   };
 
@@ -1302,13 +1290,10 @@ const AppBuilder = () => {
       ? content.replace(new RegExp(escaped, flags), replaceQuery)
       : content.replace(new RegExp(escaped, findCaseSensitive ? '' : 'i'), replaceQuery);
     const count = (content.match(new RegExp(escaped, flags)) || []).length;
-    if (activeTab === 'html') handleDirectEdit('html', replaced);
-    else if (activeTab === 'css') handleDirectEdit('css', replaced);
-    else if (activeTab === 'js') handleDirectEdit('js', replaced);
-    else if (activeTab === 'readme') setGeneratedApp(prev => ({ ...prev, project: { ...prev.project, readme: replaced } }));
-    else if (activeTab.startsWith('extra:')) {
-      const efName = activeTab.slice(6);
-      setGeneratedApp(prev => ({ ...prev, project: { ...prev.project, extra_files: prev.project.extra_files.map(f => f.name === efName ? { ...f, content: replaced } : f) } }));
+    const pathMap = { html: 'index.html', css: 'style.css', js: 'script.js', readme: 'README.md' };
+    const filePath = pathMap[activeTab] || (activeTab.startsWith('extra:') ? activeTab.slice(6) : null);
+    if (filePath) {
+      setGeneratedApp(prev => ({ ...prev, project: ptSetContent(prev.project, filePath, replaced) }));
     }
     toast.success(all ? `Replaced ${count} occurrence(s)` : 'Replaced first occurrence');
   };
@@ -1318,8 +1303,8 @@ const AppBuilder = () => {
     if (!diffView) return;
     try {
       toast.info('Analyzing diff...');
-      const before = diffView.verA?.[diffView.fileKey] || '';
-      const after  = diffView.verB?.[diffView.fileKey] || '';
+      const before = ptGetContent(diffView.verA, diffView.file) || '';
+      const after  = ptGetContent(diffView.verB, diffView.file) || '';
       const res = await axiosInstance.post('/app-builder/explain-diff', {
         file_name: diffView.file, before, after
       });
@@ -1362,8 +1347,8 @@ const AppBuilder = () => {
     let score = scanResult ? (scanResult.score ?? 80) : 80;
     const consoleErrs = consoleErrors.filter(e => e.level === 'error').length;
     score = Math.max(0, score - consoleErrs * 5);
-    if (!generatedApp.project?.readme?.trim()) score = Math.max(0, score - 8);
-    if (!generatedApp.project?.style_css?.trim()) score = Math.max(0, score - 5);
+    if (!ptGetContent(generatedApp.project, 'README.md')?.trim()) score = Math.max(0, score - 8);
+    if (!ptGetContent(generatedApp.project, 'style.css')?.trim()) score = Math.max(0, score - 5);
     return Math.min(100, Math.round(score));
   };
   const readinessScore = computeReadiness();
@@ -1911,9 +1896,7 @@ const AppBuilder = () => {
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono uppercase transition-colors border rounded-sm ${
                     showFileExplorer ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300' : 'text-slate-500 border-slate-700/30 hover:text-indigo-400 hover:border-indigo-500/40'}`}>
                   <FolderTree className="w-3.5 h-3.5" /> FILES
-                  {((generatedApp?.project?.extra_files?.length || 0) + (generatedApp?.project?.assets?.length || 0)) > 0
-                    ? ` (${(generatedApp?.project?.extra_files?.length || 0) + (generatedApp?.project?.assets?.length || 0)})`
-                    : ''}
+                  {(() => { const n = ptGetExtraFiles(generatedApp?.project).length + ptGetAssets(generatedApp?.project).length; return n > 0 ? ` (${n})` : ''; })()}
                 </button>
                 <button onClick={() => setShowActionLog(v => !v)} title="Action log"
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono uppercase transition-colors border rounded-sm ${
@@ -2028,11 +2011,8 @@ const AppBuilder = () => {
                             <button
                               onClick={() => {
                                 const prevVer = versions[i - 1] || null;
-                                const fileKey = ver.file_changed === 'style.css' ? 'style_css'
-                                  : ver.file_changed === 'script.js' ? 'script_js' : 'index_html';
                                 setDiffView({
                                   file: ver.file_changed || 'index.html',
-                                  fileKey,
                                   verA: prevVer?.project || null,
                                   verB: ver.project,
                                   nameA: prevVer?.name || 'previous',
@@ -2255,10 +2235,10 @@ const AppBuilder = () => {
                     ))}
 
                     {/* Extra custom files */}
-                    {(generatedApp?.project?.extra_files || []).length > 0 && (
+                    {ptGetExtraFiles(generatedApp?.project).length > 0 && (
                       <>
                         <div className="px-2 py-0.5 mt-2 text-[9px] font-mono text-slate-600 uppercase tracking-wider">Custom Files</div>
-                        {(generatedApp.project.extra_files).map(ef => (
+                        {ptGetExtraFiles(generatedApp.project).map(ef => (
                           <div key={ef.name} className={`flex items-center gap-1 px-3 py-1 rounded-sm transition-colors ${
                             activeTab === `extra:${ef.name}` ? 'bg-indigo-500/15' : 'hover:bg-white/5'
                           }`}>
@@ -2277,12 +2257,12 @@ const AppBuilder = () => {
                     )}
 
                     {/* Assets */}
-                    {(generatedApp?.project?.assets || []).length > 0 && (
+                    {ptGetAssets(generatedApp?.project).length > 0 && (
                       <>
                         <div className="px-2 py-0.5 mt-2 text-[9px] font-mono text-slate-600 uppercase tracking-wider flex items-center gap-1">
                           <Folder className="w-2.5 h-2.5" /> assets/
                         </div>
-                        {(generatedApp.project.assets).map(asset => (
+                        {ptGetAssets(generatedApp.project).map(asset => (
                           <div key={asset.name} className="flex items-center gap-1 px-3 py-1 rounded-sm hover:bg-white/5 group">
                             <span className="flex items-center gap-2 flex-1 text-[10px] font-mono text-slate-500">
                               {asset.type?.startsWith('image/') ? '🖼' : '📄'} {asset.name}
@@ -2299,7 +2279,7 @@ const AppBuilder = () => {
                       </>
                     )}
 
-                    {(generatedApp?.project?.extra_files || []).length === 0 && (generatedApp?.project?.assets || []).length === 0 && (
+                    {ptGetExtraFiles(generatedApp?.project).length === 0 && ptGetAssets(generatedApp?.project).length === 0 && (
                       <p className="px-3 py-3 text-[9px] font-mono text-slate-700 text-center">
                         No custom files or assets yet. Upload an image or create a new file.
                       </p>
@@ -2323,7 +2303,7 @@ const AppBuilder = () => {
                     <button onClick={() => setDiffView(null)} className="text-slate-600 hover:text-slate-300 ml-1"><X className="w-3.5 h-3.5" /></button>
                   </div>
                   <div className="overflow-y-auto text-[10px] font-mono px-3 py-2 space-y-0.5">
-                    {computeDiff(diffView.verA?.[diffView.fileKey] || '', diffView.verB?.[diffView.fileKey] || '').map((line, i) => (
+                    {computeDiff(ptGetContent(diffView.verA, diffView.file) || '', ptGetContent(diffView.verB, diffView.file) || '').map((line, i) => (
                       line.t === 'eq' ? null : (
                         <div key={i} className={`px-1.5 py-0.5 rounded-sm whitespace-pre-wrap break-all ${
                           line.t === 'add' ? 'bg-emerald-950/60 text-emerald-400' : 'bg-red-950/60 text-red-400 line-through'
@@ -2372,9 +2352,9 @@ const AppBuilder = () => {
               <div className="flex items-center border-b border-cyan-500/20 bg-black/30 flex-shrink-0 overflow-x-auto">
                 {[
                   { id: 'preview', label: 'Preview',    icon: <MonitorPlay className="w-3 h-3" />, dirty: false },
-                  { id: 'html',    label: 'index.html', icon: <FileCode className="w-3 h-3" />,    dirty: isDirty('index_html'), file: 'index.html' },
-                  { id: 'css',     label: 'style.css',  icon: <Palette className="w-3 h-3" />,     dirty: isDirty('style_css'),  file: 'style.css' },
-                  { id: 'js',      label: 'script.js',  icon: <Code2 className="w-3 h-3" />,       dirty: isDirty('script_js'),  file: 'script.js' },
+                  { id: 'html',    label: 'index.html', icon: <FileCode className="w-3 h-3" />,    dirty: isDirty('index.html'), file: 'index.html' },
+                  { id: 'css',     label: 'style.css',  icon: <Palette className="w-3 h-3" />,     dirty: isDirty('style.css'),  file: 'style.css' },
+                  { id: 'js',      label: 'script.js',  icon: <Code2 className="w-3 h-3" />,       dirty: isDirty('script.js'),  file: 'script.js' },
                   { id: 'readme',  label: 'README.md',  icon: <BookOpen className="w-3 h-3" />,    dirty: false,                 file: null },
                 ].map(tab => (
                   <button
@@ -2392,7 +2372,7 @@ const AppBuilder = () => {
                   </button>
                 ))}
                 {/* Extra file tabs */}
-                {(generatedApp?.project?.extra_files || []).map(ef => (
+                {ptGetExtraFiles(generatedApp?.project).map(ef => (
                   <button
                     key={`extra:${ef.name}`}
                     onClick={() => setActiveTab(`extra:${ef.name}`)}
@@ -2454,7 +2434,7 @@ const AppBuilder = () => {
                 {(activeTab === 'html' || (splitView && activeTab === 'preview')) && (
                   <div className="h-full flex flex-col">
                     <div className="flex items-center gap-2 px-2 py-1 bg-black/40 border-b border-cyan-500/10 flex-shrink-0">
-                      <button onClick={() => explainFile('index.html', generatedApp.project?.index_html || '')}
+                      <button onClick={() => explainFile('index.html', ptGetContent(generatedApp.project, 'index.html'))}
                         className="flex items-center gap-1 px-2 py-0.5 text-cyan-500 text-[9px] font-mono uppercase border border-cyan-700/40 rounded-sm hover:bg-cyan-500/10">
                         <Wand2 className="w-2.5 h-2.5" /> Explain
                       </button>
@@ -2467,10 +2447,10 @@ const AppBuilder = () => {
                         {isLocked('index.html') ? <Shield className="w-2.5 h-2.5" /> : <ShieldOff className="w-2.5 h-2.5" />}
                         {isLocked('index.html') ? 'Locked' : 'Lock'}
                       </button>
-                      {isDirty('index_html') && <span className="text-[9px] font-mono text-amber-400">● Unsaved</span>}
+                      {isDirty('index.html') && <span className="text-[9px] font-mono text-amber-400">● Unsaved</span>}
                     </div>
                     <textarea
-                      value={generatedApp.project?.index_html || ''}
+                      value={ptGetContent(generatedApp.project, 'index.html')}
                       onChange={e => handleDirectEdit('html', e.target.value)}
                       onBlur={() => pushUndo()}
                       className="flex-1 bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
@@ -2481,7 +2461,7 @@ const AppBuilder = () => {
                 {activeTab === 'css' && (
                   <div className="h-full flex flex-col">
                     <div className="flex items-center gap-2 px-2 py-1 bg-black/40 border-b border-cyan-500/10 flex-shrink-0">
-                      <button onClick={() => explainFile('style.css', generatedApp.project?.style_css || '')}
+                      <button onClick={() => explainFile('style.css', ptGetContent(generatedApp.project, 'style.css'))}
                         className="flex items-center gap-1 px-2 py-0.5 text-cyan-500 text-[9px] font-mono uppercase border border-cyan-700/40 rounded-sm hover:bg-cyan-500/10">
                         <Wand2 className="w-2.5 h-2.5" /> Explain
                       </button>
@@ -2494,10 +2474,10 @@ const AppBuilder = () => {
                         {isLocked('style.css') ? <Shield className="w-2.5 h-2.5" /> : <ShieldOff className="w-2.5 h-2.5" />}
                         {isLocked('style.css') ? 'Locked' : 'Lock'}
                       </button>
-                      {isDirty('style_css') && <span className="text-[9px] font-mono text-amber-400">● Unsaved</span>}
+                      {isDirty('style.css') && <span className="text-[9px] font-mono text-amber-400">● Unsaved</span>}
                     </div>
                     <textarea
-                      value={generatedApp.project?.style_css || ''}
+                      value={ptGetContent(generatedApp.project, 'style.css')}
                       onChange={e => handleDirectEdit('css', e.target.value)}
                       onBlur={() => pushUndo()}
                       className="flex-1 bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
@@ -2508,7 +2488,7 @@ const AppBuilder = () => {
                 {activeTab === 'js' && (
                   <div className="h-full flex flex-col">
                     <div className="flex items-center gap-2 px-2 py-1 bg-black/40 border-b border-cyan-500/10 flex-shrink-0">
-                      <button onClick={() => explainFile('script.js', generatedApp.project?.script_js || '')}
+                      <button onClick={() => explainFile('script.js', ptGetContent(generatedApp.project, 'script.js'))}
                         className="flex items-center gap-1 px-2 py-0.5 text-cyan-500 text-[9px] font-mono uppercase border border-cyan-700/40 rounded-sm hover:bg-cyan-500/10">
                         <Wand2 className="w-2.5 h-2.5" /> Explain
                       </button>
@@ -2521,10 +2501,10 @@ const AppBuilder = () => {
                         {isLocked('script.js') ? <Shield className="w-2.5 h-2.5" /> : <ShieldOff className="w-2.5 h-2.5" />}
                         {isLocked('script.js') ? 'Locked' : 'Lock'}
                       </button>
-                      {isDirty('script_js') && <span className="text-[9px] font-mono text-amber-400">● Unsaved</span>}
+                      {isDirty('script.js') && <span className="text-[9px] font-mono text-amber-400">● Unsaved</span>}
                     </div>
                     <textarea
-                      value={generatedApp.project?.script_js || ''}
+                      value={ptGetContent(generatedApp.project, 'script.js')}
                       onChange={e => handleDirectEdit('js', e.target.value)}
                       onBlur={() => pushUndo()}
                       className="flex-1 bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
@@ -2539,17 +2519,14 @@ const AppBuilder = () => {
                         className="flex items-center gap-1 px-2 py-0.5 text-violet-400 text-[9px] font-mono uppercase border border-violet-700/40 rounded-sm hover:bg-violet-500/10">
                         <Sparkles className="w-2.5 h-2.5" /> AI Generate
                       </button>
-                      <button onClick={() => explainFile('README.md', generatedApp.project?.readme || '')}
+                      <button onClick={() => explainFile('README.md', ptGetContent(generatedApp.project, 'README.md'))}
                         className="flex items-center gap-1 px-2 py-0.5 text-cyan-500 text-[9px] font-mono uppercase border border-cyan-700/40 rounded-sm hover:bg-cyan-500/10">
                         <Wand2 className="w-2.5 h-2.5" /> Explain
                       </button>
                     </div>
                     <textarea
-                      value={generatedApp.project?.readme || ''}
-                      onChange={e => setGeneratedApp(prev => ({
-                        ...prev,
-                        project: { ...prev.project, readme: e.target.value }
-                      }))}
+                      value={ptGetContent(generatedApp.project, 'README.md')}
+                      onChange={e => handleDirectEdit('readme', e.target.value)}
                       className="flex-1 bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
                       spellCheck={false}
                     />
@@ -2558,8 +2535,8 @@ const AppBuilder = () => {
                 {/* Extra custom file tabs */}
                 {activeTab.startsWith('extra:') && (() => {
                   const efName = activeTab.slice(6);
-                  const ef = (generatedApp?.project?.extra_files || []).find(f => f.name === efName);
-                  if (!ef) return null;
+                  const efContent = ptGetContent(generatedApp?.project, efName);
+                  if (efContent === '' && !ptGetExtraFiles(generatedApp?.project).find(f => f.name === efName)) return null;
                   return (
                     <div className="h-full flex flex-col">
                       <div className="flex items-center gap-2 px-2 py-1 bg-black/40 border-b border-indigo-500/10 flex-shrink-0">
@@ -2580,17 +2557,11 @@ const AppBuilder = () => {
                         </button>
                       </div>
                       <textarea
-                        value={ef.content || ''}
-                        onChange={e => {
-                          const val = e.target.value;
-                          setGeneratedApp(prev => ({
-                            ...prev,
-                            project: {
-                              ...prev.project,
-                              extra_files: prev.project.extra_files.map(f => f.name === efName ? { ...f, content: val } : f)
-                            }
-                          }));
-                        }}
+                        value={efContent}
+                        onChange={e => setGeneratedApp(prev => ({
+                          ...prev,
+                          project: ptSetContent(prev.project, efName, e.target.value),
+                        }))}
                         onBlur={() => pushUndo()}
                         className="flex-1 bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
                         spellCheck={false}

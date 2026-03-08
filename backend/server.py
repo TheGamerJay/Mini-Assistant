@@ -25,6 +25,187 @@ import httpx
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
+# ── Project tree helpers ──────────────────────────────────────────────────────
+# Supports both v1 (flat: index_html/style_css/script_js) and v2 (nested tree).
+# All app-builder endpoints accept/return v2; v1 sessions are migrated on load.
+
+_MIME_MAP = {
+    'html': 'text/html', 'htm': 'text/html', 'css': 'text/css',
+    'js': 'application/javascript', 'mjs': 'application/javascript',
+    'ts': 'application/typescript', 'tsx': 'application/typescript',
+    'json': 'application/json', 'md': 'text/markdown', 'txt': 'text/plain',
+    'py': 'text/x-python', 'rb': 'text/x-ruby', 'rs': 'text/x-rust',
+    'go': 'text/x-go', 'yaml': 'text/yaml', 'yml': 'text/yaml',
+    'toml': 'text/x-toml', 'sh': 'text/x-shellscript',
+    'svg': 'image/svg+xml', 'png': 'image/png', 'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg', 'gif': 'image/gif', 'ico': 'image/x-icon',
+    'woff': 'font/woff', 'woff2': 'font/woff2', 'ttf': 'font/ttf',
+}
+
+def _pt_guess_mime(name: str) -> str:
+    ext = name.rsplit('.', 1)[-1].lower() if '.' in name else ''
+    return _MIME_MAP.get(ext, 'text/plain')
+
+def _pt_file_node(name: str, path: str, content: str = '', **kw) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    return {
+        'id':      kw.get('id') or str(uuid.uuid4()),
+        'name':    name,
+        'path':    path,
+        'type':    'file',
+        'content': content,
+        'dataUrl': kw.get('dataUrl'),
+        'metadata': {
+            'locked':     kw.get('locked', False),
+            'source':     kw.get('source', 'generated'),
+            'created_at': kw.get('created_at', now),
+            'updated_at': kw.get('updated_at', now),
+            'mime':       kw.get('mime') or _pt_guess_mime(name),
+        },
+    }
+
+def _pt_folder_node(name: str, path: str, children: list = None) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    return {
+        'id': str(uuid.uuid4()), 'name': name, 'path': path,
+        'type': 'folder', 'children': children or [],
+        'metadata': {'locked': False, 'source': 'generated', 'created_at': now, 'updated_at': now},
+    }
+
+def _pt_is_v2(project: dict) -> bool:
+    return bool(project) and project.get('version') == 2
+
+def _pt_flat_to_tree(old: dict, project_id: str = None, name: str = 'project') -> dict:
+    """Migrate flat v1 project → nested tree v2."""
+    if not old:
+        return None
+    if _pt_is_v2(old):
+        return old
+    now  = datetime.now(timezone.utc).isoformat()
+    meta = old.get('file_metadata', {})
+
+    def m(filename):
+        fm = meta.get(filename, {})
+        return {'locked': fm.get('locked', False), 'created_at': fm.get('created_at', now), 'updated_at': fm.get('updated_at', now)}
+
+    root = []
+    if old.get('index_html'): root.append(_pt_file_node('index.html', 'index.html', old['index_html'], mime='text/html',               **m('index.html')))
+    if old.get('style_css'):  root.append(_pt_file_node('style.css',  'style.css',  old['style_css'],  mime='text/css',                **m('style.css')))
+    if old.get('script_js'):  root.append(_pt_file_node('script.js',  'script.js',  old['script_js'],  mime='application/javascript',  **m('script.js')))
+    if old.get('readme'):     root.append(_pt_file_node('README.md',  'README.md',  old['readme'],     mime='text/markdown'))
+
+    for ef in old.get('extra_files', []):
+        root.append(_pt_file_node(ef['name'], ef['name'], ef.get('content', ''), **m(ef['name'])))
+
+    assets = old.get('assets', [])
+    if assets:
+        asset_nodes = [_pt_file_node(a['name'], f"assets/{a['name']}", '',
+                        dataUrl=a.get('dataUrl'), mime=a.get('type') or _pt_guess_mime(a['name']),
+                        source='imported') for a in assets]
+        root.append(_pt_folder_node('assets', 'assets', asset_nodes))
+
+    return {'version': 2, 'id': project_id or str(uuid.uuid4()), 'name': name,
+            'root': root, 'created_at': now, 'updated_at': now}
+
+def _pt_ensure_v2(project: dict, project_id: str = None, name: str = 'project') -> dict:
+    if not project:
+        return project
+    if _pt_is_v2(project):
+        return project
+    return _pt_flat_to_tree(project, project_id, name)
+
+def _pt_get_all_file_nodes(tree: dict) -> list:
+    files = []
+    def traverse(nodes):
+        for n in (nodes or []):
+            if n.get('type') == 'file':   files.append(n)
+            elif n.get('type') == 'folder': traverse(n.get('children', []))
+    traverse(tree.get('root', []) if _pt_is_v2(tree) else [])
+    return files
+
+def _pt_find_node(tree: dict, path: str) -> Optional[dict]:
+    def traverse(nodes):
+        for n in (nodes or []):
+            if n.get('path') == path: return n
+            if n.get('type') == 'folder':
+                r = traverse(n.get('children', []))
+                if r: return r
+        return None
+    return traverse(tree.get('root', [])) if _pt_is_v2(tree) else None
+
+_PT_FLAT_MAP = {'index.html': 'index_html', 'style.css': 'style_css',
+                'script.js': 'script_js', 'README.md': 'readme'}
+
+def _pt_get_content(project: dict, path: str) -> str:
+    if not project: return ''
+    if _pt_is_v2(project):
+        node = _pt_find_node(project, path)
+        return node.get('content', '') if node else ''
+    if path in _PT_FLAT_MAP:
+        return project.get(_PT_FLAT_MAP[path], '')
+    ef = next((f for f in project.get('extra_files', []) if f['name'] == path), None)
+    return ef['content'] if ef else ''
+
+def _pt_set_content(project: dict, path: str, value: str) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    if _pt_is_v2(project):
+        def update(nodes):
+            result = []
+            for n in (nodes or []):
+                if n.get('path') == path and n.get('type') == 'file':
+                    result.append(dict(n, content=value, metadata=dict(n.get('metadata', {}), updated_at=now)))
+                elif n.get('type') == 'folder':
+                    result.append(dict(n, children=update(n.get('children', []))))
+                else:
+                    result.append(n)
+            return result
+        return dict(project, root=update(project.get('root', [])), updated_at=now)
+    p = dict(project)
+    if path in _PT_FLAT_MAP: p[_PT_FLAT_MAP[path]] = value
+    else: p['extra_files'] = [dict(f, content=value) if f['name'] == path else f for f in p.get('extra_files', [])]
+    return p
+
+def _pt_tree_to_flat(tree: dict) -> dict:
+    if not _pt_is_v2(tree): return tree
+    SPECIAL = {'index.html', 'style.css', 'script.js', 'README.md'}
+    all_files = _pt_get_all_file_nodes(tree)
+    return {
+        'version': 1,
+        'index_html': _pt_get_content(tree, 'index.html'),
+        'style_css':  _pt_get_content(tree, 'style.css'),
+        'script_js':  _pt_get_content(tree, 'script.js'),
+        'readme':     _pt_get_content(tree, 'README.md'),
+        'extra_files': [{'name': n['name'], 'content': n.get('content', '')}
+                        for n in all_files if not n.get('dataUrl') and n['path'] not in SPECIAL],
+        'assets':      [{'name': n['name'], 'type': n.get('metadata', {}).get('mime', ''), 'dataUrl': n['dataUrl']}
+                        for n in all_files if n.get('dataUrl')],
+        'file_metadata': {n['path']: {'locked': True}
+                          for n in all_files if n.get('metadata', {}).get('locked')},
+    }
+
+def _pt_reconstruct_html(project: dict) -> str:
+    """Build full HTML from project (v1 or v2)."""
+    html = _pt_get_content(project, 'index.html')
+    css  = _pt_get_content(project, 'style.css')
+    js   = _pt_get_content(project, 'script.js')
+    return _pt_inline_html(html, css, js)
+
+def _pt_inline_html(html: str, css: str, js: str) -> str:
+    import re as _re
+    if not html: return ''
+    out = html
+    if css:
+        if _re.search(r'< *link[^>]*href=["\']style\.css["\'][^>]*>', out, _re.IGNORECASE):
+            out = _re.sub(r'< *link[^>]*href=["\']style\.css["\'][^>]*>', f'<style>\n{css}\n</style>', out, flags=_re.IGNORECASE)
+        elif not _re.search(r'<style[\s>]', out, _re.IGNORECASE):
+            out = out.replace('</head>', f'<style>\n{css}\n</style>\n</head>')
+    if js:
+        if _re.search(r'< *script[^>]*src=["\']script\.js["\'][^>]*><\/script>', out, _re.IGNORECASE):
+            out = _re.sub(r'< *script[^>]*src=["\']script\.js["\'][^>]*><\/script>', f'<script>\n{js}\n</script>', out, flags=_re.IGNORECASE)
+        elif not _re.search(r'<script[\s>]', out, _re.IGNORECASE):
+            out = out.replace('</body>', f'<script>\n{js}\n</script>\n</body>')
+    return out
+
 mongo_url = os.environ.get('MONGO_URL', '')
 if mongo_url:
     client = AsyncIOMotorClient(mongo_url)
@@ -627,7 +808,7 @@ async def serve_app_preview(build_id: str):
 import re as _app_re
 
 def _parse_html_to_project(html: str, name: str = "generated-app", description: str = "") -> dict:
-    """Split a single-file HTML into index.html / style.css / script.js."""
+    """Split a single-file HTML into a v2 project tree (index.html / style.css / script.js / README.md)."""
     # Extract <style> blocks
     css_blocks = _app_re.findall(r'<style[^>]*>(.*?)</style>', html, _app_re.DOTALL | _app_re.IGNORECASE)
     css = "\n\n".join(b.strip() for b in css_blocks)
@@ -672,27 +853,17 @@ npx serve .                  # Node.js alternative
 ```
 _Generated by Mini Assistant App Builder_
 """
-    return {
+    return _pt_flat_to_tree({
         "index_html": clean.strip(),
         "style_css":  css  or "/* styles */",
         "script_js":  js   or "// scripts",
         "readme":     readme,
-    }
+    }, name=name)
 
 
 def _reconstruct_html(project: dict) -> str:
-    """Merge structured project files back into a single self-contained HTML."""
-    html = project.get("index_html", "")
-    css  = project.get("style_css", "")
-    js   = project.get("script_js", "")
-    html = html.replace('<link rel="stylesheet" href="style.css">', f'<style>{css}</style>', 1)
-    html = html.replace('<script src="script.js"></script>',        f'<script>{js}</script>',  1)
-    # Fallback: if the placeholders weren't there, just inline at end
-    if f'<style>{css}</style>' not in html and css.strip():
-        html = html.replace('</head>', f'<style>{css}</style>\n</head>', 1)
-    if f'<script>{js}</script>' not in html and js.strip():
-        html = html.replace('</body>', f'<script>{js}</script>\n</body>', 1)
-    return html
+    """Merge project files back into a single self-contained HTML. Accepts v1 or v2."""
+    return _pt_reconstruct_html(project)
 
 
 def _route_edit(instruction: str) -> str:
@@ -913,17 +1084,17 @@ async def edit_app(request: AppBuilderEditRequest):
     if not ollama_client:
         raise HTTPException(status_code=503, detail="Ollama service not available")
     try:
-        # Resolve project — accept structured or fall back to parsing raw HTML
+        # Resolve project — accept v1 flat or v2 tree; migrate to v2
         if request.project:
-            project = request.project
+            project = _pt_ensure_v2(request.project)
         elif request.html:
             project = _parse_html_to_project(request.html)
         else:
             raise HTTPException(status_code=400, detail="Provide either 'project' or 'html'")
 
-        index_html = project.get("index_html", "")
-        style_css  = project.get("style_css", "")
-        script_js  = project.get("script_js", "")
+        index_html = _pt_get_content(project, 'index.html')
+        style_css  = _pt_get_content(project, 'style.css')
+        script_js  = _pt_get_content(project, 'script.js')
 
         # Route the edit to the most appropriate file
         target_file = _route_edit(request.instruction)
@@ -938,12 +1109,7 @@ async def edit_app(request: AppBuilderEditRequest):
             else:
                 raise HTTPException(status_code=400, detail="All target files are locked. Unlock a file to allow AI edits.")
 
-        file_map = {
-            "index.html": index_html,
-            "style.css":  style_css,
-            "script.js":  script_js,
-        }
-        target_content = file_map[target_file]
+        target_content = _pt_get_content(project, target_file)
 
         prompt = f"""You are editing a specific file inside a multi-file web project.
 
@@ -986,14 +1152,8 @@ Now output the updated {target_file}:"""
         updated_content = _app_re.sub(r'\n?```\s*$', '', updated_content)
         updated_content = updated_content.strip()
 
-        # Merge the updated file back into the project
-        updated_project = dict(project)
-        if target_file == "index.html":
-            updated_project["index_html"] = updated_content
-        elif target_file == "style.css":
-            updated_project["style_css"] = updated_content
-        elif target_file == "script.js":
-            updated_project["script_js"] = updated_content
+        # Merge the updated file back into the tree
+        updated_project = _pt_set_content(project, target_file, updated_content)
 
         # Reconstruct full HTML for preview
         reconstructed = _reconstruct_html(updated_project)
@@ -1054,42 +1214,46 @@ async def export_app_zip(request: AppBuilderExportRequest):
 
     name = request.name or "generated-app"
 
-    # Resolve project — structured preferred, fall back to parsing HTML
+    # Resolve project → ensure v2 tree
     if request.project:
-        project = request.project
-        if not project.get("readme"):
-            project["readme"] = _parse_html_to_project("", name, request.description)["readme"]
+        project = _pt_ensure_v2(request.project, name=name)
     elif request.html:
         project = _parse_html_to_project(request.html, name, request.description)
     else:
         raise HTTPException(status_code=400, detail="Provide either 'project' or 'html'")
 
+    # Merge in any extra_files / assets passed separately (legacy callers)
+    for ef in request.extra_files:
+        ef_name = ef.get("name", "").strip()
+        if ef_name and not _pt_find_node(project, ef_name):
+            project = _pt_flat_to_tree.__func__(  # fallback: just append node
+                project, name=name) if False else project  # skip; handled below
+    # Simpler: add extra_files as file nodes if not already present
+    for ef in request.extra_files:
+        ef_name = ef.get("name", "").strip()
+        if ef_name and not _pt_find_node(project, ef_name):
+            node = _pt_file_node(ef_name, ef_name, ef.get("content", ""), source="imported")
+            project = dict(project, root=project['root'] + [node])
+    for asset in request.assets:
+        asset_name = asset.get("name", "").strip()
+        asset_path = f"assets/{asset_name}"
+        if asset_name and not _pt_find_node(project, asset_path):
+            node = _pt_file_node(asset_name, asset_path, '', dataUrl=asset.get('dataUrl'), mime=asset.get('type', ''), source='imported')
+            project = dict(project, root=project['root'] + [node])
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # Core project files
-        zf.writestr(f"{name}/index.html", project.get("index_html", "").strip())
-        zf.writestr(f"{name}/style.css",  project.get("style_css",  "/* styles */"))
-        zf.writestr(f"{name}/script.js",  project.get("script_js",  "// scripts"))
-        zf.writestr(f"{name}/README.md",  project.get("readme",     ""))
-
-        # Extra custom files (js, css, txt, etc.)
-        for ef in request.extra_files:
-            ef_name = ef.get("name", "").strip()
-            if ef_name:
-                zf.writestr(f"{name}/{ef_name}", ef.get("content", ""))
-
-        # Assets: decode from base64 dataUrl and write to assets/ folder
-        for asset in request.assets:
-            asset_name = asset.get("name", "").strip()
-            data_url = asset.get("dataUrl", "")
-            if asset_name and data_url:
+        # Walk all file nodes preserving tree paths
+        for fnode in _pt_get_all_file_nodes(project):
+            zip_path = f"{name}/{fnode['path']}"
+            if fnode.get('dataUrl'):
                 try:
-                    # dataUrl format: data:{mime};base64,{data}
-                    header, b64data = data_url.split(",", 1)
-                    raw = base64.b64decode(b64data)
-                    zf.writestr(f"{name}/assets/{asset_name}", raw)
+                    _, b64data = fnode['dataUrl'].split(",", 1)
+                    zf.writestr(zip_path, base64.b64decode(b64data))
                 except Exception:
-                    pass  # skip malformed assets
+                    pass
+            else:
+                zf.writestr(zip_path, fnode.get('content', ''))
 
     buf.seek(0)
 
@@ -1418,7 +1582,7 @@ def _row_to_session(r) -> dict:
         "name":             r["name"],
         "description":      r["description"],
         "html":             r["html"],
-        "project":          _j(r["project"]),
+        "project":          _pt_ensure_v2(_j(r["project"]), r["id"], r["name"]),
         "editHistory":      _j(r["edit_history"]) or [],
         "versions":         _j(r["versions"]) or [],
         "build_id":         r["build_id"],
