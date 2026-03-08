@@ -1007,12 +1007,30 @@ Now output the updated {target_file}:"""
             except Exception:
                 pass
 
+        # Generate a short conversational reply describing what changed
+        chat_reply = ""
+        try:
+            reply_resp = ollama_client.chat(
+                model=_default_model,
+                messages=[{"role": "user", "content":
+                    f"A developer asked you to: \"{request.instruction}\"\n"
+                    f"You just updated {target_file} to implement this.\n"
+                    f"Write 1-2 friendly sentences describing what you changed and why. "
+                    f"Be specific but brief. Don't say 'certainly' or 'of course'. "
+                    f"Sound like a helpful teammate, not a robot."
+                }]
+            )
+            chat_reply = reply_resp['message']['content'].strip()
+        except Exception:
+            chat_reply = f"Done! I updated `{target_file}` based on your request. Review the changes below."
+
         return {
             "project": updated_project,
             "html": reconstructed,
             "file_changed": target_file,
             "build_id": build_id,
-            "preview_url": f"/api/preview/{build_id}"
+            "preview_url": f"/api/preview/{build_id}",
+            "chat_reply": chat_reply,
         }
     except HTTPException:
         raise

@@ -686,10 +686,10 @@ const AppBuilder = () => {
         instruction,
         edit_mode: res.data.edit_mode || 'full_rewrite',
       });
-      const fileTag = res.data.file_changed ? ` → \`${res.data.file_changed}\`` : '';
+      const chatReply = res.data.chat_reply || `Done! I updated \`${res.data.file_changed || 'your project'}\`. Take a look and let me know what you think.`;
       setEditHistory(prev => [...prev, {
         role: 'assistant',
-        content: `Change ready${fileTag}. Review the diff above and Approve or Reject.`,
+        content: chatReply,
         file_changed: res.data.file_changed,
         pending: true,
       }]);
@@ -711,7 +711,7 @@ const AppBuilder = () => {
     pushUndo(generatedApp);
     setGeneratedApp(pendingChange.proposed);
     setEditHistory(prev => prev.map((m, i) =>
-      i === prev.length - 1 ? { ...m, content: `Applied \`${pendingChange.file_changed || 'edit'}\`. Preview updated.`, pending: false } : m
+      i === prev.length - 1 ? { ...m, content: m.content + '\n\n✓ Applied! Preview is updated. Let me know if you want any further tweaks.', pending: false } : m
     ));
     setPendingChange(null);
     logAction('ai-edit', `AI edit applied to ${pendingChange.file_changed || 'project'}`);
@@ -721,7 +721,7 @@ const AppBuilder = () => {
   const rejectChange = () => {
     if (!pendingChange) return;
     setEditHistory(prev => prev.map((m, i) =>
-      i === prev.length - 1 ? { ...m, content: 'Change rejected.', pending: false } : m
+      i === prev.length - 1 ? { ...m, content: m.content + '\n\n✗ No problem, change discarded. Want me to try a different approach?', pending: false } : m
     ));
     setPendingChange(null);
     toast.info('Change discarded');
@@ -2605,80 +2605,102 @@ const AppBuilder = () => {
 
               {/* ── Edit conversation ── */}
               <div className="flex-1 flex flex-col overflow-hidden border-t border-cyan-500/20">
-                <div className="px-4 py-1.5 bg-black/40 border-b border-cyan-500/10 flex items-center gap-2 flex-shrink-0">
-                  <Pencil className="w-3 h-3 text-cyan-400" />
-                  <span className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider flex-1">AI Edit Chat</span>
+                <div className="px-4 py-2 bg-black/50 border-b border-cyan-500/10 flex items-center gap-2 flex-shrink-0">
+                  <div className="w-5 h-5 rounded bg-gradient-to-br from-cyan-500 to-violet-600 flex items-center justify-center flex-shrink-0">
+                    <Wand2 className="w-3 h-3 text-white" />
+                  </div>
+                  <div className="flex-1">
+                    <span className="text-xs font-semibold text-cyan-300">AI Editor</span>
+                    <span className="text-[9px] text-slate-500 font-mono ml-2">Chat to make changes — I'll explain everything</span>
+                  </div>
                   {undoStack.length > 0 && (
-                    <span className="text-[9px] text-slate-600 font-mono">{undoStack.length} undo state{undoStack.length !== 1 ? 's' : ''}</span>
+                    <span className="text-[9px] text-slate-600 font-mono">{undoStack.length} undo{undoStack.length !== 1 ? 's' : ''}</span>
                   )}
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
                   {editHistory.length === 0 && (
-                    <p className="text-[10px] text-slate-600 font-mono text-center py-3">
-                      Test in Preview tab, edit files directly above, or chat here to make AI changes.
-                    </p>
+                    <div className="flex items-start gap-2.5 mt-1">
+                      <div className="w-7 h-7 rounded-full bg-gradient-to-br from-cyan-500 to-violet-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <Wand2 className="w-3.5 h-3.5 text-white" />
+                      </div>
+                      <div className="bg-black/50 border border-cyan-900/30 rounded-lg rounded-tl-sm px-3.5 py-2.5 max-w-[85%]">
+                        <p className="text-xs text-slate-300 leading-relaxed">
+                          Hey! Your app is live in the preview. Tell me what you'd like to change — I'll update the code, explain what I did, and let you approve or reject before anything is applied.
+                        </p>
+                        <p className="text-[10px] text-slate-500 mt-1.5 font-mono">Try: "make the buttons bigger", "fix the navigation", "add a dark mode toggle"</p>
+                      </div>
+                    </div>
                   )}
                   {editHistory.map((msg, idx) => (
-                    <div key={idx} className={`flex items-start gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div key={idx} className={`flex items-start gap-2.5 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                       {msg.role === 'assistant' && (
-                        <div className="w-5 h-5 rounded bg-gradient-to-br from-cyan-500 to-violet-600 flex items-center justify-center flex-shrink-0">
-                          <Wand2 className="w-2.5 h-2.5 text-white" />
+                        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-cyan-500 to-violet-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                          <Wand2 className="w-3.5 h-3.5 text-white" />
                         </div>
                       )}
-                      <div className={`max-w-[80%] px-2.5 py-1.5 rounded text-[10px] font-mono ${
+                      <div className={`max-w-[82%] px-3.5 py-2.5 rounded-lg text-xs leading-relaxed ${
                         msg.role === 'user'
-                          ? 'bg-cyan-500/20 border border-cyan-500/30 text-cyan-100'
+                          ? 'bg-cyan-500/20 border border-cyan-500/30 text-cyan-100 rounded-tr-sm'
                           : msg.pending
-                          ? 'bg-amber-950/40 border border-amber-500/30 text-amber-200'
-                          : 'bg-black/40 border border-cyan-900/30 text-slate-300'
+                          ? 'bg-amber-950/40 border border-amber-500/30 text-amber-100 rounded-tl-sm'
+                          : 'bg-black/50 border border-cyan-900/30 text-slate-300 rounded-tl-sm'
                       }`}>
-                        {msg.content}
-                        {/* Approve / Reject buttons on the last pending message */}
+                        <span className="whitespace-pre-wrap">{msg.content}</span>
+                        {msg.file_changed && msg.pending && (
+                          <span className="inline-block mt-1 text-[9px] font-mono bg-black/40 px-1.5 py-0.5 rounded text-cyan-500 border border-cyan-900/40">
+                            {msg.file_changed}
+                          </span>
+                        )}
                         {msg.pending && idx === editHistory.length - 1 && pendingChange && (
-                          <div className="flex gap-2 mt-2">
+                          <div className="flex gap-2 mt-3">
                             <button onClick={approveChange}
-                              className="px-3 py-1 bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-[9px] font-mono uppercase rounded-sm hover:bg-emerald-500/30">
-                              ✓ Approve
+                              className="px-3 py-1.5 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[10px] font-mono uppercase rounded-sm hover:bg-emerald-500/30 flex items-center gap-1">
+                              ✓ Apply it
                             </button>
                             <button onClick={rejectChange}
-                              className="px-3 py-1 bg-red-500/20 border border-red-500/40 text-red-400 text-[9px] font-mono uppercase rounded-sm hover:bg-red-500/30">
-                              ✗ Reject
+                              className="px-3 py-1.5 bg-red-500/10 border border-red-500/30 text-red-400 text-[10px] font-mono uppercase rounded-sm hover:bg-red-500/20">
+                              ✗ Discard
                             </button>
                           </div>
                         )}
                       </div>
+                      {msg.role === 'user' && (
+                        <div className="w-7 h-7 rounded-full bg-slate-700 flex items-center justify-center flex-shrink-0 mt-0.5 text-[10px] font-bold text-slate-300">
+                          U
+                        </div>
+                      )}
                     </div>
                   ))}
                   {editLoading && (
-                    <div className="flex items-center gap-2">
-                      <div className="w-5 h-5 rounded bg-gradient-to-br from-cyan-500 to-violet-600 flex items-center justify-center flex-shrink-0">
-                        <Loader2 className="w-2.5 h-2.5 text-white animate-spin" />
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-7 h-7 rounded-full bg-gradient-to-br from-cyan-500 to-violet-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <Loader2 className="w-3.5 h-3.5 text-white animate-spin" />
                       </div>
-                      <div className="px-2.5 py-1.5 bg-black/40 border border-cyan-900/30 rounded">
-                        <span className="text-[10px] font-mono text-cyan-400/80 animate-pulse">{editMsg || 'Working...'}</span>
+                      <div className="px-3.5 py-2.5 bg-black/50 border border-cyan-900/30 rounded-lg rounded-tl-sm">
+                        <span className="text-xs text-cyan-400/80 animate-pulse">{editMsg || 'Working on it...'}</span>
                       </div>
                     </div>
                   )}
                   <div ref={editEndRef} />
                 </div>
 
-                <div className="p-2.5 border-t border-cyan-500/20 bg-black/30 flex gap-2 items-end flex-shrink-0">
+                <div className="p-3 border-t border-cyan-500/20 bg-black/40 flex gap-2 items-end flex-shrink-0">
                   <textarea
                     value={editInput}
                     onChange={e => setEditInput(e.target.value)}
                     onKeyDown={handleEditKey}
-                    placeholder='Ask AI to change or fix something...'
-                    className="flex-1 bg-black/50 border border-cyan-900/50 text-cyan-100 placeholder:text-cyan-900/40 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 rounded-sm font-mono text-[11px] p-2 outline-none resize-none"
+                    placeholder='Tell me what to change... (Shift+Enter for new line)'
+                    className="flex-1 bg-black/60 border border-cyan-900/50 text-cyan-100 placeholder:text-slate-600 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/30 rounded-lg font-mono text-xs p-3 outline-none resize-none"
                     rows={2}
                     disabled={editLoading}
                   />
                   <button
                     onClick={editApp}
                     disabled={editLoading || !editInput.trim()}
-                    className="p-2 bg-gradient-to-r from-cyan-500 to-violet-600 text-white rounded-sm hover:from-cyan-400 hover:to-violet-500 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+                    className="p-3 bg-gradient-to-r from-cyan-500 to-violet-600 text-white rounded-lg hover:from-cyan-400 hover:to-violet-500 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0 transition-all"
                   >
-                    <Send className="w-3.5 h-3.5" />
+                    <Send className="w-4 h-4" />
                   </button>
                 </div>
               </div>
