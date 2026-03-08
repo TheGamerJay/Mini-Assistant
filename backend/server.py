@@ -3960,6 +3960,38 @@ try:
             raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
         return {"deleted": task_id}
 
+    @api_router.get("/tasks/active/list", tags=["orchestrator"])
+    async def list_active_tasks():
+        """List tasks that are NOT in a terminal state (not completed/failed/cancelled)."""
+        _TERMINAL = {"completed", "failed", "cancelled"}
+        all_tasks = await _task_store.list_recent(limit=200)
+        return [t for t in all_tasks if t.get("current_state") not in _TERMINAL]
+
+    @api_router.post("/tasks/{task_id}/rollback/{checkpoint_name}", tags=["orchestrator"])
+    async def rollback_task(task_id: str, checkpoint_name: str):
+        """
+        Roll back a task to a named checkpoint (post_plan, post_codegen, post_test, …).
+        Resets task state without re-running — call /resume afterwards to continue.
+        Preserved outputs from the checkpoint are kept; steps after the checkpoint are cleared.
+        """
+        task = await _orchestrator.rollback(task_id, checkpoint_name)
+        if not task:
+            raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+        return task.to_dict()
+
+    @api_router.get("/tasks/{task_id}/checkpoints", tags=["orchestrator"])
+    async def get_task_checkpoints(task_id: str):
+        """Return all named checkpoints for a task with their preserved outputs."""
+        task = await _task_store.load(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+        return {
+            "task_id":            task.task_id,
+            "checkpoints":        [c.to_dict() for c in task.checkpoints],
+            "preserved_outputs":  task.preserved_outputs,
+            "last_checkpoint":    task.last_checkpoint_name(),
+        }
+
     logging.info("✓ Orchestrator task API registered (/api/tasks/*)")
 
 except Exception as _orch_err:

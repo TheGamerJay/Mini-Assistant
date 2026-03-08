@@ -25,13 +25,14 @@ import RailwayManager from '../components/Railway/RailwayManager';
 import FixLoop from '../components/FixLoop/FixLoop';
 import TesterAgent from '../components/TesterAgent/TesterAgent';
 import AgentPipeline from '../components/AgentPipeline/AgentPipeline';
+import TaskMonitor from '../components/Tasks/TaskMonitor';
 import {
-  MessageSquare, 
-  Mic, 
-  FolderOpen, 
-  Terminal, 
-  Search, 
-  Code, 
+  MessageSquare,
+  Mic,
+  FolderOpen,
+  Terminal,
+  Search,
+  Code,
   Layers,
   Activity,
   Zap,
@@ -49,13 +50,35 @@ import {
   Train,
   Bug,
   FlaskConical,
-  Brain
+  Brain,
+  ListTodo,
+  Loader2,
 } from 'lucide-react';
+
+const _ACTIVE_TASK_STATES = new Set([
+  'created', 'loading_context', 'planning', 'awaiting_approval',
+  'coding', 'reviewing', 'testing', 'fixing', 'deploying', 'documenting',
+]);
 
 const Dashboard = () => {
   const [activeTab, setActiveTab] = useState('chat');
   const [isOllamaConnected, setIsOllamaConnected] = useState(false);
   const [isVoiceActive, setIsVoiceActive] = useState(false);
+  const [activeTasks, setActiveTasks] = useState([]);
+
+  // Poll for active tasks every 5 s – drives the compact header indicator
+  useEffect(() => {
+    let cancelled = false;
+    const fetchActive = async () => {
+      try {
+        const res = await axiosInstance.get('/tasks/active/list');
+        if (!cancelled) setActiveTasks(res.data || []);
+      } catch (_) {}
+    };
+    fetchActive();
+    const id = setInterval(fetchActive, 5000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
 
   useEffect(() => {
     checkHealth();
@@ -74,7 +97,8 @@ const Dashboard = () => {
   };
 
   const tabs = [
-    { id: 'chat', label: 'CHAT', icon: MessageSquare },
+    { id: 'chat',  label: 'CHAT',           icon: MessageSquare },
+    { id: 'tasks', label: 'TASK MONITOR',   icon: ListTodo },
     { id: 'agent', label: 'AGENT PIPELINE', icon: Brain },
     { id: 'appbuilder', label: 'APP BUILDER', icon: Wand2 },
     { id: 'codereview', label: 'CODE REVIEW', icon: Shield },
@@ -136,6 +160,22 @@ const Dashboard = () => {
           </div>
           
           <div className="flex items-center gap-6">
+            {/* Compact active-task indicator */}
+            {activeTasks.length > 0 && (
+              <button
+                onClick={() => setActiveTab('tasks')}
+                className="flex items-center gap-2 px-3 py-1.5 bg-cyan-950/60 border border-cyan-600/40 rounded-sm hover:bg-cyan-900/60 transition-colors"
+                title="View active tasks"
+              >
+                <Loader2 className="w-3.5 h-3.5 text-cyan-400 animate-spin" />
+                <span className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider">
+                  {activeTasks.length} task{activeTasks.length !== 1 ? 's' : ''} running
+                </span>
+                <span className="text-[9px] font-mono text-cyan-600 capitalize">
+                  {activeTasks[0]?.current_state?.replace(/_/g, ' ')}
+                </span>
+              </button>
+            )}
             <div className="flex items-center gap-3" data-testid="status-indicator">
               <Activity className={`w-5 h-5 ${isOllamaConnected ? 'text-green-400' : 'text-red-400'}`} />
               <span className="text-sm font-mono uppercase tracking-wider">
@@ -175,6 +215,7 @@ const Dashboard = () => {
         {/* Content Area */}
         <main className="flex-1 overflow-hidden" data-testid="main-content">
           {activeTab === 'chat' && <ChatInterface />}
+          {activeTab === 'tasks' && <TaskMonitor />}
           {activeTab === 'agent' && <AgentPipeline />}
           {activeTab === 'appbuilder' && <AppBuilder />}
           {activeTab === 'codereview' && <CodeReview />}

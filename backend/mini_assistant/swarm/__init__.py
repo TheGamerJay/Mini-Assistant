@@ -10,9 +10,10 @@ from .file_analyst_agent import FileAnalystAgent
 from .vision_agent       import VisionAgent
 from .orchestrator_task  import (
     OrchestratorTask, WorkflowStep, WorkflowState, StepStatus,
-    OrchTaskType, StateTransition, VALID_TRANSITIONS, AGENT_ALLOWED_STATES,
+    OrchTaskType, StateTransition, Checkpoint,
+    VALID_TRANSITIONS, AGENT_ALLOWED_STATES, CHECKPOINT_NAMES,
 )
-from .task_store         import TaskStore
+from .task_store          import TaskStore
 from .orchestrator_engine import OrchestratorEngine
 
 __all__ = [
@@ -24,7 +25,8 @@ __all__ = [
     "TesterAgent", "FileAnalystAgent", "VisionAgent",
     # New macro-level orchestrator
     "OrchestratorTask", "WorkflowStep", "WorkflowState", "StepStatus",
-    "OrchTaskType", "StateTransition", "VALID_TRANSITIONS", "AGENT_ALLOWED_STATES",
+    "OrchTaskType", "StateTransition", "Checkpoint",
+    "VALID_TRANSITIONS", "AGENT_ALLOWED_STATES", "CHECKPOINT_NAMES",
     "TaskStore",
     "OrchestratorEngine",
 ]

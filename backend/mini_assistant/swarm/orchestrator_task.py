@@ -147,7 +147,57 @@ AGENT_ALLOWED_STATES: dict[str, list[WorkflowState]] = {
 }
 
 
+# ─── Named checkpoint names ───────────────────────────────────────────────────
+
+CHECKPOINT_NAMES = {
+    WorkflowState.LOADING_CONTEXT: "post_context",
+    WorkflowState.PLANNING:        "post_plan",
+    WorkflowState.CODING:          "post_codegen",
+    WorkflowState.REVIEWING:       "post_review",
+    WorkflowState.TESTING:         "post_test",
+    WorkflowState.FIXING:          "post_fix",
+    WorkflowState.DEPLOYING:       "pre_deploy",
+    WorkflowState.DOCUMENTING:     "post_docs",
+}
+
+
 # ─── Data models ──────────────────────────────────────────────────────────────
+
+@dataclass
+class Checkpoint:
+    """
+    Named snapshot of task state at a safe milestone.
+    Stores enough to resume or roll back to this point.
+    Outputs are preserved so a failed task never loses them.
+    """
+    name:              str                # e.g. "post_plan", "post_codegen"
+    state:             str                # WorkflowState value
+    step_index:        int                # index into OrchestratorTask.steps[]
+    timestamp:         str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+    preserved_outputs: dict[str, Any] = field(default_factory=dict)
+    # preserved_outputs keys: last_output, last_files, build_id, preview_url
+
+    def to_dict(self) -> dict:
+        return {
+            "name":              self.name,
+            "state":             self.state,
+            "step_index":        self.step_index,
+            "timestamp":         self.timestamp,
+            "preserved_outputs": self.preserved_outputs,
+        }
+
+    @staticmethod
+    def from_dict(d: dict) -> "Checkpoint":
+        return Checkpoint(
+            name              = d.get("name", ""),
+            state             = d.get("state", ""),
+            step_index        = d.get("step_index", 0),
+            timestamp         = d.get("timestamp", ""),
+            preserved_outputs = d.get("preserved_outputs", {}),
+        )
+
 
 @dataclass
 class StateTransition:
@@ -257,11 +307,16 @@ class OrchestratorTask:
     updated_at:      str               = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
-    completed_at:    Optional[str]     = None
-    result:          Optional[str]     = None
-    failure_reason:  Optional[str]     = None
-    state_history:   list[StateTransition] = field(default_factory=list)
-    metadata:        dict[str, Any]    = field(default_factory=dict)
+    completed_at:      Optional[str]     = None
+    result:            Optional[str]     = None
+    failure_reason:    Optional[str]     = None
+    failure_summary:   Optional[str]     = None   # human-readable failure summary
+    state_history:     list[StateTransition] = field(default_factory=list)
+    checkpoints:       list[Checkpoint]  = field(default_factory=list)
+    preserved_outputs: dict[str, Any]    = field(default_factory=dict)
+    # preserved_outputs: always holds the last good outputs regardless of failure
+    # keys: last_output, last_step, last_state, build_id, preview_url, files
+    metadata:          dict[str, Any]    = field(default_factory=dict)
 
     # ── State machine ──────────────────────────────────────────────────────────
 
@@ -320,6 +375,61 @@ class OrchestratorTask:
                 return step
         return None
 
+    # ── Checkpoint management ──────────────────────────────────────────────────
+
+    def save_checkpoint(
+        self,
+        name: str,
+        preserved_outputs: Optional[dict] = None,
+    ) -> Checkpoint:
+        """
+        Record a named checkpoint at the current state.
+        Always updates preserved_outputs so partial work is never lost.
+        """
+        outputs = dict(preserved_outputs or {})
+        self.preserved_outputs.update(outputs)   # rolling update
+        cp = Checkpoint(
+            name              = name,
+            state             = str(self.current_state),
+            step_index        = len(self.steps) - 1,
+            preserved_outputs = dict(self.preserved_outputs),  # snapshot
+        )
+        self.checkpoints.append(cp)
+        self.updated_at = datetime.now(timezone.utc).isoformat()
+        return cp
+
+    def rollback_to_checkpoint(self, name: str) -> Optional[Checkpoint]:
+        """
+        Reset the task to the named checkpoint.
+        - Clears steps after the checkpoint step_index
+        - Resets current_state to checkpoint state
+        - Clears failure_reason / failure_summary
+        - Does NOT re-run (caller must invoke resume() afterwards)
+        Returns the checkpoint, or None if not found.
+        """
+        cp = next((c for c in reversed(self.checkpoints) if c.name == name), None)
+        if not cp:
+            return None
+        # Truncate steps to checkpoint position (keep steps 0..step_index inclusive)
+        self.steps = self.steps[: cp.step_index + 1]
+        # Remove checkpoints after this one
+        idx = self.checkpoints.index(cp)
+        self.checkpoints = self.checkpoints[: idx + 1]
+        # Reset state (bypassing validation – rollback is always safe)
+        self.force_state(
+            WorkflowState(cp.state),
+            reason=f"Rolled back to checkpoint '{name}'",
+        )
+        self.failure_reason  = None
+        self.failure_summary = None
+        self.completed_at    = None
+        self.updated_at      = datetime.now(timezone.utc).isoformat()
+        return cp
+
+    def last_checkpoint_name(self) -> Optional[str]:
+        """Return the name of the most recent checkpoint, or None."""
+        return self.checkpoints[-1].name if self.checkpoints else None
+
     def last_completed_state(self) -> Optional[WorkflowState]:
         """Return the WorkflowState of the last successfully DONE step (for resume)."""
         for step in reversed(self.steps):
@@ -334,21 +444,24 @@ class OrchestratorTask:
 
     def to_dict(self) -> dict:
         return {
-            "task_id":         self.task_id,
-            "task_type":       self.task_type,
-            "goal":            self.goal[:1000],
-            "current_state":   str(self.current_state),
-            "steps":           [s.to_dict() for s in self.steps],
-            "assigned_agents": self.assigned_agents,
-            "retry_count":     self.retry_count,
-            "max_retries":     self.max_retries,
-            "created_at":      self.created_at,
-            "updated_at":      self.updated_at,
-            "completed_at":    self.completed_at,
-            "result":          self.result[:2000] if self.result else None,
-            "failure_reason":  self.failure_reason,
-            "state_history":   [t.to_dict() for t in self.state_history],
-            "metadata":        self.metadata,
+            "task_id":           self.task_id,
+            "task_type":         self.task_type,
+            "goal":              self.goal[:1000],
+            "current_state":     str(self.current_state),
+            "steps":             [s.to_dict() for s in self.steps],
+            "assigned_agents":   self.assigned_agents,
+            "retry_count":       self.retry_count,
+            "max_retries":       self.max_retries,
+            "created_at":        self.created_at,
+            "updated_at":        self.updated_at,
+            "completed_at":      self.completed_at,
+            "result":            self.result[:2000] if self.result else None,
+            "failure_reason":    self.failure_reason,
+            "failure_summary":   self.failure_summary,
+            "state_history":     [t.to_dict() for t in self.state_history],
+            "checkpoints":       [c.to_dict() for c in self.checkpoints],
+            "preserved_outputs": self.preserved_outputs,
+            "metadata":          self.metadata,
         }
 
     @staticmethod
@@ -377,20 +490,24 @@ class OrchestratorTask:
             )
             for t in d.get("state_history", [])
         ]
+        checkpoints = [Checkpoint.from_dict(c) for c in d.get("checkpoints", [])]
         return OrchestratorTask(
-            goal            = d["goal"],
-            task_id         = d["task_id"],
-            task_type       = d.get("task_type", OrchTaskType.GENERIC),
-            current_state   = WorkflowState(d.get("current_state", "created")),
-            steps           = steps,
-            assigned_agents = d.get("assigned_agents", []),
-            retry_count     = d.get("retry_count", 0),
-            max_retries     = d.get("max_retries", 3),
-            created_at      = d.get("created_at", ""),
-            updated_at      = d.get("updated_at", ""),
-            completed_at    = d.get("completed_at"),
-            result          = d.get("result"),
-            failure_reason  = d.get("failure_reason"),
-            state_history   = history,
-            metadata        = d.get("metadata", {}),
+            goal              = d["goal"],
+            task_id           = d["task_id"],
+            task_type         = d.get("task_type", OrchTaskType.GENERIC),
+            current_state     = WorkflowState(d.get("current_state", "created")),
+            steps             = steps,
+            assigned_agents   = d.get("assigned_agents", []),
+            retry_count       = d.get("retry_count", 0),
+            max_retries       = d.get("max_retries", 3),
+            created_at        = d.get("created_at", ""),
+            updated_at        = d.get("updated_at", ""),
+            completed_at      = d.get("completed_at"),
+            result            = d.get("result"),
+            failure_reason    = d.get("failure_reason"),
+            failure_summary   = d.get("failure_summary"),
+            state_history     = history,
+            checkpoints       = checkpoints,
+            preserved_outputs = d.get("preserved_outputs", {}),
+            metadata          = d.get("metadata", {}),
         )

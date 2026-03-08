@@ -8,10 +8,14 @@ defined WorkflowStates. The engine enforces:
 
   • Valid state transitions         (via OrchestratorTask.transition())
   • Agent / state rules             (agents only run in their allowed states)
+  • Named checkpoints at milestones (post_plan, post_codegen, post_test, …)
+  • Partial output preservation     (last good outputs always kept on failure)
   • Retry and fix-loop limits       (configurable max_fix_loops)
   • Persistent checkpoints          (TaskStore.save_sync() after each step)
   • Resume from last safe state     (OrchestratorEngine.resume())
-  • Full audit trail                (OrchestratorTask.state_history + WorkflowStep list)
+  • Rollback to named checkpoint    (OrchestratorEngine.rollback())
+  • Agent lifecycle hooks           (Memory Brain, Learning Brain stubs)
+  • Full audit trail                (OrchestratorTask.state_history + steps)
 
 Architecture
 ────────────
@@ -19,16 +23,12 @@ Architecture
     └─ creates / drives OrchestratorTask (macro, persisted)
          └─ calls SwarmManager.run() for agent execution (micro, existing)
               └─ TaskQueue → per-agent SwarmTask objects
-
-SwarmManager is run in a thread executor to avoid blocking FastAPI's
-async event loop, since SwarmManager.run() uses threading internally.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from typing import Optional, TYPE_CHECKING
 
 from .orchestrator_task import (
@@ -38,6 +38,7 @@ from .orchestrator_task import (
     StepStatus,
     OrchTaskType,
     AGENT_ALLOWED_STATES,
+    CHECKPOINT_NAMES,
     TERMINAL_STATES,
 )
 from .task_store import TaskStore
@@ -73,10 +74,6 @@ def _classify(goal: str) -> str:
 
 
 # ─── Workflow blueprints ───────────────────────────────────────────────────────
-# Each blueprint is an ordered list of (step_name, WorkflowState, agent_name).
-# The engine drives through these sequentially.
-# Future agents (tool_agent, doc_agent, etc.) are listed even though they are
-# not yet in SwarmManager – the engine will fall back gracefully.
 
 _BLUEPRINTS: dict[str, list[tuple[str, WorkflowState, str]]] = {
     OrchTaskType.BUILD: [
@@ -115,18 +112,61 @@ _BLUEPRINTS: dict[str, list[tuple[str, WorkflowState, str]]] = {
 }
 
 
+# ─── Agent lifecycle hooks (stubs – replace with real agents in Phase 8) ───────
+
+def _hook_memory_brain(task: OrchestratorTask, event: str, data: Optional[dict] = None) -> None:
+    """
+    Memory Brain hook – called at key task lifecycle events.
+    Stub: logs the event and stores a summary in task.metadata.
+    Replace with real Memory Brain call in Phase 8.
+    Events: task_start, checkpoint_saved, task_complete, task_failed
+    """
+    entry = {"event": event, "state": str(task.current_state), **(data or {})}
+    task.metadata.setdefault("memory_log", []).append(entry)
+    logger.debug("[%s] Memory Brain hook: %s", task.task_id[:8], event)
+
+
+def _hook_learning_brain(task: OrchestratorTask, event: str) -> None:
+    """
+    Learning Brain hook – called only on task_complete or task_failed.
+    Stub: records a lesson summary in task.metadata.
+    Replace with real Learning Brain call in Phase 9.
+    """
+    if event not in ("task_complete", "task_failed"):
+        return
+    lesson = {
+        "event":        event,
+        "task_type":    task.task_type,
+        "retries":      task.retry_count,
+        "checkpoints":  [c.name for c in task.checkpoints],
+        "outcome":      str(task.current_state),
+        "failure":      task.failure_summary or task.failure_reason or "",
+    }
+    task.metadata.setdefault("learning_log", []).append(lesson)
+    logger.debug("[%s] Learning Brain hook: %s", task.task_id[:8], event)
+
+
+def _hook_doc_brain(task: OrchestratorTask) -> None:
+    """
+    Documentation Brain hook – called when DOCUMENTING state completes.
+    Stub: records a doc entry in metadata.
+    Replace with real Documentation Brain call in Phase 8.
+    """
+    task.metadata["doc_generated"] = {
+        "task_id":    task.task_id,
+        "task_type":  task.task_type,
+        "goal":       task.goal[:200],
+        "result":     (task.result or "")[:500],
+    }
+    logger.debug("[%s] Doc Brain hook fired.", task.task_id[:8])
+
+
 # ─── Orchestrator Engine ───────────────────────────────────────────────────────
 
 class OrchestratorEngine:
     """
     Drives an OrchestratorTask through the workflow state machine,
     using SwarmManager for agent execution at each step.
-
-    Usage (from FastAPI endpoint)
-    ─────────────────────────────
-        engine = OrchestratorEngine(assistant, task_store)
-        task   = await engine.run("Build a REST API in FastAPI")
-        print(task.current_state, task.result)
     """
 
     def __init__(
@@ -136,30 +176,43 @@ class OrchestratorEngine:
     ):
         self._swarm         = SwarmManager(assistant)
         self._store         = task_store or TaskStore()
-        self._max_fix_loops = int(3)   # max testing ↔ fixing cycles per task
+        self._max_fix_loops = 3
 
     # ── Agent enforcement ──────────────────────────────────────────────────────
 
     def _check_agent_allowed(self, agent_name: str, state: WorkflowState) -> None:
-        """
-        Log a warning (or raise PermissionError) if the agent is not allowed
-        to run in the current state.
-
-        Unknown agents are warned but not blocked – forward compatibility.
-        """
         allowed = AGENT_ALLOWED_STATES.get(agent_name)
         if allowed is None:
-            logger.warning(
-                "No state restriction defined for agent '%s' – allowing.", agent_name
-            )
+            logger.warning("No state restriction for agent '%s' – allowing.", agent_name)
             return
         if state not in allowed:
             raise PermissionError(
-                f"Agent '{agent_name}' is NOT permitted in state '{state.value}'. "
-                f"Permitted states: {[s.value for s in allowed]}"
+                f"Agent '{agent_name}' NOT permitted in state '{state.value}'. "
+                f"Permitted: {[s.value for s in allowed]}"
             )
 
-    # ── Sync execution (runs inside a thread via run_in_executor) ─────────────
+    # ── Output preservation (called on EVERY successful step) ─────────────────
+
+    def _preserve_outputs(
+        self,
+        task:       OrchestratorTask,
+        step:       WorkflowStep,
+        output:     str,
+        extra:      Optional[dict] = None,
+    ) -> None:
+        """
+        Update task.preserved_outputs with the latest good output.
+        Called after every successful step so failure never wipes useful work.
+        """
+        task.preserved_outputs.update({
+            "last_output":    output[:3000],
+            "last_step":      step.name,
+            "last_state":     step.state,
+            "last_agent":     step.agent_name,
+            **(extra or {}),
+        })
+
+    # ── Sync execution ─────────────────────────────────────────────────────────
 
     def _run_step_sync(
         self,
@@ -169,10 +222,8 @@ class OrchestratorEngine:
         state:      WorkflowState,
     ) -> tuple[bool, str, list[str]]:
         """
-        Execute one workflow step synchronously.
-
-        Returns (success, output_text, list_of_swarm_task_ids).
-        Uses TaskStore.save_sync() for mid-execution checkpoints.
+        Execute one workflow step synchronously via SwarmManager.
+        Returns (success, output_text, swarm_task_ids).
         """
         self._check_agent_allowed(agent_name, state)
 
@@ -181,27 +232,23 @@ class OrchestratorEngine:
             task.task_id[:8], step.name, state.value, agent_name,
         )
 
-        # Run the swarm – this is synchronous (ThreadPoolExecutor inside)
         swarm_result = self._swarm.run(task.goal)
-
         task_ids = [t.id for t in swarm_result.tasks]
         output   = swarm_result.final_output or ""
-
-        # Checkpoint
-        self._store.save_sync(task)
 
         return swarm_result.success, output, task_ids
 
     def _execute_workflow_sync(self, task: OrchestratorTask) -> None:
-        """
-        Drive the task through its blueprint states.
-        Called from an asyncio thread executor.
-        """
-        blueprint   = _BLUEPRINTS.get(task.task_type, _BLUEPRINTS[OrchTaskType.GENERIC])
-        fix_loops   = 0
-        step_idx    = 0
+        """Drive the task through its blueprint. Called in a thread executor."""
+        blueprint = _BLUEPRINTS.get(task.task_type, _BLUEPRINTS[OrchTaskType.GENERIC])
+        fix_loops = 0
+        step_idx  = 0
 
-        # Resume: skip steps whose state was already DONE
+        # Memory Brain: task started
+        _hook_memory_brain(task, "task_start", {"goal": task.goal[:200]})
+        self._store.save_sync(task)
+
+        # Resume: set of already-DONE states to skip
         done_states = {
             WorkflowState(s.state)
             for s in task.steps
@@ -214,17 +261,17 @@ class OrchestratorEngine:
 
             step_name, target_state, agent_name = blueprint[step_idx]
 
-            # Skip states already completed (resume path)
+            # Skip already-done states (resume path)
             if target_state in done_states:
-                logger.info("[%s] Skipping already-done state=%s", task.task_id[:8], target_state)
+                logger.info("[%s] Skip already-done: %s", task.task_id[:8], target_state)
                 step_idx += 1
                 continue
 
-            # Transition
+            # State transition
             try:
                 task.transition(target_state, reason=f"Starting '{step_name}'")
             except ValueError as exc:
-                logger.warning("[%s] Cannot transition to %s: %s – skipping step.",
+                logger.warning("[%s] Skip invalid transition to %s: %s",
                                task.task_id[:8], target_state, exc)
                 step_idx += 1
                 continue
@@ -238,108 +285,171 @@ class OrchestratorEngine:
                     task, step, agent_name, target_state
                 )
                 step.swarm_task_ids = task_ids
-
-                # Track assigned agents
-                for t in task_ids:
-                    if agent_name not in task.assigned_agents:
-                        task.assigned_agents.append(agent_name)
+                if agent_name not in task.assigned_agents:
+                    task.assigned_agents.append(agent_name)
 
                 if success:
                     step.complete(output=output[:2000])
+
+                    # Always preserve outputs on success
+                    self._preserve_outputs(task, step, output)
+
+                    # Save named checkpoint if this state has one
+                    cp_name = CHECKPOINT_NAMES.get(target_state)
+                    if cp_name:
+                        task.save_checkpoint(
+                            cp_name,
+                            preserved_outputs={"last_output": output[:3000]},
+                        )
+                        _hook_memory_brain(task, "checkpoint_saved", {"checkpoint": cp_name})
+
+                    # Doc Brain hook after DOCUMENTING
+                    if target_state == WorkflowState.DOCUMENTING:
+                        _hook_doc_brain(task)
+
+                    self._store.save_sync(task)
                     step_idx += 1
 
                 else:
-                    # Test failure → enter fix loop if allowed
+                    # ── Failure handling ───────────────────────────────────────
+                    # Always preserve whatever output we got (partial work)
+                    if output:
+                        self._preserve_outputs(task, step, output,
+                                               extra={"partial": True})
+
+                    # Test failure → fix loop
                     if target_state == WorkflowState.TESTING and fix_loops < self._max_fix_loops:
                         fix_loops += 1
-                        step.fail(error=f"Tests failed (fix loop {fix_loops}/{self._max_fix_loops})")
-                        task.increment_retry()
-                        logger.info(
-                            "[%s] Test failure – fix loop %d/%d",
-                            task.task_id[:8], fix_loops, self._max_fix_loops,
+                        step.fail(error=f"Tests failed (loop {fix_loops}/{self._max_fix_loops})")
+                        task.failure_summary = (
+                            f"Tests failed in loop {fix_loops}. "
+                            f"Last partial output preserved. Attempting fix."
                         )
+                        task.increment_retry()
+                        logger.info("[%s] Fix loop %d/%d", task.task_id[:8],
+                                    fix_loops, self._max_fix_loops)
 
-                        # Insert a FIXING step dynamically
                         task.transition(WorkflowState.FIXING, reason=f"Fix loop {fix_loops}")
                         fix_step = task.add_step(
                             f"Fix (loop {fix_loops})",
-                            str(WorkflowState.FIXING),
-                            "debug_agent",
+                            str(WorkflowState.FIXING), "debug_agent",
                         )
                         fix_step.start()
                         self._store.save_sync(task)
 
-                        fix_success, fix_output, fix_task_ids = self._run_step_sync(
+                        fix_ok, fix_out, fix_ids = self._run_step_sync(
                             task, fix_step, "debug_agent", WorkflowState.FIXING
                         )
-                        fix_step.swarm_task_ids = fix_task_ids
-                        if fix_success:
-                            fix_step.complete(output=fix_output[:2000])
+                        fix_step.swarm_task_ids = fix_ids
+                        if fix_ok:
+                            fix_step.complete(output=fix_out[:2000])
+                            self._preserve_outputs(task, fix_step, fix_out)
+                            cp_name = CHECKPOINT_NAMES.get(WorkflowState.FIXING)
+                            if cp_name:
+                                task.save_checkpoint(cp_name)
                         else:
-                            fix_step.fail(error=fix_output[:500])
+                            fix_step.fail(error=fix_out[:500])
+                            # Still preserve whatever came back
+                            if fix_out:
+                                self._preserve_outputs(task, fix_step, fix_out,
+                                                       extra={"partial": True})
 
-                        # Loop back to TESTING (don't advance step_idx)
                         task.transition(WorkflowState.TESTING,
                                         reason=f"Re-test after fix loop {fix_loops}")
-                        # step_idx stays pointing at TESTING step → re-runs it
+                        # step_idx unchanged → re-runs testing step
 
                     elif task.can_retry():
-                        # General retry: reset to PLANNING
+                        # General retry from PLANNING
                         task.increment_retry()
                         step.fail(error=f"Failed – retry {task.retry_count}/{task.max_retries}")
-                        logger.info("[%s] General retry %d/%d",
-                                    task.task_id[:8], task.retry_count, task.max_retries)
+                        task.failure_summary = (
+                            f"Step '{step_name}' failed. Partial outputs preserved. "
+                            f"Retry {task.retry_count}/{task.max_retries}."
+                        )
                         try:
                             task.transition(WorkflowState.PLANNING, reason="General retry")
-                            step_idx = 0   # restart from planning step
+                            step_idx   = 0
                             done_states.clear()
                         except ValueError:
-                            # Cannot loop back – fail
-                            task.failure_reason = output[:500] or "Step failed"
-                            task.transition(WorkflowState.FAILED, reason="Cannot retry from here")
+                            task.failure_reason  = output[:500] or "Step failed"
+                            task.failure_summary = (
+                                f"Step '{step_name}' failed and cannot retry from here. "
+                                f"Last checkpoint: {task.last_checkpoint_name() or 'none'}."
+                            )
+                            task.transition(WorkflowState.FAILED,
+                                            reason="Cannot retry from here")
                             break
 
                     else:
-                        # Out of retries
-                        step.fail(error=output[:500] or "Step failed – retries exhausted")
-                        task.failure_reason = output[:500] or "Step failed after max retries"
+                        # Out of retries – fail and preserve everything we have
+                        step.fail(error=output[:500] or "Retries exhausted")
+                        task.failure_reason  = output[:500] or "Step failed after max retries"
+                        task.failure_summary = (
+                            f"Step '{step_name}' failed after {task.max_retries} retries. "
+                            f"Last checkpoint: {task.last_checkpoint_name() or 'none'}. "
+                            f"Partial outputs preserved in preserved_outputs."
+                        )
                         task.transition(WorkflowState.FAILED, reason="Max retries exceeded")
                         break
 
             except PermissionError as exc:
                 step.fail(error=str(exc))
-                logger.error("[%s] Agent state violation: %s", task.task_id[:8], exc)
-                task.failure_reason = str(exc)
+                task.failure_reason  = str(exc)
+                task.failure_summary = f"Agent state violation in step '{step_name}': {exc}"
                 task.transition(WorkflowState.FAILED, reason="Agent state violation")
                 break
 
             except Exception as exc:
                 step.fail(error=str(exc))
-                logger.exception("[%s] Unhandled exception in step '%s'.", task.task_id[:8], step_name)
+                logger.exception("[%s] Unhandled exception in step '%s'.",
+                                 task.task_id[:8], step_name)
                 if task.can_retry():
                     task.increment_retry()
-                    logger.info("[%s] Retrying after exception (%d/%d).",
-                                task.task_id[:8], task.retry_count, task.max_retries)
+                    task.failure_summary = (
+                        f"Exception in '{step_name}': {exc!s:.200}. "
+                        f"Retrying ({task.retry_count}/{task.max_retries})."
+                    )
                     try:
-                        task.transition(WorkflowState.PLANNING, reason=f"Retry after exception: {exc}")
-                        step_idx = 0
+                        task.transition(WorkflowState.PLANNING,
+                                        reason=f"Retry after: {exc!s:.100}")
+                        step_idx   = 0
                         done_states.clear()
                     except ValueError:
-                        task.failure_reason = str(exc)
+                        task.failure_reason  = str(exc)
+                        task.failure_summary = (
+                            f"Fatal exception in '{step_name}': {exc!s:.300}. "
+                            f"Last checkpoint: {task.last_checkpoint_name() or 'none'}."
+                        )
                         task.transition(WorkflowState.FAILED, reason=str(exc))
                         break
                 else:
-                    task.failure_reason = str(exc)
+                    task.failure_reason  = str(exc)
+                    task.failure_summary = (
+                        f"Fatal exception in '{step_name}' after all retries: {exc!s:.300}. "
+                        f"Last checkpoint: {task.last_checkpoint_name() or 'none'}. "
+                        f"Preserved outputs available."
+                    )
                     task.transition(WorkflowState.FAILED, reason=str(exc))
                     break
 
             self._store.save_sync(task)
 
-        # Mark completed if we exited without failure
+        # ── Mark completed ─────────────────────────────────────────────────────
         if task.current_state not in TERMINAL_STATES:
             done_steps = [s for s in task.steps if s.status == StepStatus.DONE]
             task.result = done_steps[-1].output if done_steps else "Completed successfully."
             task.transition(WorkflowState.COMPLETED, reason="All steps completed")
+
+        # ── Post-task hooks ────────────────────────────────────────────────────
+        hook_event = (
+            "task_complete" if task.current_state == WorkflowState.COMPLETED
+            else "task_failed"
+        )
+        _hook_memory_brain(task, hook_event, {
+            "result":      (task.result or "")[:300],
+            "checkpoints": [c.name for c in task.checkpoints],
+        })
+        _hook_learning_brain(task, hook_event)
 
         self._store.save_sync(task)
 
@@ -350,96 +460,90 @@ class OrchestratorEngine:
         goal:     str,
         metadata: Optional[dict] = None,
     ) -> OrchestratorTask:
-        """
-        Create and execute a new OrchestratorTask for the user's goal.
-
-        Runs SwarmManager in a thread executor so the FastAPI event loop
-        is not blocked. Persists to TaskStore before returning.
-
-        Returns the fully populated OrchestratorTask.
-        """
+        """Create and execute a new OrchestratorTask."""
         task_type = _classify(goal)
         task      = OrchestratorTask(goal=goal, task_type=task_type, metadata=metadata or {})
 
         logger.info("[%s] New %s task: %s", task.task_id[:8], task_type, goal[:80])
-        self._store.save_sync(task)   # persist immediately so it's queryable
+        self._store.save_sync(task)
 
         try:
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, self._execute_workflow_sync, task)
         except Exception as exc:
-            logger.exception("[%s] Fatal error in workflow executor.", task.task_id[:8])
+            logger.exception("[%s] Fatal executor error.", task.task_id[:8])
             if task.current_state not in TERMINAL_STATES:
-                task.failure_reason = str(exc)
+                task.failure_reason  = str(exc)
+                task.failure_summary = (
+                    f"Fatal error: {exc!s:.300}. "
+                    f"Last checkpoint: {task.last_checkpoint_name() or 'none'}. "
+                    f"Preserved outputs available."
+                )
                 task.force_state(WorkflowState.FAILED, reason=f"Fatal: {exc}")
 
-        # Final async save (syncs JSON state to MongoDB if configured)
         await self._store.save(task)
-
-        logger.info(
-            "[%s] Finished: state=%s retries=%d",
-            task.task_id[:8], task.current_state, task.retry_count,
-        )
+        logger.info("[%s] Done: state=%s retries=%d checkpoints=%d",
+                    task.task_id[:8], task.current_state,
+                    task.retry_count, len(task.checkpoints))
         return task
 
     async def resume(self, task_id: str) -> Optional[OrchestratorTask]:
-        """
-        Resume an interrupted task from its last successfully completed state.
-
-        - If already COMPLETED or CANCELLED: returns as-is (nothing to do).
-        - If FAILED: resets state to last DONE step's state and re-runs.
-        - If stuck IN_PROGRESS: re-runs from where it left off.
-
-        Returns None if task_id is not found in the store.
-        """
+        """Resume an interrupted/failed task from its last safe state."""
         task = await self._store.load(task_id)
         if not task:
-            logger.error("Cannot resume: task %s not found.", task_id)
             return None
 
         if task.current_state in {WorkflowState.COMPLETED, WorkflowState.CANCELLED}:
-            logger.info("[%s] Already %s – nothing to resume.", task.task_id[:8], task.current_state)
             return task
 
-        # Determine safe resume state
         safe_state = task.last_completed_state() or WorkflowState.CREATED
+        logger.info("[%s] Resuming from state=%s (was %s)",
+                    task.task_id[:8], safe_state, task.current_state)
 
-        logger.info(
-            "[%s] Resuming from state=%s (was %s)",
-            task.task_id[:8], safe_state, task.current_state,
-        )
-
-        # Reset any in-progress or failed steps to pending
         for step in task.steps:
             if step.status in (StepStatus.IN_PROGRESS, StepStatus.FAILED):
-                step.status      = StepStatus.PENDING
-                step.error       = ""
-                step.started_at  = None
+                step.status       = StepStatus.PENDING
+                step.error        = ""
+                step.started_at   = None
                 step.completed_at = None
 
-        # Force reset to safe state (bypass normal transition validation)
         task.force_state(safe_state, reason=f"Resumed – was {task.current_state}")
-        task.failure_reason = None
+        task.failure_reason  = None
+        task.failure_summary = None
 
         try:
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, self._execute_workflow_sync, task)
         except Exception as exc:
-            logger.exception("[%s] Fatal error during resume.", task.task_id[:8])
             if task.current_state not in TERMINAL_STATES:
-                task.failure_reason = str(exc)
+                task.failure_reason  = str(exc)
+                task.failure_summary = f"Resume failed: {exc!s:.300}"
                 task.force_state(WorkflowState.FAILED, reason=f"Resume failed: {exc}")
 
         await self._store.save(task)
         return task
 
+    async def rollback(self, task_id: str, checkpoint_name: str) -> Optional[OrchestratorTask]:
+        """
+        Reset a task to a named checkpoint WITHOUT re-running it.
+        Caller should follow up with resume() to re-execute from that point.
+        """
+        task = await self._store.load(task_id)
+        if not task:
+            return None
+
+        cp = task.rollback_to_checkpoint(checkpoint_name)
+        if not cp:
+            logger.warning("[%s] Checkpoint '%s' not found.", task.task_id[:8], checkpoint_name)
+            return task   # return unchanged
+
+        logger.info("[%s] Rolled back to checkpoint '%s' (state=%s)",
+                    task.task_id[:8], checkpoint_name, cp.state)
+        await self._store.save(task)
+        return task
+
     async def cancel(self, task_id: str) -> Optional[OrchestratorTask]:
-        """
-        Mark a task as CANCELLED. Only works if the task is not already terminal.
-        (Note: if the task is mid-execution in a thread, the thread will complete
-        its current step before the state is overwritten – cancellation is
-        cooperative, not preemptive.)
-        """
+        """Mark a task as CANCELLED."""
         task = await self._store.load(task_id)
         if not task:
             return None
