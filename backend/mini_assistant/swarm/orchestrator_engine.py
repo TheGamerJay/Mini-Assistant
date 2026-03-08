@@ -14,21 +14,28 @@ defined WorkflowStates. The engine enforces:
   • Persistent checkpoints          (TaskStore.save_sync() after each step)
   • Resume from last safe state     (OrchestratorEngine.resume())
   • Rollback to named checkpoint    (OrchestratorEngine.rollback())
-  • Agent lifecycle hooks           (Memory Brain, Learning Brain stubs)
-  • Full audit trail                (OrchestratorTask.state_history + steps)
+  • Real Memory Brain               (task summaries persisted across sessions)
+  • Real Learning Brain             (cross-task pattern tracking)
+  • Real Tool Brain + Security      (safe shell execution with guardrails)
+  • Consolidated debug_log          (full event stream in task.metadata)
+  • Enriched step prompts           (memory context + previous outputs injected)
 
 Architecture
 ────────────
   OrchestratorEngine
     └─ creates / drives OrchestratorTask (macro, persisted)
-         └─ calls SwarmManager.run() for agent execution (micro, existing)
-              └─ TaskQueue → per-agent SwarmTask objects
+         ├─ calls SwarmManager.run() for agent execution (micro, existing)
+         ├─ MemoryBrain  – context retrieval + outcome persistence
+         ├─ LearningBrain – cross-task pattern accumulation
+         ├─ ToolBrain     – safe shell/git execution (DEPLOYING state)
+         └─ SecurityBrain – embedded inside ToolBrain (automatic)
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Optional, TYPE_CHECKING
 
 from .orchestrator_task import (
@@ -41,8 +48,11 @@ from .orchestrator_task import (
     CHECKPOINT_NAMES,
     TERMINAL_STATES,
 )
-from .task_store import TaskStore
-from .manager    import SwarmManager
+from .task_store     import TaskStore
+from .manager        import SwarmManager
+from .memory_brain   import MemoryBrain
+from .learning_brain import LearningBrain
+from .tool_brain     import ToolBrain
 
 if TYPE_CHECKING:
     from ..main import MiniAssistant
@@ -112,53 +122,17 @@ _BLUEPRINTS: dict[str, list[tuple[str, WorkflowState, str]]] = {
 }
 
 
-# ─── Agent lifecycle hooks (stubs – replace with real agents in Phase 8) ───────
+# ─── Debug log helper ──────────────────────────────────────────────────────────
 
-def _hook_memory_brain(task: OrchestratorTask, event: str, data: Optional[dict] = None) -> None:
-    """
-    Memory Brain hook – called at key task lifecycle events.
-    Stub: logs the event and stores a summary in task.metadata.
-    Replace with real Memory Brain call in Phase 8.
-    Events: task_start, checkpoint_saved, task_complete, task_failed
-    """
-    entry = {"event": event, "state": str(task.current_state), **(data or {})}
-    task.metadata.setdefault("memory_log", []).append(entry)
-    logger.debug("[%s] Memory Brain hook: %s", task.task_id[:8], event)
-
-
-def _hook_learning_brain(task: OrchestratorTask, event: str) -> None:
-    """
-    Learning Brain hook – called only on task_complete or task_failed.
-    Stub: records a lesson summary in task.metadata.
-    Replace with real Learning Brain call in Phase 9.
-    """
-    if event not in ("task_complete", "task_failed"):
-        return
-    lesson = {
-        "event":        event,
-        "task_type":    task.task_type,
-        "retries":      task.retry_count,
-        "checkpoints":  [c.name for c in task.checkpoints],
-        "outcome":      str(task.current_state),
-        "failure":      task.failure_summary or task.failure_reason or "",
+def _debug_entry(event: str, brain: str, data: Optional[dict] = None) -> dict:
+    """Build a structured event entry for task.metadata['debug_log']."""
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "type":      "event",
+        "brain":     brain,
+        "event":     event,
+        **(data or {}),
     }
-    task.metadata.setdefault("learning_log", []).append(lesson)
-    logger.debug("[%s] Learning Brain hook: %s", task.task_id[:8], event)
-
-
-def _hook_doc_brain(task: OrchestratorTask) -> None:
-    """
-    Documentation Brain hook – called when DOCUMENTING state completes.
-    Stub: records a doc entry in metadata.
-    Replace with real Documentation Brain call in Phase 8.
-    """
-    task.metadata["doc_generated"] = {
-        "task_id":    task.task_id,
-        "task_type":  task.task_type,
-        "goal":       task.goal[:200],
-        "result":     (task.result or "")[:500],
-    }
-    logger.debug("[%s] Doc Brain hook fired.", task.task_id[:8])
 
 
 # ─── Orchestrator Engine ───────────────────────────────────────────────────────
@@ -167,52 +141,148 @@ class OrchestratorEngine:
     """
     Drives an OrchestratorTask through the workflow state machine,
     using SwarmManager for agent execution at each step.
+    Real brain hooks (Memory, Learning, Tool, Security) are wired in.
     """
 
     def __init__(
         self,
         assistant:  Optional["MiniAssistant"] = None,
         task_store: Optional[TaskStore]       = None,
+        mongo_db=None,
     ):
         self._swarm         = SwarmManager(assistant)
         self._store         = task_store or TaskStore()
+        self._memory        = MemoryBrain(mongo_db=mongo_db)
+        self._learning      = LearningBrain()
+        self._tool          = ToolBrain()
         self._max_fix_loops = 3
+
+    # ── Debug log ──────────────────────────────────────────────────────────────
+
+    def _log(self, task: OrchestratorTask, event: str, brain: str,
+             data: Optional[dict] = None) -> None:
+        """Append a structured entry to task.metadata['debug_log']."""
+        entry = _debug_entry(event, brain, data)
+        task.metadata.setdefault("debug_log", []).append(entry)
+        logger.debug("[%s][%s] %s %s", task.task_id[:8], brain, event,
+                     str(data or "")[:80])
 
     # ── Agent enforcement ──────────────────────────────────────────────────────
 
-    def _check_agent_allowed(self, agent_name: str, state: WorkflowState) -> None:
+    def _check_agent_allowed(self, task: OrchestratorTask,
+                             agent_name: str, state: WorkflowState) -> None:
         allowed = AGENT_ALLOWED_STATES.get(agent_name)
         if allowed is None:
+            self._log(task, "agent_check_skipped", "engine",
+                      {"agent": agent_name, "state": str(state), "reason": "no restriction defined"})
             logger.warning("No state restriction for agent '%s' – allowing.", agent_name)
             return
         if state not in allowed:
-            raise PermissionError(
+            reason = (
                 f"Agent '{agent_name}' NOT permitted in state '{state.value}'. "
                 f"Permitted: {[s.value for s in allowed]}"
             )
+            self._log(task, "agent_check_rejected", "engine",
+                      {"agent": agent_name, "state": str(state), "reason": reason})
+            raise PermissionError(reason)
+        self._log(task, "agent_check_approved", "engine",
+                  {"agent": agent_name, "state": str(state)})
 
-    # ── Output preservation (called on EVERY successful step) ─────────────────
+    # ── Output preservation ────────────────────────────────────────────────────
 
     def _preserve_outputs(
         self,
-        task:       OrchestratorTask,
-        step:       WorkflowStep,
-        output:     str,
-        extra:      Optional[dict] = None,
+        task:  OrchestratorTask,
+        step:  WorkflowStep,
+        output: str,
+        extra:  Optional[dict] = None,
     ) -> None:
-        """
-        Update task.preserved_outputs with the latest good output.
-        Called after every successful step so failure never wipes useful work.
-        """
         task.preserved_outputs.update({
-            "last_output":    output[:3000],
-            "last_step":      step.name,
-            "last_state":     step.state,
-            "last_agent":     step.agent_name,
+            "last_output":  output[:3000],
+            "last_step":    step.name,
+            "last_state":   step.state,
+            "last_agent":   step.agent_name,
             **(extra or {}),
         })
 
-    # ── Sync execution ─────────────────────────────────────────────────────────
+    # ── Step prompt enrichment ─────────────────────────────────────────────────
+
+    def _build_step_prompt(
+        self,
+        task:       OrchestratorTask,
+        step_name:  str,
+        agent_name: str,
+    ) -> str:
+        """
+        Build a richer prompt for the agent by injecting:
+        - memory context from past similar tasks
+        - previous step output (if any)
+        """
+        parts = [f"Goal: {task.goal}",
+                 f"Current step: {step_name} (agent: {agent_name})"]
+
+        mem_block = self._memory.build_context_block(task.task_type, task.goal)
+        if mem_block:
+            parts.append(mem_block)
+
+        last_out = task.preserved_outputs.get("last_output", "")
+        if last_out:
+            parts.append(
+                f"Previous step output (use as context):\n{last_out[:1500]}"
+            )
+
+        return "\n\n".join(parts)
+
+    # ── Tool execution (DEPLOYING state) ──────────────────────────────────────
+
+    def _run_tool_step_sync(
+        self,
+        task:  OrchestratorTask,
+        step:  WorkflowStep,
+    ) -> tuple[bool, str, list[str]]:
+        """
+        For DEPLOYING state: extract a shell command from SwarmManager output,
+        then run it through ToolBrain (which calls SecurityBrain internally).
+        Falls back to returning the plan output if no executable command is found.
+        """
+        # First: ask SwarmManager to produce a deployment plan
+        prompt = self._build_step_prompt(task, step.name, step.agent_name)
+        swarm_result = self._swarm.run(prompt)
+        plan_output  = swarm_result.final_output or ""
+        task_ids     = [t.id for t in swarm_result.tasks]
+
+        # Try to extract a shell command from the plan (lines starting with $)
+        commands = [
+            line.lstrip("$ ").strip()
+            for line in plan_output.splitlines()
+            if line.strip().startswith("$")
+        ]
+
+        if commands:
+            # Run the first extracted command through ToolBrain
+            cmd = commands[0]
+            self._log(task, "tool_command_extracted", "tool_brain",
+                      {"command": cmd, "source": "planner_output"})
+            ok, tool_out, audit = self._tool.run(cmd, task_id=task.task_id)
+            task.metadata.setdefault("debug_log", []).append(audit)
+            self._log(task, "tool_command_result", "tool_brain",
+                      {"success": ok, "exit_code": audit.get("exit_code"), "level": audit.get("level")})
+
+            # Security block → step fails with clear reason
+            if not ok and audit.get("level") == "blocked":
+                task.failure_summary = (
+                    f"Security Brain blocked command in '{step.name}': {audit.get('reason', '')}"
+                )
+
+            combined = f"{plan_output}\n\n[Tool output]:\n{tool_out}"
+            return ok, combined, task_ids
+        else:
+            # No command found – treat plan output as the step output
+            self._log(task, "tool_no_command_extracted", "tool_brain",
+                      {"note": "no '$' prefixed command found in plan output"})
+            return swarm_result.success, plan_output, task_ids
+
+    # ── Main step execution ────────────────────────────────────────────────────
 
     def _run_step_sync(
         self,
@@ -222,21 +292,30 @@ class OrchestratorEngine:
         state:      WorkflowState,
     ) -> tuple[bool, str, list[str]]:
         """
-        Execute one workflow step synchronously via SwarmManager.
+        Execute one workflow step synchronously.
+        DEPLOYING state goes through ToolBrain; all others through SwarmManager.
         Returns (success, output_text, swarm_task_ids).
         """
-        self._check_agent_allowed(agent_name, state)
+        self._check_agent_allowed(task, agent_name, state)
 
         logger.info(
             "[%s] Step '%s' | state=%s | agent=%s",
             task.task_id[:8], step.name, state.value, agent_name,
         )
+        self._log(task, "step_started", "engine",
+                  {"step": step.name, "state": str(state), "agent": agent_name})
 
-        swarm_result = self._swarm.run(task.goal)
-        task_ids = [t.id for t in swarm_result.tasks]
-        output   = swarm_result.final_output or ""
+        if state == WorkflowState.DEPLOYING:
+            return self._run_tool_step_sync(task, step)
 
+        # All other states → SwarmManager with enriched prompt
+        prompt       = self._build_step_prompt(task, step.name, agent_name)
+        swarm_result = self._swarm.run(prompt)
+        task_ids     = [t.id for t in swarm_result.tasks]
+        output       = swarm_result.final_output or ""
         return swarm_result.success, output, task_ids
+
+    # ── Workflow driver ────────────────────────────────────────────────────────
 
     def _execute_workflow_sync(self, task: OrchestratorTask) -> None:
         """Drive the task through its blueprint. Called in a thread executor."""
@@ -244,8 +323,12 @@ class OrchestratorEngine:
         fix_loops = 0
         step_idx  = 0
 
-        # Memory Brain: task started
-        _hook_memory_brain(task, "task_start", {"goal": task.goal[:200]})
+        # ── Memory Brain: task started ─────────────────────────────────────────
+        mem_ctx = self._memory.load_context(task.task_type, task.goal)
+        self._log(task, "task_start", "memory_brain", {
+            "goal":         task.goal[:200],
+            "past_context": len(mem_ctx),
+        })
         self._store.save_sync(task)
 
         # Resume: set of already-DONE states to skip
@@ -254,6 +337,9 @@ class OrchestratorEngine:
             for s in task.steps
             if s.status == StepStatus.DONE and s.state
         }
+        if done_states:
+            self._log(task, "resume_skip_states", "engine",
+                      {"skipping": [s.value for s in done_states]})
 
         while step_idx < len(blueprint):
             if task.current_state in TERMINAL_STATES:
@@ -264,15 +350,21 @@ class OrchestratorEngine:
             # Skip already-done states (resume path)
             if target_state in done_states:
                 logger.info("[%s] Skip already-done: %s", task.task_id[:8], target_state)
+                self._log(task, "step_skipped_already_done", "engine",
+                          {"step": step_name, "state": str(target_state)})
                 step_idx += 1
                 continue
 
             # State transition
             try:
                 task.transition(target_state, reason=f"Starting '{step_name}'")
+                self._log(task, "state_transition", "engine",
+                          {"to": str(target_state), "step": step_name})
             except ValueError as exc:
                 logger.warning("[%s] Skip invalid transition to %s: %s",
                                task.task_id[:8], target_state, exc)
+                self._log(task, "transition_rejected", "engine",
+                          {"target": str(target_state), "reason": str(exc)})
                 step_idx += 1
                 continue
 
@@ -290,32 +382,39 @@ class OrchestratorEngine:
 
                 if success:
                     step.complete(output=output[:2000])
-
-                    # Always preserve outputs on success
                     self._preserve_outputs(task, step, output)
 
-                    # Save named checkpoint if this state has one
+                    # Named checkpoint
                     cp_name = CHECKPOINT_NAMES.get(target_state)
                     if cp_name:
                         task.save_checkpoint(
                             cp_name,
                             preserved_outputs={"last_output": output[:3000]},
                         )
-                        _hook_memory_brain(task, "checkpoint_saved", {"checkpoint": cp_name})
+                        self._log(task, "checkpoint_saved", "memory_brain",
+                                  {"checkpoint": cp_name, "state": str(target_state)})
+                        self._memory.record_checkpoint(task, cp_name)
 
                     # Doc Brain hook after DOCUMENTING
                     if target_state == WorkflowState.DOCUMENTING:
-                        _hook_doc_brain(task)
+                        task.metadata["doc_generated"] = {
+                            "task_id":   task.task_id,
+                            "task_type": task.task_type,
+                            "goal":      task.goal[:200],
+                            "result":    (task.result or output)[:500],
+                        }
+                        self._log(task, "doc_generated", "doc_brain",
+                                  {"task_type": task.task_type})
 
+                    self._log(task, "step_completed", "engine",
+                              {"step": step_name, "state": str(target_state)})
                     self._store.save_sync(task)
                     step_idx += 1
 
                 else:
-                    # ── Failure handling ───────────────────────────────────────
-                    # Always preserve whatever output we got (partial work)
+                    # Always preserve whatever output we got
                     if output:
-                        self._preserve_outputs(task, step, output,
-                                               extra={"partial": True})
+                        self._preserve_outputs(task, step, output, extra={"partial": True})
 
                     # Test failure → fix loop
                     if target_state == WorkflowState.TESTING and fix_loops < self._max_fix_loops:
@@ -326,6 +425,8 @@ class OrchestratorEngine:
                             f"Last partial output preserved. Attempting fix."
                         )
                         task.increment_retry()
+                        self._log(task, "fix_loop_started", "engine",
+                                  {"loop": fix_loops, "max": self._max_fix_loops})
                         logger.info("[%s] Fix loop %d/%d", task.task_id[:8],
                                     fix_loops, self._max_fix_loops)
 
@@ -347,25 +448,29 @@ class OrchestratorEngine:
                             cp_name = CHECKPOINT_NAMES.get(WorkflowState.FIXING)
                             if cp_name:
                                 task.save_checkpoint(cp_name)
+                                self._log(task, "checkpoint_saved", "memory_brain",
+                                          {"checkpoint": cp_name})
                         else:
                             fix_step.fail(error=fix_out[:500])
-                            # Still preserve whatever came back
                             if fix_out:
                                 self._preserve_outputs(task, fix_step, fix_out,
                                                        extra={"partial": True})
 
+                        self._log(task, "fix_loop_done", "engine",
+                                  {"loop": fix_loops, "fix_ok": fix_ok})
                         task.transition(WorkflowState.TESTING,
                                         reason=f"Re-test after fix loop {fix_loops}")
                         # step_idx unchanged → re-runs testing step
 
                     elif task.can_retry():
-                        # General retry from PLANNING
                         task.increment_retry()
                         step.fail(error=f"Failed – retry {task.retry_count}/{task.max_retries}")
                         task.failure_summary = (
                             f"Step '{step_name}' failed. Partial outputs preserved. "
                             f"Retry {task.retry_count}/{task.max_retries}."
                         )
+                        self._log(task, "general_retry", "engine",
+                                  {"step": step_name, "retry": task.retry_count})
                         try:
                             task.transition(WorkflowState.PLANNING, reason="General retry")
                             step_idx   = 0
@@ -381,7 +486,6 @@ class OrchestratorEngine:
                             break
 
                     else:
-                        # Out of retries – fail and preserve everything we have
                         step.fail(error=output[:500] or "Retries exhausted")
                         task.failure_reason  = output[:500] or "Step failed after max retries"
                         task.failure_summary = (
@@ -389,6 +493,8 @@ class OrchestratorEngine:
                             f"Last checkpoint: {task.last_checkpoint_name() or 'none'}. "
                             f"Partial outputs preserved in preserved_outputs."
                         )
+                        self._log(task, "retries_exhausted", "engine",
+                                  {"step": step_name, "reason": task.failure_summary[:200]})
                         task.transition(WorkflowState.FAILED, reason="Max retries exceeded")
                         break
 
@@ -396,6 +502,8 @@ class OrchestratorEngine:
                 step.fail(error=str(exc))
                 task.failure_reason  = str(exc)
                 task.failure_summary = f"Agent state violation in step '{step_name}': {exc}"
+                self._log(task, "agent_permission_denied", "engine",
+                          {"step": step_name, "error": str(exc)[:200]})
                 task.transition(WorkflowState.FAILED, reason="Agent state violation")
                 break
 
@@ -403,6 +511,8 @@ class OrchestratorEngine:
                 step.fail(error=str(exc))
                 logger.exception("[%s] Unhandled exception in step '%s'.",
                                  task.task_id[:8], step_name)
+                self._log(task, "step_exception", "engine",
+                          {"step": step_name, "error": str(exc)[:200]})
                 if task.can_retry():
                     task.increment_retry()
                     task.failure_summary = (
@@ -440,16 +550,34 @@ class OrchestratorEngine:
             task.result = done_steps[-1].output if done_steps else "Completed successfully."
             task.transition(WorkflowState.COMPLETED, reason="All steps completed")
 
-        # ── Post-task hooks ────────────────────────────────────────────────────
+        # ── Post-task: Memory Brain ────────────────────────────────────────────
+        self._memory.save_task_summary(task)
         hook_event = (
             "task_complete" if task.current_state == WorkflowState.COMPLETED
             else "task_failed"
         )
-        _hook_memory_brain(task, hook_event, {
-            "result":      (task.result or "")[:300],
+        self._log(task, hook_event, "memory_brain", {
+            "result":      (task.result or "")[:200],
             "checkpoints": [c.name for c in task.checkpoints],
         })
-        _hook_learning_brain(task, hook_event)
+
+        # ── Post-task: Learning Brain ──────────────────────────────────────────
+        try:
+            lesson = self._learning.record_outcome(task)
+            self._log(task, "learning_recorded", "learning_brain", {
+                "outcome":   lesson["outcome"],
+                "fix_loops": lesson["fix_loops"],
+                "retries":   lesson["retries"],
+            })
+            patterns = self._learning.get_patterns()
+            task.metadata["learning_patterns"] = {
+                "success_rate":    patterns.get("success_rate"),
+                "total_tasks":     patterns.get("total_tasks"),
+                "avg_retries":     patterns.get("avg_retries"),
+            }
+        except Exception as exc:
+            logger.warning("[%s] LearningBrain failed: %s", task.task_id[:8], exc)
+            self._log(task, "learning_error", "learning_brain", {"error": str(exc)})
 
         self._store.save_sync(task)
 
@@ -479,6 +607,7 @@ class OrchestratorEngine:
                     f"Last checkpoint: {task.last_checkpoint_name() or 'none'}. "
                     f"Preserved outputs available."
                 )
+                self._log(task, "fatal_executor_error", "engine", {"error": str(exc)[:200]})
                 task.force_state(WorkflowState.FAILED, reason=f"Fatal: {exc}")
 
         await self._store.save(task)
@@ -488,7 +617,12 @@ class OrchestratorEngine:
         return task
 
     async def resume(self, task_id: str) -> Optional[OrchestratorTask]:
-        """Resume an interrupted/failed task from its last safe state."""
+        """
+        Resume an interrupted/failed task from its last safe state.
+        After a rollback the task is already at the checkpoint state;
+        this method rehydrates preserved_outputs + assigned_agents and
+        re-executes from the correct next blueprint step.
+        """
         task = await self._store.load(task_id)
         if not task:
             return None
@@ -497,17 +631,31 @@ class OrchestratorEngine:
             return task
 
         safe_state = task.last_completed_state() or WorkflowState.CREATED
-        logger.info("[%s] Resuming from state=%s (was %s)",
+        logger.info("[%s] Resuming from state=%s (currently %s)",
                     task.task_id[:8], safe_state, task.current_state)
+        self._log(task, "resume_initiated", "engine", {
+            "from_state":  str(task.current_state),
+            "safe_state":  str(safe_state),
+        })
 
+        # Reset any stuck IN_PROGRESS or FAILED steps to PENDING
+        reset_count = 0
         for step in task.steps:
             if step.status in (StepStatus.IN_PROGRESS, StepStatus.FAILED):
                 step.status       = StepStatus.PENDING
                 step.error        = ""
                 step.started_at   = None
                 step.completed_at = None
+                reset_count += 1
 
-        task.force_state(safe_state, reason=f"Resumed – was {task.current_state}")
+        if reset_count:
+            self._log(task, "steps_reset_to_pending", "engine",
+                      {"count": reset_count})
+
+        # Only force_state if we're not already there (avoid duplicate history entries)
+        if task.current_state != safe_state:
+            task.force_state(safe_state, reason=f"Resumed – was {task.current_state}")
+
         task.failure_reason  = None
         task.failure_summary = None
 
@@ -518,6 +666,7 @@ class OrchestratorEngine:
             if task.current_state not in TERMINAL_STATES:
                 task.failure_reason  = str(exc)
                 task.failure_summary = f"Resume failed: {exc!s:.300}"
+                self._log(task, "resume_failed", "engine", {"error": str(exc)[:200]})
                 task.force_state(WorkflowState.FAILED, reason=f"Resume failed: {exc}")
 
         await self._store.save(task)
@@ -526,6 +675,9 @@ class OrchestratorEngine:
     async def rollback(self, task_id: str, checkpoint_name: str) -> Optional[OrchestratorTask]:
         """
         Reset a task to a named checkpoint WITHOUT re-running it.
+        - Truncates steps after checkpoint step_index
+        - Resets preserved_outputs + assigned_agents to checkpoint state
+        - Resets retry_count
         Caller should follow up with resume() to re-execute from that point.
         """
         task = await self._store.load(task_id)
@@ -537,8 +689,14 @@ class OrchestratorEngine:
             logger.warning("[%s] Checkpoint '%s' not found.", task.task_id[:8], checkpoint_name)
             return task   # return unchanged
 
-        logger.info("[%s] Rolled back to checkpoint '%s' (state=%s)",
-                    task.task_id[:8], checkpoint_name, cp.state)
+        self._log(task, "rollback_complete", "engine", {
+            "checkpoint":  checkpoint_name,
+            "state":       cp.state,
+            "step_index":  cp.step_index,
+            "steps_kept":  len(task.steps),
+        })
+        logger.info("[%s] Rolled back to checkpoint '%s' (state=%s steps_kept=%d)",
+                    task.task_id[:8], checkpoint_name, cp.state, len(task.steps))
         await self._store.save(task)
         return task
 
@@ -549,6 +707,7 @@ class OrchestratorEngine:
             return None
         if task.current_state in TERMINAL_STATES:
             return task
+        self._log(task, "cancel_requested", "engine", {})
         try:
             task.transition(WorkflowState.CANCELLED, reason="Cancelled by user")
         except ValueError:

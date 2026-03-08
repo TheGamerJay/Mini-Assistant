@@ -15,6 +15,10 @@ from .orchestrator_task  import (
 )
 from .task_store          import TaskStore
 from .orchestrator_engine import OrchestratorEngine
+from .memory_brain        import MemoryBrain
+from .learning_brain      import LearningBrain
+from .security_brain      import SecurityBrain
+from .tool_brain          import ToolBrain
 
 __all__ = [
     # Existing micro-level swarm
@@ -23,10 +27,12 @@ __all__ = [
     "SwarmManager",
     "PlannerAgent", "ResearchAgent", "CodingAgent", "DebugAgent",
     "TesterAgent", "FileAnalystAgent", "VisionAgent",
-    # New macro-level orchestrator
+    # Macro-level orchestrator
     "OrchestratorTask", "WorkflowStep", "WorkflowState", "StepStatus",
     "OrchTaskType", "StateTransition", "Checkpoint",
     "VALID_TRANSITIONS", "AGENT_ALLOWED_STATES", "CHECKPOINT_NAMES",
     "TaskStore",
     "OrchestratorEngine",
+    # Brain layer
+    "MemoryBrain", "LearningBrain", "SecurityBrain", "ToolBrain",
 ]

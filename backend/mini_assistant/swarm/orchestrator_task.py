@@ -403,6 +403,8 @@ class OrchestratorTask:
         Reset the task to the named checkpoint.
         - Clears steps after the checkpoint step_index
         - Resets current_state to checkpoint state
+        - Resets preserved_outputs to checkpoint snapshot (no stale future outputs)
+        - Resets assigned_agents to only those in kept steps
         - Clears failure_reason / failure_summary
         - Does NOT re-run (caller must invoke resume() afterwards)
         Returns the checkpoint, or None if not found.
@@ -410,11 +412,23 @@ class OrchestratorTask:
         cp = next((c for c in reversed(self.checkpoints) if c.name == name), None)
         if not cp:
             return None
+
         # Truncate steps to checkpoint position (keep steps 0..step_index inclusive)
         self.steps = self.steps[: cp.step_index + 1]
+
+        # Rebuild assigned_agents from only the kept DONE steps so no stale agents remain
+        self.assigned_agents = list(dict.fromkeys(
+            s.agent_name for s in self.steps
+            if s.status == StepStatus.DONE and s.agent_name
+        ))
+
+        # Reset preserved_outputs to the checkpoint snapshot — future outputs are gone
+        self.preserved_outputs = dict(cp.preserved_outputs)
+
         # Remove checkpoints after this one
         idx = self.checkpoints.index(cp)
         self.checkpoints = self.checkpoints[: idx + 1]
+
         # Reset state (bypassing validation – rollback is always safe)
         self.force_state(
             WorkflowState(cp.state),
@@ -423,6 +437,7 @@ class OrchestratorTask:
         self.failure_reason  = None
         self.failure_summary = None
         self.completed_at    = None
+        self.retry_count     = 0          # reset retry counter after explicit rollback
         self.updated_at      = datetime.now(timezone.utc).isoformat()
         return cp
 

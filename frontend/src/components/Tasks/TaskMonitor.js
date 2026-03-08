@@ -5,7 +5,8 @@ import {
   Activity, CheckCircle, XCircle, Clock, Loader2, MinusCircle,
   RotateCcw, X, Play, ChevronRight, ChevronDown, AlertTriangle,
   Shield, Archive, FileText, Cpu, Zap, RefreshCw, Trash2, Plus,
-  Send, CornerDownLeft,
+  Send, CornerDownLeft, BookOpen, Brain, Wrench, Lock, Unlock,
+  Terminal, TrendingUp,
 } from 'lucide-react';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -216,6 +217,100 @@ const PreservedOutputs = ({ outputs }) => {
   );
 };
 
+// ── Event Log (debug_log from task.metadata) ──────────────────────────────────
+
+const EVENT_CONFIG = {
+  memory_brain:    { color: 'text-sky-400',     bg: 'bg-sky-950/30',     border: 'border-sky-800/40',     Icon: Brain   },
+  learning_brain:  { color: 'text-violet-400',  bg: 'bg-violet-950/30',  border: 'border-violet-800/40',  Icon: TrendingUp },
+  security_brain:  { color: 'text-amber-400',   bg: 'bg-amber-950/30',   border: 'border-amber-800/40',   Icon: Shield  },
+  tool_brain:      { color: 'text-emerald-400', bg: 'bg-emerald-950/30', border: 'border-emerald-800/40', Icon: Terminal },
+  doc_brain:       { color: 'text-teal-400',    bg: 'bg-teal-950/30',    border: 'border-teal-800/40',    Icon: BookOpen },
+  engine:          { color: 'text-slate-400',   bg: 'bg-slate-900/30',   border: 'border-slate-700/40',   Icon: Cpu     },
+};
+
+const SecurityBadge = ({ level }) => {
+  if (level === 'blocked')  return <span className="text-[8px] font-mono uppercase px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-700/40">BLOCKED</span>;
+  if (level === 'warning')  return <span className="text-[8px] font-mono uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-700/40">WARNING</span>;
+  if (level === 'approved') return <span className="text-[8px] font-mono uppercase px-1.5 py-0.5 rounded bg-green-500/20 text-green-400 border border-green-700/40">OK</span>;
+  return null;
+};
+
+const EventLog = ({ metadata }) => {
+  const log = metadata?.debug_log;
+  if (!log?.length) return (
+    <p className="text-[10px] text-slate-600 font-mono py-4 text-center">
+      No events recorded yet.
+    </p>
+  );
+
+  return (
+    <div className="space-y-1">
+      {log.map((entry, i) => {
+        const cfg = EVENT_CONFIG[entry.brain] || EVENT_CONFIG.engine;
+        const Icon = cfg.Icon;
+        const isSecurityCheck = entry.type === 'security_check';
+        return (
+          <div key={i} className={`flex items-start gap-2 px-2 py-1.5 rounded-sm border ${cfg.bg} ${cfg.border}`}>
+            <Icon className={`w-3 h-3 flex-shrink-0 mt-0.5 ${cfg.color}`} />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`text-[9px] font-mono uppercase ${cfg.color}`}>{entry.brain}</span>
+                <span className="text-[9px] font-mono text-slate-400">{entry.event}</span>
+                {isSecurityCheck && <SecurityBadge level={entry.level} />}
+                <span className="text-[8px] font-mono text-slate-700 ml-auto flex-shrink-0">{fmt(entry.timestamp)}</span>
+              </div>
+              {/* Relevant detail fields */}
+              {entry.step       && <p className="text-[8px] font-mono text-slate-600">step: {entry.step}</p>}
+              {entry.checkpoint && <p className="text-[8px] font-mono text-slate-600">checkpoint: {entry.checkpoint}</p>}
+              {entry.command    && <p className="text-[8px] font-mono text-slate-500 truncate">cmd: {entry.command}</p>}
+              {entry.reason     && <p className="text-[8px] font-mono text-slate-500 truncate">{entry.reason}</p>}
+              {entry.error      && <p className="text-[8px] font-mono text-red-400 truncate">{entry.error}</p>}
+              {entry.past_context !== undefined && (
+                <p className="text-[8px] font-mono text-slate-600">past context loaded: {entry.past_context} entries</p>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+// ── Learning Patterns Panel ────────────────────────────────────────────────────
+
+const LearningPanel = ({ metadata }) => {
+  const patterns = metadata?.learning_patterns;
+  if (!patterns) return null;
+  return (
+    <div className="px-3 py-2 bg-violet-950/20 border border-violet-800/30 rounded-sm mt-2">
+      <div className="flex items-center gap-1.5 mb-2">
+        <TrendingUp className="w-3 h-3 text-violet-400" />
+        <span className="text-[9px] font-mono text-violet-400 uppercase">Learning Brain — Global Patterns</span>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        {patterns.success_rate !== null && patterns.success_rate !== undefined && (
+          <div className="text-center">
+            <p className="text-[10px] font-mono text-green-400">{Math.round(patterns.success_rate * 100)}%</p>
+            <p className="text-[8px] font-mono text-slate-600">success rate</p>
+          </div>
+        )}
+        {patterns.total_tasks !== null && patterns.total_tasks !== undefined && (
+          <div className="text-center">
+            <p className="text-[10px] font-mono text-slate-300">{patterns.total_tasks}</p>
+            <p className="text-[8px] font-mono text-slate-600">total tasks</p>
+          </div>
+        )}
+        {patterns.avg_retries !== null && patterns.avg_retries !== undefined && (
+          <div className="text-center">
+            <p className="text-[10px] font-mono text-amber-400">{patterns.avg_retries}</p>
+            <p className="text-[8px] font-mono text-slate-600">avg retries</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // ── Task Detail Panel ─────────────────────────────────────────────────────────
 
 const TaskDetail = ({ task, onResume, onCancel, onRollback, onDelete, actionLoading }) => {
@@ -232,7 +327,8 @@ const TaskDetail = ({ task, onResume, onCancel, onRollback, onDelete, actionLoad
   const isResumable = task.current_state === 'failed';
   const isCancellable = isActive;
   const isDone      = TERMINAL_STATES.has(task.current_state);
-  const sections    = ['steps', 'timeline', 'checkpoints', 'outputs'];
+  const sections    = ['steps', 'timeline', 'checkpoints', 'outputs', 'events'];
+  const eventCount  = task.metadata?.debug_log?.length || 0;
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -332,13 +428,18 @@ const TaskDetail = ({ task, onResume, onCancel, onRollback, onDelete, actionLoad
           <button
             key={s}
             onClick={() => setActiveSection(s)}
-            className={`px-3 py-1.5 text-[10px] font-mono uppercase border-b-2 transition-colors ${
+            className={`px-3 py-1.5 text-[10px] font-mono uppercase border-b-2 transition-colors relative ${
               activeSection === s
                 ? 'border-cyan-400 text-cyan-400'
                 : 'border-transparent text-slate-600 hover:text-slate-400'
             }`}
           >
             {s}
+            {s === 'events' && eventCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 flex items-center justify-center bg-cyan-500/30 text-cyan-400 rounded-full text-[7px] font-mono">
+                {eventCount > 99 ? '99' : eventCount}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -361,6 +462,12 @@ const TaskDetail = ({ task, onResume, onCancel, onRollback, onDelete, actionLoad
         )}
         {activeSection === 'outputs' && (
           <PreservedOutputs outputs={task.preserved_outputs} />
+        )}
+        {activeSection === 'events' && (
+          <>
+            <EventLog metadata={task.metadata} />
+            <LearningPanel metadata={task.metadata} />
+          </>
         )}
       </div>
     </div>
