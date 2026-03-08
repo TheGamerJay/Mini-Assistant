@@ -32,7 +32,13 @@ const FixLoop = () => {
       toast.error('Enter a URL to analyze');
       return;
     }
-    
+
+    // Blob URLs are browser-side memory objects — the server cannot navigate to them
+    if (url.trim().startsWith('blob:')) {
+      toast.error('Blob URLs cannot be tested by FixLoop. Use the App Builder\'s edit chat to fix generated apps, or paste the preview URL instead.');
+      return;
+    }
+
     setLoading(true);
     setResult(null);
     

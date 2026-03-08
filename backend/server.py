@@ -1,6 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File
 from agents import run_agent_pipeline
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -517,6 +517,18 @@ Provide:
         raise HTTPException(status_code=500, detail=f"Analysis error: {str(e)}")
 
 # App Builder
+# In-memory preview store: maps build_id -> html string
+# (persists for the lifetime of the server process)
+_app_previews: dict = {}
+
+@api_router.get("/preview/{build_id}", response_class=HTMLResponse)
+async def serve_app_preview(build_id: str):
+    """Serve a generated app HTML by build ID — navigable by FixLoop and browsers."""
+    html = _app_previews.get(build_id)
+    if not html:
+        raise HTTPException(status_code=404, detail="Preview not found or expired")
+    return HTMLResponse(content=html)
+
 class AppBuilderRequest(BaseModel):
     description: str
     framework: str = "react"
@@ -604,7 +616,17 @@ Now generate the complete HTML file:"""
         name_words = request.description.split()[:4]
         app_name = "-".join(w.lower() for w in name_words if w.isalpha()) or "generated-app"
 
-        return {"name": app_name, "description": request.description, "html": content}
+        # Store in preview cache so FixLoop can navigate to a real URL
+        build_id = str(uuid.uuid4())
+        _app_previews[build_id] = content
+
+        return {
+            "name": app_name,
+            "description": request.description,
+            "html": content,
+            "build_id": build_id,
+            "preview_url": f"/api/preview/{build_id}"
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Generation error: {str(e)}")
 
@@ -658,7 +680,15 @@ USER'S CHANGE REQUEST:
         if not content.lower().startswith('<!doctype') and '<!doctype' in content.lower():
             content = content[content.lower().find('<!doctype'):]
 
-        return {"html": content}
+        # Store updated version in preview cache
+        build_id = str(uuid.uuid4())
+        _app_previews[build_id] = content
+
+        return {
+            "html": content,
+            "build_id": build_id,
+            "preview_url": f"/api/preview/{build_id}"
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Edit error: {str(e)}")
 
@@ -1711,32 +1741,47 @@ SCREENSHOT_DIR.mkdir(exist_ok=True)
 
 async def capture_page_screenshot(url: str, session_id: str) -> Dict:
     """Capture a screenshot of a webpage using Playwright"""
+    # Blob URLs are browser-side memory objects and cannot be navigated by the server.
+    if url.startswith("blob:"):
+        return {
+            "success": False,
+            "error": (
+                "Blob URL detected. Blob URLs are browser-memory objects and cannot be "
+                "opened server-side. Use the App Builder's built-in Edit conversation to "
+                "test and fix generated apps, or open them in a full tab and submit their "
+                "preview URL instead."
+            ),
+            "console_logs": [],
+            "page_errors": [],
+            "blob_url": True
+        }
+
     try:
         from playwright.async_api import async_playwright
-        
+
         screenshot_path = SCREENSHOT_DIR / f"{session_id}.png"
         console_logs = []
         page_errors = []
-        
+
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             context = await browser.new_context(viewport={"width": 1920, "height": 1080})
             page = await context.new_page()
-            
+
             # Capture console logs
             page.on("console", lambda msg: console_logs.append({
                 "type": msg.type,
                 "text": msg.text,
                 "location": str(msg.location) if msg.location else None
             }))
-            
+
             # Capture page errors
             page.on("pageerror", lambda err: page_errors.append({
                 "type": "PageError",
                 "message": str(err),
                 "severity": "critical"
             }))
-            
+
             try:
                 # Navigate to URL
                 response = await page.goto(url, timeout=30000, wait_until="networkidle")

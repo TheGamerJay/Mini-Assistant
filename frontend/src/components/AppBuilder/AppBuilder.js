@@ -251,7 +251,12 @@ const AppBuilder = () => {
         description,
         framework: 'react',
       }, { timeout: 180000 });
-      setGeneratedApp(response.data);
+      const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
+      const data = response.data;
+      if (data.preview_url) {
+        data.full_preview_url = backendUrl.replace('/api', '') + data.preview_url;
+      }
+      setGeneratedApp(data);
       toast.success('App generated!');
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to generate app');
@@ -278,7 +283,12 @@ const AppBuilder = () => {
         html: generatedApp.html,
         instruction,
       }, { timeout: 300000 });
-      setGeneratedApp(prev => ({ ...prev, html: res.data.html }));
+      const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
+      const updated = { ...generatedApp, html: res.data.html, build_id: res.data.build_id };
+      if (res.data.preview_url) {
+        updated.full_preview_url = backendUrl.replace('/api', '') + res.data.preview_url;
+      }
+      setGeneratedApp(updated);
       setEditHistory(prev => [...prev, { role: 'assistant', content: 'Done! Preview updated above. Let me know what else to change.' }]);
     } catch (err) {
       const msg = err.response?.data?.detail || 'Failed to apply changes';
@@ -499,7 +509,12 @@ const AppBuilder = () => {
               {/* Toolbar */}
               <div className="flex items-center gap-2 px-4 py-2 border-b border-cyan-500/20 bg-black/40 flex-shrink-0">
                 <CheckCircle className="w-4 h-4 text-green-400" />
-                <span className="text-xs font-mono text-green-400 flex-1">{generatedApp.name} — ready</span>
+                <span className="text-xs font-mono text-green-400 flex-1 truncate">
+                  {generatedApp.name} — ready
+                  {generatedApp.full_preview_url && (
+                    <span className="text-slate-600 ml-2">{generatedApp.full_preview_url}</span>
+                  )}
+                </span>
                 <button onClick={openInBrowser} className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 text-xs font-mono uppercase rounded-sm hover:bg-cyan-500/30 transition-all">
                   <Eye className="w-3.5 h-3.5" /> Open
                 </button>
