@@ -4000,6 +4000,72 @@ try:
             "last_checkpoint":    task.last_checkpoint_name(),
         }
 
+    @api_router.get("/tasks/{task_id}/export", tags=["orchestrator"])
+    async def export_task_diagnostics(task_id: str):
+        """
+        Full diagnostic export for a task:
+        - task metadata, steps, checkpoints, preserved_outputs
+        - debug_log (full brain event stream)
+        - learning_patterns
+        - security audit entries from debug_log
+        - tool result entries from debug_log
+        - per-brain config versions (from brain_configs)
+        - permission model snapshot (from permission_model)
+        """
+        task = await _task_store.load(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+
+        from mini_assistant.swarm.brain_configs import all_configs_dict
+        from mini_assistant.swarm.permission_model import all_permissions_dict
+
+        debug_log = task.metadata.get("debug_log", [])
+        security_events = [e for e in debug_log if e.get("type") == "security_check"]
+        tool_events     = [e for e in debug_log if e.get("type") == "tool_result"]
+
+        return {
+            "task_id":            task.task_id,
+            "task_type":          task.task_type,
+            "goal":               task.goal,
+            "current_state":      str(task.current_state),
+            "created_at":         task.created_at.isoformat() if task.created_at else None,
+            "updated_at":         task.updated_at.isoformat() if task.updated_at else None,
+            "retry_count":        task.retry_count,
+            "failure_reason":     task.failure_reason,
+            "failure_summary":    task.failure_summary,
+            "steps":              [s.to_dict() for s in task.steps],
+            "checkpoints":        [c.to_dict() for c in task.checkpoints],
+            "preserved_outputs":  task.preserved_outputs,
+            "assigned_agents":    task.assigned_agents,
+            "debug_log":          debug_log,
+            "security_events":    security_events,
+            "tool_events":        tool_events,
+            "learning_patterns":  task.metadata.get("learning_patterns", {}),
+            "brain_configs":      all_configs_dict(),
+            "permission_model":   all_permissions_dict(),
+            "exported_at":        datetime.now(timezone.utc).isoformat(),
+        }
+
+    @api_router.get("/learning/patterns", tags=["orchestrator"])
+    async def get_learning_patterns():
+        """Return cross-task learning patterns from LearningBrain."""
+        try:
+            from mini_assistant.swarm.learning_brain import LearningBrain
+            lb = LearningBrain()
+            return lb.get_patterns()
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc))
+
+    @api_router.get("/diagnostics/brains", tags=["orchestrator"])
+    async def get_brain_diagnostics():
+        """Return brain configs + permission model for all registered brains."""
+        from mini_assistant.swarm.brain_configs import all_configs_dict
+        from mini_assistant.swarm.permission_model import all_permissions_dict
+        return {
+            "brain_configs":    all_configs_dict(),
+            "permission_model": all_permissions_dict(),
+        }
+
     logging.info("✓ Orchestrator task API registered (/api/tasks/*)")
 
 except Exception as _orch_err:

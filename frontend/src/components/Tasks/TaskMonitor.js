@@ -6,7 +6,7 @@ import {
   RotateCcw, X, Play, ChevronRight, ChevronDown, AlertTriangle,
   Shield, Archive, FileText, Cpu, Zap, RefreshCw, Trash2, Plus,
   Send, CornerDownLeft, BookOpen, Brain, Wrench, Lock, Unlock,
-  Terminal, TrendingUp,
+  Terminal, TrendingUp, Download,
 } from 'lucide-react';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -235,6 +235,16 @@ const SecurityBadge = ({ level }) => {
   return null;
 };
 
+const PermissionBadge = ({ allowed, reason }) => {
+  if (allowed === false) return (
+    <span className="text-[8px] font-mono uppercase px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-700/40" title={reason}>DENIED</span>
+  );
+  if (allowed === true) return (
+    <span className="text-[8px] font-mono uppercase px-1.5 py-0.5 rounded bg-green-500/10 text-green-600 border border-green-900/40">ALLOW</span>
+  );
+  return null;
+};
+
 const EventLog = ({ metadata }) => {
   const log = metadata?.debug_log;
   if (!log?.length) return (
@@ -249,24 +259,56 @@ const EventLog = ({ metadata }) => {
         const cfg = EVENT_CONFIG[entry.brain] || EVENT_CONFIG.engine;
         const Icon = cfg.Icon;
         const isSecurityCheck = entry.type === 'security_check';
+        const isToolResult    = entry.type === 'tool_result';
+        const isPermCheck     = entry.event === 'permission_check';
         return (
           <div key={i} className={`flex items-start gap-2 px-2 py-1.5 rounded-sm border ${cfg.bg} ${cfg.border}`}>
             <Icon className={`w-3 h-3 flex-shrink-0 mt-0.5 ${cfg.color}`} />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className={`text-[9px] font-mono uppercase ${cfg.color}`}>{entry.brain}</span>
-                <span className="text-[9px] font-mono text-slate-400">{entry.event}</span>
+                <span className="text-[9px] font-mono text-slate-400">{entry.event || entry.type}</span>
                 {isSecurityCheck && <SecurityBadge level={entry.level} />}
+                {isPermCheck && <PermissionBadge allowed={entry.allowed} reason={entry.reason} />}
+                {isToolResult && entry.security_level && <SecurityBadge level={entry.security_level} />}
+                {isToolResult && entry.exit_code !== undefined && (
+                  <span className={`text-[8px] font-mono px-1 rounded ${entry.success ? 'text-green-500' : 'text-red-400'}`}>
+                    rc={entry.exit_code}
+                  </span>
+                )}
+                {isToolResult && entry.duration_ms !== undefined && (
+                  <span className="text-[8px] font-mono text-slate-700">{entry.duration_ms}ms</span>
+                )}
                 <span className="text-[8px] font-mono text-slate-700 ml-auto flex-shrink-0">{fmt(entry.timestamp)}</span>
               </div>
               {/* Relevant detail fields */}
-              {entry.step       && <p className="text-[8px] font-mono text-slate-600">step: {entry.step}</p>}
-              {entry.checkpoint && <p className="text-[8px] font-mono text-slate-600">checkpoint: {entry.checkpoint}</p>}
-              {entry.command    && <p className="text-[8px] font-mono text-slate-500 truncate">cmd: {entry.command}</p>}
-              {entry.reason     && <p className="text-[8px] font-mono text-slate-500 truncate">{entry.reason}</p>}
-              {entry.error      && <p className="text-[8px] font-mono text-red-400 truncate">{entry.error}</p>}
+              {entry.step             && <p className="text-[8px] font-mono text-slate-600">step: {entry.step}</p>}
+              {entry.checkpoint       && <p className="text-[8px] font-mono text-slate-600">checkpoint: {entry.checkpoint}</p>}
+              {entry.command          && <p className="text-[8px] font-mono text-slate-500 truncate">cmd: {entry.command}</p>}
+              {entry.reason           && <p className="text-[8px] font-mono text-slate-500 truncate">{entry.reason}</p>}
+              {entry.error            && <p className="text-[8px] font-mono text-red-400 truncate">{entry.error}</p>}
+              {entry.matched_pattern  && <p className="text-[8px] font-mono text-amber-600 truncate">pattern: {entry.matched_pattern}</p>}
               {entry.past_context !== undefined && (
                 <p className="text-[8px] font-mono text-slate-600">past context loaded: {entry.past_context} entries</p>
+              )}
+              {/* ToolResult: stdout/stderr snippets */}
+              {isToolResult && entry.stdout_snippet && (
+                <pre className="text-[8px] font-mono text-emerald-400/70 whitespace-pre-wrap break-all max-h-12 overflow-y-auto mt-0.5 bg-black/20 px-1 rounded">
+                  {entry.stdout_snippet}
+                </pre>
+              )}
+              {isToolResult && entry.stderr_snippet && (
+                <pre className="text-[8px] font-mono text-red-400/70 whitespace-pre-wrap break-all max-h-10 overflow-y-auto mt-0.5 bg-black/20 px-1 rounded">
+                  {entry.stderr_snippet}
+                </pre>
+              )}
+              {/* ToolResult: warning flags */}
+              {isToolResult && entry.warning_flags?.length > 0 && (
+                <p className="text-[8px] font-mono text-amber-500">⚠ {entry.warning_flags.join(', ')}</p>
+              )}
+              {/* ToolResult: blocked */}
+              {isToolResult && entry.blocked_by_security && (
+                <p className="text-[8px] font-mono text-red-400">Blocked by SecurityBrain</p>
               )}
             </div>
           </div>
@@ -313,7 +355,7 @@ const LearningPanel = ({ metadata }) => {
 
 // ── Task Detail Panel ─────────────────────────────────────────────────────────
 
-const TaskDetail = ({ task, onResume, onCancel, onRollback, onDelete, actionLoading }) => {
+const TaskDetail = ({ task, onResume, onCancel, onRollback, onDelete, onExport, actionLoading }) => {
   const [activeSection, setActiveSection] = useState('steps');
   if (!task) {
     return (
@@ -390,6 +432,14 @@ const TaskDetail = ({ task, onResume, onCancel, onRollback, onDelete, actionLoad
               <Trash2 className="w-3 h-3" /> Delete
             </button>
           )}
+          <button
+            onClick={() => onExport(task.task_id)}
+            disabled={actionLoading}
+            className="flex items-center gap-1.5 px-3 py-1 text-[10px] font-mono uppercase text-slate-400 border border-slate-700/40 rounded-sm hover:bg-white/5 disabled:opacity-40 ml-auto"
+            title="Export full diagnostic JSON"
+          >
+            <Download className="w-3 h-3" /> Export
+          </button>
         </div>
       </div>
 
@@ -657,6 +707,22 @@ const TaskMonitor = () => {
     }
   };
 
+  const handleExport = async (taskId) => {
+    try {
+      const res = await axiosInstance.get(`/tasks/${taskId}/export`);
+      const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `task-${taskId.slice(0, 8)}-diagnostics.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Diagnostic export downloaded');
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Export failed');
+    }
+  };
+
   // ── Filter ────────────────────────────────────────────────────────────────────
 
   const filtered = tasks.filter(t => {
@@ -756,6 +822,7 @@ const TaskMonitor = () => {
           onCancel={handleCancel}
           onRollback={handleRollback}
           onDelete={handleDelete}
+          onExport={handleExport}
           actionLoading={actionLoading}
         />
       </div>

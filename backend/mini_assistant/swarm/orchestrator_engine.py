@@ -48,11 +48,14 @@ from .orchestrator_task import (
     CHECKPOINT_NAMES,
     TERMINAL_STATES,
 )
-from .task_store     import TaskStore
-from .manager        import SwarmManager
-from .memory_brain   import MemoryBrain
-from .learning_brain import LearningBrain
-from .tool_brain     import ToolBrain
+from .task_store        import TaskStore
+from .manager           import SwarmManager
+from .memory_brain      import MemoryBrain
+from .learning_brain    import LearningBrain
+from .tool_brain        import ToolBrain, ToolResult
+from .brain_configs     import get_system_prompt
+from .permission_model  import check_permission, PermissionCheckResult
+from .execution_intent  import parse_execution_intents, planner_tool_prompt_suffix
 
 if TYPE_CHECKING:
     from ..main import MiniAssistant
@@ -171,13 +174,13 @@ class OrchestratorEngine:
 
     def _check_agent_allowed(self, task: OrchestratorTask,
                              agent_name: str, state: WorkflowState) -> None:
+        # Check legacy AGENT_ALLOWED_STATES (orchestrator_task level)
         allowed = AGENT_ALLOWED_STATES.get(agent_name)
         if allowed is None:
             self._log(task, "agent_check_skipped", "engine",
                       {"agent": agent_name, "state": str(state), "reason": "no restriction defined"})
             logger.warning("No state restriction for agent '%s' – allowing.", agent_name)
-            return
-        if state not in allowed:
+        elif state not in allowed:
             reason = (
                 f"Agent '{agent_name}' NOT permitted in state '{state.value}'. "
                 f"Permitted: {[s.value for s in allowed]}"
@@ -185,8 +188,20 @@ class OrchestratorEngine:
             self._log(task, "agent_check_rejected", "engine",
                       {"agent": agent_name, "state": str(state), "reason": reason})
             raise PermissionError(reason)
-        self._log(task, "agent_check_approved", "engine",
-                  {"agent": agent_name, "state": str(state)})
+        else:
+            self._log(task, "agent_check_approved", "engine",
+                      {"agent": agent_name, "state": str(state)})
+
+        # Check permission_model BrainPermissions
+        perm: PermissionCheckResult = check_permission(agent_name, state.value)
+        self._log(task, "permission_check", "engine", {
+            "brain_id": agent_name,
+            "state":    state.value,
+            "allowed":  perm.allowed,
+            "reason":   perm.reason,
+        })
+        if not perm.allowed:
+            raise PermissionError(perm.reason)
 
     # ── Output preservation ────────────────────────────────────────────────────
 
@@ -212,24 +227,41 @@ class OrchestratorEngine:
         task:       OrchestratorTask,
         step_name:  str,
         agent_name: str,
+        state:      Optional[WorkflowState] = None,
     ) -> str:
         """
         Build a richer prompt for the agent by injecting:
+        - BrainConfig system prompt/role for this agent
         - memory context from past similar tasks
         - previous step output (if any)
+        - for DEPLOYING state: ExecutionIntent JSON format instruction
         """
-        parts = [f"Goal: {task.goal}",
-                 f"Current step: {step_name} (agent: {agent_name})"]
+        parts = []
 
+        # 1. Brain system prompt (role + responsibilities)
+        sys_prompt = get_system_prompt(agent_name)
+        if sys_prompt:
+            parts.append(sys_prompt)
+
+        # 2. Task goal + step
+        parts.append(f"Goal: {task.goal}")
+        parts.append(f"Current step: {step_name} (agent: {agent_name})")
+
+        # 3. Memory context from past similar tasks
         mem_block = self._memory.build_context_block(task.task_type, task.goal)
         if mem_block:
             parts.append(mem_block)
 
+        # 4. Previous step output
         last_out = task.preserved_outputs.get("last_output", "")
         if last_out:
             parts.append(
                 f"Previous step output (use as context):\n{last_out[:1500]}"
             )
+
+        # 5. For DEPLOYING: structured ExecutionIntent format instruction
+        if state == WorkflowState.DEPLOYING:
+            parts.append(planner_tool_prompt_suffix())
 
         return "\n\n".join(parts)
 
@@ -241,46 +273,102 @@ class OrchestratorEngine:
         step:  WorkflowStep,
     ) -> tuple[bool, str, list[str]]:
         """
-        For DEPLOYING state: extract a shell command from SwarmManager output,
-        then run it through ToolBrain (which calls SecurityBrain internally).
-        Falls back to returning the plan output if no executable command is found.
+        For DEPLOYING state: parse structured ExecutionIntent JSON blocks from
+        SwarmManager output, then run each intent through ToolBrain.
+        Falls back to $ line extraction, then plain plan output.
         """
-        # First: ask SwarmManager to produce a deployment plan
-        prompt = self._build_step_prompt(task, step.name, step.agent_name)
+        # Ask SwarmManager to produce a deployment plan (with ExecutionIntent suffix)
+        prompt       = self._build_step_prompt(task, step.name, step.agent_name,
+                                               state=WorkflowState.DEPLOYING)
         swarm_result = self._swarm.run(prompt)
         plan_output  = swarm_result.final_output or ""
         task_ids     = [t.id for t in swarm_result.tasks]
 
-        # Try to extract a shell command from the plan (lines starting with $)
+        # 1. Try structured ExecutionIntent JSON blocks
+        intents = parse_execution_intents(plan_output)
+        if intents:
+            self._log(task, "execution_intents_parsed", "tool_brain", {
+                "count":   len(intents),
+                "actions": [i.action_type for i in intents],
+            })
+            all_outputs: list[str] = [plan_output]
+            overall_ok = True
+
+            for intent in intents:
+                cmd = intent.command
+                self._log(task, "tool_intent_execute", "tool_brain", {
+                    "intent_id":   intent.intent_id,
+                    "action_type": intent.action_type,
+                    "command":     cmd[:120],
+                    "risk_level":  intent.risk_level,
+                    "reason":      intent.reason,
+                })
+
+                result: ToolResult = self._tool.run(
+                    cmd,
+                    task_id = task.task_id,
+                    cwd     = intent.cwd or None,
+                )
+                task.metadata.setdefault("debug_log", []).append(result.to_dict())
+                self._log(task, "tool_result", "tool_brain", {
+                    "intent_id":     intent.intent_id,
+                    "success":       result.success,
+                    "exit_code":     result.exit_code,
+                    "security_level": result.security_level,
+                    "duration_ms":   result.duration_ms,
+                    "blocked":       result.blocked_by_security,
+                    "warnings":      result.warning_flags,
+                })
+
+                if result.blocked_by_security:
+                    overall_ok = False
+                    task.failure_summary = (
+                        f"SecurityBrain blocked '{cmd[:80]}' in '{step.name}': "
+                        f"{result.security_decision.reason}"
+                    )
+                    all_outputs.append(f"\n[BLOCKED] {cmd[:80]}: {result.stderr}")
+                    break   # stop on first blocked command
+                else:
+                    combined_out = result.stdout
+                    if result.stderr:
+                        combined_out += f"\n[stderr]: {result.stderr}"
+                    all_outputs.append(f"\n[Tool: {cmd[:60]}]\n{combined_out[:800]}")
+                    if not result.success:
+                        overall_ok = False
+                        break
+
+            return overall_ok, "\n".join(all_outputs), task_ids
+
+        # 2. Fallback: $ line extraction (legacy)
         commands = [
             line.lstrip("$ ").strip()
             for line in plan_output.splitlines()
             if line.strip().startswith("$")
         ]
-
         if commands:
-            # Run the first extracted command through ToolBrain
             cmd = commands[0]
-            self._log(task, "tool_command_extracted", "tool_brain",
-                      {"command": cmd, "source": "planner_output"})
-            ok, tool_out, audit = self._tool.run(cmd, task_id=task.task_id)
-            task.metadata.setdefault("debug_log", []).append(audit)
-            self._log(task, "tool_command_result", "tool_brain",
-                      {"success": ok, "exit_code": audit.get("exit_code"), "level": audit.get("level")})
-
-            # Security block → step fails with clear reason
-            if not ok and audit.get("level") == "blocked":
+            self._log(task, "tool_command_extracted_legacy", "tool_brain",
+                      {"command": cmd, "source": "dollar_prefix"})
+            result = self._tool.run(cmd, task_id=task.task_id)
+            task.metadata.setdefault("debug_log", []).append(result.to_dict())
+            self._log(task, "tool_result", "tool_brain", {
+                "success":        result.success,
+                "exit_code":      result.exit_code,
+                "security_level": result.security_level,
+            })
+            if result.blocked_by_security:
                 task.failure_summary = (
-                    f"Security Brain blocked command in '{step.name}': {audit.get('reason', '')}"
+                    f"SecurityBrain blocked command in '{step.name}': "
+                    f"{result.security_decision.reason}"
                 )
+            tool_out = result.stdout + ("\n" + result.stderr if result.stderr else "")
+            combined = f"{plan_output}\n\n[Tool output]:\n{tool_out.strip()}"
+            return result.success, combined, task_ids
 
-            combined = f"{plan_output}\n\n[Tool output]:\n{tool_out}"
-            return ok, combined, task_ids
-        else:
-            # No command found – treat plan output as the step output
-            self._log(task, "tool_no_command_extracted", "tool_brain",
-                      {"note": "no '$' prefixed command found in plan output"})
-            return swarm_result.success, plan_output, task_ids
+        # 3. No command found – return plan as output
+        self._log(task, "tool_no_command_extracted", "tool_brain",
+                  {"note": "no ExecutionIntent blocks or '$' commands found in plan output"})
+        return swarm_result.success, plan_output, task_ids
 
     # ── Main step execution ────────────────────────────────────────────────────
 
@@ -309,7 +397,7 @@ class OrchestratorEngine:
             return self._run_tool_step_sync(task, step)
 
         # All other states → SwarmManager with enriched prompt
-        prompt       = self._build_step_prompt(task, step.name, agent_name)
+        prompt       = self._build_step_prompt(task, step.name, agent_name, state=state)
         swarm_result = self._swarm.run(prompt)
         task_ids     = [t.id for t in swarm_result.tasks]
         output       = swarm_result.final_output or ""
