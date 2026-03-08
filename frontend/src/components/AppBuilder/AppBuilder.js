@@ -46,6 +46,28 @@ const renderLinks = (text) => {
   return result;
 };
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+/**
+ * Merge structured project files back into a single self-contained HTML string
+ * for the iframe preview and single-file downloads.
+ */
+const reconstructHtml = (project) => {
+  if (!project) return '';
+  let html = project.index_html || '';
+  const css = project.style_css || '';
+  const js  = project.script_js || '';
+  html = html.replace('<link rel="stylesheet" href="style.css">', `<style>${css}</style>`);
+  html = html.replace('<script src="script.js"></script>',        `<script>${js}</script>`);
+  // Fallback: inline if placeholders weren't found
+  if (!html.includes(`<style>${css}`) && css.trim()) {
+    html = html.replace('</head>', `<style>${css}</style>\n</head>`);
+  }
+  if (!html.includes(`<script>${js}`) && js.trim()) {
+    html = html.replace('</body>', `<script>${js}</script>\n</body>`);
+  }
+  return html;
+};
+
 // ── Component ──────────────────────────────────────────────────────────────────
 const SESSIONS_KEY = 'appbuilder_sessions';
 
@@ -157,10 +179,12 @@ const AppBuilder = () => {
   }, [generatedApp, editHistory]);
 
   const resumeSession = (session) => {
+    const html = session.project ? reconstructHtml(session.project) : session.html;
     setGeneratedApp({
       name: session.name,
       description: session.description,
-      html: session.html,
+      html,
+      project: session.project || null,
       build_id: session.build_id,
       full_preview_url: session.full_preview_url,
     });
@@ -307,6 +331,10 @@ const AppBuilder = () => {
       if (data.preview_url) {
         data.full_preview_url = backendUrl.replace('/api', '') + data.preview_url;
       }
+      // Use structured project for everything; keep raw html as fallback
+      if (data.project) {
+        data.html = reconstructHtml(data.project);
+      }
       setGeneratedApp(data);
       toast.success('App generated!');
     } catch (error) {
@@ -331,16 +359,26 @@ const AppBuilder = () => {
     }, 2500);
     try {
       const res = await axiosInstance.post('/app-builder/edit', {
-        html: generatedApp.html,
+        project: generatedApp.project || null,
+        html: generatedApp.project ? null : generatedApp.html,
         instruction,
       }, { timeout: 300000 });
       const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
-      const updated = { ...generatedApp, html: res.data.html, build_id: res.data.build_id };
+      const updated = {
+        ...generatedApp,
+        project: res.data.project || generatedApp.project,
+        html: res.data.html || reconstructHtml(res.data.project),
+        build_id: res.data.build_id,
+      };
       if (res.data.preview_url) {
         updated.full_preview_url = backendUrl.replace('/api', '') + res.data.preview_url;
       }
       setGeneratedApp(updated);
-      setEditHistory(prev => [...prev, { role: 'assistant', content: 'Done! Preview updated above. Let me know what else to change.' }]);
+      const fileChanged = res.data.file_changed;
+      const reply = fileChanged
+        ? `Done! Edited \`${fileChanged}\`. Preview updated above.`
+        : 'Done! Preview updated above.';
+      setEditHistory(prev => [...prev, { role: 'assistant', content: reply }]);
     } catch (err) {
       const msg = err.response?.data?.detail || 'Failed to apply changes';
       toast.error(msg);
@@ -371,7 +409,8 @@ const AppBuilder = () => {
     try {
       toast.info('Building ZIP...');
       const res = await axiosInstance.post('/app-builder/export-zip', {
-        html: generatedApp.html,
+        project: generatedApp.project || null,
+        html: generatedApp.project ? null : generatedApp.html,
         name: generatedApp.name || 'generated-app',
         description: generatedApp.description || '',
       }, { responseType: 'blob', timeout: 60000 });
@@ -624,10 +663,12 @@ const AppBuilder = () => {
               {/* Toolbar */}
               <div className="flex items-center gap-2 px-4 py-2 border-b border-cyan-500/20 bg-black/40 flex-shrink-0">
                 <CheckCircle className="w-4 h-4 text-green-400" />
-                <span className="text-xs font-mono text-green-400 flex-1 truncate">
+                <span className="text-xs font-mono text-green-400 flex-1 truncate flex items-center gap-2">
                   {generatedApp.name} — ready
-                  {generatedApp.full_preview_url && (
-                    <span className="text-slate-600 ml-2">{generatedApp.full_preview_url}</span>
+                  {generatedApp.project && (
+                    <span className="text-slate-600 text-[10px] font-mono">
+                      index.html · style.css · script.js
+                    </span>
                   )}
                 </span>
                 <button onClick={openInBrowser} className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 text-xs font-mono uppercase rounded-sm hover:bg-cyan-500/30 transition-all">
