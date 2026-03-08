@@ -38,6 +38,62 @@ def _require_db():
     if db is None:
         raise HTTPException(status_code=503, detail="Database not configured (MONGO_URL env var not set)")
 
+
+# ── Redis client (for app preview cache) ───────────────────────────────────────
+_redis_client = None
+
+async def _get_redis():
+    global _redis_client
+    if _redis_client is not None:
+        return _redis_client
+    redis_url = os.environ.get('REDIS_URL', '')
+    if not redis_url:
+        return None
+    try:
+        import redis.asyncio as aioredis
+        _redis_client = await aioredis.from_url(redis_url, decode_responses=True)
+        await _redis_client.ping()
+        return _redis_client
+    except Exception as e:
+        logging.warning(f"Redis unavailable: {e}")
+        return None
+
+
+# ── Postgres pool (for app builder sessions) ───────────────────────────────────
+_pg_pool = None
+
+async def _get_pg():
+    global _pg_pool
+    if _pg_pool is not None:
+        return _pg_pool
+    db_url = os.environ.get('DATABASE_URL', '')
+    if not db_url:
+        return None
+    try:
+        import asyncpg
+        _pg_pool = await asyncpg.create_pool(db_url, min_size=1, max_size=5)
+        async with _pg_pool.acquire() as conn:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS app_builder_sessions (
+                    id          TEXT PRIMARY KEY,
+                    name        TEXT,
+                    description TEXT,
+                    html        TEXT,
+                    project     JSONB,
+                    edit_history JSONB  DEFAULT '[]',
+                    versions    JSONB   DEFAULT '[]',
+                    build_id    TEXT,
+                    preview_url TEXT,
+                    saved_at    TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at  TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+        logging.info("✓ Postgres pool ready (app_builder_sessions table ensured)")
+        return _pg_pool
+    except Exception as e:
+        logging.warning(f"Postgres unavailable: {e}")
+        return None
+
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
@@ -524,6 +580,16 @@ _app_previews: dict = {}
 @api_router.get("/preview/{build_id}", response_class=HTMLResponse)
 async def serve_app_preview(build_id: str):
     """Serve a generated app HTML by build ID — navigable by FixLoop and browsers."""
+    # Try Redis first
+    r = await _get_redis()
+    if r:
+        try:
+            html = await r.get(f"preview:{build_id}")
+            if html:
+                return HTMLResponse(content=html)
+        except Exception:
+            pass
+    # Fallback to in-memory dict
     html = _app_previews.get(build_id)
     if not html:
         raise HTTPException(status_code=404, detail="Preview not found or expired")
@@ -719,6 +785,12 @@ Now generate the complete HTML file:"""
 
         build_id = str(uuid.uuid4())
         _app_previews[build_id] = reconstructed
+        r = await _get_redis()
+        if r:
+            try:
+                await r.setex(f"preview:{build_id}", 86400, reconstructed)
+            except Exception:
+                pass
 
         return {
             "name": app_name,
@@ -827,6 +899,12 @@ Now output the updated {target_file}:"""
 
         build_id = str(uuid.uuid4())
         _app_previews[build_id] = reconstructed
+        r = await _get_redis()
+        if r:
+            try:
+                await r.setex(f"preview:{build_id}", 86400, reconstructed)
+            except Exception:
+                pass
 
         return {
             "project": updated_project,
@@ -879,6 +957,108 @@ async def export_app_zip(request: AppBuilderExportRequest):
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{name}.zip"'}
     )
+
+
+class AppBuilderSessionUpsert(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    html: Optional[str] = None
+    project: Optional[dict] = None
+    edit_history: list = []
+    versions: list = []
+    build_id: Optional[str] = None
+    preview_url: Optional[str] = None
+
+@api_router.post("/app-builder/sessions")
+async def upsert_session(req: AppBuilderSessionUpsert):
+    """Create or update an app builder session in Postgres."""
+    pg = await _get_pg()
+    if not pg:
+        return {"ok": False, "reason": "postgres_unavailable"}
+    async with pg.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO app_builder_sessions
+                (id, name, description, html, project, edit_history, versions, build_id, preview_url, saved_at, updated_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW(),NOW())
+            ON CONFLICT (id) DO UPDATE SET
+                name=EXCLUDED.name, description=EXCLUDED.description,
+                html=EXCLUDED.html, project=EXCLUDED.project,
+                edit_history=EXCLUDED.edit_history, versions=EXCLUDED.versions,
+                build_id=EXCLUDED.build_id, preview_url=EXCLUDED.preview_url,
+                updated_at=NOW()
+        """,
+        req.id, req.name, req.description,
+        req.html,
+        json.dumps(req.project) if req.project else None,
+        json.dumps(req.edit_history),
+        json.dumps(req.versions),
+        req.build_id, req.preview_url)
+    return {"ok": True}
+
+@api_router.get("/app-builder/sessions")
+async def list_sessions():
+    """Return all saved app builder sessions (newest first)."""
+    pg = await _get_pg()
+    if not pg:
+        return []
+    async with pg.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, name, description, html, project, edit_history, versions,
+                   build_id, preview_url, saved_at, updated_at
+            FROM app_builder_sessions
+            ORDER BY updated_at DESC
+        """)
+    result = []
+    for r in rows:
+        result.append({
+            "id": r["id"],
+            "name": r["name"],
+            "description": r["description"],
+            "html": r["html"],
+            "project": json.loads(r["project"]) if r["project"] else None,
+            "editHistory": json.loads(r["edit_history"]) if r["edit_history"] else [],
+            "versions": json.loads(r["versions"]) if r["versions"] else [],
+            "build_id": r["build_id"],
+            "preview_url": r["preview_url"],
+            "savedAt": r["updated_at"].isoformat() if r["updated_at"] else None,
+        })
+    return result
+
+@api_router.get("/app-builder/sessions/{session_id}")
+async def get_session(session_id: str):
+    """Return a single session by id."""
+    pg = await _get_pg()
+    if not pg:
+        raise HTTPException(status_code=503, detail="Postgres unavailable")
+    async with pg.acquire() as conn:
+        r = await conn.fetchrow(
+            "SELECT * FROM app_builder_sessions WHERE id=$1", session_id)
+    if not r:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {
+        "id": r["id"],
+        "name": r["name"],
+        "description": r["description"],
+        "html": r["html"],
+        "project": json.loads(r["project"]) if r["project"] else None,
+        "editHistory": json.loads(r["edit_history"]) if r["edit_history"] else [],
+        "versions": json.loads(r["versions"]) if r["versions"] else [],
+        "build_id": r["build_id"],
+        "preview_url": r["preview_url"],
+        "savedAt": r["updated_at"].isoformat() if r["updated_at"] else None,
+    }
+
+@api_router.delete("/app-builder/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """Delete a session from Postgres."""
+    pg = await _get_pg()
+    if not pg:
+        raise HTTPException(status_code=503, detail="Postgres unavailable")
+    async with pg.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM app_builder_sessions WHERE id=$1", session_id)
+    return {"ok": True}
 
 
 class GitCommitRequest(BaseModel):

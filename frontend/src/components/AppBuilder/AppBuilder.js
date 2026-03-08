@@ -72,7 +72,7 @@ const reconstructHtml = (project) => {
 // ── Component ──────────────────────────────────────────────────────────────────
 const SESSIONS_KEY = 'appbuilder_sessions';
 
-const loadSessions = () => {
+const loadSessionsLocal = () => {
   try { return JSON.parse(localStorage.getItem(SESSIONS_KEY) || '[]'); } catch { return []; }
 };
 
@@ -112,7 +112,7 @@ const AppBuilder = () => {
   const [activeTab, setActiveTab] = useState('preview'); // 'preview'|'html'|'css'|'js'
 
   // Saved sessions
-  const [savedSessions, setSavedSessions] = useState(loadSessions);
+  const [savedSessions, setSavedSessions] = useState(loadSessionsLocal);
 
   const EDIT_LOADING_MSGS = [
     'Reading your app...', 'Finding what to change...', 'Applying changes...',
@@ -181,7 +181,19 @@ const AppBuilder = () => {
     editEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [editHistory, editLoading]);
 
-  // Auto-save current session to localStorage whenever app or edit history changes
+  // Load sessions from backend (Postgres) on mount; fall back to localStorage
+  useEffect(() => {
+    axiosInstance.get('/app-builder/sessions').then(res => {
+      if (Array.isArray(res.data) && res.data.length > 0) {
+        setSavedSessions(res.data);
+        try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(res.data)); } catch {}
+      }
+    }).catch(() => {
+      // Postgres unavailable — keep localStorage sessions already loaded
+    });
+  }, []);
+
+  // Auto-save to Postgres (and localStorage as fallback) whenever app or edit history changes
   useEffect(() => {
     if (!generatedApp) return;
     const session = {
@@ -189,18 +201,23 @@ const AppBuilder = () => {
       name: generatedApp.name,
       description: generatedApp.description || '',
       html: generatedApp.html,
-      build_id: generatedApp.build_id,
-      full_preview_url: generatedApp.full_preview_url,
+      project: generatedApp.project || null,
       editHistory,
+      versions,
+      build_id: generatedApp.build_id,
+      preview_url: generatedApp.full_preview_url || null,
       savedAt: new Date().toISOString(),
     };
+    // Persist to Postgres
+    axiosInstance.post('/app-builder/sessions', session).catch(() => {});
+    // Also keep localStorage as fallback
     setSavedSessions(prev => {
       const filtered = prev.filter(s => s.id !== session.id);
-      const updated = [session, ...filtered].slice(0, 20); // keep last 20
+      const updated = [session, ...filtered].slice(0, 20);
       try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(updated)); } catch {}
       return updated;
     });
-  }, [generatedApp, editHistory]);
+  }, [generatedApp, editHistory, versions]);
 
   const resumeSession = (session) => {
     const html = session.project ? reconstructHtml(session.project) : session.html;
@@ -210,13 +227,15 @@ const AppBuilder = () => {
       html,
       project: session.project || null,
       build_id: session.build_id,
-      full_preview_url: session.full_preview_url,
+      full_preview_url: session.preview_url || session.full_preview_url,
     });
     setEditHistory(session.editHistory || []);
+    setVersions(session.versions || []);
     setMode('build');
   };
 
   const deleteSession = (id) => {
+    axiosInstance.delete(`/app-builder/sessions/${id}`).catch(() => {});
     setSavedSessions(prev => {
       const updated = prev.filter(s => s.id !== id);
       try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(updated)); } catch {}
