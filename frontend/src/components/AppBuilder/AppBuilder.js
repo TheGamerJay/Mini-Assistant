@@ -12,7 +12,7 @@ import {
   Github, Globe, Share2, LogIn, Lock, Unlock, Link, Copy, CheckSquare,
   Columns, Command, Server,
   Activity, StickyNote, Star, AlignLeft, Replace, ChevronDown,
-  Copy as CopyIcon, Shield, ShieldOff, FileSearch, GitCommit, TrendingUp
+  Shield, ShieldOff, FileSearch, GitCommit, TrendingUp
 } from 'lucide-react';
 
 // ── Coach system prompt ────────────────────────────────────────────────────────
@@ -2601,7 +2601,7 @@ const AppBuilder = () => {
                         <span className="text-[9px] font-mono text-indigo-400 flex-1">{efName}</span>
                         <button onClick={() => duplicateExtraFile(efName)}
                           className="flex items-center gap-1 px-2 py-0.5 text-indigo-400 text-[9px] font-mono uppercase border border-indigo-700/40 rounded-sm hover:bg-indigo-500/10">
-                          <CopyIcon className="w-2.5 h-2.5" /> Dupe
+                          <Copy className="w-2.5 h-2.5" /> Dupe
                         </button>
                         <button onClick={() => toggleLock(efName)}
                           className={`flex items-center gap-1 px-2 py-0.5 text-[9px] font-mono uppercase border rounded-sm transition-colors ${isLocked(efName) ? 'text-amber-400 border-amber-700/40 hover:bg-amber-500/10' : 'text-slate-500 border-slate-700/40 hover:bg-slate-500/10'}`}>
