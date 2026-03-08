@@ -711,7 +711,7 @@ const AppBuilder = () => {
     pushUndo(generatedApp);
     setGeneratedApp(pendingChange.proposed);
     setEditHistory(prev => prev.map((m, i) =>
-      i === prev.length - 1 ? { ...m, content: m.content + '\n\n✓ Applied! Preview is updated. Let me know if you want any further tweaks.', pending: false } : m
+      i === prev.length - 1 ? { ...m, content: m.content + '\n\n✓ Applied! Let me know if you want any further tweaks.', pending: false } : m
     ));
     setPendingChange(null);
     logAction('ai-edit', `AI edit applied to ${pendingChange.file_changed || 'project'}`);
@@ -2185,7 +2185,7 @@ const AppBuilder = () => {
                     <button onClick={() => setShowConsole(false)} className="text-slate-600 hover:text-slate-400 ml-2"><X className="w-3 h-3" /></button>
                   </div>
                   <div className="overflow-y-auto px-3 py-1.5 space-y-0.5 font-mono text-[10px]">
-                    {consoleErrors.length === 0 && <span className="text-slate-600">No console output captured yet. Open the Preview tab to start capturing.</span>}
+                    {consoleErrors.length === 0 && <span className="text-slate-600">No console output captured yet. Use the OPEN button to view the app and start capturing errors.</span>}
                     {consoleErrors.map((e, i) => (
                       <div key={i} className={`flex gap-2 ${e.level === 'error' ? 'text-red-400' : e.level === 'warn' ? 'text-amber-400' : 'text-slate-400'}`}>
                         <span className="text-slate-600 flex-shrink-0">{e.time}</span>
@@ -2626,7 +2626,7 @@ const AppBuilder = () => {
                       </div>
                       <div className="bg-black/50 border border-cyan-900/30 rounded-lg rounded-tl-sm px-3.5 py-2.5 max-w-[85%]">
                         <p className="text-xs text-slate-300 leading-relaxed">
-                          Hey! Your app is live in the preview. Tell me what you'd like to change — I'll update the code, explain what I did, and let you approve or reject before anything is applied.
+                          Hey! Your app is ready. Tell me what you'd like to change — I'll update the code, explain what I did, and let you approve or reject before anything is applied.
                         </p>
                         <p className="text-[10px] text-slate-500 mt-1.5 font-mono">Try: "make the buttons bigger", "fix the navigation", "add a dark mode toggle"</p>
                       </div>
