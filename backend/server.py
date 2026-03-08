@@ -963,11 +963,13 @@ class AppBuilderExportRequest(BaseModel):
     project: Optional[dict] = None  # structured project (preferred)
     name: str = "generated-app"
     description: str = ""
+    assets: List[dict] = []         # [{name, type, dataUrl}]
+    extra_files: List[dict] = []    # [{name, content}]
 
 @api_router.post("/app-builder/export-zip")
 async def export_app_zip(request: AppBuilderExportRequest):
-    """Return a ZIP of the structured project files."""
-    import io, zipfile
+    """Return a ZIP of the structured project files, assets, and extra files."""
+    import io, zipfile, base64
     from fastapi.responses import Response
 
     name = request.name or "generated-app"
@@ -975,7 +977,6 @@ async def export_app_zip(request: AppBuilderExportRequest):
     # Resolve project — structured preferred, fall back to parsing HTML
     if request.project:
         project = request.project
-        # Ensure readme is present
         if not project.get("readme"):
             project["readme"] = _parse_html_to_project("", name, request.description)["readme"]
     elif request.html:
@@ -985,10 +986,31 @@ async def export_app_zip(request: AppBuilderExportRequest):
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        # Core project files
         zf.writestr(f"{name}/index.html", project.get("index_html", "").strip())
         zf.writestr(f"{name}/style.css",  project.get("style_css",  "/* styles */"))
         zf.writestr(f"{name}/script.js",  project.get("script_js",  "// scripts"))
         zf.writestr(f"{name}/README.md",  project.get("readme",     ""))
+
+        # Extra custom files (js, css, txt, etc.)
+        for ef in request.extra_files:
+            ef_name = ef.get("name", "").strip()
+            if ef_name:
+                zf.writestr(f"{name}/{ef_name}", ef.get("content", ""))
+
+        # Assets: decode from base64 dataUrl and write to assets/ folder
+        for asset in request.assets:
+            asset_name = asset.get("name", "").strip()
+            data_url = asset.get("dataUrl", "")
+            if asset_name and data_url:
+                try:
+                    # dataUrl format: data:{mime};base64,{data}
+                    header, b64data = data_url.split(",", 1)
+                    raw = base64.b64decode(b64data)
+                    zf.writestr(f"{name}/assets/{asset_name}", raw)
+                except Exception:
+                    pass  # skip malformed assets
+
     buf.seek(0)
 
     return Response(

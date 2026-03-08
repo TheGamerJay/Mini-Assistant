@@ -7,7 +7,8 @@ import {
   Trash2, FolderOpen, Clock, Package, Undo2, History, MonitorPlay,
   FileCode, Palette, Code2, BookmarkPlus, X, Pin, Archive, Search,
   SortAsc, RefreshCw, Redo2, Upload, BookOpen, AlertTriangle, AlertCircle,
-  ShieldCheck, ArchiveRestore, Bug, Zap, Gauge, Terminal, Wrench
+  ShieldCheck, ArchiveRestore, Bug, Zap, Gauge, Terminal, Wrench,
+  FilePlus, FolderTree, FileText, Folder
 } from 'lucide-react';
 
 // ── Coach system prompt ────────────────────────────────────────────────────────
@@ -161,6 +162,12 @@ const AppBuilder = () => {
   const [consoleErrors, setConsoleErrors] = useState([]);
   const [showConsole, setShowConsole] = useState(false);
   const [autoFixLoading, setAutoFixLoading] = useState(false);
+
+  // Phase 3 — File explorer & asset management
+  const [showFileExplorer, setShowFileExplorer] = useState(false);
+  const [newFileName, setNewFileName] = useState('');
+  const [showNewFileInput, setShowNewFileInput] = useState(false);
+  const assetInputRef = useRef(null);
 
   // Undo / Redo / version history
   const [undoStack, setUndoStack] = useState([]);
@@ -917,6 +924,8 @@ const AppBuilder = () => {
         html: generatedApp.project ? null : generatedApp.html,
         name: generatedApp.name || 'generated-app',
         description: generatedApp.description || '',
+        assets: generatedApp.project?.assets || [],
+        extra_files: generatedApp.project?.extra_files || [],
       }, { responseType: 'blob', timeout: 60000 });
       const url = URL.createObjectURL(new Blob([res.data], { type: 'application/zip' }));
       const a = document.createElement('a');
@@ -940,6 +949,63 @@ const AppBuilder = () => {
     a.click();
     URL.revokeObjectURL(url);
     toast.success('Downloaded!');
+  };
+
+  // ── Phase 3: Asset & file management ─────────────────────────────────────────
+  const uploadAsset = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const dataUrl = ev.target.result;
+        setGeneratedApp(prev => {
+          const assets = [...(prev.project?.assets || [])];
+          // Replace if same name
+          const idx = assets.findIndex(a => a.name === file.name);
+          const entry = { name: file.name, type: file.type, dataUrl };
+          if (idx >= 0) assets[idx] = entry; else assets.push(entry);
+          return { ...prev, project: { ...prev.project, assets } };
+        });
+        toast.success(`Asset uploaded: ${file.name}`);
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = '';
+  };
+
+  const createExtraFile = () => {
+    const name = newFileName.trim();
+    if (!name) return;
+    if (!name.match(/\.(js|css|json|txt|md|html?)$/i)) {
+      toast.error('Use a valid extension: .js .css .json .txt .md .html');
+      return;
+    }
+    setGeneratedApp(prev => {
+      const extra = [...(prev.project?.extra_files || [])];
+      if (extra.find(f => f.name === name)) { toast.error('File already exists'); return prev; }
+      extra.push({ name, content: '' });
+      return { ...prev, project: { ...prev.project, extra_files: extra } };
+    });
+    setActiveTab(`extra:${name}`);
+    setNewFileName('');
+    setShowNewFileInput(false);
+  };
+
+  const deleteExtraFile = (name) => {
+    setGeneratedApp(prev => ({
+      ...prev,
+      project: { ...prev.project, extra_files: (prev.project?.extra_files || []).filter(f => f.name !== name) }
+    }));
+    if (activeTab === `extra:${name}`) setActiveTab('preview');
+  };
+
+  const deleteAsset = (name) => {
+    setGeneratedApp(prev => ({
+      ...prev,
+      project: { ...prev.project, assets: (prev.project?.assets || []).filter(a => a.name !== name) }
+    }));
+    toast.success(`Removed asset: ${name}`);
   };
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -1338,6 +1404,7 @@ const AppBuilder = () => {
               {/* Hidden import file inputs */}
               <input ref={importHtmlRef} type="file" accept=".html,.htm" onChange={handleImportHtml} className="hidden" />
               <input ref={importZipRef}  type="file" accept=".zip"       onChange={handleImportZip}  className="hidden" />
+              <input ref={assetInputRef} type="file" accept="image/*,.svg,.ico,.woff,.woff2,.ttf,.otf" multiple onChange={uploadAsset} className="hidden" />
 
               <div className="flex items-center gap-3 flex-wrap">
                 <button
@@ -1436,6 +1503,22 @@ const AppBuilder = () => {
                   {consoleErrors.length > 0 ? consoleErrors.length : 'Console'}
                 </button>
 
+                {/* File Explorer */}
+                <button
+                  onClick={() => setShowFileExplorer(v => !v)}
+                  title="File explorer — manage files and assets"
+                  className={`flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase transition-colors border rounded-sm ${
+                    showFileExplorer
+                      ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300'
+                      : 'text-slate-500 border-slate-700/30 hover:text-indigo-400 hover:border-indigo-500/40'
+                  }`}
+                >
+                  <FolderTree className="w-3 h-3" />
+                  Files {((generatedApp?.project?.extra_files?.length || 0) + (generatedApp?.project?.assets?.length || 0)) > 0
+                    ? `(${(generatedApp?.project?.extra_files?.length || 0) + (generatedApp?.project?.assets?.length || 0)})`
+                    : ''}
+                </button>
+
                 <div className="w-px h-4 bg-slate-700/60 mx-0.5" />
 
                 <button onClick={openInBrowser} className="flex items-center gap-1 px-2 py-1 bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 text-[10px] font-mono uppercase rounded-sm hover:bg-cyan-500/30 transition-all">
@@ -1447,7 +1530,7 @@ const AppBuilder = () => {
                 <button onClick={exportZip} className="flex items-center gap-1 px-2 py-1 bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-[10px] font-mono uppercase rounded-sm hover:bg-emerald-500/30 transition-all">
                   <Package className="w-3 h-3" /> ZIP
                 </button>
-                <button onClick={() => { setGeneratedApp(null); setDescription(''); setEditInput(''); setEditHistory([]); setUndoStack([]); setRedoStack([]); setVersions([]); setActiveTab('preview'); setDiffView(null); }}
+                <button onClick={() => { setGeneratedApp(null); setDescription(''); setEditInput(''); setEditHistory([]); setUndoStack([]); setRedoStack([]); setVersions([]); setActiveTab('preview'); setDiffView(null); setShowFileExplorer(false); setScanResult(null); setConsoleErrors([]); }}
                   className="flex items-center gap-1 px-2 py-1 text-slate-500 hover:text-slate-300 text-[10px] font-mono uppercase transition-colors border border-slate-700/30 rounded-sm hover:border-slate-500/50">
                   <RotateCcw className="w-3 h-3" /> New
                 </button>
@@ -1609,6 +1692,117 @@ const AppBuilder = () => {
                 </div>
               )}
 
+              {/* ── File Explorer panel ── */}
+              {showFileExplorer && (
+                <div className="border-b border-indigo-500/20 bg-black/60 flex-shrink-0" style={{ maxHeight: '260px', overflowY: 'auto' }}>
+                  <div className="flex items-center gap-2 px-4 py-2 border-b border-indigo-500/10 sticky top-0 bg-black/80">
+                    <FolderTree className="w-3.5 h-3.5 text-indigo-400" />
+                    <span className="text-[10px] font-mono text-indigo-400 uppercase tracking-wider flex-1">File Explorer</span>
+                    <button onClick={() => assetInputRef.current?.click()}
+                      className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-mono uppercase text-cyan-400 border border-cyan-700/40 rounded-sm hover:bg-cyan-500/10 transition-colors">
+                      <Upload className="w-2.5 h-2.5" /> Upload Asset
+                    </button>
+                    <button onClick={() => setShowNewFileInput(v => !v)}
+                      className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-mono uppercase text-indigo-400 border border-indigo-700/40 rounded-sm hover:bg-indigo-500/10 transition-colors">
+                      <FilePlus className="w-2.5 h-2.5" /> New File
+                    </button>
+                    <button onClick={() => setShowFileExplorer(false)} className="text-slate-600 hover:text-slate-300 ml-1">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {showNewFileInput && (
+                    <div className="flex items-center gap-2 px-4 py-2 bg-indigo-950/30 border-b border-indigo-500/10">
+                      <input
+                        value={newFileName}
+                        onChange={e => setNewFileName(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && createExtraFile()}
+                        placeholder="filename.js or filename.css..."
+                        className="flex-1 bg-black/50 border border-indigo-700/50 text-indigo-100 placeholder:text-indigo-900/60 rounded-sm px-2 py-1 text-[10px] font-mono outline-none focus:border-indigo-400"
+                        autoFocus
+                      />
+                      <button onClick={createExtraFile}
+                        className="px-2 py-1 bg-indigo-500/20 border border-indigo-500/40 text-indigo-400 text-[9px] font-mono uppercase rounded-sm hover:bg-indigo-500/30">
+                        Create
+                      </button>
+                      <button onClick={() => { setShowNewFileInput(false); setNewFileName(''); }}
+                        className="px-2 py-1 text-slate-500 hover:text-slate-300 text-[9px] font-mono uppercase">
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="px-2 py-2 space-y-0.5">
+                    {/* Core files */}
+                    <div className="px-2 py-0.5 text-[9px] font-mono text-slate-600 uppercase tracking-wider">Core Files</div>
+                    {[
+                      { id: 'html',   label: 'index.html', icon: <FileCode className="w-3 h-3 text-orange-400" /> },
+                      { id: 'css',    label: 'style.css',  icon: <Palette className="w-3 h-3 text-blue-400" /> },
+                      { id: 'js',     label: 'script.js',  icon: <Code2 className="w-3 h-3 text-yellow-400" /> },
+                      { id: 'readme', label: 'README.md',  icon: <BookOpen className="w-3 h-3 text-green-400" /> },
+                    ].map(f => (
+                      <button key={f.id} onClick={() => { setActiveTab(f.id); setShowFileExplorer(false); }}
+                        className={`w-full flex items-center gap-2 px-3 py-1 rounded-sm text-[10px] font-mono text-left transition-colors ${
+                          activeTab === f.id ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                        }`}>
+                        {f.icon} {f.label}
+                      </button>
+                    ))}
+
+                    {/* Extra custom files */}
+                    {(generatedApp?.project?.extra_files || []).length > 0 && (
+                      <>
+                        <div className="px-2 py-0.5 mt-2 text-[9px] font-mono text-slate-600 uppercase tracking-wider">Custom Files</div>
+                        {(generatedApp.project.extra_files).map(ef => (
+                          <div key={ef.name} className={`flex items-center gap-1 px-3 py-1 rounded-sm transition-colors ${
+                            activeTab === `extra:${ef.name}` ? 'bg-indigo-500/15' : 'hover:bg-white/5'
+                          }`}>
+                            <button onClick={() => { setActiveTab(`extra:${ef.name}`); setShowFileExplorer(false); }}
+                              className="flex items-center gap-2 flex-1 text-[10px] font-mono text-slate-400 hover:text-slate-200 text-left">
+                              <FileText className="w-3 h-3 text-indigo-400 flex-shrink-0" />
+                              {ef.name}
+                            </button>
+                            <button onClick={() => deleteExtraFile(ef.name)}
+                              className="text-slate-700 hover:text-red-400 transition-colors flex-shrink-0">
+                              <Trash2 className="w-2.5 h-2.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </>
+                    )}
+
+                    {/* Assets */}
+                    {(generatedApp?.project?.assets || []).length > 0 && (
+                      <>
+                        <div className="px-2 py-0.5 mt-2 text-[9px] font-mono text-slate-600 uppercase tracking-wider flex items-center gap-1">
+                          <Folder className="w-2.5 h-2.5" /> assets/
+                        </div>
+                        {(generatedApp.project.assets).map(asset => (
+                          <div key={asset.name} className="flex items-center gap-1 px-3 py-1 rounded-sm hover:bg-white/5 group">
+                            <span className="flex items-center gap-2 flex-1 text-[10px] font-mono text-slate-500">
+                              {asset.type?.startsWith('image/') ? '🖼' : '📄'} {asset.name}
+                              <span className="text-[8px] text-slate-700 ml-auto">
+                                {asset.type?.split('/')[1]?.toUpperCase() || 'FILE'}
+                              </span>
+                            </span>
+                            <button onClick={() => deleteAsset(asset.name)}
+                              className="text-slate-700 hover:text-red-400 transition-colors flex-shrink-0 opacity-0 group-hover:opacity-100">
+                              <Trash2 className="w-2.5 h-2.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </>
+                    )}
+
+                    {(generatedApp?.project?.extra_files || []).length === 0 && (generatedApp?.project?.assets || []).length === 0 && (
+                      <p className="px-3 py-3 text-[9px] font-mono text-slate-700 text-center">
+                        No custom files or assets yet. Upload an image or create a new file.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* ── Diff viewer panel ── */}
               {diffView && (
                 <div className="border-b border-amber-500/20 bg-black/70 flex-shrink-0 flex flex-col" style={{ maxHeight: '220px' }}>
@@ -1652,6 +1846,24 @@ const AppBuilder = () => {
                   >
                     {tab.icon}{tab.label}
                     {tab.dirty && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" title="Unsaved changes" />}
+                  </button>
+                ))}
+                {/* Extra file tabs */}
+                {(generatedApp?.project?.extra_files || []).map(ef => (
+                  <button
+                    key={`extra:${ef.name}`}
+                    onClick={() => setActiveTab(`extra:${ef.name}`)}
+                    className={`flex items-center gap-1.5 px-3 py-2 text-[11px] font-mono border-r border-cyan-500/10 transition-all flex-shrink-0 group ${
+                      activeTab === `extra:${ef.name}`
+                        ? 'bg-indigo-500/10 text-indigo-300 border-b-2 border-b-indigo-400'
+                        : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'
+                    }`}
+                  >
+                    <FileText className="w-3 h-3" />{ef.name}
+                    <span
+                      onClick={e => { e.stopPropagation(); deleteExtraFile(ef.name); }}
+                      className="opacity-0 group-hover:opacity-100 ml-1 hover:text-red-400 transition-opacity cursor-pointer"
+                    ><X className="w-2.5 h-2.5" /></span>
                   </button>
                 ))}
                 {/* Explain panel toggle */}
@@ -1763,6 +1975,41 @@ const AppBuilder = () => {
                     />
                   </div>
                 )}
+                {/* Extra custom file tabs */}
+                {activeTab.startsWith('extra:') && (() => {
+                  const efName = activeTab.slice(6);
+                  const ef = (generatedApp?.project?.extra_files || []).find(f => f.name === efName);
+                  if (!ef) return null;
+                  return (
+                    <div className="h-full flex flex-col">
+                      <div className="flex items-center gap-2 px-2 py-1 bg-black/40 border-b border-indigo-500/10 flex-shrink-0">
+                        <FileText className="w-3 h-3 text-indigo-400" />
+                        <span className="text-[9px] font-mono text-indigo-400 flex-1">{efName}</span>
+                        <button onClick={() => deleteExtraFile(efName)}
+                          className="flex items-center gap-1 px-2 py-0.5 text-red-500 text-[9px] font-mono uppercase border border-red-700/40 rounded-sm hover:bg-red-500/10">
+                          <Trash2 className="w-2.5 h-2.5" /> Delete
+                        </button>
+                      </div>
+                      <textarea
+                        value={ef.content || ''}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setGeneratedApp(prev => ({
+                            ...prev,
+                            project: {
+                              ...prev.project,
+                              extra_files: prev.project.extra_files.map(f => f.name === efName ? { ...f, content: val } : f)
+                            }
+                          }));
+                        }}
+                        onBlur={() => pushUndo()}
+                        className="flex-1 bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
+                        spellCheck={false}
+                        placeholder={`// ${efName}\n`}
+                      />
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* ── Edit conversation ── */}
