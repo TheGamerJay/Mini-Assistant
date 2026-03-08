@@ -17,8 +17,12 @@ from .task_store          import TaskStore
 from .orchestrator_engine import OrchestratorEngine
 from .memory_brain        import MemoryBrain
 from .learning_brain      import LearningBrain
-from .security_brain      import SecurityBrain, SecurityDecision, SecurityLevel
-from .tool_brain          import ToolBrain, ToolResult
+from .security_brain      import (
+    SecurityBrain, SecurityDecision, SecurityLevel, ShellSafetyAudit,
+)
+from .tool_brain          import (
+    ToolBrain, ToolResult, ExecutionMode, IntentSource, CommandPolicy,
+)
 from .brain_configs       import BrainConfig, get_brain_config, get_system_prompt, all_configs_dict
 from .permission_model    import (
     BrainPermissions, PermissionCheckResult, ToolCategory,
@@ -44,8 +48,8 @@ __all__ = [
     "OrchestratorEngine",
     # Brain layer
     "MemoryBrain", "LearningBrain",
-    "SecurityBrain", "SecurityDecision", "SecurityLevel",
-    "ToolBrain", "ToolResult",
+    "SecurityBrain", "SecurityDecision", "SecurityLevel", "ShellSafetyAudit",
+    "ToolBrain", "ToolResult", "ExecutionMode", "IntentSource", "CommandPolicy",
     # Phase 9: configs + permissions + intents
     "BrainConfig", "get_brain_config", "get_system_prompt", "all_configs_dict",
     "BrainPermissions", "PermissionCheckResult", "ToolCategory",

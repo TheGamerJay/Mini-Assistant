@@ -52,7 +52,7 @@ from .task_store        import TaskStore
 from .manager           import SwarmManager
 from .memory_brain      import MemoryBrain
 from .learning_brain    import LearningBrain
-from .tool_brain        import ToolBrain, ToolResult
+from .tool_brain        import ToolBrain, ToolResult, IntentSource
 from .brain_configs     import get_system_prompt
 from .permission_model  import check_permission, PermissionCheckResult
 from .execution_intent  import parse_execution_intents, planner_tool_prompt_suffix
@@ -306,8 +306,9 @@ class OrchestratorEngine:
 
                 result: ToolResult = self._tool.run(
                     cmd,
-                    task_id = task.task_id,
-                    cwd     = intent.cwd or None,
+                    task_id       = task.task_id,
+                    cwd           = intent.cwd or None,
+                    intent_source = IntentSource.STRUCTURED_INTENT,
                 )
                 task.metadata.setdefault("debug_log", []).append(result.to_dict())
                 self._log(task, "tool_result", "tool_brain", {
@@ -349,7 +350,8 @@ class OrchestratorEngine:
             cmd = commands[0]
             self._log(task, "tool_command_extracted_legacy", "tool_brain",
                       {"command": cmd, "source": "dollar_prefix"})
-            result = self._tool.run(cmd, task_id=task.task_id)
+            result = self._tool.run(cmd, task_id=task.task_id,
+                                    intent_source=IntentSource.LEGACY_FALLBACK)
             task.metadata.setdefault("debug_log", []).append(result.to_dict())
             self._log(task, "tool_result", "tool_brain", {
                 "success":        result.success,

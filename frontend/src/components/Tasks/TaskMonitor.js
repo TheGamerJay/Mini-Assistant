@@ -302,13 +302,54 @@ const EventLog = ({ metadata }) => {
                   {entry.stderr_snippet}
                 </pre>
               )}
-              {/* ToolResult: warning flags */}
+              {/* ToolResult: execution mode + intent source + shell info */}
+              {isToolResult && entry.execution_mode && (
+                <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                  <span className={`text-[8px] font-mono px-1 rounded border ${
+                    entry.execution_mode === 'safe_argv_only'
+                      ? 'text-green-500 border-green-900/40 bg-green-950/20'
+                      : entry.execution_mode === 'limited_shell'
+                      ? 'text-amber-500 border-amber-900/40 bg-amber-950/20'
+                      : 'text-red-500 border-red-900/40 bg-red-950/20'
+                  }`}>{entry.execution_mode.replace(/_/g, ' ')}</span>
+                  {entry.intent_source && (
+                    <span className={`text-[8px] font-mono px-1 rounded border ${
+                      entry.intent_source === 'structured_intent'
+                        ? 'text-cyan-500 border-cyan-900/40 bg-cyan-950/20'
+                        : entry.intent_source === 'legacy_dollar_fallback'
+                        ? 'text-amber-600 border-amber-900/40 bg-amber-950/20'
+                        : 'text-slate-500 border-slate-800/40'
+                    }`}>
+                      {entry.intent_source === 'structured_intent' ? 'STRUCTURED' :
+                       entry.intent_source === 'legacy_dollar_fallback' ? '⚠ FALLBACK' : 'DIRECT'}
+                    </span>
+                  )}
+                  {entry.used_shell && entry.shell_reason && (
+                    <span className="text-[8px] font-mono text-amber-600 truncate max-w-[200px]" title={entry.shell_reason}>
+                      shell: {entry.shell_reason}
+                    </span>
+                  )}
+                </div>
+              )}
+              {isToolResult && entry.cwd && (
+                <p className="text-[8px] font-mono text-slate-600">cwd: {entry.cwd}</p>
+              )}
+              {isToolResult && entry.env_keys_used?.length > 0 && (
+                <p className="text-[8px] font-mono text-slate-600">env keys: {entry.env_keys_used.join(', ')}</p>
+              )}
+              {/* ToolResult: security patterns */}
               {isToolResult && entry.warning_flags?.length > 0 && (
                 <p className="text-[8px] font-mono text-amber-500">⚠ {entry.warning_flags.join(', ')}</p>
               )}
+              {isToolResult && entry.matched_security_patterns?.length > 0 && (
+                <p className="text-[8px] font-mono text-amber-600 truncate">patterns: {entry.matched_security_patterns.join(', ')}</p>
+              )}
+              {isToolResult && entry.shell_audit_warnings?.length > 0 && (
+                <p className="text-[8px] font-mono text-orange-500">shell warnings: {entry.shell_audit_warnings.join(', ')}</p>
+              )}
               {/* ToolResult: blocked */}
               {isToolResult && entry.blocked_by_security && (
-                <p className="text-[8px] font-mono text-red-400">Blocked by SecurityBrain</p>
+                <p className="text-[8px] font-mono text-red-400 font-semibold">✕ Blocked by SecurityBrain</p>
               )}
             </div>
           </div>
