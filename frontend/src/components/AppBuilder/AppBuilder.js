@@ -68,7 +68,9 @@ const AppBuilder = () => {
   const [editInput, setEditInput] = useState('');
   const [editLoading, setEditLoading] = useState(false);
   const [editMsg, setEditMsg] = useState('');
+  const [editHistory, setEditHistory] = useState([]);
   const editLoadingIntervalRef = useRef(null);
+  const editEndRef = useRef(null);
 
   const EDIT_LOADING_MSGS = [
     'Reading your app...', 'Finding what to change...', 'Applying changes...',
@@ -118,6 +120,10 @@ const AppBuilder = () => {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [coachMessages]);
+
+  useEffect(() => {
+    editEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [editHistory, editLoading]);
 
   const startCoach = async () => {
     setCoachLoading(true);
@@ -257,6 +263,9 @@ const AppBuilder = () => {
 
   const editApp = async () => {
     if (!editInput.trim() || editLoading || !generatedApp?.html) return;
+    const instruction = editInput.trim();
+    setEditInput('');
+    setEditHistory(prev => [...prev, { role: 'user', content: instruction }]);
     setEditLoading(true);
     let i = 0;
     setEditMsg(EDIT_LOADING_MSGS[0]);
@@ -267,13 +276,14 @@ const AppBuilder = () => {
     try {
       const res = await axiosInstance.post('/app-builder/edit', {
         html: generatedApp.html,
-        instruction: editInput,
+        instruction,
       }, { timeout: 300000 });
       setGeneratedApp(prev => ({ ...prev, html: res.data.html }));
-      setEditInput('');
-      toast.success('Changes applied!');
+      setEditHistory(prev => [...prev, { role: 'assistant', content: 'Done! Preview updated above. Let me know what else to change.' }]);
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to apply changes');
+      const msg = err.response?.data?.detail || 'Failed to apply changes';
+      toast.error(msg);
+      setEditHistory(prev => [...prev, { role: 'assistant', content: `Error: ${msg}` }]);
     } finally {
       clearInterval(editLoadingIntervalRef.current);
       setEditMsg('');
@@ -484,73 +494,96 @@ const AppBuilder = () => {
               </div>
             </div>
           ) : (
-            <div className="flex-1 overflow-y-auto p-6">
-              <div className="max-w-lg mx-auto space-y-6">
+            <div className="flex-1 flex flex-col overflow-hidden">
 
-                {/* Success card */}
-                <div className="text-center space-y-4">
-                  <div className="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-cyan-500 to-violet-600 flex items-center justify-center">
-                    <CheckCircle className="w-8 h-8 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="text-2xl font-bold text-cyan-400 uppercase" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
-                      Your App is Ready!
-                    </h3>
-                    <p className="text-slate-400 font-mono text-sm mt-1">{generatedApp.name}</p>
-                  </div>
-                  <div className="flex flex-col gap-3">
-                    <button
-                      onClick={openInBrowser}
-                      className="w-full py-4 bg-gradient-to-r from-cyan-500 to-violet-600 text-white font-bold hover:from-cyan-400 hover:to-violet-500 hover:shadow-[0_0_20px_rgba(0,243,255,0.4)] uppercase tracking-wider rounded-sm transition-all flex items-center justify-center gap-2 text-lg"
-                    >
-                      <Eye className="w-5 h-5" /> OPEN IN BROWSER
-                    </button>
-                    <button
-                      onClick={downloadApp}
-                      className="w-full py-3 bg-violet-500/20 text-violet-400 border border-violet-500/50 hover:bg-violet-500/30 rounded-sm font-semibold uppercase flex items-center justify-center gap-2 transition-all"
-                    >
-                      <Download className="w-4 h-4" /> DOWNLOAD .HTML
-                    </button>
-                    <button
-                      onClick={() => { setGeneratedApp(null); setDescription(''); setEditInput(''); }}
-                      className="w-full py-2 text-slate-500 hover:text-slate-300 text-sm font-mono uppercase flex items-center justify-center gap-2 transition-colors"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" /> BUILD ANOTHER
-                    </button>
-                  </div>
-                </div>
-
-                {/* Edit / iterate panel */}
-                <div className="border border-cyan-500/20 rounded-sm bg-black/30">
-                  <div className="flex items-center gap-2 px-4 py-3 border-b border-cyan-500/20">
-                    <Pencil className="w-4 h-4 text-cyan-400" />
-                    <span className="text-xs font-mono text-cyan-400 uppercase tracking-wider">Edit / Iterate</span>
-                  </div>
-                  <div className="p-4 space-y-3">
-                    <p className="text-xs text-slate-500 font-mono">Describe what to change or fix — the AI will update the app and give you a new version.</p>
-                    <textarea
-                      value={editInput}
-                      onChange={e => setEditInput(e.target.value)}
-                      onKeyDown={handleEditKey}
-                      placeholder='e.g. "make the background dark blue", "the jump button doesn\'t work on mobile", "add a high score leaderboard"'
-                      className="w-full bg-black/50 border border-cyan-900/50 text-cyan-100 placeholder:text-cyan-900/40 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 rounded-sm font-mono text-sm p-3 outline-none resize-none"
-                      rows={3}
-                      disabled={editLoading}
-                    />
-                    <button
-                      onClick={editApp}
-                      disabled={editLoading || !editInput.trim()}
-                      className="w-full py-3 bg-gradient-to-r from-cyan-500/80 to-violet-600/80 hover:from-cyan-500 hover:to-violet-600 text-white font-bold uppercase tracking-wider rounded-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                    >
-                      {editLoading
-                        ? <><Loader2 className="w-4 h-4 animate-spin" />{editMsg || 'Applying...'}</>
-                        : <><Pencil className="w-4 h-4" />APPLY CHANGES</>
-                      }
-                    </button>
-                  </div>
-                </div>
-
+              {/* Toolbar */}
+              <div className="flex items-center gap-2 px-4 py-2 border-b border-cyan-500/20 bg-black/40 flex-shrink-0">
+                <CheckCircle className="w-4 h-4 text-green-400" />
+                <span className="text-xs font-mono text-green-400 flex-1">{generatedApp.name} — ready</span>
+                <button onClick={openInBrowser} className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 text-xs font-mono uppercase rounded-sm hover:bg-cyan-500/30 transition-all">
+                  <Eye className="w-3.5 h-3.5" /> Open
+                </button>
+                <button onClick={downloadApp} className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-500/20 border border-violet-500/40 text-violet-400 text-xs font-mono uppercase rounded-sm hover:bg-violet-500/30 transition-all">
+                  <Download className="w-3.5 h-3.5" /> Download
+                </button>
+                <button onClick={() => { setGeneratedApp(null); setDescription(''); setEditInput(''); setEditHistory([]); }} className="flex items-center gap-1.5 px-3 py-1.5 text-slate-500 hover:text-slate-300 text-xs font-mono uppercase transition-colors">
+                  <RotateCcw className="w-3.5 h-3.5" /> New
+                </button>
               </div>
+
+              {/* Live preview iframe */}
+              <div className="flex-shrink-0" style={{ height: '55%' }}>
+                <iframe
+                  key={generatedApp.html}
+                  srcDoc={generatedApp.html}
+                  title="App Preview"
+                  className="w-full h-full border-0 bg-white"
+                  sandbox="allow-scripts allow-forms allow-modals allow-same-origin"
+                />
+              </div>
+
+              {/* Edit conversation */}
+              <div className="flex-1 flex flex-col overflow-hidden border-t border-cyan-500/20">
+                <div className="px-4 py-2 bg-black/40 border-b border-cyan-500/10 flex items-center gap-2 flex-shrink-0">
+                  <Pencil className="w-3.5 h-3.5 text-cyan-400" />
+                  <span className="text-xs font-mono text-cyan-400 uppercase tracking-wider">Editing Conversation</span>
+                </div>
+
+                {/* Messages */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  {editHistory.length === 0 && (
+                    <p className="text-xs text-slate-600 font-mono text-center py-4">Test the app above, then tell me what to change or fix.</p>
+                  )}
+                  {editHistory.map((msg, idx) => (
+                    <div key={idx} className={`flex items-start gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      {msg.role === 'assistant' && (
+                        <div className="w-6 h-6 rounded bg-gradient-to-br from-cyan-500 to-violet-600 flex items-center justify-center flex-shrink-0">
+                          <Wand2 className="w-3 h-3 text-white" />
+                        </div>
+                      )}
+                      <div className={`max-w-[80%] px-3 py-2 rounded text-xs font-mono ${
+                        msg.role === 'user'
+                          ? 'bg-cyan-500/20 border border-cyan-500/30 text-cyan-100'
+                          : 'bg-black/40 border border-cyan-900/30 text-slate-300'
+                      }`}>
+                        {msg.content}
+                      </div>
+                    </div>
+                  ))}
+                  {editLoading && (
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded bg-gradient-to-br from-cyan-500 to-violet-600 flex items-center justify-center flex-shrink-0">
+                        <Loader2 className="w-3 h-3 text-white animate-spin" />
+                      </div>
+                      <div className="px-3 py-2 bg-black/40 border border-cyan-900/30 rounded">
+                        <span className="text-xs font-mono text-cyan-400/80 animate-pulse">{editMsg || 'Working...'}</span>
+                      </div>
+                    </div>
+                  )}
+                  <div ref={editEndRef} />
+                </div>
+
+                {/* Edit input */}
+                <div className="p-3 border-t border-cyan-500/20 bg-black/30 flex gap-2 items-end flex-shrink-0">
+                  <textarea
+                    value={editInput}
+                    onChange={e => setEditInput(e.target.value)}
+                    onKeyDown={handleEditKey}
+                    placeholder='Describe what to change or fix...'
+                    className="flex-1 bg-black/50 border border-cyan-900/50 text-cyan-100 placeholder:text-cyan-900/40 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 rounded-sm font-mono text-xs p-2.5 outline-none resize-none"
+                    rows={2}
+                    disabled={editLoading}
+                  />
+                  <button
+                    onClick={editApp}
+                    disabled={editLoading || !editInput.trim()}
+                    className="p-2.5 bg-gradient-to-r from-cyan-500 to-violet-600 text-white rounded-sm hover:from-cyan-400 hover:to-violet-500 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
             </div>
           )}
         </div>
