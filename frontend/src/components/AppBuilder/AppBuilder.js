@@ -3,7 +3,8 @@ import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import {
   Wand2, Loader2, Download, Eye,
-  MessageSquare, Send, ChevronRight, RotateCcw, Sparkles, Pencil, CheckCircle
+  MessageSquare, Send, ChevronRight, RotateCcw, Sparkles, Pencil, CheckCircle,
+  Trash2, FolderOpen, Clock
 } from 'lucide-react';
 
 // ── Coach system prompt ────────────────────────────────────────────────────────
@@ -46,6 +47,12 @@ const renderLinks = (text) => {
 };
 
 // ── Component ──────────────────────────────────────────────────────────────────
+const SESSIONS_KEY = 'appbuilder_sessions';
+
+const loadSessions = () => {
+  try { return JSON.parse(localStorage.getItem(SESSIONS_KEY) || '[]'); } catch { return []; }
+};
+
 const AppBuilder = () => {
   const [mode, setMode] = useState('coach');   // 'coach' | 'build'
 
@@ -71,6 +78,9 @@ const AppBuilder = () => {
   const [editHistory, setEditHistory] = useState([]);
   const editLoadingIntervalRef = useRef(null);
   const editEndRef = useRef(null);
+
+  // Saved sessions
+  const [savedSessions, setSavedSessions] = useState(loadSessions);
 
   const EDIT_LOADING_MSGS = [
     'Reading your app...', 'Finding what to change...', 'Applying changes...',
@@ -124,6 +134,47 @@ const AppBuilder = () => {
   useEffect(() => {
     editEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [editHistory, editLoading]);
+
+  // Auto-save current session to localStorage whenever app or edit history changes
+  useEffect(() => {
+    if (!generatedApp) return;
+    const session = {
+      id: generatedApp.build_id || generatedApp.name,
+      name: generatedApp.name,
+      description: generatedApp.description || '',
+      html: generatedApp.html,
+      build_id: generatedApp.build_id,
+      full_preview_url: generatedApp.full_preview_url,
+      editHistory,
+      savedAt: new Date().toISOString(),
+    };
+    setSavedSessions(prev => {
+      const filtered = prev.filter(s => s.id !== session.id);
+      const updated = [session, ...filtered].slice(0, 20); // keep last 20
+      try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(updated)); } catch {}
+      return updated;
+    });
+  }, [generatedApp, editHistory]);
+
+  const resumeSession = (session) => {
+    setGeneratedApp({
+      name: session.name,
+      description: session.description,
+      html: session.html,
+      build_id: session.build_id,
+      full_preview_url: session.full_preview_url,
+    });
+    setEditHistory(session.editHistory || []);
+    setMode('build');
+  };
+
+  const deleteSession = (id) => {
+    setSavedSessions(prev => {
+      const updated = prev.filter(s => s.id !== id);
+      try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(updated)); } catch {}
+      return updated;
+    });
+  };
 
   const startCoach = async () => {
     setCoachLoading(true);
@@ -474,7 +525,50 @@ const AppBuilder = () => {
       {mode === 'build' && (
         <div className="flex-1 flex flex-col overflow-hidden">
           {!generatedApp ? (
-            <div className="p-5 space-y-4">
+            <div className="p-5 space-y-4 overflow-y-auto flex-1">
+
+              {/* Saved sessions */}
+              {savedSessions.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-mono text-cyan-400/70 uppercase tracking-wider">
+                    <FolderOpen className="w-3.5 h-3.5" />
+                    Saved Builds — click to continue
+                  </div>
+                  <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                    {savedSessions.map(session => (
+                      <div key={session.id} className="flex items-center gap-2 p-3 bg-black/40 border border-cyan-900/40 hover:border-cyan-500/40 rounded-sm group transition-all">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-mono text-cyan-300 truncate">{session.name}</div>
+                          <div className="flex items-center gap-1 mt-0.5">
+                            <Clock className="w-3 h-3 text-slate-600" />
+                            <span className="text-xs text-slate-600 font-mono">
+                              {new Date(session.savedAt).toLocaleString()}
+                            </span>
+                            {session.editHistory?.length > 0 && (
+                              <span className="text-xs text-violet-500 font-mono ml-1">· {session.editHistory.length / 2 | 0} edits</span>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => resumeSession(session)}
+                          className="px-3 py-1.5 bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 text-xs font-mono uppercase rounded-sm hover:bg-cyan-500/30 transition-all flex-shrink-0"
+                        >
+                          Continue
+                        </button>
+                        <button
+                          onClick={() => deleteSession(session.id)}
+                          className="p-1.5 text-slate-700 hover:text-red-400 transition-colors flex-shrink-0"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="border-t border-cyan-900/30 pt-3 text-xs font-mono text-slate-600 uppercase">Or start a new build:</div>
+                </div>
+              )}
+
               <textarea
                 data-testid="app-description-input"
                 value={description}
@@ -521,7 +615,7 @@ const AppBuilder = () => {
                 <button onClick={downloadApp} className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-500/20 border border-violet-500/40 text-violet-400 text-xs font-mono uppercase rounded-sm hover:bg-violet-500/30 transition-all">
                   <Download className="w-3.5 h-3.5" /> Download
                 </button>
-                <button onClick={() => { setGeneratedApp(null); setDescription(''); setEditInput(''); setEditHistory([]); }} className="flex items-center gap-1.5 px-3 py-1.5 text-slate-500 hover:text-slate-300 text-xs font-mono uppercase transition-colors">
+                <button onClick={() => { setGeneratedApp(null); setDescription(''); setEditInput(''); setEditHistory([]); }} className="flex items-center gap-1.5 px-3 py-1.5 text-slate-500 hover:text-slate-300 text-xs font-mono uppercase transition-colors" title="Back to sessions / start new build">
                   <RotateCcw className="w-3.5 h-3.5" /> New
                 </button>
               </div>
