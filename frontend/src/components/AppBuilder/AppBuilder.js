@@ -2633,9 +2633,9 @@ const AppBuilder = () => {
                     </div>
                   );
                 })()}
-                </div> {/* end code editor pane */}
+                </div>
                 )}
-              </div> {/* end content area */}
+              </div>
 
               {/* ── Edit conversation ── */}
               <div className="flex-1 flex flex-col overflow-hidden border-t border-cyan-500/20">
