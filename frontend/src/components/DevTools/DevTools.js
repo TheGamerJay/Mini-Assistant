@@ -1,26 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { Wand2, Check, Copy, Palette, FileJson, FileText, TestTube } from 'lucide-react';
+import { usePersist } from '../../hooks/usePersist';
 
 const DevTools = () => {
-  const [activeToolTab, setActiveToolTab] = useState('regex');
+  const [activeToolTab, setActiveToolTab] = usePersist('ma_devtools_tab', 'regex');
 
   // Regex Tester State
-  const [regex, setRegex] = useState('');
-  const [regexFlags, setRegexFlags] = useState('g');
-  const [testString, setTestString] = useState('');
+  const [regex, setRegex] = usePersist('ma_devtools_regex', '');
+  const [regexFlags, setRegexFlags] = usePersist('ma_devtools_flags', 'g');
+  const [testString, setTestString] = usePersist('ma_devtools_teststr', '');
   const [regexMatches, setRegexMatches] = useState([]);
 
   // JSON Formatter State
-  const [jsonInput, setJsonInput] = useState('');
+  const [jsonInput, setJsonInput] = usePersist('ma_devtools_json', '');
   const [jsonOutput, setJsonOutput] = useState('');
   const [jsonError, setJsonError] = useState('');
 
   // Markdown State
-  const [markdown, setMarkdown] = useState('# Hello Mini Assistant\n\nThis is **bold** and this is *italic*.\n\n- List item 1\n- List item 2\n\n```javascript\nconsole.log("Code block");\n```');
+  const [markdown, setMarkdown] = usePersist('ma_devtools_md', '# Hello Mini Assistant\n\nThis is **bold** and this is *italic*.\n\n- List item 1\n- List item 2\n\n```javascript\nconsole.log("Code block");\n```');
 
   // Color Picker State
-  const [selectedColor, setSelectedColor] = useState('#00f3ff');
+  const [selectedColor, setSelectedColor] = usePersist('ma_devtools_color', '#00f3ff');
   const [colorFormats, setColorFormats] = useState({});
 
   // Regex Tester Functions

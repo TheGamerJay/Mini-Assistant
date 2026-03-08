@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import { Code, Search, Loader2, FileCode } from 'lucide-react';
+import { usePersist } from '../../hooks/usePersist';
 
 const CodebaseSearch = () => {
   const [query, setQuery] = useState('');
-  const [path, setPath] = useState('/app');
+  const [path, setPath] = usePersist('ma_codebase_path', '/app');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
 

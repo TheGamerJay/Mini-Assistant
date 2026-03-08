@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import { Settings, Plus, Trash2, Eye, EyeOff, Save, Key } from 'lucide-react';
+import { usePersist } from '../../hooks/usePersist';
 
 const EnvManager = () => {
-  const [envType, setEnvType] = useState('frontend');
+  const [envType, setEnvType] = usePersist('ma_env_type', 'frontend');
   const [envVars, setEnvVars] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showValues, setShowValues] = useState({});

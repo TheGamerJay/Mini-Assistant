@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import { Play, Loader2, Terminal, Code, Trash2 } from 'lucide-react';
+import { usePersist } from '../../hooks/usePersist';
 
 const detectLanguage = (code) => {
   const c = code.trim();
@@ -13,12 +14,12 @@ const detectLanguage = (code) => {
 };
 
 const CodeRunner = () => {
-  const [code, setCode] = useState('');
-  const [language, setLanguage] = useState('python');
+  const [code, setCode] = usePersist('ma_coderunner_code', '');
+  const [language, setLanguage] = usePersist('ma_coderunner_lang', 'python');
   const [autoDetected, setAutoDetected] = useState(false);
   const [output, setOutput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [history, setHistory] = useState([]);
+  const [history, setHistory] = usePersist('ma_coderunner_history', []);
 
   const handleCodeChange = (e) => {
     const val = e.target.value;

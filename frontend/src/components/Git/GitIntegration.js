@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import { GitBranch, Upload, Download, GitCommit, GitPullRequest, RefreshCw, FolderGit2, Terminal } from 'lucide-react';
+import { usePersist } from '../../hooks/usePersist';
 
 const GitIntegration = () => {
   const [status, setStatus] = useState(null);
@@ -9,8 +10,8 @@ const GitIntegration = () => {
   const [currentBranch, setCurrentBranch] = useState('');
   const [commitMessage, setCommitMessage] = useState('');
   const [loading, setLoading] = useState(false);
-  const [repoUrl, setRepoUrl] = useState('');
-  const [remoteName, setRemoteName] = useState('origin');
+  const [repoUrl, setRepoUrl] = usePersist('ma_git_repourl', '');
+  const [remoteName, setRemoteName] = usePersist('ma_git_remote', 'origin');
   const [logs, setLogs] = useState([]);
 
   useEffect(() => {

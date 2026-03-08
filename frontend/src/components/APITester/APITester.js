@@ -2,15 +2,16 @@ import React, { useState } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import { Send, Loader2, Plus, Trash2, Copy, Check } from 'lucide-react';
+import { usePersist } from '../../hooks/usePersist';
 
 const APITester = () => {
-  const [url, setUrl] = useState('');
-  const [method, setMethod] = useState('GET');
-  const [headers, setHeaders] = useState([{ key: 'Content-Type', value: 'application/json' }]);
-  const [body, setBody] = useState('');
+  const [url, setUrl] = usePersist('ma_apitester_url', '');
+  const [method, setMethod] = usePersist('ma_apitester_method', 'GET');
+  const [headers, setHeaders] = usePersist('ma_apitester_headers', [{ key: 'Content-Type', value: 'application/json' }]);
+  const [body, setBody] = usePersist('ma_apitester_body', '');
   const [response, setResponse] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [history, setHistory] = useState([]);
+  const [history, setHistory] = usePersist('ma_apitester_history', []);
   const [copied, setCopied] = useState(false);
 
   const testAPI = async () => {

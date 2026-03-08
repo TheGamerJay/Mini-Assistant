@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import { Package, Download, Trash2, Loader2, Plus, Check } from 'lucide-react';
+import { usePersist } from '../../hooks/usePersist';
 
 const PackageManager = () => {
-  const [packageType, setPackageType] = useState('npm');
+  const [packageType, setPackageType] = usePersist('ma_pkg_type', 'npm');
   const [searchQuery, setSearchQuery] = useState('');
   const [packageName, setPackageName] = useState('');
   const [installedPackages, setInstalledPackages] = useState([]);

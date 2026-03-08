@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import { Shield, Loader2, AlertTriangle, CheckCircle, XCircle, Zap } from 'lucide-react';
+import { usePersist } from '../../hooks/usePersist';
 
 const detectLanguage = (code) => {
   const c = code.trim();
@@ -17,8 +18,8 @@ const detectLanguage = (code) => {
 };
 
 const CodeReview = () => {
-  const [code, setCode] = useState('');
-  const [language, setLanguage] = useState('javascript');
+  const [code, setCode] = usePersist('ma_codereview_code', '');
+  const [language, setLanguage] = usePersist('ma_codereview_lang', 'javascript');
   const [autoDetected, setAutoDetected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState(null);

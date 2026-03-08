@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
-import { Bug, Camera, Wrench, Play, Loader2, AlertTriangle, CheckCircle, XCircle, RefreshCw, History, Image, ZoomIn, X } from 'lucide-react';
+import { Bug, Camera, Wrench, Play, Loader2, AlertTriangle, CheckCircle, XCircle, RefreshCw, History, Image, ZoomIn, X, Trash2 } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -24,6 +24,16 @@ const FixLoop = () => {
       setSessions(response.data.sessions || []);
     } catch (error) {
       console.error('Failed to load history');
+    }
+  };
+
+  const deleteSession = async (sessionId) => {
+    try {
+      await axiosInstance.delete(`/fixloop/sessions/${sessionId}`);
+      setSessions(prev => prev.filter(s => s.id !== sessionId));
+      toast.success('Session deleted');
+    } catch (error) {
+      toast.error('Failed to delete session');
     }
   };
 
@@ -167,14 +177,23 @@ const FixLoop = () => {
                   >
                     <div className="flex items-center justify-between mb-2">
                       <span className="font-mono text-cyan-400 text-sm">{session.url}</span>
-                      <span className="text-xs text-slate-500">
-                        {new Date(session.created_at).toLocaleString()}
-                      </span>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-slate-500">
+                          {new Date(session.created_at).toLocaleString()}
+                        </span>
+                        <button
+                          onClick={() => deleteSession(session.id)}
+                          className="p-1 text-slate-600 hover:text-red-400 transition-colors rounded"
+                          title="Delete session"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                     <div className="flex items-center gap-4">
                       <span className={`text-xs px-2 py-1 rounded ${
-                        session.errors?.length > 0 
-                          ? 'bg-red-500/20 text-red-400' 
+                        session.errors?.length > 0
+                          ? 'bg-red-500/20 text-red-400'
                           : 'bg-green-500/20 text-green-400'
                       }`}>
                         {session.errors?.length || 0} errors

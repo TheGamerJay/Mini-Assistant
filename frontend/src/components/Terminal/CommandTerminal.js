@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import { Terminal as TerminalIcon, Play, X } from 'lucide-react';
+import { usePersist } from '../../hooks/usePersist';
 
 const CommandTerminal = () => {
   const [command, setCommand] = useState('');
-  const [history, setHistory] = useState([]);
+  const [history, setHistory] = usePersist('ma_terminal_history', []);
   const [executing, setExecuting] = useState(false);
 
   const executeCommand = async () => {

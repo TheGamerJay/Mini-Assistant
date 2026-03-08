@@ -2,12 +2,13 @@ import React, { useState } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import { Database, Plus, Trash2, Download, Code } from 'lucide-react';
+import { usePersist } from '../../hooks/usePersist';
 
 const DatabaseDesigner = () => {
-  const [tables, setTables] = useState([]);
+  const [tables, setTables] = usePersist('ma_dbdesigner_tables', []);
   const [showAddTable, setShowAddTable] = useState(false);
   const [newTable, setNewTable] = useState({ name: '', fields: [{ name: 'id', type: 'INTEGER', primary: true }] });
-  const [dbType, setDbType] = useState('mongodb');
+  const [dbType, setDbType] = usePersist('ma_dbdesigner_type', 'mongodb');
 
   const fieldTypes = {
     mongodb: ['String', 'Number', 'Boolean', 'Date', 'ObjectId', 'Array', 'Object'],

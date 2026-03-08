@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import { Database, Key, RefreshCw, Trash2, Plus, Loader2, Check, Search } from 'lucide-react';
+import { usePersist } from '../../hooks/usePersist';
 
 const RedisManager = () => {
-  const [config, setConfig] = useState({ host: 'localhost', port: 6379, password: '', db: 0 });
+  const [config, setConfig] = usePersist('ma_redis_config', { host: 'localhost', port: 6379, password: '', db: 0 });
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [keys, setKeys] = useState([]);

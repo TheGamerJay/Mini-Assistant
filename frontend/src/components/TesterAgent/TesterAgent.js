@@ -2,11 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import { FlaskConical, Play, Plus, Trash2, Loader2, CheckCircle, XCircle, History, Sparkles, FileCode } from 'lucide-react';
+import { usePersist } from '../../hooks/usePersist';
 
 const TesterAgent = () => {
-  const [url, setUrl] = useState('');
-  const [testType, setTestType] = useState('smoke');
-  const [endpoints, setEndpoints] = useState([]);
+  const [url, setUrl] = usePersist('ma_tester_url', '');
+  const [testType, setTestType] = usePersist('ma_tester_type', 'smoke');
+  const [endpoints, setEndpoints] = usePersist('ma_tester_endpoints', []);
   const [newEndpoint, setNewEndpoint] = useState('');
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);

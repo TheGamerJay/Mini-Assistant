@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import { Train, Rocket, Server, RefreshCw, Loader2, Check, ExternalLink, FolderGit2 } from 'lucide-react';
+import { usePersist } from '../../hooks/usePersist';
 
 const RailwayManager = () => {
-  const [apiToken, setApiToken] = useState('');
+  const [apiToken, setApiToken] = usePersist('ma_railway_token', '');
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [projects, setProjects] = useState([]);

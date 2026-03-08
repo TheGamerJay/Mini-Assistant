@@ -5,6 +5,7 @@ import {
   Brain, Loader2, Send, CheckCircle, XCircle,
   Code, Search, Bug, FlaskConical, Zap, ChevronDown, ChevronUp, Network
 } from 'lucide-react';
+import { usePersist } from '../../hooks/usePersist';
 
 const BRAINS = [
   { id: 'manager',   label: 'Manager',   icon: Network,      model: 'glm-5:cloud',              color: 'cyan'   },
@@ -54,7 +55,7 @@ const STATUS_LABEL = {
 };
 
 const AgentPipeline = () => {
-  const [task, setTask] = useState('');
+  const [task, setTask] = usePersist('ma_pipeline_task', '');
   const [running, setRunning] = useState(false);
   const [ctx, setCtx] = useState(null);
   const [showContext, setShowContext] = useState(false);

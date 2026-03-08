@@ -3416,6 +3416,14 @@ async def fixloop_sessions():
     sessions = await db.fixloop_sessions.find({}, {"_id": 0}).sort("created_at", -1).limit(20).to_list(20)
     return {"sessions": sessions}
 
+@api_router.delete("/fixloop/sessions/{session_id}")
+async def delete_fixloop_session(session_id: str):
+    _require_db()
+    result = await db.fixloop_sessions.delete_one({"id": session_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"deleted": session_id}
+
 # ==================== Tester Agent ====================
 class TestRequest(BaseModel):
     url: str

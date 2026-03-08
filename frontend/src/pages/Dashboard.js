@@ -26,6 +26,7 @@ import FixLoop from '../components/FixLoop/FixLoop';
 import TesterAgent from '../components/TesterAgent/TesterAgent';
 import AgentPipeline from '../components/AgentPipeline/AgentPipeline';
 import TaskMonitor from '../components/Tasks/TaskMonitor';
+import { usePersist } from '../hooks/usePersist';
 import {
   MessageSquare,
   Mic,
@@ -61,7 +62,7 @@ const _ACTIVE_TASK_STATES = new Set([
 ]);
 
 const Dashboard = () => {
-  const [activeTab, setActiveTab] = useState('chat');
+  const [activeTab, setActiveTab] = usePersist('ma_dashboard_tab', 'chat');
   const [isOllamaConnected, setIsOllamaConnected] = useState(false);
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [activeTasks, setActiveTasks] = useState([]);

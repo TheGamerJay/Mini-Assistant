@@ -2,17 +2,18 @@ import React, { useState, useEffect } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import { Shield, AlertTriangle, CheckCircle, XCircle, Loader2, Cloud, Rocket, Settings, Activity, Database as DbIcon, Box } from 'lucide-react';
+import { usePersist } from '../../hooks/usePersist';
 
 const AdvancedTools = () => {
-  const [activeTab, setActiveTab] = useState('security');
-  
+  const [activeTab, setActiveTab] = usePersist('ma_advtools_tab', 'security');
+
   // Security Scanner State
   const [securityCode, setSecurityCode] = useState('');
   const [securityLoading, setSecurityLoading] = useState(false);
   const [vulnerabilities, setVulnerabilities] = useState([]);
-  
+
   // Deploy State
-  const [deployPlatform, setDeployPlatform] = useState('vercel');
+  const [deployPlatform, setDeployPlatform] = usePersist('ma_advtools_platform', 'vercel');
   const [deployLoading, setDeployLoading] = useState(false);
   const [deployStatus, setDeployStatus] = useState(null);
   

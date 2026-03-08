@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import { Database, Play, Table, Columns, Loader2, Check, X, RefreshCw } from 'lucide-react';
+import { usePersist } from '../../hooks/usePersist';
 
 const PostgresManager = () => {
-  const [connectionString, setConnectionString] = useState('');
+  const [connectionString, setConnectionString] = usePersist('ma_postgres_connstr', '');
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [tables, setTables] = useState([]);
