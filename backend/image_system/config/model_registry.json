@@ -1,0 +1,19 @@
+{
+  "ollama_models": {
+    "router": { "model": "qwen3:14b", "role": "routing and classification" },
+    "router_fallback": { "model": "qwen2.5:7b", "role": "fast classifier fallback" },
+    "coder": { "model": "qwen2.5-coder:14b", "role": "coding and integration" },
+    "vision": { "model": "qwen2.5vl:7b", "role": "vision and image review" },
+    "embeddings": { "model": "nomic-embed-text", "role": "embeddings and memory" }
+  },
+  "image_checkpoints": {
+    "anime_general": { "file": "animagine-xl-4.0.safetensors", "type": "SDXL", "base_size": 1024 },
+    "anime_shonen": { "file": "AbyssOrangeMix2_hard.safetensors", "type": "SD1.5", "base_size": 512 },
+    "anime_seinen": { "file": "MeinaMix_v11.safetensors", "type": "SD1.5", "base_size": 512 },
+    "anime_shojo": { "file": "counterfeit_v30.safetensors", "type": "SD1.5", "base_size": 512 },
+    "anime_slice_of_life": { "file": "anything-v5.safetensors", "type": "SD1.5", "base_size": 512 },
+    "realistic": { "file": "Realistic_Vision_V6.0_NV_B1_fp16.safetensors", "type": "SD1.5", "base_size": 512 },
+    "fantasy": { "file": "DreamShaper_8_pruned.safetensors", "type": "SD1.5", "base_size": 512 },
+    "flux_premium": { "file": "flux1-schnell.safetensors", "type": "FLUX", "base_size": 1024 }
+  }
+}

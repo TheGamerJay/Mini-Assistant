@@ -1,0 +1,73 @@
+{
+  "1": {
+    "inputs": {
+      "ckpt_name": "animagine-xl-4.0.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": { "title": "CheckpointLoaderSimple" }
+  },
+  "2": {
+    "inputs": {
+      "text": "masterpiece, best quality, highres, matching reference style, consistent art style",
+      "clip": ["1", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "CLIPTextEncode positive" }
+  },
+  "3": {
+    "inputs": {
+      "text": "lowres, bad anatomy, bad hands, cropped, worst quality, watermark, inconsistent style",
+      "clip": ["1", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "CLIPTextEncode negative" }
+  },
+  "4": {
+    "inputs": {
+      "image": "reference_image.png",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": { "title": "LoadImage" }
+  },
+  "5": {
+    "inputs": {
+      "pixels": ["4", 0],
+      "vae": ["1", 2]
+    },
+    "class_type": "VAEEncode",
+    "_meta": { "title": "VAEEncode" }
+  },
+  "6": {
+    "inputs": {
+      "seed": 42,
+      "steps": 30,
+      "cfg": 7.0,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 0.6,
+      "model": ["1", 0],
+      "positive": ["2", 0],
+      "negative": ["3", 0],
+      "latent_image": ["5", 0]
+    },
+    "class_type": "KSampler",
+    "_meta": { "title": "KSampler" }
+  },
+  "7": {
+    "inputs": {
+      "samples": ["6", 0],
+      "vae": ["1", 2]
+    },
+    "class_type": "VAEDecode",
+    "_meta": { "title": "VAEDecode" }
+  },
+  "8": {
+    "inputs": {
+      "filename_prefix": "reference_match",
+      "images": ["7", 0]
+    },
+    "class_type": "SaveImage",
+    "_meta": { "title": "SaveImage" }
+  }
+}

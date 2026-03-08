@@ -1,0 +1,81 @@
+{
+  "1": {
+    "inputs": {
+      "ckpt_name": "Realistic_Vision_V6.0_NV_B1_fp16.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": { "title": "CheckpointLoaderSimple" }
+  },
+  "2": {
+    "inputs": {
+      "text": "high quality, detailed, seamless inpainting, natural integration, professional edit",
+      "clip": ["1", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "CLIPTextEncode positive" }
+  },
+  "3": {
+    "inputs": {
+      "text": "blurry, low quality, artifacts, seam, watermark, deformed, bad anatomy",
+      "clip": ["1", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "CLIPTextEncode negative" }
+  },
+  "4": {
+    "inputs": {
+      "image": "input_image.png",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": { "title": "LoadImage" }
+  },
+  "5": {
+    "inputs": {
+      "image": "input_mask.png",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": { "title": "LoadMask" }
+  },
+  "6": {
+    "inputs": {
+      "pixels": ["4", 0],
+      "vae": ["1", 2]
+    },
+    "class_type": "VAEEncode",
+    "_meta": { "title": "VAEEncode" }
+  },
+  "7": {
+    "inputs": {
+      "seed": 42,
+      "steps": 30,
+      "cfg": 7.5,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 0.75,
+      "model": ["1", 0],
+      "positive": ["2", 0],
+      "negative": ["3", 0],
+      "latent_image": ["6", 0]
+    },
+    "class_type": "KSampler",
+    "_meta": { "title": "KSampler" }
+  },
+  "8": {
+    "inputs": {
+      "samples": ["7", 0],
+      "vae": ["1", 2]
+    },
+    "class_type": "VAEDecode",
+    "_meta": { "title": "VAEDecode" }
+  },
+  "9": {
+    "inputs": {
+      "filename_prefix": "inpaint_edit",
+      "images": ["8", 0]
+    },
+    "class_type": "SaveImage",
+    "_meta": { "title": "SaveImage" }
+  }
+}

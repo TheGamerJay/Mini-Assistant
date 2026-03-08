@@ -1,0 +1,66 @@
+{
+  "1": {
+    "inputs": {
+      "ckpt_name": "anything-v5.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": { "title": "CheckpointLoaderSimple" }
+  },
+  "2": {
+    "inputs": {
+      "text": "masterpiece, best quality, highres, cozy atmosphere, detailed anime art, soft natural lighting, everyday life",
+      "clip": ["1", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "CLIPTextEncode positive" }
+  },
+  "3": {
+    "inputs": {
+      "text": "lowres, bad anatomy, bad hands, cropped, worst quality, watermark, signature, action, battle, dark",
+      "clip": ["1", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "CLIPTextEncode negative" }
+  },
+  "4": {
+    "inputs": {
+      "width": 512,
+      "height": 512,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": { "title": "EmptyLatentImage" }
+  },
+  "5": {
+    "inputs": {
+      "seed": 42,
+      "steps": 25,
+      "cfg": 7.0,
+      "sampler_name": "euler_a",
+      "scheduler": "normal",
+      "denoise": 1.0,
+      "model": ["1", 0],
+      "positive": ["2", 0],
+      "negative": ["3", 0],
+      "latent_image": ["4", 0]
+    },
+    "class_type": "KSampler",
+    "_meta": { "title": "KSampler" }
+  },
+  "6": {
+    "inputs": {
+      "samples": ["5", 0],
+      "vae": ["1", 2]
+    },
+    "class_type": "VAEDecode",
+    "_meta": { "title": "VAEDecode" }
+  },
+  "7": {
+    "inputs": {
+      "filename_prefix": "anime_sol",
+      "images": ["6", 0]
+    },
+    "class_type": "SaveImage",
+    "_meta": { "title": "SaveImage" }
+  }
+}

@@ -1,0 +1,114 @@
+{
+  "workflows": {
+    "anime_general": {
+      "file": "anime_general.json",
+      "description": "General anime art generation using Animagine XL 4.0 (SDXL)",
+      "checkpoint_key": "anime_general",
+      "default_width": 832,
+      "default_height": 1216,
+      "default_steps": 28,
+      "default_cfg": 7.0,
+      "supports_img2img": false,
+      "supports_inpaint": false
+    },
+    "anime_shonen_action": {
+      "file": "anime_shonen_action.json",
+      "description": "High-energy shonen action scenes using AbyssOrangeMix2",
+      "checkpoint_key": "anime_shonen",
+      "default_width": 640,
+      "default_height": 512,
+      "default_steps": 30,
+      "default_cfg": 7.5,
+      "supports_img2img": false,
+      "supports_inpaint": false
+    },
+    "anime_seinen_cinematic": {
+      "file": "anime_seinen_cinematic.json",
+      "description": "Dark, mature anime cinematics using MeinaMix",
+      "checkpoint_key": "anime_seinen",
+      "default_width": 768,
+      "default_height": 432,
+      "default_steps": 32,
+      "default_cfg": 7.5,
+      "supports_img2img": false,
+      "supports_inpaint": false
+    },
+    "anime_shojo_romance": {
+      "file": "anime_shojo_romance.json",
+      "description": "Soft romantic anime art using Counterfeit V3",
+      "checkpoint_key": "anime_shojo",
+      "default_width": 512,
+      "default_height": 768,
+      "default_steps": 28,
+      "default_cfg": 7.0,
+      "supports_img2img": false,
+      "supports_inpaint": false
+    },
+    "anime_slice_of_life": {
+      "file": "anime_slice_of_life.json",
+      "description": "Cozy everyday anime scenes using Anything V5",
+      "checkpoint_key": "anime_slice_of_life",
+      "default_width": 512,
+      "default_height": 512,
+      "default_steps": 25,
+      "default_cfg": 7.0,
+      "supports_img2img": false,
+      "supports_inpaint": false
+    },
+    "realistic_photo": {
+      "file": "realistic_photo.json",
+      "description": "Photorealistic images using Realistic Vision V6",
+      "checkpoint_key": "realistic",
+      "default_width": 512,
+      "default_height": 768,
+      "default_steps": 30,
+      "default_cfg": 7.0,
+      "supports_img2img": true,
+      "supports_inpaint": false
+    },
+    "fantasy_cinematic": {
+      "file": "fantasy_cinematic.json",
+      "description": "Epic fantasy scenes using DreamShaper 8",
+      "checkpoint_key": "fantasy",
+      "default_width": 768,
+      "default_height": 512,
+      "default_steps": 35,
+      "default_cfg": 7.5,
+      "supports_img2img": false,
+      "supports_inpaint": false
+    },
+    "flux_high_realism": {
+      "file": "flux_high_realism.json",
+      "description": "Ultra-realistic premium quality using FLUX Schnell",
+      "checkpoint_key": "flux_premium",
+      "default_width": 1024,
+      "default_height": 1024,
+      "default_steps": 4,
+      "default_cfg": 1.0,
+      "supports_img2img": false,
+      "supports_inpaint": false
+    },
+    "image_edit_inpaint": {
+      "file": "image_edit_inpaint.json",
+      "description": "Inpainting workflow for editing existing images",
+      "checkpoint_key": "realistic",
+      "default_width": 512,
+      "default_height": 512,
+      "default_steps": 30,
+      "default_cfg": 7.5,
+      "supports_img2img": true,
+      "supports_inpaint": true
+    },
+    "image_reference_match": {
+      "file": "image_reference_match.json",
+      "description": "Generate images matching a reference style via img2img",
+      "checkpoint_key": "anime_general",
+      "default_width": 832,
+      "default_height": 1216,
+      "default_steps": 30,
+      "default_cfg": 7.0,
+      "supports_img2img": true,
+      "supports_inpaint": false
+    }
+  }
+}

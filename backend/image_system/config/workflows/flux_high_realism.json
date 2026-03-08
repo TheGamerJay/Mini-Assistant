@@ -1,0 +1,66 @@
+{
+  "1": {
+    "inputs": {
+      "ckpt_name": "flux1-schnell.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": { "title": "CheckpointLoaderSimple" }
+  },
+  "2": {
+    "inputs": {
+      "text": "ultra detailed, professional, 8k resolution, photorealistic, perfect composition, masterwork",
+      "clip": ["1", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "CLIPTextEncode positive" }
+  },
+  "3": {
+    "inputs": {
+      "text": "blurry, low quality, watermark, text, signature, deformed",
+      "clip": ["1", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "CLIPTextEncode negative" }
+  },
+  "4": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": { "title": "EmptyLatentImage" }
+  },
+  "5": {
+    "inputs": {
+      "seed": 42,
+      "steps": 4,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0,
+      "model": ["1", 0],
+      "positive": ["2", 0],
+      "negative": ["3", 0],
+      "latent_image": ["4", 0]
+    },
+    "class_type": "KSampler",
+    "_meta": { "title": "KSampler" }
+  },
+  "6": {
+    "inputs": {
+      "samples": ["5", 0],
+      "vae": ["1", 2]
+    },
+    "class_type": "VAEDecode",
+    "_meta": { "title": "VAEDecode" }
+  },
+  "7": {
+    "inputs": {
+      "filename_prefix": "flux_realism",
+      "images": ["6", 0]
+    },
+    "class_type": "SaveImage",
+    "_meta": { "title": "SaveImage" }
+  }
+}

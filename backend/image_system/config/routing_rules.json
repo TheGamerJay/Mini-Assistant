@@ -1,0 +1,128 @@
+{
+  "keyword_rules": [
+    {
+      "keywords": ["ultra realistic", "premium quality", "flux", "best quality photorealistic", "hyperrealistic 8k"],
+      "checkpoint": "flux_premium",
+      "workflow": "flux_high_realism",
+      "style_family": "realistic",
+      "anime_genre": null,
+      "visual_mode": "portrait"
+    },
+    {
+      "keywords": ["realistic", "photo", "dslr", "portrait photography", "cinematic photo", "human skin", "photograph", "photorealistic", "raw photo", "camera", "studio lighting", "bokeh", "lens"],
+      "checkpoint": "realistic",
+      "workflow": "realistic_photo",
+      "style_family": "realistic",
+      "anime_genre": null,
+      "visual_mode": "portrait"
+    },
+    {
+      "keywords": ["fantasy warrior", "dragon", "castle", "magic", "rpg", "creature", "epic cinematic", "wizard", "sorcerer", "dungeon", "sword and sorcery", "knight", "mythical", "ancient ruins", "mystical forest", "dark fantasy"],
+      "checkpoint": "fantasy",
+      "workflow": "fantasy_cinematic",
+      "style_family": "fantasy",
+      "anime_genre": null,
+      "visual_mode": "landscape"
+    },
+    {
+      "keywords": ["battle", "aura", "energy blast", "sword clash", "power up", "shonen", "fighting", "action pose", "combat", "explosion", "ki", "chakra", "super saiyan", "berserker", "rage", "fierce", "rivalry", "tournament"],
+      "checkpoint": "anime_shonen",
+      "workflow": "anime_shonen_action",
+      "style_family": "anime",
+      "anime_genre": "shonen",
+      "visual_mode": "action"
+    },
+    {
+      "keywords": ["dark anime", "grim", "mature", "emotional cinematic", "serious warrior", "seinen", "psychological", "melancholy", "war veteran", "anti-hero", "morally grey", "tragedy", "brutal", "haunted", "complex character", "seinen anime"],
+      "checkpoint": "anime_seinen",
+      "workflow": "anime_seinen_cinematic",
+      "style_family": "anime",
+      "anime_genre": "seinen",
+      "visual_mode": "cinematic"
+    },
+    {
+      "keywords": ["romance", "shojo", "soft love", "elegant anime", "couple", "pretty anime", "shoujo", "magical girl", "flower", "pastel", "gentle", "sweet", "love story", "wedding", "ribbon", "heartwarming", "soft"],
+      "checkpoint": "anime_shojo",
+      "workflow": "anime_shojo_romance",
+      "style_family": "anime",
+      "anime_genre": "shojo",
+      "visual_mode": "portrait"
+    },
+    {
+      "keywords": ["school", "cafe", "daily life", "cozy anime", "classroom", "slice of life", "everyday", "after school", "lunch break", "club activity", "uniform", "convenience store", "neighborhood", "summer vacation", "ordinary"],
+      "checkpoint": "anime_slice_of_life",
+      "workflow": "anime_slice_of_life",
+      "style_family": "anime",
+      "anime_genre": "slice_of_life",
+      "visual_mode": "casual"
+    },
+    {
+      "keywords": ["anime", "manga", "cartoon", "2d", "drawn", "illustrated", "otaku", "waifu", "chibi", "moe", "kawaii", "neko", "elf", "fox girl", "catgirl", "demon lord", "isekai", "light novel"],
+      "checkpoint": "anime_general",
+      "workflow": "anime_general",
+      "style_family": "anime",
+      "anime_genre": "general",
+      "visual_mode": "portrait"
+    }
+  ],
+  "fallback_routes": {
+    "anime": {
+      "checkpoint": "anime_general",
+      "workflow": "anime_general"
+    },
+    "realistic": {
+      "checkpoint": "realistic",
+      "workflow": "realistic_photo"
+    },
+    "fantasy": {
+      "checkpoint": "fantasy",
+      "workflow": "fantasy_cinematic"
+    }
+  },
+  "size_map": {
+    "SD1.5": {
+      "portrait": { "width": 512, "height": 768 },
+      "landscape": { "width": 768, "height": 512 },
+      "square": { "width": 512, "height": 512 },
+      "action": { "width": 640, "height": 512 },
+      "cinematic": { "width": 768, "height": 432 },
+      "casual": { "width": 512, "height": 512 }
+    },
+    "SDXL": {
+      "portrait": { "width": 832, "height": 1216 },
+      "landscape": { "width": 1216, "height": 832 },
+      "square": { "width": 1024, "height": 1024 },
+      "action": { "width": 1024, "height": 768 },
+      "cinematic": { "width": 1280, "height": 720 },
+      "casual": { "width": 1024, "height": 1024 }
+    },
+    "FLUX": {
+      "portrait": { "width": 768, "height": 1024 },
+      "landscape": { "width": 1024, "height": 768 },
+      "square": { "width": 1024, "height": 1024 },
+      "action": { "width": 1024, "height": 768 },
+      "cinematic": { "width": 1280, "height": 720 },
+      "casual": { "width": 1024, "height": 1024 }
+    }
+  },
+  "quality_presets": {
+    "fast": {
+      "steps": 20,
+      "cfg": 7.0,
+      "sampler": "euler_a",
+      "scheduler": "normal"
+    },
+    "balanced": {
+      "steps": 28,
+      "cfg": 7.5,
+      "sampler": "dpmpp_2m",
+      "scheduler": "karras"
+    },
+    "high": {
+      "steps": 40,
+      "cfg": 8.0,
+      "sampler": "dpmpp_2m_sde",
+      "scheduler": "karras"
+    }
+  }
+}

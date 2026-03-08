@@ -4064,6 +4064,20 @@ app.include_router(api_router)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Image System API  (/api/image/*, /api/models/*)
+# Mounts the local Ollama+ComfyUI multi-brain image router as a sub-application.
+# ══════════════════════════════════════════════════════════════════════════════
+try:
+    import sys as _sys, pathlib as _pl
+    _sys.path.insert(0, str(_pl.Path(__file__).parent))
+    from image_system.api.server import app as _image_app
+    app.mount("/image-api", _image_app)
+    logger.info("Image system mounted at /image-api")
+except Exception as _img_err:
+    logger.warning(f"Image system not available: {_img_err}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Orchestrator Task API  (/api/tasks/*)
 # ══════════════════════════════════════════════════════════════════════════════
 # Provides REST access to the OrchestratorEngine – the macro-level state
