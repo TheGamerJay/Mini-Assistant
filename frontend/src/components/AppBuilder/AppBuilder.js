@@ -1836,174 +1836,139 @@ const AppBuilder = () => {
           ) : (
             <div className="flex-1 flex flex-col overflow-hidden">
 
-              {/* ── Toolbar ── */}
-              <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-cyan-500/20 bg-black/50 flex-shrink-0 flex-wrap">
-                <CheckCircle className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />
-                <span className="text-[11px] font-mono text-green-400 flex-1 truncate min-w-0">{generatedApp.name}</span>
+              {/* ── Toolbar Row 1: Identity + Edit tools ── */}
+              <div className="flex items-center gap-2 px-4 py-2 border-b border-cyan-500/10 bg-black/60 flex-shrink-0">
+                <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
+                <span className="text-xs font-mono text-green-300 flex-1 truncate min-w-0 mr-1">{generatedApp.name}</span>
 
-                {/* Readiness score */}
                 {readinessScore !== null && (
-                  <span title="Project readiness score (scan + console + readme)"
-                    className={`text-[10px] font-mono px-1.5 py-0.5 border rounded-sm ${readinessColor} border-current/30 flex items-center gap-1`}>
+                  <span title="Project readiness score"
+                    className={`text-[10px] font-mono px-2 py-0.5 border rounded-sm ${readinessColor} border-current/40 flex items-center gap-1 flex-shrink-0`}>
                     <TrendingUp className="w-2.5 h-2.5" />{readinessScore}%
                   </span>
                 )}
 
-                {/* Undo / Redo */}
-                <button onClick={undo} disabled={!undoStack.length}
-                  title={`Undo (${undoStack.length})`}
-                  className="flex items-center gap-1 px-2 py-1 text-slate-400 hover:text-cyan-400 disabled:opacity-30 disabled:cursor-not-allowed text-[10px] font-mono uppercase transition-colors border border-slate-700/40 rounded-sm hover:border-cyan-500/40">
-                  <Undo2 className="w-3 h-3" /> Undo
-                </button>
-                <button onClick={redo} disabled={!redoStack.length}
-                  title={`Redo (${redoStack.length})`}
-                  className="flex items-center gap-1 px-2 py-1 text-slate-400 hover:text-cyan-400 disabled:opacity-30 disabled:cursor-not-allowed text-[10px] font-mono uppercase transition-colors border border-slate-700/40 rounded-sm hover:border-cyan-500/40">
-                  <Redo2 className="w-3 h-3" /> Redo
-                </button>
+                <div className="w-px h-5 bg-slate-700/60 mx-1" />
 
-                {/* Save version */}
-                <button onClick={saveVersion}
-                  title="Save a named restore point"
-                  className="flex items-center gap-1 px-2 py-1 text-yellow-500/80 hover:text-yellow-400 text-[10px] font-mono uppercase transition-colors border border-yellow-700/30 rounded-sm hover:border-yellow-500/50">
-                  <BookmarkPlus className="w-3 h-3" /> Save
+                {/* Undo / Redo / Save */}
+                <button onClick={undo} disabled={!undoStack.length} title={`Undo (${undoStack.length})`}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-slate-400 hover:text-cyan-400 disabled:opacity-25 text-xs font-mono uppercase transition-colors border border-slate-700/40 rounded-sm hover:border-cyan-500/40 disabled:cursor-not-allowed">
+                  <Undo2 className="w-3.5 h-3.5" /> UNDO
                 </button>
-
-                {/* History */}
+                <button onClick={redo} disabled={!redoStack.length} title={`Redo (${redoStack.length})`}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-slate-400 hover:text-cyan-400 disabled:opacity-25 text-xs font-mono uppercase transition-colors border border-slate-700/40 rounded-sm hover:border-cyan-500/40 disabled:cursor-not-allowed">
+                  <Redo2 className="w-3.5 h-3.5" /> REDO
+                </button>
+                <button onClick={saveVersion} title="Save restore point"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-yellow-400/80 hover:text-yellow-300 text-xs font-mono uppercase transition-colors border border-yellow-700/40 rounded-sm hover:border-yellow-500/50 hover:bg-yellow-500/5">
+                  <BookmarkPlus className="w-3.5 h-3.5" /> SAVE
+                </button>
                 <button onClick={() => setShowVersions(v => !v)}
-                  className={`flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase transition-colors border rounded-sm ${
-                    showVersions ? 'bg-violet-500/20 border-violet-500/50 text-violet-300' : 'text-slate-400 border-slate-700/40 hover:text-violet-400 hover:border-violet-500/40'
-                  }`}>
-                  <History className="w-3 h-3" /> {versions.length > 0 ? `History (${versions.length})` : 'History'}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono uppercase transition-colors border rounded-sm ${
+                    showVersions ? 'bg-violet-500/20 border-violet-500/50 text-violet-300' : 'text-slate-400 border-slate-700/40 hover:text-violet-400 hover:border-violet-500/40'}`}>
+                  <History className="w-3.5 h-3.5" /> HISTORY{versions.length > 0 ? ` (${versions.length})` : ''}
                 </button>
 
-                {/* Test / Scan */}
-                <button
-                  onClick={runScan}
-                  disabled={scanLoading || !generatedApp?.project}
-                  title="Static scan — checks accessibility, mobile, performance, error handling"
-                  className={`flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase transition-colors border rounded-sm disabled:opacity-30 ${
+                <div className="w-px h-5 bg-slate-700/60 mx-1" />
+
+                {/* Test / Console / Split / ⌃K */}
+                <button onClick={runScan} disabled={scanLoading || !generatedApp?.project}
+                  title="Static code scan"
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono uppercase transition-colors border rounded-sm disabled:opacity-30 ${
                     showScanPanel
                       ? (scanResult?.counts && Object.values(scanResult.counts).some(v => v > 0)
                           ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
                           : 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300')
-                      : 'text-slate-400 border-slate-700/40 hover:text-amber-400 hover:border-amber-500/40'
-                  }`}
-                >
-                  {scanLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Bug className="w-3 h-3" />}
-                  {scanResult ? `Score ${scanResult.score}` : 'Test'}
+                      : 'text-slate-400 border-slate-700/40 hover:text-amber-400 hover:border-amber-500/40'}`}>
+                  {scanLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bug className="w-3.5 h-3.5" />}
+                  {scanResult ? `SCORE ${scanResult.score}` : 'TEST'}
                 </button>
-
-                {/* Console */}
-                <button
-                  onClick={() => setShowConsole(v => !v)}
-                  title="Console errors captured from preview"
-                  className={`flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase transition-colors border rounded-sm ${
+                <button onClick={() => setShowConsole(v => !v)} title="Console errors"
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono uppercase transition-colors border rounded-sm ${
                     consoleErrors.some(e => e.level === 'error')
                       ? 'bg-red-500/20 border-red-500/50 text-red-300'
-                      : showConsole
-                      ? 'bg-slate-700/40 border-slate-500 text-slate-300'
-                      : 'text-slate-500 border-slate-700/30 hover:text-slate-300 hover:border-slate-500'
-                  }`}
-                >
-                  <Terminal className="w-3 h-3" />
-                  {consoleErrors.length > 0 ? consoleErrors.length : 'Console'}
+                      : showConsole ? 'bg-slate-700/40 border-slate-500 text-slate-300'
+                      : 'text-slate-500 border-slate-700/30 hover:text-slate-300 hover:border-slate-500'}`}>
+                  <Terminal className="w-3.5 h-3.5" />
+                  {consoleErrors.length > 0 ? consoleErrors.length : 'CONSOLE'}
                 </button>
-
-                {/* Split View */}
-                <button
-                  onClick={() => setSplitView(v => !v)}
-                  title="Toggle split view — preview + code side by side (⌃\)"
-                  className={`flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase transition-colors border rounded-sm ${
-                    splitView
-                      ? 'bg-sky-500/20 border-sky-500/50 text-sky-300'
-                      : 'text-slate-500 border-slate-700/30 hover:text-sky-400 hover:border-sky-500/40'
-                  }`}
-                >
-                  <Columns className="w-3 h-3" /> Split
+                <button onClick={() => setSplitView(v => !v)} title="Split view (⌃\)"
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono uppercase transition-colors border rounded-sm ${
+                    splitView ? 'bg-sky-500/20 border-sky-500/50 text-sky-300' : 'text-slate-500 border-slate-700/30 hover:text-sky-400 hover:border-sky-500/40'}`}>
+                  <Columns className="w-3.5 h-3.5" /> SPLIT
                 </button>
-
-                {/* Command Palette */}
-                <button
-                  onClick={() => { setShowCmdPalette(true); setCmdQuery(''); setCmdIndex(0); }}
-                  title="Command palette (⌃K)"
-                  className="flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase transition-colors border rounded-sm text-slate-500 border-slate-700/30 hover:text-cyan-400 hover:border-cyan-500/40"
-                >
-                  <Command className="w-3 h-3" /> ⌃K
+                <button onClick={() => { setShowCmdPalette(true); setCmdQuery(''); setCmdIndex(0); }} title="Command palette"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono uppercase transition-colors border rounded-sm text-slate-500 border-slate-700/30 hover:text-cyan-400 hover:border-cyan-500/40">
+                  <Command className="w-3.5 h-3.5" /> ⌃K
                 </button>
+              </div>
 
-                {/* File Explorer */}
-                <button
-                  onClick={() => setShowFileExplorer(v => !v)}
-                  title="File explorer — manage files and assets"
-                  className={`flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase transition-colors border rounded-sm ${
-                    showFileExplorer
-                      ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300'
-                      : 'text-slate-500 border-slate-700/30 hover:text-indigo-400 hover:border-indigo-500/40'
-                  }`}
-                >
-                  <FolderTree className="w-3 h-3" />
-                  Files {((generatedApp?.project?.extra_files?.length || 0) + (generatedApp?.project?.assets?.length || 0)) > 0
-                    ? `(${(generatedApp?.project?.extra_files?.length || 0) + (generatedApp?.project?.assets?.length || 0)})`
+              {/* ── Toolbar Row 2: Panels + Export + Deploy ── */}
+              <div className="flex items-center gap-2 px-4 py-2 border-b border-cyan-500/20 bg-black/40 flex-shrink-0">
+                {/* Panels group */}
+                <span className="text-[9px] font-mono text-slate-600 uppercase tracking-widest mr-1">PANELS</span>
+                <button onClick={() => setShowFileExplorer(v => !v)} title="File explorer"
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono uppercase transition-colors border rounded-sm ${
+                    showFileExplorer ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300' : 'text-slate-500 border-slate-700/30 hover:text-indigo-400 hover:border-indigo-500/40'}`}>
+                  <FolderTree className="w-3.5 h-3.5" /> FILES
+                  {((generatedApp?.project?.extra_files?.length || 0) + (generatedApp?.project?.assets?.length || 0)) > 0
+                    ? ` (${(generatedApp?.project?.extra_files?.length || 0) + (generatedApp?.project?.assets?.length || 0)})`
                     : ''}
                 </button>
-
-                {/* Action Log */}
-                <button onClick={() => setShowActionLog(v => !v)}
-                  title="Action log — history of all workspace actions"
-                  className={`flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase transition-colors border rounded-sm ${showActionLog ? 'bg-slate-700/40 border-slate-500 text-slate-300' : 'text-slate-500 border-slate-700/30 hover:text-slate-300 hover:border-slate-500'}`}>
-                  <Activity className="w-3 h-3" />
-                  {actionLog.length > 0 ? actionLog.length : 'Log'}
+                <button onClick={() => setShowActionLog(v => !v)} title="Action log"
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono uppercase transition-colors border rounded-sm ${
+                    showActionLog ? 'bg-slate-700/40 border-slate-500 text-slate-300' : 'text-slate-500 border-slate-700/30 hover:text-slate-300 hover:border-slate-500'}`}>
+                  <Activity className="w-3.5 h-3.5" /> {actionLog.length > 0 ? `LOG (${actionLog.length})` : 'LOG'}
+                </button>
+                <button onClick={() => setShowNotes(v => !v)} title="Project notes"
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono uppercase transition-colors border rounded-sm ${
+                    showNotes ? 'bg-yellow-500/20 border-yellow-500/50 text-yellow-300' : 'text-slate-500 border-slate-700/30 hover:text-yellow-400 hover:border-yellow-500/40'}`}>
+                  <StickyNote className="w-3.5 h-3.5" /> NOTES
+                </button>
+                <button onClick={explainArchitecture} disabled={archLoading} title="AI architecture explain"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono uppercase transition-colors border rounded-sm text-slate-500 border-slate-700/30 hover:text-violet-400 hover:border-violet-500/40 disabled:opacity-30">
+                  {archLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <GitCommit className="w-3.5 h-3.5" />} ARCH
                 </button>
 
-                {/* Notes */}
-                <button onClick={() => setShowNotes(v => !v)}
-                  title="Project notes"
-                  className={`flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase transition-colors border rounded-sm ${showNotes ? 'bg-yellow-500/20 border-yellow-500/50 text-yellow-300' : 'text-slate-500 border-slate-700/30 hover:text-yellow-400 hover:border-yellow-500/40'}`}>
-                  <StickyNote className="w-3 h-3" /> Notes
+                <div className="w-px h-5 bg-slate-700/60 mx-2" />
+
+                {/* Export group */}
+                <span className="text-[9px] font-mono text-slate-600 uppercase tracking-widest mr-1">EXPORT</span>
+                <button onClick={openInBrowser}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-500/15 border border-cyan-500/40 text-cyan-400 text-xs font-mono uppercase rounded-sm hover:bg-cyan-500/25 transition-all">
+                  <Eye className="w-3.5 h-3.5" /> OPEN
+                </button>
+                <button onClick={downloadApp}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-500/15 border border-violet-500/40 text-violet-400 text-xs font-mono uppercase rounded-sm hover:bg-violet-500/25 transition-all">
+                  <Download className="w-3.5 h-3.5" /> .HTML
+                </button>
+                <button onClick={exportZip}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-xs font-mono uppercase rounded-sm hover:bg-emerald-500/25 transition-all">
+                  <Package className="w-3.5 h-3.5" /> ZIP
+                </button>
+                <button onClick={exportSessionJson} title="Export session as importable JSON"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700/30 border border-slate-600/40 text-slate-400 text-xs font-mono uppercase rounded-sm hover:bg-slate-600/30 transition-all">
+                  <Download className="w-3.5 h-3.5" /> JSON
                 </button>
 
-                {/* Arch explain */}
-                <button onClick={explainArchitecture} disabled={archLoading}
-                  title="AI explains the project architecture"
-                  className="flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase transition-colors border rounded-sm text-slate-500 border-slate-700/30 hover:text-violet-400 hover:border-violet-500/40 disabled:opacity-30">
-                  {archLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <GitCommit className="w-3 h-3" />} Arch
+                <div className="w-px h-5 bg-slate-700/60 mx-2" />
+
+                {/* Deploy group */}
+                <span className="text-[9px] font-mono text-slate-600 uppercase tracking-widest mr-1">DEPLOY</span>
+                <button onClick={() => { setShowGithubModal(true); setGithubResult(null); }} title="Push to GitHub"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800/70 border border-gray-600/50 text-gray-300 text-xs font-mono uppercase rounded-sm hover:bg-gray-700/70 hover:text-white transition-all">
+                  <Github className="w-3.5 h-3.5" /> GITHUB
+                </button>
+                <button onClick={() => { setShowVercelModal(true); setVercelResult(null); }} title="Deploy to Vercel"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-black/70 border border-white/25 text-white text-xs font-mono uppercase rounded-sm hover:bg-white/10 transition-all">
+                  <Globe className="w-3.5 h-3.5" /> VERCEL
                 </button>
 
-                <div className="w-px h-4 bg-slate-700/60 mx-0.5" />
-
-                <button onClick={openInBrowser} className="flex items-center gap-1 px-2 py-1 bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 text-[10px] font-mono uppercase rounded-sm hover:bg-cyan-500/30 transition-all">
-                  <Eye className="w-3 h-3" /> Open
-                </button>
-                <button onClick={downloadApp} className="flex items-center gap-1 px-2 py-1 bg-violet-500/20 border border-violet-500/40 text-violet-400 text-[10px] font-mono uppercase rounded-sm hover:bg-violet-500/30 transition-all">
-                  <Download className="w-3 h-3" /> .HTML
-                </button>
-                <button onClick={exportZip} className="flex items-center gap-1 px-2 py-1 bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-[10px] font-mono uppercase rounded-sm hover:bg-emerald-500/30 transition-all">
-                  <Package className="w-3 h-3" /> ZIP
-                </button>
-                <button onClick={exportSessionJson} title="Export full session as JSON (importable)"
-                  className="flex items-center gap-1 px-2 py-1 bg-slate-500/20 border border-slate-500/40 text-slate-400 text-[10px] font-mono uppercase rounded-sm hover:bg-slate-500/30 transition-all">
-                  <Download className="w-3 h-3" /> JSON
-                </button>
-
-                <div className="w-px h-4 bg-slate-700/60 mx-0.5" />
-
-                {/* GitHub push */}
-                <button onClick={() => { setShowGithubModal(true); setGithubResult(null); }}
-                  title="Push to GitHub repository"
-                  className="flex items-center gap-1 px-2 py-1 bg-gray-900/60 border border-gray-600/50 text-gray-300 text-[10px] font-mono uppercase rounded-sm hover:bg-gray-800 hover:text-white transition-all">
-                  <Github className="w-3 h-3" /> GitHub
-                </button>
-
-                {/* Vercel deploy */}
-                <button onClick={() => { setShowVercelModal(true); setVercelResult(null); }}
-                  title="Deploy to Vercel as a live site"
-                  className="flex items-center gap-1 px-2 py-1 bg-black border border-white/20 text-white text-[10px] font-mono uppercase rounded-sm hover:bg-white/10 transition-all">
-                  <Globe className="w-3 h-3" /> Vercel
-                </button>
+                <div className="flex-1" />
 
                 <button onClick={() => { setGeneratedApp(null); setDescription(''); setEditInput(''); setEditHistory([]); setUndoStack([]); setRedoStack([]); setVersions([]); setActiveTab('preview'); setDiffView(null); setShowFileExplorer(false); setScanResult(null); setConsoleErrors([]); }}
-                  className="flex items-center gap-1 px-2 py-1 text-slate-500 hover:text-slate-300 text-[10px] font-mono uppercase transition-colors border border-slate-700/30 rounded-sm hover:border-slate-500/50">
-                  <RotateCcw className="w-3 h-3" /> New
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-slate-500 hover:text-slate-300 text-xs font-mono uppercase transition-colors border border-slate-700/30 rounded-sm hover:border-slate-500/50">
+                  <RotateCcw className="w-3.5 h-3.5" /> NEW
                 </button>
               </div>
 
