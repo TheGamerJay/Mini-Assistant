@@ -11,7 +11,7 @@ import {
   FilePlus, FolderTree, FileText, Folder,
   Github, Globe, Share2, LogIn, Lock, Unlock, Link, Copy, CheckSquare,
   Columns, Command, Server,
-  Activity, StickyNote, Star, AlignLeft, Replace, ChevronDown, ChevronRight,
+  Activity, StickyNote, Star, AlignLeft, Replace, ChevronDown,
   Copy as CopyIcon, Shield, ShieldOff, FileSearch, GitCommit, TrendingUp
 } from 'lucide-react';
 
