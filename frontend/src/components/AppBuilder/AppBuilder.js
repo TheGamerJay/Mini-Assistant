@@ -1401,6 +1401,7 @@ const AppBuilder = () => {
 
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
+    <>
     <div className="h-full flex flex-col bg-[#0a0a0f]/50" data-testid="app-builder">
 
       {/* Header */}
@@ -2885,6 +2886,7 @@ const AppBuilder = () => {
         </div>
       </div>
     )}
+    </>
   );
 };
 
