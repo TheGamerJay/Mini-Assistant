@@ -20,6 +20,7 @@ from gtts import gTTS
 from duckduckgo_search import DDGS
 import tempfile
 import subprocess
+import httpx
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -899,6 +900,7 @@ class CodeReviewRequest(BaseModel):
 class GitRemoteRequest(BaseModel):
     name: str
     url: str
+    github_token: str = ""
 
 class AppBuilderEditRequest(BaseModel):
     html: Optional[str] = None          # legacy / fallback
@@ -2137,6 +2139,22 @@ class GitPullRequest(BaseModel):
 class GitBranchRequest(BaseModel):
     name: str
 
+class GitWriteFilesRequest(BaseModel):
+    files: Dict[str, str]  # {filename: content}
+
+# ── Git workspace helpers ──────────────────────────────────────────────────────
+_GIT_WORKSPACE = Path("/tmp/ma_workspace")
+
+def _git_ws() -> str:
+    _GIT_WORKSPACE.mkdir(parents=True, exist_ok=True)
+    return str(_GIT_WORKSPACE)
+
+def _auth_url(url: str, token: str) -> str:
+    """Embed GitHub token into HTTPS URL for authentication."""
+    if token and url.startswith("https://"):
+        return url.replace("https://", f"https://{token}@", 1)
+    return url
+
 class CodeRunRequest(BaseModel):
     code: str
     language: str = "python"
@@ -2226,29 +2244,36 @@ Format response as JSON:
         raise HTTPException(status_code=500, detail=f"Review error: {str(e)}")
 
 # Git Integration
+@api_router.post("/git/write-files")
+async def git_write_files(request: GitWriteFilesRequest):
+    """Write project files into the git workspace so they can be committed."""
+    try:
+        ws = Path(_git_ws())
+        written = []
+        for filename, content in request.files.items():
+            # Sanitize: no path traversal
+            safe_name = Path(filename).name
+            (ws / safe_name).write_text(content, encoding="utf-8")
+            written.append(safe_name)
+        return {"success": True, "written": written}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Write files error: {str(e)}")
+
 @api_router.get("/git/status")
 async def git_status():
     try:
+        ws = _git_ws()
         result = subprocess.run(
-            "cd /app && git status --porcelain -b",
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=5
+            ["git", "status", "--porcelain", "-b"],
+            capture_output=True, text=True, timeout=5, cwd=ws
         )
-        
-        # Check if git repo exists
+
         if result.returncode != 0:
-            return {
-                "initialized": False,
-                "branch": None,
-                "modified": [],
-                "staged": []
-            }
-        
+            return {"initialized": False, "branch": None, "modified": [], "staged": []}
+
         lines = result.stdout.strip().split('\n')
         branch = lines[0].split('/')[-1] if lines else 'main'
-        
+
         modified = []
         staged = []
         for line in lines[1:]:
@@ -2259,37 +2284,20 @@ async def git_status():
                     modified.append(filename)
                 if status[0] in ['A', 'M', 'D']:
                     staged.append(filename)
-        
-        return {
-            "initialized": True,
-            "branch": branch,
-            "modified": modified,
-            "staged": staged,
-            "branches": []
-        }
+
+        return {"initialized": True, "branch": branch, "modified": modified, "staged": staged, "branches": []}
     except Exception as e:
-        return {
-            "initialized": False,
-            "branch": None,
-            "modified": [],
-            "staged": []
-        }
+        return {"initialized": False, "branch": None, "modified": [], "staged": []}
 
 @api_router.post("/git/init")
 async def git_init():
     try:
-        result = subprocess.run(
-            "cd /app && git init",
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        
+        ws = _git_ws()
+        result = subprocess.run(["git", "init"], capture_output=True, text=True, timeout=5, cwd=ws)
+
         if result.returncode == 0:
-            # Configure git user
-            subprocess.run("cd /app && git config user.name 'Mini Assistant'", shell=True)
-            subprocess.run("cd /app && git config user.email 'mini@assistant.ai'", shell=True)
+            subprocess.run(["git", "config", "user.name", "Mini Assistant"], cwd=ws)
+            subprocess.run(["git", "config", "user.email", "mini@assistant.ai"], cwd=ws)
             return {"success": True, "message": "Repository initialized"}
         else:
             raise HTTPException(status_code=500, detail=result.stderr)
@@ -2297,17 +2305,11 @@ async def git_init():
         raise HTTPException(status_code=500, detail=f"Init error: {str(e)}")
 
 @api_router.post("/git/add")
-async def git_add(files: List[str] = ["."])  :
+async def git_add(files: List[str] = ["."]):
     try:
-        file_list = " ".join(files)
-        result = subprocess.run(
-            f"cd /app && git add {file_list}",
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        
+        ws = _git_ws()
+        result = subprocess.run(["git", "add"] + files, capture_output=True, text=True, timeout=10, cwd=ws)
+
         if result.returncode == 0:
             return {"success": True, "message": "Files staged"}
         else:
@@ -2318,14 +2320,12 @@ async def git_add(files: List[str] = ["."])  :
 @api_router.post("/git/commit")
 async def git_commit(request: GitCommitRequest):
     try:
+        ws = _git_ws()
         result = subprocess.run(
-            f'cd /app && git commit -m "{request.message}"',
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=10
+            ["git", "commit", "-m", request.message],
+            capture_output=True, text=True, timeout=10, cwd=ws
         )
-        
+
         if result.returncode == 0 or "nothing to commit" in result.stdout:
             return {"success": True, "message": "Changes committed"}
         else:
@@ -2336,32 +2336,28 @@ async def git_commit(request: GitCommitRequest):
 @api_router.post("/git/push")
 async def git_push(request: GitPushRequest):
     try:
+        ws = _git_ws()
         result = subprocess.run(
-            f"cd /app && git push {request.remote} {request.branch}",
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=30
+            ["git", "push", request.remote, request.branch],
+            capture_output=True, text=True, timeout=30, cwd=ws
         )
-        
+
         if result.returncode == 0:
             return {"success": True, "message": "Pushed successfully"}
         else:
-            raise HTTPException(status_code=500, detail=result.stderr or "Push failed. Make sure remote is configured and you have permissions.")
+            raise HTTPException(status_code=500, detail=result.stderr or "Push failed. Make sure remote is configured with a valid token.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Push error: {str(e)}")
 
 @api_router.post("/git/pull")
 async def git_pull(request: GitPullRequest):
     try:
+        ws = _git_ws()
         result = subprocess.run(
-            f"cd /app && git pull {request.remote} {request.branch}",
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=30
+            ["git", "pull", request.remote, request.branch],
+            capture_output=True, text=True, timeout=30, cwd=ws
         )
-        
+
         if result.returncode == 0:
             return {"success": True, "message": "Pulled successfully"}
         else:
@@ -2372,43 +2368,31 @@ async def git_pull(request: GitPullRequest):
 @api_router.post("/git/remote/add")
 async def git_add_remote(request: GitRemoteRequest):
     try:
+        ws = _git_ws()
+        auth_url = _auth_url(request.url, request.github_token)
+
+        # Remove existing remote with same name if it exists
+        subprocess.run(["git", "remote", "remove", request.name], cwd=ws, capture_output=True)
+
         result = subprocess.run(
-            f"cd /app && git remote add {request.name} {request.url}",
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=5
+            ["git", "remote", "add", request.name, auth_url],
+            capture_output=True, text=True, timeout=5, cwd=ws
         )
-        
         if result.returncode == 0:
             return {"success": True, "message": f"Remote '{request.name}' added"}
-        else:
-            # Try removing and re-adding if already exists
-            subprocess.run(f"cd /app && git remote remove {request.name}", shell=True, capture_output=True)
-            result = subprocess.run(
-                f"cd /app && git remote add {request.name} {request.url}",
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            if result.returncode == 0:
-                return {"success": True, "message": f"Remote '{request.name}' updated"}
-            raise HTTPException(status_code=500, detail=result.stderr)
+        raise HTTPException(status_code=500, detail=result.stderr)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Remote add error: {str(e)}")
 
 @api_router.post("/git/branch/create")
 async def git_create_branch(request: GitBranchRequest):
     try:
+        ws = _git_ws()
         result = subprocess.run(
-            f"cd /app && git checkout -b {request.name}",
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=5
+            ["git", "checkout", "-b", request.name],
+            capture_output=True, text=True, timeout=5, cwd=ws
         )
-        
+
         if result.returncode == 0:
             return {"success": True, "message": f"Branch '{request.name}' created"}
         else:
@@ -3055,97 +3039,89 @@ class RailwayRequest(BaseModel):
     api_token: str
     project_id: Optional[str] = None
 
+_RAILWAY_GQL = "https://backboard.railway.app/graphql/v2"
+
+async def _railway_gql(token: str, query: str, variables: dict = None) -> dict:
+    """Run a Railway GraphQL query. Raises HTTPException on error."""
+    payload = {"query": query}
+    if variables:
+        payload["variables"] = variables
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(
+            _RAILWAY_GQL,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json=payload,
+        )
+    if resp.status_code == 401:
+        raise HTTPException(status_code=401, detail="Invalid Railway API token. Generate one at https://railway.app/account/tokens")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=f"Railway API returned {resp.status_code}: {resp.text[:300]}")
+    data = resp.json()
+    if "errors" in data:
+        msgs = "; ".join(e.get("message", str(e)) for e in data["errors"])
+        raise HTTPException(status_code=400, detail=f"Railway error: {msgs}")
+    return data.get("data", {})
+
 @api_router.post("/railway/projects")
 async def railway_projects(request: RailwayRequest):
-    try:
-        import aiohttp
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://backboard.railway.app/graphql/v2",
-                headers={
-                    "Authorization": f"Bearer {request.api_token}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "query": """
-                        query {
-                            me {
-                                projects {
-                                    edges {
-                                        node {
-                                            id
-                                            name
-                                            description
-                                            createdAt
-                                            environments {
-                                                edges {
-                                                    node {
-                                                        id
-                                                        name
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+    data = await _railway_gql(request.api_token, """
+        query {
+            me {
+                projects {
+                    edges {
+                        node {
+                            id
+                            name
+                            description
+                            createdAt
                         }
-                    """
+                    }
                 }
-            ) as resp:
-                data = await resp.json()
-                if 'errors' in data:
-                    raise HTTPException(status_code=400, detail=data['errors'][0]['message'])
-                projects = data.get('data', {}).get('me', {}).get('projects', {}).get('edges', [])
-                return {"projects": [p['node'] for p in projects]}
-    except aiohttp.ClientError as e:
-        raise HTTPException(status_code=500, detail=f"Railway API error: {str(e)}")
+            }
+        }
+    """)
+    edges = data.get("me", {}).get("projects", {}).get("edges", [])
+    return {"projects": [e["node"] for e in edges]}
 
 @api_router.post("/railway/services")
 async def railway_services(request: RailwayRequest):
-    try:
-        import aiohttp
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://backboard.railway.app/graphql/v2",
-                headers={
-                    "Authorization": f"Bearer {request.api_token}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "query": """
-                        query($projectId: String!) {
-                            project(id: $projectId) {
-                                services {
-                                    edges {
-                                        node {
-                                            id
-                                            name
-                                            icon
-                                        }
-                                    }
-                                }
-                            }
+    if not request.project_id:
+        raise HTTPException(status_code=400, detail="project_id is required")
+    data = await _railway_gql(request.api_token, """
+        query($projectId: String!) {
+            project(id: $projectId) {
+                services {
+                    edges {
+                        node {
+                            id
+                            name
                         }
-                    """,
-                    "variables": {"projectId": request.project_id}
+                    }
                 }
-            ) as resp:
-                data = await resp.json()
-                if 'errors' in data:
-                    raise HTTPException(status_code=400, detail=data['errors'][0]['message'])
-                services = data.get('data', {}).get('project', {}).get('services', {}).get('edges', [])
-                return {"services": [s['node'] for s in services]}
-    except aiohttp.ClientError as e:
-        raise HTTPException(status_code=500, detail=f"Railway API error: {str(e)}")
+            }
+        }
+    """, {"projectId": request.project_id})
+    edges = data.get("project", {}).get("services", {}).get("edges", [])
+    return {"services": [e["node"] for e in edges]}
 
 @api_router.post("/railway/deploy")
 async def railway_deploy(request: RailwayRequest):
-    # Trigger a deployment via Railway API
+    if not request.project_id:
+        raise HTTPException(status_code=400, detail="project_id is required")
+    # Railway deployments are triggered via their GitHub integration or CLI.
+    # We surface the project URL so the user can trigger redeploys from the dashboard.
+    data = await _railway_gql(request.api_token, """
+        query($projectId: String!) {
+            project(id: $projectId) {
+                id
+                name
+            }
+        }
+    """, {"projectId": request.project_id})
+    project = data.get("project", {})
     return {
-        "status": "Deploy triggered",
-        "message": "Use Railway CLI or GitHub integration for automatic deployments",
-        "docs": "https://docs.railway.app/guides/github-autodeploys"
+        "success": True,
+        "message": f"Project '{project.get('name', request.project_id)}' — trigger a redeploy from https://railway.app/project/{request.project_id}",
     }
 
 # ==================== Auto Error Fix (FixLoop with Screenshots) ====================

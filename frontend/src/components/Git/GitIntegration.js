@@ -12,6 +12,7 @@ const GitIntegration = () => {
   const [loading, setLoading] = useState(false);
   const [repoUrl, setRepoUrl] = usePersist('ma_git_repourl', '');
   const [remoteName, setRemoteName] = usePersist('ma_git_remote', 'origin');
+  const [githubToken, setGithubToken] = usePersist('ma_git_token', '');
   const [logs, setLogs] = useState([]);
 
   useEffect(() => {
@@ -123,7 +124,8 @@ const GitIntegration = () => {
     try {
       const response = await axiosInstance.post('/git/remote/add', {
         name: remoteName,
-        url: repoUrl
+        url: repoUrl,
+        github_token: githubToken
       });
       toast.success(`Remote '${remoteName}' added!`);
       setLogs(prev => [...prev, `Added remote: ${remoteName}`]);
@@ -225,6 +227,14 @@ const GitIntegration = () => {
               placeholder="https://github.com/username/repo.git"
               value={repoUrl}
               onChange={(e) => setRepoUrl(e.target.value)}
+              className="w-full bg-black/50 border border-cyan-900/50 text-cyan-100 placeholder:text-cyan-900/50 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 rounded-sm font-mono px-4 py-2 outline-none text-sm"
+            />
+            <input
+              data-testid="github-token-input"
+              type="password"
+              placeholder="GitHub personal access token (for push/pull)"
+              value={githubToken}
+              onChange={(e) => setGithubToken(e.target.value)}
               className="w-full bg-black/50 border border-cyan-900/50 text-cyan-100 placeholder:text-cyan-900/50 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 rounded-sm font-mono px-4 py-2 outline-none text-sm"
             />
             <button
