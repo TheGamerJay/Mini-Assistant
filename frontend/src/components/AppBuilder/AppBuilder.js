@@ -7,7 +7,7 @@ import {
   Trash2, FolderOpen, Clock, Package, Undo2, History, MonitorPlay,
   FileCode, Palette, Code2, BookmarkPlus, X, Pin, Archive, Search,
   SortAsc, RefreshCw, Redo2, Upload, BookOpen, AlertTriangle, AlertCircle,
-  ShieldCheck, ArchiveRestore
+  ShieldCheck, ArchiveRestore, Bug, Zap, Gauge, Terminal, Wrench
 } from 'lucide-react';
 
 // ── Coach system prompt ────────────────────────────────────────────────────────
@@ -153,6 +153,14 @@ const AppBuilder = () => {
   const [editingSessionId, setEditingSessionId] = useState(null);
   const [editingSessionName, setEditingSessionName] = useState('');
   const [sessionTagInput, setSessionTagInput] = useState('');
+
+  // Phase 2 — Testing & scanning
+  const [scanResult, setScanResult] = useState(null);
+  const [scanLoading, setScanLoading] = useState(false);
+  const [showScanPanel, setShowScanPanel] = useState(false);
+  const [consoleErrors, setConsoleErrors] = useState([]);
+  const [showConsole, setShowConsole] = useState(false);
+  const [autoFixLoading, setAutoFixLoading] = useState(false);
 
   // Undo / Redo / version history
   const [undoStack, setUndoStack] = useState([]);
@@ -780,6 +788,80 @@ const AppBuilder = () => {
     });
   };
 
+  // ── Phase 2: Console error capture ───────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.data?.type === 'console') {
+        setConsoleErrors(prev => [...prev.slice(-99), {
+          level: e.data.level,
+          msg: e.data.msg,
+          time: new Date().toLocaleTimeString(),
+        }]);
+      }
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, []);
+
+  // Inject console capture into iframe srcDoc
+  const injectConsoleCapture = (html) => {
+    if (!html) return html;
+    const script = `<script>(function(){var t=console;['log','warn','error'].forEach(function(l){var o=t[l].bind(t);t[l]=function(){o.apply(t,arguments);try{window.parent.postMessage({type:'console',level:l,msg:Array.from(arguments).map(function(a){return typeof a==='object'?JSON.stringify(a):String(a)}).join(' ')}, '*')}catch(e){}};});window.onerror=function(m,s,l){window.parent.postMessage({type:'console',level:'error',msg:m+' ('+s+':'+l+')'},'*')};window.addEventListener('unhandledrejection',function(e){window.parent.postMessage({type:'console',level:'error',msg:'Unhandled Promise: '+e.reason},'*')});})();<\/script>`;
+    if (html.includes('<head>')) return html.replace('<head>', '<head>' + script);
+    return script + html;
+  };
+
+  // ── Phase 2: Static scan ──────────────────────────────────────────────────────
+  const runScan = async () => {
+    if (!generatedApp?.project || scanLoading) return;
+    setScanLoading(true);
+    setShowScanPanel(true);
+    try {
+      const res = await axiosInstance.post('/app-builder/scan', {
+        project: generatedApp.project,
+        project_type: generatedApp.project_type || projectType || 'app',
+      }, { timeout: 15000 });
+      setScanResult(res.data);
+      const { counts } = res.data;
+      const total = Object.values(counts).reduce((a, b) => a + b, 0);
+      if (total === 0) toast.success(`Clean scan — score ${res.data.score}/100`);
+      else toast.warning(`${total} finding(s) — score ${res.data.score}/100`);
+    } catch { toast.error('Scan failed'); }
+    finally { setScanLoading(false); }
+  };
+
+  // ── Phase 2: Auto-fix ─────────────────────────────────────────────────────────
+  const runAutoFix = async (errors) => {
+    if (!generatedApp?.build_id || autoFixLoading) return;
+    setAutoFixLoading(true);
+    try {
+      const res = await axiosInstance.post(
+        `/app-builder/sessions/${generatedApp.build_id}/auto-fix`,
+        { errors: errors.slice(0, 5), max_attempts: 3 },
+        { timeout: 180000 }
+      );
+      if (res.data.ok) {
+        pushUndo(generatedApp);
+        const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
+        setGeneratedApp(prev => ({
+          ...prev,
+          project: res.data.project,
+          html: res.data.html,
+          build_id: res.data.build_id,
+          full_preview_url: res.data.preview_url
+            ? backendUrl.replace('/api', '') + res.data.preview_url
+            : prev.full_preview_url,
+        }));
+        toast.success(`Auto-fixed ${res.data.applied.length} issue(s)`);
+        // Re-scan after fix
+        setTimeout(runScan, 500);
+      } else {
+        toast.error(res.data.message || 'Auto-fix could not apply changes');
+      }
+    } catch { toast.error('Auto-fix failed'); }
+    finally { setAutoFixLoading(false); }
+  };
+
   // ── Import ────────────────────────────────────────────────────────────────────
   const handleImportHtml = async (e) => {
     const file = e.target.files?.[0];
@@ -1321,6 +1403,39 @@ const AppBuilder = () => {
                   <History className="w-3 h-3" /> {versions.length > 0 ? `History (${versions.length})` : 'History'}
                 </button>
 
+                {/* Test / Scan */}
+                <button
+                  onClick={runScan}
+                  disabled={scanLoading || !generatedApp?.project}
+                  title="Static scan — checks accessibility, mobile, performance, error handling"
+                  className={`flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase transition-colors border rounded-sm disabled:opacity-30 ${
+                    showScanPanel
+                      ? (scanResult?.counts && Object.values(scanResult.counts).some(v => v > 0)
+                          ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
+                          : 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300')
+                      : 'text-slate-400 border-slate-700/40 hover:text-amber-400 hover:border-amber-500/40'
+                  }`}
+                >
+                  {scanLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Bug className="w-3 h-3" />}
+                  {scanResult ? `Score ${scanResult.score}` : 'Test'}
+                </button>
+
+                {/* Console */}
+                <button
+                  onClick={() => setShowConsole(v => !v)}
+                  title="Console errors captured from preview"
+                  className={`flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase transition-colors border rounded-sm ${
+                    consoleErrors.some(e => e.level === 'error')
+                      ? 'bg-red-500/20 border-red-500/50 text-red-300'
+                      : showConsole
+                      ? 'bg-slate-700/40 border-slate-500 text-slate-300'
+                      : 'text-slate-500 border-slate-700/30 hover:text-slate-300 hover:border-slate-500'
+                  }`}
+                >
+                  <Terminal className="w-3 h-3" />
+                  {consoleErrors.length > 0 ? consoleErrors.length : 'Console'}
+                </button>
+
                 <div className="w-px h-4 bg-slate-700/60 mx-0.5" />
 
                 <button onClick={openInBrowser} className="flex items-center gap-1 px-2 py-1 bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 text-[10px] font-mono uppercase rounded-sm hover:bg-cyan-500/30 transition-all">
@@ -1414,6 +1529,86 @@ const AppBuilder = () => {
                 </div>
               )}
 
+              {/* ── Scan results panel ── */}
+              {showScanPanel && (
+                <div className="border-b border-amber-500/20 bg-black/70 flex-shrink-0 flex flex-col" style={{ maxHeight: '240px' }}>
+                  <div className="flex items-center gap-2 px-4 py-2 border-b border-amber-500/10 flex-shrink-0">
+                    <Bug className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="text-[10px] font-mono text-amber-400 uppercase tracking-wider flex-1">
+                      Static Scan {scanResult ? `— Score ${scanResult.score}/100` : ''}
+                    </span>
+                    {scanResult && (
+                      <div className="flex gap-2 mr-2">
+                        {scanResult.counts.critical > 0    && <span className="text-[9px] font-mono text-red-400">{scanResult.counts.critical} critical</span>}
+                        {scanResult.counts.warning > 0     && <span className="text-[9px] font-mono text-amber-400">{scanResult.counts.warning} warning</span>}
+                        {scanResult.counts.performance > 0 && <span className="text-[9px] font-mono text-blue-400">{scanResult.counts.performance} perf</span>}
+                        {scanResult.counts.cosmetic > 0    && <span className="text-[9px] font-mono text-slate-500">{scanResult.counts.cosmetic} cosmetic</span>}
+                      </div>
+                    )}
+                    {scanResult?.findings?.filter(f => ['critical','warning'].includes(f.severity)).length > 0 && (
+                      <button
+                        onClick={() => runAutoFix(scanResult.findings.filter(f => ['critical','warning'].includes(f.severity)))}
+                        disabled={autoFixLoading}
+                        className="flex items-center gap-1 px-2 py-0.5 bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-[9px] font-mono uppercase rounded-sm hover:bg-emerald-500/30 disabled:opacity-50"
+                      >
+                        {autoFixLoading ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Wrench className="w-2.5 h-2.5" />}
+                        Auto-Fix
+                      </button>
+                    )}
+                    <button onClick={() => setShowScanPanel(false)} className="text-slate-600 hover:text-slate-400"><X className="w-3 h-3" /></button>
+                  </div>
+                  <div className="overflow-y-auto px-3 py-2 space-y-1">
+                    {scanLoading && <p className="text-[10px] font-mono text-slate-500 animate-pulse">Scanning project files...</p>}
+                    {!scanLoading && scanResult?.findings?.length === 0 && (
+                      <p className="text-[10px] font-mono text-emerald-400">No issues found. Project looks clean!</p>
+                    )}
+                    {!scanLoading && scanResult?.findings?.map((f, i) => {
+                      const colors = {
+                        critical:    'text-red-400 border-red-900/50 bg-red-950/30',
+                        warning:     'text-amber-400 border-amber-900/50 bg-amber-950/20',
+                        performance: 'text-blue-400 border-blue-900/50 bg-blue-950/20',
+                        cosmetic:    'text-slate-500 border-slate-700/50 bg-slate-900/20',
+                      };
+                      const icons = {
+                        critical: <AlertCircle className="w-3 h-3 flex-shrink-0" />,
+                        warning:  <AlertTriangle className="w-3 h-3 flex-shrink-0" />,
+                        performance: <Gauge className="w-3 h-3 flex-shrink-0" />,
+                        cosmetic: <Zap className="w-3 h-3 flex-shrink-0" />,
+                      };
+                      return (
+                        <div key={i} className={`flex items-start gap-2 px-2 py-1.5 rounded-sm border text-[10px] font-mono ${colors[f.severity] || colors.cosmetic}`}>
+                          {icons[f.severity] || icons.cosmetic}
+                          <span className="flex-1">{f.message}</span>
+                          <span className="text-[9px] opacity-60 flex-shrink-0">{f.file}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Console panel ── */}
+              {showConsole && (
+                <div className="border-b border-slate-700/40 bg-black/80 flex-shrink-0 flex flex-col" style={{ maxHeight: '180px' }}>
+                  <div className="flex items-center gap-2 px-4 py-1.5 border-b border-slate-700/30 flex-shrink-0">
+                    <Terminal className="w-3 h-3 text-slate-400" />
+                    <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider flex-1">Console</span>
+                    <button onClick={() => setConsoleErrors([])} className="text-[9px] font-mono text-slate-600 hover:text-slate-400 uppercase">Clear</button>
+                    <button onClick={() => setShowConsole(false)} className="text-slate-600 hover:text-slate-400 ml-2"><X className="w-3 h-3" /></button>
+                  </div>
+                  <div className="overflow-y-auto px-3 py-1.5 space-y-0.5 font-mono text-[10px]">
+                    {consoleErrors.length === 0 && <span className="text-slate-600">No console output captured yet. Open the Preview tab to start capturing.</span>}
+                    {consoleErrors.map((e, i) => (
+                      <div key={i} className={`flex gap-2 ${e.level === 'error' ? 'text-red-400' : e.level === 'warn' ? 'text-amber-400' : 'text-slate-400'}`}>
+                        <span className="text-slate-600 flex-shrink-0">{e.time}</span>
+                        <span className="opacity-60 flex-shrink-0">[{e.level}]</span>
+                        <span className="break-all">{e.msg}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* ── Diff viewer panel ── */}
               {diffView && (
                 <div className="border-b border-amber-500/20 bg-black/70 flex-shrink-0 flex flex-col" style={{ maxHeight: '220px' }}>
@@ -1485,7 +1680,7 @@ const AppBuilder = () => {
                 {activeTab === 'preview' && (
                   <iframe
                     key={generatedApp.html}
-                    srcDoc={generatedApp.html}
+                    srcDoc={injectConsoleCapture(generatedApp.html)}
                     title="App Preview"
                     className="w-full h-full border-0 bg-white"
                     sandbox="allow-scripts allow-forms allow-modals allow-same-origin"

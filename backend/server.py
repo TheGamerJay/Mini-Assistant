@@ -1458,6 +1458,252 @@ Output ONLY valid JSON. No markdown. No preamble."""
         raise HTTPException(status_code=500, detail=f"Brief error: {str(e)}")
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# PHASE 2 — TESTING, SCAN, AUTO-FIX
+# ══════════════════════════════════════════════════════════════════════════════
+
+class AppBuilderScanRequest(BaseModel):
+    project: dict
+    project_type: str = "app"
+
+def _static_scan(project: dict, project_type: str = "app") -> dict:
+    """
+    Pure-Python static analysis of project files.
+    Returns severity-labelled findings + readiness score.
+    """
+    import re as _sr
+    findings = []
+    html = project.get("index_html", "") or ""
+    css  = project.get("style_css",  "") or ""
+    js   = project.get("script_js",  "") or ""
+
+    # ── index.html checks ─────────────────────────────────────────────────────
+    if "viewport" not in html.lower():
+        findings.append({"file": "index.html", "severity": "warning",
+            "category": "mobile", "message": "Missing <meta name='viewport'> — layout will break on mobile"})
+
+    imgs_no_alt = _sr.findall(r'<img(?![^>]*\balt\b)[^>]*>', html, _sr.IGNORECASE)
+    if imgs_no_alt:
+        findings.append({"file": "index.html", "severity": "warning",
+            "category": "accessibility", "message": f"{len(imgs_no_alt)} image(s) missing alt attribute"})
+
+    if not _sr.search(r'<title>[^<]+</title>', html, _sr.IGNORECASE):
+        findings.append({"file": "index.html", "severity": "cosmetic",
+            "category": "meta", "message": "Missing or empty <title> tag"})
+
+    empty_hrefs = _sr.findall(r"href\s*=\s*[\"']#[\"']", html, _sr.IGNORECASE)
+    if len(empty_hrefs) > 2:
+        findings.append({"file": "index.html", "severity": "cosmetic",
+            "category": "broken_link", "message": f"{len(empty_hrefs)} placeholder href='#' link(s)"})
+
+    inputs_no_label = _sr.findall(r'<input(?![^>]*\bid\b)[^>]*>', html, _sr.IGNORECASE)
+    if len(inputs_no_label) > 2:
+        findings.append({"file": "index.html", "severity": "cosmetic",
+            "category": "accessibility", "message": f"{len(inputs_no_label)} input(s) without id — hard to associate labels"})
+
+    # ── script.js checks ──────────────────────────────────────────────────────
+    cl_count = len(_sr.findall(r'\bconsole\.log\b', js))
+    if cl_count > 5:
+        findings.append({"file": "script.js", "severity": "cosmetic",
+            "category": "cleanup", "message": f"{cl_count} console.log() calls left in — remove before release"})
+
+    fetch_count = len(_sr.findall(r'\bfetch\s*\(', js))
+    try_count   = len(_sr.findall(r'\btry\s*\{', js))
+    if fetch_count > 0 and try_count == 0:
+        findings.append({"file": "script.js", "severity": "warning",
+            "category": "error_handling", "message": "fetch() calls with no try/catch — unhandled network errors will crash the app"})
+
+    js_kb = len(js.encode("utf-8")) / 1024
+    if js_kb > 200:
+        findings.append({"file": "script.js", "severity": "performance",
+            "category": "size", "message": f"script.js is {js_kb:.0f} KB — large scripts hurt load time"})
+
+    if not js.strip() and project_type not in ("landing",):
+        findings.append({"file": "script.js", "severity": "warning",
+            "category": "empty", "message": "script.js is empty — app may not be interactive"})
+
+    # eval is a red flag for games/tools
+    if "eval(" in js:
+        findings.append({"file": "script.js", "severity": "warning",
+            "category": "security", "message": "eval() detected — security risk and performance hit"})
+
+    # ── style.css checks ──────────────────────────────────────────────────────
+    if css and "@media" not in css:
+        findings.append({"file": "style.css", "severity": "warning",
+            "category": "mobile", "message": "No @media queries — layout will not adapt to screen sizes"})
+
+    imp_count = len(_sr.findall(r"!important", css))
+    if imp_count > 6:
+        findings.append({"file": "style.css", "severity": "cosmetic",
+            "category": "quality", "message": f"{imp_count} !important declarations — indicates specificity conflicts"})
+
+    if not css.strip():
+        findings.append({"file": "style.css", "severity": "cosmetic",
+            "category": "empty", "message": "style.css is empty — all styling is inline or missing"})
+
+    # ── Sort by severity ───────────────────────────────────────────────────────
+    _ord = {"critical": 0, "warning": 1, "performance": 2, "cosmetic": 3}
+    findings.sort(key=lambda f: _ord.get(f["severity"], 4))
+
+    counts = {
+        "critical":    sum(1 for f in findings if f["severity"] == "critical"),
+        "warning":     sum(1 for f in findings if f["severity"] == "warning"),
+        "performance": sum(1 for f in findings if f["severity"] == "performance"),
+        "cosmetic":    sum(1 for f in findings if f["severity"] == "cosmetic"),
+    }
+    score = max(0, 100 - (
+        counts["critical"]    * 25 +
+        counts["warning"]     * 10 +
+        counts["performance"] * 5  +
+        counts["cosmetic"]    * 2
+    ))
+    return {"findings": findings, "score": score, "counts": counts}
+
+
+@api_router.post("/app-builder/scan")
+async def scan_project(req: AppBuilderScanRequest):
+    """Static analysis scan — no browser required."""
+    return _static_scan(req.project, req.project_type)
+
+
+class RunSessionTestRequest(BaseModel):
+    preview_url: Optional[str] = None  # override; falls back to session.preview_url
+
+@api_router.post("/app-builder/sessions/{session_id}/run-test")
+async def run_session_test(session_id: str, req: RunSessionTestRequest):
+    """Run static scan + optional FixLoop screenshot test; store in fixloop_result."""
+    pg = await _get_pg()
+    if not pg:
+        raise HTTPException(status_code=503, detail="Postgres unavailable")
+
+    async with pg.acquire() as conn:
+        await _migrate_sessions_table(conn)
+        r = await conn.fetchrow("SELECT * FROM app_builder_sessions WHERE id=$1", session_id)
+    if not r:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session = _row_to_session(r)
+    project = session.get("project")
+
+    # Static scan
+    scan = _static_scan(project or {}, session.get("project_type", "app"))
+
+    # FixLoop (screenshot) — only if we have a real HTTP preview URL
+    fl_result = None
+    url = req.preview_url or session.get("preview_url") or ""
+    if url and not url.startswith("blob:"):
+        # Make absolute if relative
+        if url.startswith("/"):
+            host = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
+            if host:
+                url = f"https://{host}{url}"
+        if url.startswith("http"):
+            try:
+                fl_req = ErrorFixRequest(url=url, auto_fix=False, capture_screenshot=True)
+                fl_result = await fixloop_start(fl_req)
+            except Exception as e:
+                fl_result = {"error": str(e)}
+
+    result = {
+        "session_id": session_id,
+        "scan":      scan,
+        "fixloop":   fl_result,
+        "tested_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    async with pg.acquire() as conn:
+        await conn.execute(
+            "UPDATE app_builder_sessions SET fixloop_result=$1, updated_at=NOW() WHERE id=$2",
+            json.dumps(result), session_id)
+
+    return result
+
+
+class AutoFixRequest(BaseModel):
+    errors: list          # list of finding/error dicts with severity + message + file
+    max_attempts: int = 3
+
+@api_router.post("/app-builder/sessions/{session_id}/auto-fix")
+async def auto_fix_session(session_id: str, req: AutoFixRequest):
+    """Apply AI fixes for the top errors (up to max_attempts). Save updated project."""
+    if not ollama_client:
+        raise HTTPException(status_code=503, detail="Ollama service not available")
+
+    pg = await _get_pg()
+    if not pg:
+        raise HTTPException(status_code=503, detail="Postgres unavailable")
+
+    async with pg.acquire() as conn:
+        r = await conn.fetchrow("SELECT * FROM app_builder_sessions WHERE id=$1", session_id)
+    if not r:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session = _row_to_session(r)
+    project = session.get("project")
+    if not project:
+        raise HTTPException(status_code=400, detail="Session has no project files")
+
+    _ord = {"critical": 0, "warning": 1, "performance": 2, "cosmetic": 3}
+    errors_to_fix = sorted(req.errors[:8], key=lambda e: _ord.get(e.get("severity", "cosmetic"), 4))
+    current = dict(project)
+    applied = []
+
+    for err in errors_to_fix[:req.max_attempts]:
+        target = err.get("file", "script.js")
+        fkey = ("index_html" if target == "index.html"
+                else "style_css" if target == "style.css"
+                else "script_js")
+        content = current.get(fkey, "")
+        prompt = f"""Fix this specific issue in {target}.
+
+Issue: {err.get("message", "")}
+Severity: {err.get("severity", "")}
+Category: {err.get("category", "")}
+
+Current {target}:
+{content[:7000]}
+
+Return ONLY the complete corrected {target}. No markdown. No explanation. Start outputting the file immediately."""
+        try:
+            import re as _fr
+            res = ollama_client.chat(model=_default_model, messages=[{"role": "user", "content": prompt}])
+            fixed = res["message"]["content"].strip()
+            fixed = _fr.sub(r'^```[a-zA-Z]*\n?', '', fixed)
+            fixed = _fr.sub(r'\n?```\s*$', '', fixed).strip()
+            if fixed:
+                current[fkey] = fixed
+                applied.append({"error": err, "file": target})
+        except Exception:
+            pass
+
+    if not applied:
+        return {"ok": False, "message": "No fixes applied", "applied": []}
+
+    reconstructed = _reconstruct_html(current)
+    build_id = str(uuid.uuid4())
+    _app_previews[build_id] = reconstructed
+    redis = await _get_redis()
+    if redis:
+        try: await redis.setex(f"preview:{build_id}", 86400, reconstructed)
+        except Exception: pass
+
+    async with pg.acquire() as conn:
+        await conn.execute("""
+            UPDATE app_builder_sessions
+            SET project=$1, html=$2, build_id=$3, preview_url=$4, updated_at=NOW()
+            WHERE id=$5
+        """, json.dumps(current), reconstructed, build_id, f"/api/preview/{build_id}", session_id)
+
+    return {
+        "ok": True,
+        "applied": applied,
+        "project": current,
+        "html": reconstructed,
+        "build_id": build_id,
+        "preview_url": f"/api/preview/{build_id}",
+    }
+
+
 class AppBuilderImportHtmlRequest(BaseModel):
     html: str
     name: str = "imported-app"
