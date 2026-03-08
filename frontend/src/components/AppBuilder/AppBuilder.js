@@ -131,6 +131,10 @@ const AppBuilder = () => {
   const [buildLoading, setBuildLoading] = useState(false);
   const [buildMsg, setBuildMsg] = useState('');
   const [generatedApp, setGeneratedApp] = useState(null);
+  const [projectType, setProjectType] = useState('app');
+  const [buildMode, setBuildMode] = useState('polished');
+  const [projectBrief, setProjectBrief] = useState(null);   // AI brief before build
+  const [briefLoading, setBriefLoading] = useState(false);
 
   // Edit state
   const [editInput, setEditInput] = useState('');
@@ -139,6 +143,16 @@ const AppBuilder = () => {
   const [editHistory, setEditHistory] = useState([]);
   const editLoadingIntervalRef = useRef(null);
   const editEndRef = useRef(null);
+  const [pendingChange, setPendingChange] = useState(null); // proposed AI edit awaiting approve/reject
+
+  // Explain panel
+  const [explainPanel, setExplainPanel] = useState(null);  // {file, content} | null
+  const [explainLoading, setExplainLoading] = useState(false);
+
+  // Session metadata editing
+  const [editingSessionId, setEditingSessionId] = useState(null);
+  const [editingSessionName, setEditingSessionName] = useState('');
+  const [sessionTagInput, setSessionTagInput] = useState('');
 
   // Undo / Redo / version history
   const [undoStack, setUndoStack] = useState([]);
@@ -154,6 +168,13 @@ const AppBuilder = () => {
   // Import refs
   const importHtmlRef = useRef(null);
   const importZipRef  = useRef(null);
+
+  // Dirty-state tracking (ref to last-saved project snapshot)
+  const savedProjectRef = useRef(null);
+  const isDirty = (fileKey) => {
+    if (!savedProjectRef.current || !generatedApp?.project) return false;
+    return savedProjectRef.current[fileKey] !== generatedApp.project[fileKey];
+  };
 
   // Saved sessions
   const [savedSessions, setSavedSessions] = useState(loadSessionsLocal);
@@ -228,6 +249,21 @@ const AppBuilder = () => {
     editEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [editHistory, editLoading]);
 
+  // Auto-show diff when pending change arrives
+  useEffect(() => {
+    if (!pendingChange) return;
+    const fileKey = pendingChange.file_changed === 'style.css' ? 'style_css'
+      : pendingChange.file_changed === 'script.js' ? 'script_js' : 'index_html';
+    setDiffView({
+      file: pendingChange.file_changed || 'index.html',
+      fileKey,
+      verA: generatedApp?.project || null,
+      verB: pendingChange.proposed?.project || null,
+      nameA: 'current',
+      nameB: 'proposed',
+    });
+  }, [pendingChange]);
+
   // Load sessions from backend (Postgres) on mount; fall back to localStorage
   useEffect(() => {
     axiosInstance.get('/app-builder/sessions').then(res => {
@@ -254,15 +290,22 @@ const AppBuilder = () => {
       versions,
       build_id: generatedApp.build_id,
       preview_url: generatedApp.full_preview_url || null,
-      project_type: generatedApp.project_type || 'app',
+      project_type: generatedApp.project_type || projectType || 'app',
+      project_type_label: generatedApp.project_type_label || null,
+      build_mode: generatedApp.build_mode || buildMode || 'polished',
       is_pinned: existing?.is_pinned || false,
       is_archived: existing?.is_archived || false,
+      is_favorite: existing?.is_favorite || false,
       edit_count: editHistory.filter(m => m.role === 'user').length,
       last_edited_file: editHistory.filter(m => m.role === 'assistant' && m.file_changed).slice(-1)[0]?.file_changed || null,
+      tags: existing?.tags || [],
+      notes: existing?.notes || null,
       savedAt: new Date().toISOString(),
     };
     // Persist to Postgres
     axiosInstance.post('/app-builder/sessions', session).catch(() => {});
+    // Stamp saved state for dirty tracking
+    savedProjectRef.current = generatedApp.project ? { ...generatedApp.project } : null;
     // Also keep localStorage as fallback
     setSavedSessions(prev => {
       const filtered = prev.filter(s => s.id !== session.id);
@@ -470,24 +513,34 @@ const AppBuilder = () => {
   };
 
   // ── Build ────────────────────────────────────────────────────────────────────
+  const fetchProjectBrief = async () => {
+    if (!description.trim() || briefLoading) return;
+    setBriefLoading(true);
+    try {
+      const res = await axiosInstance.post('/app-builder/project-brief', {
+        description, project_type: projectType, build_mode: buildMode,
+      }, { timeout: 60000 });
+      setProjectBrief(res.data.brief);
+    } catch { toast.error('Could not generate brief'); }
+    finally { setBriefLoading(false); }
+  };
+
   const generateApp = async () => {
     if (!description.trim() || buildLoading) return;
     setBuildLoading(true);
+    setProjectBrief(null);
     startLoadingCycle(BUILD_LOADING_MSGS, setBuildMsg);
     try {
       const response = await axiosInstance.post('/app-builder/generate', {
-        description,
-        framework: 'react',
+        description, framework: 'react',
+        project_type: projectType, build_mode: buildMode,
       }, { timeout: 180000 });
       const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
       const data = response.data;
-      if (data.preview_url) {
-        data.full_preview_url = backendUrl.replace('/api', '') + data.preview_url;
-      }
-      // Use structured project for everything; keep raw html as fallback
-      if (data.project) {
-        data.html = reconstructHtml(data.project);
-      }
+      if (data.preview_url) data.full_preview_url = backendUrl.replace('/api', '') + data.preview_url;
+      if (data.project) data.html = reconstructHtml(data.project);
+      data.project_type = data.project_type || projectType;
+      data.build_mode   = data.build_mode   || buildMode;
       setGeneratedApp(data);
       toast.success('App generated!');
     } catch (error) {
@@ -511,29 +564,35 @@ const AppBuilder = () => {
       setEditMsg(EDIT_LOADING_MSGS[i]);
     }, 2500);
     try {
-      // Snapshot current state before overwriting
-      pushUndo(generatedApp);
       const res = await axiosInstance.post('/app-builder/edit', {
         project: generatedApp.project || null,
         html: generatedApp.project ? null : generatedApp.html,
         instruction,
       }, { timeout: 300000 });
       const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
-      const updated = {
+      const proposed = {
         ...generatedApp,
         project: res.data.project || generatedApp.project,
         html: res.data.html || reconstructHtml(res.data.project),
         build_id: res.data.build_id,
+        full_preview_url: res.data.preview_url
+          ? backendUrl.replace('/api', '') + res.data.preview_url
+          : generatedApp.full_preview_url,
       };
-      if (res.data.preview_url) {
-        updated.full_preview_url = backendUrl.replace('/api', '') + res.data.preview_url;
-      }
-      setGeneratedApp(updated);
-      const fileChanged = res.data.file_changed;
-      const reply = fileChanged
-        ? `Done! Edited \`${fileChanged}\`. Preview updated above.`
-        : 'Done! Preview updated above.';
-      setEditHistory(prev => [...prev, { role: 'assistant', content: reply, file_changed: fileChanged }]);
+      // Store as pending — user must approve or reject
+      setPendingChange({
+        proposed,
+        file_changed: res.data.file_changed,
+        instruction,
+        edit_mode: res.data.edit_mode || 'full_rewrite',
+      });
+      const fileTag = res.data.file_changed ? ` → \`${res.data.file_changed}\`` : '';
+      setEditHistory(prev => [...prev, {
+        role: 'assistant',
+        content: `Change ready${fileTag}. Review the diff above and Approve or Reject.`,
+        file_changed: res.data.file_changed,
+        pending: true,
+      }]);
     } catch (err) {
       const msg = err.response?.data?.detail || 'Failed to apply changes';
       toast.error(msg);
@@ -543,6 +602,26 @@ const AppBuilder = () => {
       setEditMsg('');
       setEditLoading(false);
     }
+  };
+
+  const approveChange = () => {
+    if (!pendingChange) return;
+    pushUndo(generatedApp);
+    setGeneratedApp(pendingChange.proposed);
+    setEditHistory(prev => prev.map((m, i) =>
+      i === prev.length - 1 ? { ...m, content: `Applied \`${pendingChange.file_changed || 'edit'}\`. Preview updated.`, pending: false } : m
+    ));
+    setPendingChange(null);
+    toast.success('Change applied');
+  };
+
+  const rejectChange = () => {
+    if (!pendingChange) return;
+    setEditHistory(prev => prev.map((m, i) =>
+      i === prev.length - 1 ? { ...m, content: 'Change rejected.', pending: false } : m
+    ));
+    setPendingChange(null);
+    toast.info('Change discarded');
   };
 
   const handleEditKey = (e) => {
@@ -618,6 +697,87 @@ const AppBuilder = () => {
     const blob = new Blob([generatedApp.html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank');
+  };
+
+  // ── Explain file ─────────────────────────────────────────────────────────────
+  const explainFile = async (file, content) => {
+    if (!content?.trim()) { toast.error('File is empty'); return; }
+    setExplainLoading(true);
+    setExplainPanel({ file, content: 'Loading explanation...' });
+    try {
+      const res = await axiosInstance.post('/app-builder/explain', {
+        file, content, project_name: generatedApp?.name || '',
+      }, { timeout: 60000 });
+      setExplainPanel({ file, content: res.data.explanation });
+    } catch { setExplainPanel({ file, content: 'Explanation failed. Try again.' }); }
+    finally { setExplainLoading(false); }
+  };
+
+  // ── Generate README ───────────────────────────────────────────────────────────
+  const generateReadme = async () => {
+    if (!generatedApp?.project) return;
+    toast.info('Generating README...');
+    try {
+      const res = await axiosInstance.post('/app-builder/generate-readme', {
+        project: generatedApp.project,
+        name: generatedApp.name,
+        description: generatedApp.description || '',
+      }, { timeout: 60000 });
+      setGeneratedApp(prev => ({
+        ...prev,
+        project: { ...prev.project, readme: res.data.readme },
+      }));
+      setActiveTab('readme');
+      toast.success('README generated!');
+    } catch { toast.error('README generation failed'); }
+  };
+
+  // ── Clone session ─────────────────────────────────────────────────────────────
+  const cloneSession = async (id) => {
+    try {
+      const res = await axiosInstance.post(`/app-builder/sessions/${id}/clone`);
+      toast.success(`Cloned as "${res.data.name}"`);
+      // Refresh sessions from backend
+      const list = await axiosInstance.get('/app-builder/sessions');
+      if (Array.isArray(list.data)) setSavedSessions(list.data);
+    } catch { toast.error('Clone failed'); }
+  };
+
+  // ── Session rename inline ─────────────────────────────────────────────────────
+  const commitRename = (id) => {
+    if (!editingSessionName.trim()) { setEditingSessionId(null); return; }
+    axiosInstance.patch(`/app-builder/sessions/${id}`, { name: editingSessionName.trim() }).catch(() => {});
+    setSavedSessions(prev => prev.map(s => s.id === id ? { ...s, name: editingSessionName.trim() } : s));
+    setEditingSessionId(null);
+  };
+
+  // ── Session tag management ────────────────────────────────────────────────────
+  const addTag = (id, tag) => {
+    if (!tag.trim()) return;
+    setSavedSessions(prev => {
+      const updated = prev.map(s => {
+        if (s.id !== id) return s;
+        const tags = [...new Set([...(s.tags || []), tag.trim()])];
+        axiosInstance.patch(`/app-builder/sessions/${id}`, { tags }).catch(() => {});
+        return { ...s, tags };
+      });
+      try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(updated)); } catch {}
+      return updated;
+    });
+    setSessionTagInput('');
+  };
+
+  const removeTag = (id, tag) => {
+    setSavedSessions(prev => {
+      const updated = prev.map(s => {
+        if (s.id !== id) return s;
+        const tags = (s.tags || []).filter(t => t !== tag);
+        axiosInstance.patch(`/app-builder/sessions/${id}`, { tags }).catch(() => {});
+        return { ...s, tags };
+      });
+      try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(updated)); } catch {}
+      return updated;
+    });
   };
 
   // ── Import ────────────────────────────────────────────────────────────────────
@@ -910,7 +1070,23 @@ const AppBuilder = () => {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5">
                             {session.is_pinned && <Pin className="w-3 h-3 text-cyan-500 flex-shrink-0" />}
-                            <span className="text-sm font-mono text-cyan-300 truncate">{session.name}</span>
+                            {session.is_favorite && <span className="text-amber-400 text-xs">★</span>}
+                            {editingSessionId === session.id ? (
+                              <input
+                                autoFocus
+                                value={editingSessionName}
+                                onChange={e => setEditingSessionName(e.target.value)}
+                                onBlur={() => commitRename(session.id)}
+                                onKeyDown={e => { if (e.key === 'Enter') commitRename(session.id); if (e.key === 'Escape') setEditingSessionId(null); }}
+                                className="flex-1 bg-black/60 border border-cyan-500/50 text-cyan-200 text-sm font-mono px-1 py-0 rounded-sm outline-none"
+                              />
+                            ) : (
+                              <span
+                                className="text-sm font-mono text-cyan-300 truncate cursor-pointer hover:text-cyan-200"
+                                onDoubleClick={() => { setEditingSessionId(session.id); setEditingSessionName(session.name); }}
+                                title="Double-click to rename"
+                              >{session.name}</span>
+                            )}
                             {(() => {
                               const badge = getHealthBadge(session);
                               return (
@@ -934,7 +1110,21 @@ const AppBuilder = () => {
                             {session.versions?.length > 0 && (
                               <span className="text-xs text-amber-600 font-mono">{session.versions.length} versions</span>
                             )}
+                            {session.build_mode && session.build_mode !== 'polished' && (
+                              <span className="text-[9px] font-mono text-slate-600 bg-slate-800 px-1 rounded">{session.build_mode}</span>
+                            )}
                           </div>
+                          {/* Tags */}
+                          {(session.tags || []).length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {session.tags.map(tag => (
+                                <span key={tag} className="text-[9px] font-mono bg-cyan-950/50 border border-cyan-800/40 text-cyan-500 px-1 py-0.5 rounded-sm flex items-center gap-0.5">
+                                  {tag}
+                                  <button onClick={() => removeTag(session.id, tag)} className="text-slate-600 hover:text-red-400 ml-0.5"><X className="w-2 h-2" /></button>
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
                           <button
@@ -943,6 +1133,12 @@ const AppBuilder = () => {
                           >
                             Open
                           </button>
+                          <button
+                            onClick={() => { setSavedSessions(prev => prev.map(s => s.id === session.id ? { ...s, is_favorite: !s.is_favorite } : s)); axiosInstance.patch(`/app-builder/sessions/${session.id}`, { is_favorite: !session.is_favorite }).catch(() => {}); }}
+                            className={`p-1.5 transition-colors ${session.is_favorite ? 'text-amber-400' : 'text-slate-700 hover:text-amber-500'}`}
+                            title="Favorite"
+                          >★</button>
+                          <button onClick={() => cloneSession(session.id)} className="p-1.5 text-slate-700 hover:text-cyan-400 transition-colors" title="Clone"><RefreshCw className="w-3.5 h-3.5" /></button>
                           <button
                             onClick={() => pinSession(session.id)}
                             className={`p-1.5 transition-colors ${session.is_pinned ? 'text-cyan-400' : 'text-slate-700 hover:text-cyan-500'}`}
@@ -982,13 +1178,79 @@ const AppBuilder = () => {
                 </div>
               )}
 
+              {/* Project type + build mode selectors */}
+              <div className="flex gap-3 flex-wrap">
+                <div className="flex flex-col gap-1 flex-1 min-w-32">
+                  <label className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">Project Type</label>
+                  <select value={projectType} onChange={e => setProjectType(e.target.value)}
+                    className="bg-black/50 border border-cyan-900/50 text-cyan-300 font-mono text-xs rounded-sm px-2 py-1.5 outline-none focus:border-cyan-500">
+                    <option value="app">App / Tool</option>
+                    <option value="game">Game</option>
+                    <option value="dashboard">Dashboard</option>
+                    <option value="landing">Landing Page</option>
+                    <option value="creative">Creative / Art</option>
+                    <option value="tool">Utility</option>
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1 flex-1 min-w-32">
+                  <label className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">Build Mode</label>
+                  <select value={buildMode} onChange={e => setBuildMode(e.target.value)}
+                    className="bg-black/50 border border-cyan-900/50 text-cyan-300 font-mono text-xs rounded-sm px-2 py-1.5 outline-none focus:border-cyan-500">
+                    <option value="quick">Quick Prototype</option>
+                    <option value="polished">Polished Demo</option>
+                    <option value="production">Production Starter</option>
+                    <option value="game_jam">Game Jam Mode</option>
+                    <option value="mobile">Mobile-First</option>
+                  </select>
+                </div>
+                <div className="flex items-end">
+                  <button onClick={fetchProjectBrief} disabled={!description.trim() || briefLoading}
+                    className="px-3 py-1.5 border border-violet-500/40 text-violet-400 text-[10px] font-mono uppercase rounded-sm hover:bg-violet-500/10 disabled:opacity-40 flex items-center gap-1">
+                    {briefLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                    Brief
+                  </button>
+                </div>
+              </div>
+
+              {/* AI Project Brief panel */}
+              {projectBrief && (
+                <div className="bg-black/50 border border-violet-500/20 rounded-sm p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+                    <span className="text-[10px] font-mono text-violet-400 uppercase tracking-wider flex-1">AI Project Brief</span>
+                    <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${
+                      projectBrief.complexity === 'high' ? 'text-red-400 border-red-800' :
+                      projectBrief.complexity === 'medium' ? 'text-amber-400 border-amber-800' :
+                      'text-emerald-400 border-emerald-800'}`}>{projectBrief.complexity} complexity</span>
+                    <button onClick={() => setProjectBrief(null)} className="text-slate-600 hover:text-slate-400"><X className="w-3 h-3" /></button>
+                  </div>
+                  <p className="text-xs font-mono text-cyan-200">{projectBrief.one_liner}</p>
+                  {projectBrief.must_haves?.length > 0 && (
+                    <div>
+                      <div className="text-[9px] font-mono text-slate-500 uppercase mb-1">Must-haves</div>
+                      <div className="flex flex-wrap gap-1">
+                        {projectBrief.must_haves.map((f, i) => <span key={i} className="text-[9px] font-mono bg-cyan-950/50 border border-cyan-800/30 text-cyan-400 px-1.5 py-0.5 rounded-sm">{f}</span>)}
+                      </div>
+                    </div>
+                  )}
+                  {projectBrief.risks?.length > 0 && (
+                    <div>
+                      <div className="text-[9px] font-mono text-slate-500 uppercase mb-1">Risks</div>
+                      <div className="flex flex-wrap gap-1">
+                        {projectBrief.risks.map((r, i) => <span key={i} className="text-[9px] font-mono bg-red-950/30 border border-red-800/30 text-red-400 px-1.5 py-0.5 rounded-sm">{r}</span>)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <textarea
                 data-testid="app-description-input"
                 value={description}
                 onChange={e => setDescription(e.target.value)}
                 placeholder="Describe your app in detail (or use the Coach to build a spec first)..."
                 className="w-full bg-black/50 border border-cyan-900/50 text-cyan-100 placeholder:text-cyan-900/50 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 rounded-sm font-mono p-4 outline-none resize-none"
-                rows={6}
+                rows={5}
                 disabled={buildLoading}
               />
               {/* Hidden import file inputs */}
@@ -1178,11 +1440,11 @@ const AppBuilder = () => {
               {/* ── File tabs ── */}
               <div className="flex items-center border-b border-cyan-500/20 bg-black/30 flex-shrink-0 overflow-x-auto">
                 {[
-                  { id: 'preview', label: 'Preview',    icon: <MonitorPlay className="w-3 h-3" /> },
-                  { id: 'html',    label: 'index.html', icon: <FileCode className="w-3 h-3" /> },
-                  { id: 'css',     label: 'style.css',  icon: <Palette className="w-3 h-3" /> },
-                  { id: 'js',      label: 'script.js',  icon: <Code2 className="w-3 h-3" /> },
-                  { id: 'readme',  label: 'README.md',  icon: <BookOpen className="w-3 h-3" /> },
+                  { id: 'preview', label: 'Preview',    icon: <MonitorPlay className="w-3 h-3" />, dirty: false },
+                  { id: 'html',    label: 'index.html', icon: <FileCode className="w-3 h-3" />,    dirty: isDirty('index_html'), fileKey: 'index_html', file: 'index.html' },
+                  { id: 'css',     label: 'style.css',  icon: <Palette className="w-3 h-3" />,     dirty: isDirty('style_css'),  fileKey: 'style_css',  file: 'style.css' },
+                  { id: 'js',      label: 'script.js',  icon: <Code2 className="w-3 h-3" />,       dirty: isDirty('script_js'),  fileKey: 'script_js',  file: 'script.js' },
+                  { id: 'readme',  label: 'README.md',  icon: <BookOpen className="w-3 h-3" />,    dirty: false },
                 ].map(tab => (
                   <button
                     key={tab.id}
@@ -1194,9 +1456,29 @@ const AppBuilder = () => {
                     }`}
                   >
                     {tab.icon}{tab.label}
+                    {tab.dirty && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" title="Unsaved changes" />}
                   </button>
                 ))}
+                {/* Explain panel toggle */}
+                {explainPanel && (
+                  <button onClick={() => setExplainPanel(null)}
+                    className="ml-auto flex items-center gap-1 px-2 py-1.5 text-[10px] font-mono text-cyan-500 hover:text-cyan-300 flex-shrink-0">
+                    <X className="w-3 h-3" /> Close Explain
+                  </button>
+                )}
               </div>
+
+              {/* ── Explain panel ── */}
+              {explainPanel && (
+                <div className="border-b border-cyan-500/20 bg-black/60 px-4 py-3 flex-shrink-0 max-h-40 overflow-y-auto">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <Wand2 className="w-3 h-3 text-cyan-400" />
+                    <span className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider">{explainPanel.file} — Explanation</span>
+                    {explainLoading && <Loader2 className="w-3 h-3 text-cyan-400 animate-spin" />}
+                  </div>
+                  <p className="text-[10px] font-mono text-slate-300 whitespace-pre-wrap">{explainPanel.content}</p>
+                </div>
+              )}
 
               {/* ── Content area (preview OR code editor) ── */}
               <div className="flex-shrink-0 overflow-hidden" style={{ height: '48%' }}>
@@ -1210,42 +1492,81 @@ const AppBuilder = () => {
                   />
                 )}
                 {activeTab === 'html' && (
-                  <textarea
-                    value={generatedApp.project?.index_html || ''}
-                    onChange={e => handleDirectEdit('html', e.target.value)}
-                    onBlur={() => pushUndo()}
-                    className="w-full h-full bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
-                    spellCheck={false}
-                  />
+                  <div className="h-full flex flex-col">
+                    <div className="flex items-center gap-2 px-2 py-1 bg-black/40 border-b border-cyan-500/10 flex-shrink-0">
+                      <button onClick={() => explainFile('index.html', generatedApp.project?.index_html || '')}
+                        className="flex items-center gap-1 px-2 py-0.5 text-cyan-500 text-[9px] font-mono uppercase border border-cyan-700/40 rounded-sm hover:bg-cyan-500/10">
+                        <Wand2 className="w-2.5 h-2.5" /> Explain
+                      </button>
+                      {isDirty('index_html') && <span className="text-[9px] font-mono text-amber-400">● Unsaved</span>}
+                    </div>
+                    <textarea
+                      value={generatedApp.project?.index_html || ''}
+                      onChange={e => handleDirectEdit('html', e.target.value)}
+                      onBlur={() => pushUndo()}
+                      className="flex-1 bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
+                      spellCheck={false}
+                    />
+                  </div>
                 )}
                 {activeTab === 'css' && (
-                  <textarea
-                    value={generatedApp.project?.style_css || ''}
-                    onChange={e => handleDirectEdit('css', e.target.value)}
-                    onBlur={() => pushUndo()}
-                    className="w-full h-full bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
-                    spellCheck={false}
-                  />
+                  <div className="h-full flex flex-col">
+                    <div className="flex items-center gap-2 px-2 py-1 bg-black/40 border-b border-cyan-500/10 flex-shrink-0">
+                      <button onClick={() => explainFile('style.css', generatedApp.project?.style_css || '')}
+                        className="flex items-center gap-1 px-2 py-0.5 text-cyan-500 text-[9px] font-mono uppercase border border-cyan-700/40 rounded-sm hover:bg-cyan-500/10">
+                        <Wand2 className="w-2.5 h-2.5" /> Explain
+                      </button>
+                      {isDirty('style_css') && <span className="text-[9px] font-mono text-amber-400">● Unsaved</span>}
+                    </div>
+                    <textarea
+                      value={generatedApp.project?.style_css || ''}
+                      onChange={e => handleDirectEdit('css', e.target.value)}
+                      onBlur={() => pushUndo()}
+                      className="flex-1 bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
+                      spellCheck={false}
+                    />
+                  </div>
                 )}
                 {activeTab === 'js' && (
-                  <textarea
-                    value={generatedApp.project?.script_js || ''}
-                    onChange={e => handleDirectEdit('js', e.target.value)}
-                    onBlur={() => pushUndo()}
-                    className="w-full h-full bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
-                    spellCheck={false}
-                  />
+                  <div className="h-full flex flex-col">
+                    <div className="flex items-center gap-2 px-2 py-1 bg-black/40 border-b border-cyan-500/10 flex-shrink-0">
+                      <button onClick={() => explainFile('script.js', generatedApp.project?.script_js || '')}
+                        className="flex items-center gap-1 px-2 py-0.5 text-cyan-500 text-[9px] font-mono uppercase border border-cyan-700/40 rounded-sm hover:bg-cyan-500/10">
+                        <Wand2 className="w-2.5 h-2.5" /> Explain
+                      </button>
+                      {isDirty('script_js') && <span className="text-[9px] font-mono text-amber-400">● Unsaved</span>}
+                    </div>
+                    <textarea
+                      value={generatedApp.project?.script_js || ''}
+                      onChange={e => handleDirectEdit('js', e.target.value)}
+                      onBlur={() => pushUndo()}
+                      className="flex-1 bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
+                      spellCheck={false}
+                    />
+                  </div>
                 )}
                 {activeTab === 'readme' && (
-                  <textarea
-                    value={generatedApp.project?.readme || ''}
-                    onChange={e => setGeneratedApp(prev => ({
-                      ...prev,
-                      project: { ...prev.project, readme: e.target.value }
-                    }))}
-                    className="w-full h-full bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
-                    spellCheck={false}
-                  />
+                  <div className="h-full flex flex-col">
+                    <div className="flex items-center gap-2 px-2 py-1 bg-black/40 border-b border-cyan-500/10 flex-shrink-0">
+                      <button onClick={generateReadme}
+                        className="flex items-center gap-1 px-2 py-0.5 text-violet-400 text-[9px] font-mono uppercase border border-violet-700/40 rounded-sm hover:bg-violet-500/10">
+                        <Sparkles className="w-2.5 h-2.5" /> AI Generate
+                      </button>
+                      <button onClick={() => explainFile('README.md', generatedApp.project?.readme || '')}
+                        className="flex items-center gap-1 px-2 py-0.5 text-cyan-500 text-[9px] font-mono uppercase border border-cyan-700/40 rounded-sm hover:bg-cyan-500/10">
+                        <Wand2 className="w-2.5 h-2.5" /> Explain
+                      </button>
+                    </div>
+                    <textarea
+                      value={generatedApp.project?.readme || ''}
+                      onChange={e => setGeneratedApp(prev => ({
+                        ...prev,
+                        project: { ...prev.project, readme: e.target.value }
+                      }))}
+                      className="flex-1 bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
+                      spellCheck={false}
+                    />
+                  </div>
                 )}
               </div>
 
@@ -1275,9 +1596,24 @@ const AppBuilder = () => {
                       <div className={`max-w-[80%] px-2.5 py-1.5 rounded text-[10px] font-mono ${
                         msg.role === 'user'
                           ? 'bg-cyan-500/20 border border-cyan-500/30 text-cyan-100'
+                          : msg.pending
+                          ? 'bg-amber-950/40 border border-amber-500/30 text-amber-200'
                           : 'bg-black/40 border border-cyan-900/30 text-slate-300'
                       }`}>
                         {msg.content}
+                        {/* Approve / Reject buttons on the last pending message */}
+                        {msg.pending && idx === editHistory.length - 1 && pendingChange && (
+                          <div className="flex gap-2 mt-2">
+                            <button onClick={approveChange}
+                              className="px-3 py-1 bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-[9px] font-mono uppercase rounded-sm hover:bg-emerald-500/30">
+                              ✓ Approve
+                            </button>
+                            <button onClick={rejectChange}
+                              className="px-3 py-1 bg-red-500/20 border border-red-500/40 text-red-400 text-[9px] font-mono uppercase rounded-sm hover:bg-red-500/30">
+                              ✗ Reject
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}

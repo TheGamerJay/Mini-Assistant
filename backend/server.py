@@ -722,14 +722,23 @@ def _route_edit(instruction: str) -> str:
 class AppBuilderRequest(BaseModel):
     description: str
     framework: str = "react"
+    project_type: str = "app"      # app | game | dashboard | landing | tool | creative
+    build_mode: str = "polished"   # quick | polished | production | game_jam | mobile
 
 @api_router.post("/app-builder/generate")
 async def generate_app(request: AppBuilderRequest):
     if not ollama_client:
         raise HTTPException(status_code=503, detail="Ollama service not available")
-    
+
+    _mode_addendum = {
+        "quick":      "\nBUILD MODE: Quick prototype. Core features only. Prioritize working logic over polish.",
+        "production": "\nBUILD MODE: Production starter. Emphasize clean architecture, error handling, edge cases.",
+        "game_jam":   "\nBUILD MODE: Game jam mode. Maximize fun, game feel, and effects. Speed over perfection.",
+        "mobile":     "\nBUILD MODE: Mobile-first. Touch controls required. Design for 375px width first.",
+    }.get(request.build_mode, "")
+
     try:
-        prompt = f"""You are a world-class web developer and UI designer. Your job is to generate a single, complete, self-contained HTML file for the following app:
+        prompt = f"""You are a world-class web developer and UI designer. Your job is to generate a single, complete, self-contained HTML file for the following app:{_mode_addendum}
 
 {request.description}
 
@@ -823,10 +832,12 @@ Now generate the complete HTML file:"""
         return {
             "name": app_name,
             "description": request.description,
-            "html": content,        # original for backward compat
-            "project": project,     # structured files
+            "html": content,
+            "project": project,
             "build_id": build_id,
-            "preview_url": f"/api/preview/{build_id}"
+            "preview_url": f"/api/preview/{build_id}",
+            "project_type": request.project_type,
+            "build_mode": request.build_mode,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Generation error: {str(e)}")
@@ -989,6 +1000,7 @@ async def export_app_zip(request: AppBuilderExportRequest):
 
 # ── Migrate table to add new columns if they don't exist yet ────────────────────
 _SESSION_MIGRATIONS = [
+    # Phase 0 (original)
     "ALTER TABLE app_builder_sessions ADD COLUMN IF NOT EXISTS user_id TEXT",
     "ALTER TABLE app_builder_sessions ADD COLUMN IF NOT EXISTS project_type TEXT DEFAULT 'app'",
     "ALTER TABLE app_builder_sessions ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN DEFAULT FALSE",
@@ -997,6 +1009,13 @@ _SESSION_MIGRATIONS = [
     "ALTER TABLE app_builder_sessions ADD COLUMN IF NOT EXISTS last_edited_file TEXT",
     "ALTER TABLE app_builder_sessions ADD COLUMN IF NOT EXISTS last_opened_at TIMESTAMPTZ",
     "ALTER TABLE app_builder_sessions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()",
+    # Phase 1
+    "ALTER TABLE app_builder_sessions ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]'",
+    "ALTER TABLE app_builder_sessions ADD COLUMN IF NOT EXISTS notes TEXT",
+    "ALTER TABLE app_builder_sessions ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE",
+    "ALTER TABLE app_builder_sessions ADD COLUMN IF NOT EXISTS build_mode TEXT DEFAULT 'polished'",
+    "ALTER TABLE app_builder_sessions ADD COLUMN IF NOT EXISTS project_type_label TEXT",
+    "ALTER TABLE app_builder_sessions ADD COLUMN IF NOT EXISTS fixloop_result JSONB",
 ]
 
 async def _migrate_sessions_table(conn):
@@ -1015,25 +1034,34 @@ def _row_to_session(r) -> dict:
             try: return json.loads(v)
             except Exception: return v
         return v
+    keys = r.keys()
+    def _col(col, default=None):
+        return r[col] if col in keys else default
     return {
-        "id":             r["id"],
-        "name":           r["name"],
-        "description":    r["description"],
-        "html":           r["html"],
-        "project":        _j(r["project"]),
-        "editHistory":    _j(r["edit_history"]) or [],
-        "versions":       _j(r["versions"]) or [],
-        "build_id":       r["build_id"],
-        "preview_url":    r["preview_url"],
-        "user_id":        r["user_id"] if "user_id" in r.keys() else None,
-        "project_type":   r["project_type"] if "project_type" in r.keys() else "app",
-        "is_pinned":      r["is_pinned"] if "is_pinned" in r.keys() else False,
-        "is_archived":    r["is_archived"] if "is_archived" in r.keys() else False,
-        "edit_count":     r["edit_count"] if "edit_count" in r.keys() else 0,
-        "last_edited_file": r["last_edited_file"] if "last_edited_file" in r.keys() else None,
-        "last_opened_at": r["last_opened_at"].isoformat() if ("last_opened_at" in r.keys() and r["last_opened_at"]) else None,
-        "created_at":     r["created_at"].isoformat() if ("created_at" in r.keys() and r["created_at"]) else None,
-        "savedAt":        r["updated_at"].isoformat() if r["updated_at"] else None,
+        "id":               r["id"],
+        "name":             r["name"],
+        "description":      r["description"],
+        "html":             r["html"],
+        "project":          _j(r["project"]),
+        "editHistory":      _j(r["edit_history"]) or [],
+        "versions":         _j(r["versions"]) or [],
+        "build_id":         r["build_id"],
+        "preview_url":      r["preview_url"],
+        "user_id":          _col("user_id"),
+        "project_type":     _col("project_type", "app"),
+        "project_type_label": _col("project_type_label"),
+        "build_mode":       _col("build_mode", "polished"),
+        "is_pinned":        _col("is_pinned", False),
+        "is_archived":      _col("is_archived", False),
+        "is_favorite":      _col("is_favorite", False),
+        "edit_count":       _col("edit_count", 0),
+        "last_edited_file": _col("last_edited_file"),
+        "tags":             _j(_col("tags")) or [],
+        "notes":            _col("notes"),
+        "fixloop_result":   _j(_col("fixloop_result")),
+        "last_opened_at":   r["last_opened_at"].isoformat() if _col("last_opened_at") else None,
+        "created_at":       r["created_at"].isoformat() if _col("created_at") else None,
+        "savedAt":          r["updated_at"].isoformat() if r["updated_at"] else None,
     }
 
 
@@ -1049,15 +1077,23 @@ class AppBuilderSessionUpsert(BaseModel):
     preview_url: Optional[str] = None
     user_id: Optional[str] = None
     project_type: str = "app"
+    project_type_label: Optional[str] = None
+    build_mode: str = "polished"
     is_pinned: bool = False
     is_archived: bool = False
+    is_favorite: bool = False
     edit_count: int = 0
     last_edited_file: Optional[str] = None
+    tags: list = []
+    notes: Optional[str] = None
 
 class AppBuilderSessionPatch(BaseModel):
     is_pinned: Optional[bool] = None
     is_archived: Optional[bool] = None
+    is_favorite: Optional[bool] = None
     name: Optional[str] = None
+    tags: Optional[list] = None
+    notes: Optional[str] = None
 
 @api_router.post("/app-builder/sessions")
 async def upsert_session(req: AppBuilderSessionUpsert):
@@ -1070,17 +1106,21 @@ async def upsert_session(req: AppBuilderSessionUpsert):
         await conn.execute("""
             INSERT INTO app_builder_sessions
                 (id, name, description, html, project, edit_history, versions,
-                 build_id, preview_url, user_id, project_type,
-                 is_pinned, is_archived, edit_count, last_edited_file,
+                 build_id, preview_url, user_id, project_type, project_type_label,
+                 build_mode, is_pinned, is_archived, is_favorite,
+                 edit_count, last_edited_file, tags, notes,
                  created_at, saved_at, updated_at)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW(),NOW(),NOW())
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NOW(),NOW(),NOW())
             ON CONFLICT (id) DO UPDATE SET
                 name=EXCLUDED.name, description=EXCLUDED.description,
                 html=EXCLUDED.html, project=EXCLUDED.project,
                 edit_history=EXCLUDED.edit_history, versions=EXCLUDED.versions,
                 build_id=EXCLUDED.build_id, preview_url=EXCLUDED.preview_url,
                 user_id=EXCLUDED.user_id, project_type=EXCLUDED.project_type,
+                project_type_label=EXCLUDED.project_type_label,
+                build_mode=EXCLUDED.build_mode,
                 edit_count=EXCLUDED.edit_count, last_edited_file=EXCLUDED.last_edited_file,
+                tags=EXCLUDED.tags, notes=EXCLUDED.notes,
                 updated_at=NOW()
         """,
         req.id, req.name, req.description,
@@ -1089,14 +1129,16 @@ async def upsert_session(req: AppBuilderSessionUpsert):
         json.dumps(req.edit_history),
         json.dumps(req.versions),
         req.build_id, req.preview_url,
-        req.user_id, req.project_type,
-        req.is_pinned, req.is_archived,
-        req.edit_count, req.last_edited_file)
+        req.user_id, req.project_type, req.project_type_label,
+        req.build_mode,
+        req.is_pinned, req.is_archived, req.is_favorite,
+        req.edit_count, req.last_edited_file,
+        json.dumps(req.tags), req.notes)
     return {"ok": True}
 
 @api_router.patch("/app-builder/sessions/{session_id}")
 async def patch_session(session_id: str, req: AppBuilderSessionPatch):
-    """Partial update — used for pin/unpin, archive/unarchive, rename."""
+    """Partial update — pin/unpin, archive/unarchive, favorite, rename, tags, notes."""
     pg = await _get_pg()
     if not pg:
         raise HTTPException(status_code=503, detail="Postgres unavailable")
@@ -1105,8 +1147,14 @@ async def patch_session(session_id: str, req: AppBuilderSessionPatch):
         fields.append(f"is_pinned=${len(vals)+1}"); vals.append(req.is_pinned)
     if req.is_archived is not None:
         fields.append(f"is_archived=${len(vals)+1}"); vals.append(req.is_archived)
+    if req.is_favorite is not None:
+        fields.append(f"is_favorite=${len(vals)+1}"); vals.append(req.is_favorite)
     if req.name is not None:
         fields.append(f"name=${len(vals)+1}"); vals.append(req.name)
+    if req.tags is not None:
+        fields.append(f"tags=${len(vals)+1}"); vals.append(json.dumps(req.tags))
+    if req.notes is not None:
+        fields.append(f"notes=${len(vals)+1}"); vals.append(req.notes)
     if not fields:
         return {"ok": True}
     fields.append(f"updated_at=NOW()")
@@ -1233,6 +1281,181 @@ async def restore_version(session_id: str, req: RestoreVersionRequest):
         "preview_url": f"/api/preview/{build_id}",
         "restored_version": target,
     }
+
+
+@api_router.post("/app-builder/sessions/{session_id}/clone")
+async def clone_session(session_id: str):
+    """Duplicate a session with a new ID and 'Copy of' prefix."""
+    pg = await _get_pg()
+    if not pg:
+        raise HTTPException(status_code=503, detail="Postgres unavailable")
+    async with pg.acquire() as conn:
+        await _migrate_sessions_table(conn)
+        r = await conn.fetchrow("SELECT * FROM app_builder_sessions WHERE id=$1", session_id)
+    if not r:
+        raise HTTPException(status_code=404, detail="Session not found")
+    new_id = str(uuid.uuid4())
+    orig = _row_to_session(r)
+    async with pg.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO app_builder_sessions
+                (id, name, description, html, project, edit_history, versions,
+                 build_id, preview_url, user_id, project_type, project_type_label,
+                 build_mode, is_pinned, is_archived, is_favorite,
+                 edit_count, last_edited_file, tags, notes,
+                 created_at, saved_at, updated_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NOW(),NOW(),NOW())
+        """,
+        new_id, f"Copy of {orig['name']}", orig["description"],
+        orig["html"],
+        json.dumps(orig["project"]) if orig["project"] else None,
+        json.dumps([]),  # fresh edit history
+        json.dumps(orig["versions"]),
+        None, None,  # new build_id/preview_url — will be set on next edit
+        orig["user_id"], orig["project_type"], orig["project_type_label"],
+        orig["build_mode"],
+        False, False, False,  # is_pinned, is_archived, is_favorite
+        0, None,
+        json.dumps(orig["tags"] or []), orig["notes"])
+    return {"ok": True, "id": new_id, "name": f"Copy of {orig['name']}"}
+
+
+class AppBuilderExplainRequest(BaseModel):
+    file: str               # 'index.html' | 'style.css' | 'script.js' | 'readme'
+    content: str
+    project_name: str = ""
+    level: str = "normal"   # 'beginner' | 'normal' | 'advanced'
+
+@api_router.post("/app-builder/explain")
+async def explain_file(req: AppBuilderExplainRequest):
+    """Ask AI to explain a project file in plain English."""
+    if not ollama_client:
+        raise HTTPException(status_code=503, detail="Ollama service not available")
+    level_map = {
+        "beginner": "Use very simple language. Avoid jargon. Assume no programming knowledge.",
+        "advanced": "Be technical. Use proper terminology. Explain internal mechanics and trade-offs.",
+    }
+    level_note = level_map.get(req.level, "Use clear but technical language suitable for an intermediate developer.")
+    prompt = f"""You are explaining code from a project called "{req.project_name or 'this app'}".
+
+The file is: {req.file}
+
+{level_note}
+
+Explain what this file does, how it's structured, and any important patterns or decisions it uses.
+Keep your explanation focused and practical — under 300 words.
+Do not repeat the code back. Only explain it.
+
+FILE CONTENT:
+{req.content[:8000]}"""
+    try:
+        res = ollama_client.chat(model=_default_model, messages=[{"role": "user", "content": prompt}])
+        return {"explanation": res["message"]["content"].strip(), "file": req.file}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Explain error: {str(e)}")
+
+
+class AppBuilderReadmeRequest(BaseModel):
+    project: dict
+    name: str = "generated-app"
+    description: str = ""
+
+@api_router.post("/app-builder/generate-readme")
+async def generate_readme(req: AppBuilderReadmeRequest):
+    """Generate a comprehensive README from the structured project files."""
+    if not ollama_client:
+        raise HTTPException(status_code=503, detail="Ollama service not available")
+    html_snippet  = (req.project.get("index_html") or "")[:3000]
+    css_snippet   = (req.project.get("style_css")  or "")[:1500]
+    js_snippet    = (req.project.get("script_js")  or "")[:3000]
+    prompt = f"""You are a technical writer. Generate a comprehensive README.md for the following web project.
+
+Project name: {req.name}
+Description: {req.description}
+
+index.html (excerpt):
+{html_snippet}
+
+style.css (excerpt):
+{css_snippet}
+
+script.js (excerpt):
+{js_snippet}
+
+Write the README in Markdown. Include:
+1. Project title and one-sentence description
+2. Features list (bullet points)
+3. How to run it (double-click HTML / python -m http.server)
+4. Controls (if it's a game or interactive app)
+5. Tech used
+6. Brief code structure overview
+7. License: MIT
+
+Output only the Markdown. No preamble."""
+    try:
+        res = ollama_client.chat(model=_default_model, messages=[{"role": "user", "content": prompt}])
+        readme = res["message"]["content"].strip()
+        return {"readme": readme}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"README generation error: {str(e)}")
+
+
+class ProjectBriefRequest(BaseModel):
+    description: str
+    project_type: str = "app"
+    build_mode: str = "polished"
+
+@api_router.post("/app-builder/project-brief")
+async def generate_project_brief(req: ProjectBriefRequest):
+    """Generate a structured build brief + file plan before generation."""
+    if not ollama_client:
+        raise HTTPException(status_code=503, detail="Ollama service not available")
+    type_context = {
+        "game":      "a browser-based game",
+        "dashboard": "a data dashboard or analytics app",
+        "landing":   "a marketing landing page",
+        "tool":      "a productivity utility app",
+        "creative":  "a creative/generative art app",
+    }.get(req.project_type, "a web application")
+    mode_context = {
+        "quick":      "Fast prototype. Core features only. Minimal polish.",
+        "polished":   "Polished demo. Full UI, animations, complete feature set.",
+        "production": "Production starter. Clean architecture, error handling, scalable patterns.",
+        "game_jam":   "Game jam mode. Maximum fun, effects, and game feel. Ship fast.",
+        "mobile":     "Mobile-first. Touch controls, responsive, small-screen optimized.",
+    }.get(req.build_mode, "")
+    prompt = f"""You are a senior product engineer planning a web project.
+
+USER WANTS: {type_context}
+BUILD MODE: {req.build_mode} — {mode_context}
+DESCRIPTION: {req.description}
+
+Generate a structured project brief in JSON with this exact shape:
+{{
+  "title": "short app name",
+  "one_liner": "one sentence summary",
+  "features": ["feature 1", "feature 2", ...],
+  "tech_stack": ["HTML", "CSS", "JavaScript", ...],
+  "complexity": "low | medium | high",
+  "estimated_files": {{"index.html": "...", "style.css": "...", "script.js": "..."}},
+  "risks": ["potential issue 1", ...],
+  "must_haves": ["non-negotiable feature 1", ...],
+  "nice_to_haves": ["optional feature 1", ...]
+}}
+
+Output ONLY valid JSON. No markdown. No preamble."""
+    try:
+        res = ollama_client.chat(model=_default_model, messages=[{"role": "user", "content": prompt}])
+        raw = res["message"]["content"].strip()
+        import re as _re2
+        raw = _re2.sub(r'^```[a-zA-Z]*\n?', '', raw)
+        raw = _re2.sub(r'\n?```\s*$', '', raw).strip()
+        brief = json.loads(raw)
+        return {"brief": brief}
+    except json.JSONDecodeError:
+        return {"brief": None, "raw": res["message"]["content"].strip()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Brief error: {str(e)}")
 
 
 class AppBuilderImportHtmlRequest(BaseModel):
