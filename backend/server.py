@@ -617,6 +617,52 @@ class GitRemoteRequest(BaseModel):
     name: str
     url: str
 
+class AppBuilderEditRequest(BaseModel):
+    html: str
+    instruction: str
+
+@api_router.post("/app-builder/edit")
+async def edit_app(request: AppBuilderEditRequest):
+    if not ollama_client:
+        raise HTTPException(status_code=503, detail="Ollama service not available")
+    try:
+        prompt = f"""You are editing an existing HTML app. The user wants a specific change made.
+
+CURRENT HTML:
+{request.html}
+
+USER'S CHANGE REQUEST:
+{request.instruction}
+
+--- INSTRUCTIONS ---
+- Apply the requested change to the HTML above.
+- Return the COMPLETE updated HTML file with the change applied.
+- Output ONLY raw HTML. No markdown, no code fences, no explanation before or after.
+- Start with <!DOCTYPE html> and end with </html>.
+- Keep everything that was not changed exactly as it was.
+- If the user reports a bug, find and fix the root cause — do not just comment it out.
+- Never truncate. Return the full file every time."""
+
+        response = ollama_client.chat(
+            model=_default_model,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        content = response['message']['content'].strip()
+
+        # Strip markdown fences
+        import re as _re
+        content = _re.sub(r'^```[a-zA-Z]*\n?', '', content)
+        content = _re.sub(r'\n?```\s*$', '', content)
+        content = content.strip()
+        if not content.lower().startswith('<!doctype') and '<!doctype' in content.lower():
+            content = content[content.lower().find('<!doctype'):]
+
+        return {"html": content}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Edit error: {str(e)}")
+
+
 class GitCommitRequest(BaseModel):
     message: str
 

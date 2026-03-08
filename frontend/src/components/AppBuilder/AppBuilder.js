@@ -3,7 +3,7 @@ import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import {
   Wand2, Loader2, Download, Eye,
-  MessageSquare, Send, ChevronRight, RotateCcw, Sparkles
+  MessageSquare, Send, ChevronRight, RotateCcw, Sparkles, Pencil, CheckCircle
 } from 'lucide-react';
 
 // ── Coach system prompt ────────────────────────────────────────────────────────
@@ -63,6 +63,17 @@ const AppBuilder = () => {
   const [buildLoading, setBuildLoading] = useState(false);
   const [buildMsg, setBuildMsg] = useState('');
   const [generatedApp, setGeneratedApp] = useState(null);
+
+  // Edit state
+  const [editInput, setEditInput] = useState('');
+  const [editLoading, setEditLoading] = useState(false);
+  const [editMsg, setEditMsg] = useState('');
+  const editLoadingIntervalRef = useRef(null);
+
+  const EDIT_LOADING_MSGS = [
+    'Reading your app...', 'Finding what to change...', 'Applying changes...',
+    'Rewriting affected code...', 'Putting it back together...', 'Almost done...',
+  ];
 
   const CHAT_LOADING_MSGS = [
     'Thinking...', 'Processing your idea...', 'Crafting the perfect question...',
@@ -241,6 +252,39 @@ const AppBuilder = () => {
     } finally {
       stopLoadingCycle(setBuildMsg);
       setBuildLoading(false);
+    }
+  };
+
+  const editApp = async () => {
+    if (!editInput.trim() || editLoading || !generatedApp?.html) return;
+    setEditLoading(true);
+    let i = 0;
+    setEditMsg(EDIT_LOADING_MSGS[0]);
+    editLoadingIntervalRef.current = setInterval(() => {
+      i = (i + 1) % EDIT_LOADING_MSGS.length;
+      setEditMsg(EDIT_LOADING_MSGS[i]);
+    }, 2500);
+    try {
+      const res = await axiosInstance.post('/app-builder/edit', {
+        html: generatedApp.html,
+        instruction: editInput,
+      }, { timeout: 300000 });
+      setGeneratedApp(prev => ({ ...prev, html: res.data.html }));
+      setEditInput('');
+      toast.success('Changes applied!');
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to apply changes');
+    } finally {
+      clearInterval(editLoadingIntervalRef.current);
+      setEditMsg('');
+      setEditLoading(false);
+    }
+  };
+
+  const handleEditKey = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      editApp();
     }
   };
 
@@ -440,37 +484,72 @@ const AppBuilder = () => {
               </div>
             </div>
           ) : (
-            <div className="flex-1 flex items-center justify-center p-8">
-              <div className="text-center space-y-6 max-w-md">
-                <div className="w-20 h-20 mx-auto rounded-full bg-gradient-to-br from-cyan-500 to-violet-600 flex items-center justify-center">
-                  <Wand2 className="w-10 h-10 text-white" />
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="max-w-lg mx-auto space-y-6">
+
+                {/* Success card */}
+                <div className="text-center space-y-4">
+                  <div className="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-cyan-500 to-violet-600 flex items-center justify-center">
+                    <CheckCircle className="w-8 h-8 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-bold text-cyan-400 uppercase" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+                      Your App is Ready!
+                    </h3>
+                    <p className="text-slate-400 font-mono text-sm mt-1">{generatedApp.name}</p>
+                  </div>
+                  <div className="flex flex-col gap-3">
+                    <button
+                      onClick={openInBrowser}
+                      className="w-full py-4 bg-gradient-to-r from-cyan-500 to-violet-600 text-white font-bold hover:from-cyan-400 hover:to-violet-500 hover:shadow-[0_0_20px_rgba(0,243,255,0.4)] uppercase tracking-wider rounded-sm transition-all flex items-center justify-center gap-2 text-lg"
+                    >
+                      <Eye className="w-5 h-5" /> OPEN IN BROWSER
+                    </button>
+                    <button
+                      onClick={downloadApp}
+                      className="w-full py-3 bg-violet-500/20 text-violet-400 border border-violet-500/50 hover:bg-violet-500/30 rounded-sm font-semibold uppercase flex items-center justify-center gap-2 transition-all"
+                    >
+                      <Download className="w-4 h-4" /> DOWNLOAD .HTML
+                    </button>
+                    <button
+                      onClick={() => { setGeneratedApp(null); setDescription(''); setEditInput(''); }}
+                      className="w-full py-2 text-slate-500 hover:text-slate-300 text-sm font-mono uppercase flex items-center justify-center gap-2 transition-colors"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" /> BUILD ANOTHER
+                    </button>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-2xl font-bold text-cyan-400 uppercase" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
-                    Your App is Ready!
-                  </h3>
-                  <p className="text-slate-400 font-mono text-sm mt-1">{generatedApp.name}</p>
+
+                {/* Edit / iterate panel */}
+                <div className="border border-cyan-500/20 rounded-sm bg-black/30">
+                  <div className="flex items-center gap-2 px-4 py-3 border-b border-cyan-500/20">
+                    <Pencil className="w-4 h-4 text-cyan-400" />
+                    <span className="text-xs font-mono text-cyan-400 uppercase tracking-wider">Edit / Iterate</span>
+                  </div>
+                  <div className="p-4 space-y-3">
+                    <p className="text-xs text-slate-500 font-mono">Describe what to change or fix — the AI will update the app and give you a new version.</p>
+                    <textarea
+                      value={editInput}
+                      onChange={e => setEditInput(e.target.value)}
+                      onKeyDown={handleEditKey}
+                      placeholder='e.g. "make the background dark blue", "the jump button doesn\'t work on mobile", "add a high score leaderboard"'
+                      className="w-full bg-black/50 border border-cyan-900/50 text-cyan-100 placeholder:text-cyan-900/40 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 rounded-sm font-mono text-sm p-3 outline-none resize-none"
+                      rows={3}
+                      disabled={editLoading}
+                    />
+                    <button
+                      onClick={editApp}
+                      disabled={editLoading || !editInput.trim()}
+                      className="w-full py-3 bg-gradient-to-r from-cyan-500/80 to-violet-600/80 hover:from-cyan-500 hover:to-violet-600 text-white font-bold uppercase tracking-wider rounded-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      {editLoading
+                        ? <><Loader2 className="w-4 h-4 animate-spin" />{editMsg || 'Applying...'}</>
+                        : <><Pencil className="w-4 h-4" />APPLY CHANGES</>
+                      }
+                    </button>
+                  </div>
                 </div>
-                <div className="flex flex-col gap-3">
-                  <button
-                    onClick={openInBrowser}
-                    className="w-full py-4 bg-gradient-to-r from-cyan-500 to-violet-600 text-white font-bold hover:from-cyan-400 hover:to-violet-500 hover:shadow-[0_0_20px_rgba(0,243,255,0.4)] uppercase tracking-wider rounded-sm transition-all flex items-center justify-center gap-2 text-lg"
-                  >
-                    <Eye className="w-5 h-5" /> OPEN IN BROWSER
-                  </button>
-                  <button
-                    onClick={downloadApp}
-                    className="w-full py-3 bg-violet-500/20 text-violet-400 border border-violet-500/50 hover:bg-violet-500/30 rounded-sm font-semibold uppercase flex items-center justify-center gap-2 transition-all"
-                  >
-                    <Download className="w-4 h-4" /> DOWNLOAD .HTML
-                  </button>
-                  <button
-                    onClick={() => { setGeneratedApp(null); setDescription(''); }}
-                    className="w-full py-2 text-slate-500 hover:text-slate-300 text-sm font-mono uppercase flex items-center justify-center gap-2 transition-colors"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" /> BUILD ANOTHER
-                  </button>
-                </div>
+
               </div>
             </div>
           )}
