@@ -4068,13 +4068,13 @@ app.include_router(api_router)
 # Mounts the local Ollama+ComfyUI multi-brain image router as a sub-application.
 # ══════════════════════════════════════════════════════════════════════════════
 try:
-    import sys as _sys, pathlib as _pl
+    import sys as _sys, pathlib as _pl, logging as _logging
     _sys.path.insert(0, str(_pl.Path(__file__).parent))
     from image_system.api.server import app as _image_app
     app.mount("/image-api", _image_app)
-    logger.info("Image system mounted at /image-api")
+    _logging.getLogger("image_system").info("Image system mounted at /image-api")
 except Exception as _img_err:
-    logger.warning(f"Image system not available: {_img_err}")
+    _logging.getLogger("image_system").warning(f"Image system not available: {_img_err}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
