@@ -1235,6 +1235,69 @@ async def restore_version(session_id: str, req: RestoreVersionRequest):
     }
 
 
+class AppBuilderImportHtmlRequest(BaseModel):
+    html: str
+    name: str = "imported-app"
+    description: str = ""
+
+@api_router.post("/app-builder/import-html")
+async def import_html(req: AppBuilderImportHtmlRequest):
+    """Parse a raw HTML string into a structured project and cache a preview."""
+    project = _parse_html_to_project(req.html, req.name, req.description)
+    reconstructed = _reconstruct_html(project)
+    build_id = str(uuid.uuid4())
+    _app_previews[build_id] = reconstructed
+    r = await _get_redis()
+    if r:
+        try: await r.setex(f"preview:{build_id}", 86400, reconstructed)
+        except Exception: pass
+    return {
+        "name": req.name, "description": req.description,
+        "html": reconstructed, "project": project,
+        "build_id": build_id, "preview_url": f"/api/preview/{build_id}"
+    }
+
+@api_router.post("/app-builder/import-zip")
+async def import_zip(file: UploadFile = File(...)):
+    """Extract a ZIP file (index.html / style.css / script.js / README.md) into a project."""
+    import io, zipfile
+    content = await file.read()
+    buf = io.BytesIO(content)
+    project = {"index_html": "", "style_css": "", "script_js": "", "readme": ""}
+    name = (file.filename or "imported-app").removesuffix(".zip")
+    try:
+        with zipfile.ZipFile(buf) as zf:
+            for fname in zf.namelist():
+                base = fname.split("/")[-1].lower()
+                try:
+                    text = zf.read(fname).decode("utf-8", errors="replace")
+                except Exception:
+                    continue
+                if base == "index.html":    project["index_html"] = text
+                elif base == "style.css":   project["style_css"]  = text
+                elif base == "script.js":   project["script_js"]  = text
+                elif base in ("readme.md", "readme.txt"): project["readme"] = text
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="Invalid ZIP file")
+
+    # If only index.html came in (self-contained), parse it out
+    if project["index_html"] and not project["style_css"] and not project["script_js"]:
+        project = _parse_html_to_project(project["index_html"], name, "")
+
+    reconstructed = _reconstruct_html(project)
+    build_id = str(uuid.uuid4())
+    _app_previews[build_id] = reconstructed
+    r = await _get_redis()
+    if r:
+        try: await r.setex(f"preview:{build_id}", 86400, reconstructed)
+        except Exception: pass
+    return {
+        "name": name, "description": "",
+        "html": reconstructed, "project": project,
+        "build_id": build_id, "preview_url": f"/api/preview/{build_id}"
+    }
+
+
 class GitCommitRequest(BaseModel):
     message: str
 

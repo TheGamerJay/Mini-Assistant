@@ -6,7 +6,8 @@ import {
   MessageSquare, Send, ChevronRight, RotateCcw, Sparkles, Pencil, CheckCircle,
   Trash2, FolderOpen, Clock, Package, Undo2, History, MonitorPlay,
   FileCode, Palette, Code2, BookmarkPlus, X, Pin, Archive, Search,
-  SortAsc, RefreshCw
+  SortAsc, RefreshCw, Redo2, Upload, BookOpen, AlertTriangle, AlertCircle,
+  ShieldCheck, ArchiveRestore
 } from 'lucide-react';
 
 // ── Coach system prompt ────────────────────────────────────────────────────────
@@ -70,6 +71,42 @@ const reconstructHtml = (project) => {
   return html;
 };
 
+// ── Diff computation (LCS-based, line-level) ───────────────────────────────────
+const computeDiff = (oldStr, newStr) => {
+  const a = (oldStr || '').split('\n').slice(0, 400);
+  const b = (newStr || '').split('\n').slice(0, 400);
+  const n = a.length, m = b.length;
+  // Build LCS table
+  const lcs = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      lcs[i][j] = a[i] === b[j] ? 1 + lcs[i + 1][j + 1] : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+  // Trace back
+  const result = [];
+  let i = 0, j = 0;
+  while (i < n || j < m) {
+    if (i < n && j < m && a[i] === b[j]) { result.push({ t: 'eq', s: a[i] }); i++; j++; }
+    else if (j < m && (i >= n || lcs[i + 1][j] >= lcs[i][j + 1])) { result.push({ t: 'add', s: b[j] }); j++; }
+    else { result.push({ t: 'del', s: a[i] }); i++; }
+  }
+  return result;
+};
+
+// ── Session health badge ───────────────────────────────────────────────────────
+const getHealthBadge = (session) => {
+  if (session.is_archived)
+    return { label: 'Archived', cls: 'text-slate-500 border-slate-700', Icon: Archive };
+  const edits = session.editHistory || [];
+  const errors = edits.filter(m => m.role === 'assistant' && m.content?.startsWith('Error:'));
+  if (errors.length >= 2)
+    return { label: 'Needs Fix', cls: 'text-red-400 border-red-800', Icon: AlertCircle };
+  if (errors.length === 1)
+    return { label: 'Warning', cls: 'text-amber-400 border-amber-800', Icon: AlertTriangle };
+  if ((session.versions || []).some(v => v.name?.toLowerCase().includes('restor')))
+    return { label: 'Restored', cls: 'text-violet-400 border-violet-800', Icon: ArchiveRestore };
+  return { label: 'Ready', cls: 'text-emerald-400 border-emerald-800', Icon: ShieldCheck };
+};
+
 // ── Component ──────────────────────────────────────────────────────────────────
 const SESSIONS_KEY = 'appbuilder_sessions';
 
@@ -103,14 +140,20 @@ const AppBuilder = () => {
   const editLoadingIntervalRef = useRef(null);
   const editEndRef = useRef(null);
 
-  // Undo / version history
-  const [undoStack, setUndoStack] = useState([]);        // last 20 project snapshots
-  const [versions, setVersions] = useState([]);           // named restore points
+  // Undo / Redo / version history
+  const [undoStack, setUndoStack] = useState([]);
+  const [redoStack, setRedoStack] = useState([]);
+  const [versions, setVersions] = useState([]);
   const [showVersions, setShowVersions] = useState(false);
   const [versionName, setVersionName] = useState('');
+  const [diffView, setDiffView] = useState(null);  // {verA, verB, file} | null
 
   // File tabs
-  const [activeTab, setActiveTab] = useState('preview'); // 'preview'|'html'|'css'|'js'
+  const [activeTab, setActiveTab] = useState('preview'); // 'preview'|'html'|'css'|'js'|'readme'
+
+  // Import refs
+  const importHtmlRef = useRef(null);
+  const importZipRef  = useRef(null);
 
   // Saved sessions
   const [savedSessions, setSavedSessions] = useState(loadSessionsLocal);
@@ -509,22 +552,29 @@ const AppBuilder = () => {
     }
   };
 
-  // ── Undo / Version history ───────────────────────────────────────────────────
+  // ── Undo / Redo / Version history ────────────────────────────────────────────
   const pushUndo = (app = generatedApp) => {
     if (!app?.project) return;
-    setUndoStack(prev => [...prev.slice(-19), {
-      project: app.project,
-      html: app.html,
-      time: new Date().toISOString(),
-    }]);
+    setUndoStack(prev => [...prev.slice(-19), { project: app.project, html: app.html, time: new Date().toISOString() }]);
+    setRedoStack([]);  // new action clears redo
   };
 
   const undo = () => {
     if (!undoStack.length) { toast.error('Nothing to undo'); return; }
-    const prev = undoStack[undoStack.length - 1];
+    const snap = undoStack[undoStack.length - 1];
     setUndoStack(s => s.slice(0, -1));
-    setGeneratedApp(g => ({ ...g, project: prev.project, html: prev.html }));
+    setRedoStack(r => [...r, { project: generatedApp.project, html: generatedApp.html, time: new Date().toISOString() }]);
+    setGeneratedApp(g => ({ ...g, project: snap.project, html: snap.html }));
     toast.success('Undone');
+  };
+
+  const redo = () => {
+    if (!redoStack.length) { toast.error('Nothing to redo'); return; }
+    const snap = redoStack[redoStack.length - 1];
+    setRedoStack(r => r.slice(0, -1));
+    setUndoStack(prev => [...prev, { project: generatedApp.project, html: generatedApp.html, time: new Date().toISOString() }]);
+    setGeneratedApp(g => ({ ...g, project: snap.project, html: snap.html }));
+    toast.success('Redone');
   };
 
   const saveVersion = () => {
@@ -568,6 +618,52 @@ const AppBuilder = () => {
     const blob = new Blob([generatedApp.html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank');
+  };
+
+  // ── Import ────────────────────────────────────────────────────────────────────
+  const handleImportHtml = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    const name = file.name.replace(/\.html?$/, '') || 'imported-app';
+    try {
+      toast.info('Importing HTML...');
+      const res = await axiosInstance.post('/app-builder/import-html', { html: text, name }, { timeout: 30000 });
+      const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
+      const data = res.data;
+      if (data.preview_url) data.full_preview_url = backendUrl.replace('/api', '') + data.preview_url;
+      setGeneratedApp(data);
+      setEditHistory([]);
+      setUndoStack([]); setRedoStack([]); setVersions([]);
+      setActiveTab('preview');
+      setMode('build');
+      toast.success(`Imported "${name}"`);
+    } catch { toast.error('Import failed'); }
+    e.target.value = '';
+  };
+
+  const handleImportZip = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const form = new FormData();
+    form.append('file', file);
+    try {
+      toast.info('Extracting ZIP...');
+      const res = await axiosInstance.post('/app-builder/import-zip', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 30000,
+      });
+      const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
+      const data = res.data;
+      if (data.preview_url) data.full_preview_url = backendUrl.replace('/api', '') + data.preview_url;
+      setGeneratedApp(data);
+      setEditHistory([]);
+      setUndoStack([]); setRedoStack([]); setVersions([]);
+      setActiveTab('preview');
+      setMode('build');
+      toast.success(`Imported ZIP: "${data.name}"`);
+    } catch { toast.error('ZIP import failed'); }
+    e.target.value = '';
   };
 
   const exportZip = async () => {
@@ -815,9 +911,14 @@ const AppBuilder = () => {
                           <div className="flex items-center gap-1.5">
                             {session.is_pinned && <Pin className="w-3 h-3 text-cyan-500 flex-shrink-0" />}
                             <span className="text-sm font-mono text-cyan-300 truncate">{session.name}</span>
-                            {session.project_type && session.project_type !== 'app' && (
-                              <span className="text-xs font-mono text-slate-600 bg-slate-800 px-1 rounded-sm">{session.project_type}</span>
-                            )}
+                            {(() => {
+                              const badge = getHealthBadge(session);
+                              return (
+                                <span className={`text-[9px] font-mono border px-1 rounded-sm flex items-center gap-0.5 flex-shrink-0 ${badge.cls}`}>
+                                  <badge.Icon className="w-2.5 h-2.5" />{badge.label}
+                                </span>
+                              );
+                            })()}
                           </div>
                           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                             <span className="flex items-center gap-1 text-xs text-slate-600 font-mono">
@@ -867,7 +968,17 @@ const AppBuilder = () => {
                       </div>
                     ))}
                   </div>
-                  <div className="border-t border-cyan-900/30 pt-3 text-xs font-mono text-slate-600 uppercase">Or start a new build:</div>
+                  <div className="border-t border-cyan-900/30 pt-3 flex items-center gap-3">
+                    <span className="text-xs font-mono text-slate-600 uppercase flex-1">Or start a new build:</span>
+                    <button onClick={() => importHtmlRef.current?.click()}
+                      className="flex items-center gap-1 px-2 py-1 text-slate-500 hover:text-cyan-400 text-[10px] font-mono uppercase border border-slate-700/40 rounded-sm hover:border-cyan-500/40 transition-all">
+                      <Upload className="w-3 h-3" /> Import HTML
+                    </button>
+                    <button onClick={() => importZipRef.current?.click()}
+                      className="flex items-center gap-1 px-2 py-1 text-slate-500 hover:text-cyan-400 text-[10px] font-mono uppercase border border-slate-700/40 rounded-sm hover:border-cyan-500/40 transition-all">
+                      <Upload className="w-3 h-3" /> Import ZIP
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -880,7 +991,11 @@ const AppBuilder = () => {
                 rows={6}
                 disabled={buildLoading}
               />
-              <div className="flex items-center gap-3">
+              {/* Hidden import file inputs */}
+              <input ref={importHtmlRef} type="file" accept=".html,.htm" onChange={handleImportHtml} className="hidden" />
+              <input ref={importZipRef}  type="file" accept=".zip"       onChange={handleImportZip}  className="hidden" />
+
+              <div className="flex items-center gap-3 flex-wrap">
                 <button
                   data-testid="generate-app-btn"
                   onClick={generateApp}
@@ -897,6 +1012,16 @@ const AppBuilder = () => {
                     <MessageSquare className="w-4 h-4" /> USE ASSISTANT
                   </button>
                 )}
+                <div className="flex items-center gap-2 ml-auto">
+                  <button onClick={() => importHtmlRef.current?.click()}
+                    className="flex items-center gap-1 px-3 py-2 text-slate-500 hover:text-cyan-400 text-xs font-mono uppercase border border-slate-700/40 rounded-sm hover:border-cyan-500/40 transition-all">
+                    <Upload className="w-3.5 h-3.5" /> HTML
+                  </button>
+                  <button onClick={() => importZipRef.current?.click()}
+                    className="flex items-center gap-1 px-3 py-2 text-slate-500 hover:text-cyan-400 text-xs font-mono uppercase border border-slate-700/40 rounded-sm hover:border-cyan-500/40 transition-all">
+                    <Upload className="w-3.5 h-3.5" /> ZIP
+                  </button>
+                </div>
               </div>
             </div>
           ) : (
@@ -907,11 +1032,16 @@ const AppBuilder = () => {
                 <CheckCircle className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />
                 <span className="text-[11px] font-mono text-green-400 flex-1 truncate min-w-0">{generatedApp.name}</span>
 
-                {/* Undo */}
+                {/* Undo / Redo */}
                 <button onClick={undo} disabled={!undoStack.length}
-                  title={`Undo (${undoStack.length} available)`}
+                  title={`Undo (${undoStack.length})`}
                   className="flex items-center gap-1 px-2 py-1 text-slate-400 hover:text-cyan-400 disabled:opacity-30 disabled:cursor-not-allowed text-[10px] font-mono uppercase transition-colors border border-slate-700/40 rounded-sm hover:border-cyan-500/40">
                   <Undo2 className="w-3 h-3" /> Undo
+                </button>
+                <button onClick={redo} disabled={!redoStack.length}
+                  title={`Redo (${redoStack.length})`}
+                  className="flex items-center gap-1 px-2 py-1 text-slate-400 hover:text-cyan-400 disabled:opacity-30 disabled:cursor-not-allowed text-[10px] font-mono uppercase transition-colors border border-slate-700/40 rounded-sm hover:border-cyan-500/40">
+                  <Redo2 className="w-3 h-3" /> Redo
                 </button>
 
                 {/* Save version */}
@@ -940,7 +1070,7 @@ const AppBuilder = () => {
                 <button onClick={exportZip} className="flex items-center gap-1 px-2 py-1 bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-[10px] font-mono uppercase rounded-sm hover:bg-emerald-500/30 transition-all">
                   <Package className="w-3 h-3" /> ZIP
                 </button>
-                <button onClick={() => { setGeneratedApp(null); setDescription(''); setEditInput(''); setEditHistory([]); setUndoStack([]); setVersions([]); setActiveTab('preview'); }}
+                <button onClick={() => { setGeneratedApp(null); setDescription(''); setEditInput(''); setEditHistory([]); setUndoStack([]); setRedoStack([]); setVersions([]); setActiveTab('preview'); setDiffView(null); }}
                   className="flex items-center gap-1 px-2 py-1 text-slate-500 hover:text-slate-300 text-[10px] font-mono uppercase transition-colors border border-slate-700/30 rounded-sm hover:border-slate-500/50">
                   <RotateCcw className="w-3 h-3" /> New
                 </button>
@@ -985,14 +1115,36 @@ const AppBuilder = () => {
                               )}
                             </div>
                           </div>
-                          <button
-                            onClick={() => generatedApp?.build_id
-                              ? restoreBackendVersion(generatedApp.build_id, i)
-                              : restoreVersion(ver)}
-                            className="text-[9px] font-mono text-cyan-400 hover:text-cyan-300 uppercase flex-shrink-0 flex items-center gap-1"
-                          >
-                            <RefreshCw className="w-2.5 h-2.5" /> Restore
-                          </button>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <button
+                              onClick={() => {
+                                const prevVer = versions[i - 1] || null;
+                                const fileKey = ver.file_changed === 'style.css' ? 'style_css'
+                                  : ver.file_changed === 'script.js' ? 'script_js' : 'index_html';
+                                setDiffView({
+                                  file: ver.file_changed || 'index.html',
+                                  fileKey,
+                                  verA: prevVer?.project || null,
+                                  verB: ver.project,
+                                  nameA: prevVer?.name || 'previous',
+                                  nameB: ver.name,
+                                });
+                              }}
+                              className="text-[9px] font-mono text-amber-500 hover:text-amber-400 uppercase flex items-center gap-0.5"
+                              title="View diff"
+                            >
+                              Diff
+                            </button>
+                            <span className="text-slate-700">·</span>
+                            <button
+                              onClick={() => generatedApp?.build_id
+                                ? restoreBackendVersion(generatedApp.build_id, i)
+                                : restoreVersion(ver)}
+                              className="text-[9px] font-mono text-cyan-400 hover:text-cyan-300 uppercase flex items-center gap-1"
+                            >
+                              <RefreshCw className="w-2.5 h-2.5" /> Restore
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1000,18 +1152,42 @@ const AppBuilder = () => {
                 </div>
               )}
 
+              {/* ── Diff viewer panel ── */}
+              {diffView && (
+                <div className="border-b border-amber-500/20 bg-black/70 flex-shrink-0 flex flex-col" style={{ maxHeight: '220px' }}>
+                  <div className="flex items-center gap-2 px-4 py-2 border-b border-amber-500/10">
+                    <span className="text-[10px] font-mono text-amber-400 uppercase tracking-wider flex-1">
+                      Diff — {diffView.file} · {diffView.nameA} → {diffView.nameB}
+                    </span>
+                    <button onClick={() => setDiffView(null)} className="text-slate-600 hover:text-slate-300"><X className="w-3.5 h-3.5" /></button>
+                  </div>
+                  <div className="overflow-y-auto text-[10px] font-mono px-3 py-2 space-y-0.5">
+                    {computeDiff(diffView.verA?.[diffView.fileKey] || '', diffView.verB?.[diffView.fileKey] || '').map((line, i) => (
+                      line.t === 'eq' ? null : (
+                        <div key={i} className={`px-1.5 py-0.5 rounded-sm whitespace-pre-wrap break-all ${
+                          line.t === 'add' ? 'bg-emerald-950/60 text-emerald-400' : 'bg-red-950/60 text-red-400 line-through'
+                        }`}>
+                          {line.t === 'add' ? '+ ' : '- '}{line.s}
+                        </div>
+                      )
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* ── File tabs ── */}
-              <div className="flex items-center border-b border-cyan-500/20 bg-black/30 flex-shrink-0">
+              <div className="flex items-center border-b border-cyan-500/20 bg-black/30 flex-shrink-0 overflow-x-auto">
                 {[
                   { id: 'preview', label: 'Preview',    icon: <MonitorPlay className="w-3 h-3" /> },
                   { id: 'html',    label: 'index.html', icon: <FileCode className="w-3 h-3" /> },
                   { id: 'css',     label: 'style.css',  icon: <Palette className="w-3 h-3" /> },
                   { id: 'js',      label: 'script.js',  icon: <Code2 className="w-3 h-3" /> },
+                  { id: 'readme',  label: 'README.md',  icon: <BookOpen className="w-3 h-3" /> },
                 ].map(tab => (
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
-                    className={`flex items-center gap-1.5 px-3 py-2 text-[11px] font-mono border-r border-cyan-500/10 transition-all ${
+                    className={`flex items-center gap-1.5 px-3 py-2 text-[11px] font-mono border-r border-cyan-500/10 transition-all flex-shrink-0 ${
                       activeTab === tab.id
                         ? 'bg-cyan-500/10 text-cyan-400 border-b-2 border-b-cyan-400'
                         : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'
@@ -1056,6 +1232,17 @@ const AppBuilder = () => {
                     value={generatedApp.project?.script_js || ''}
                     onChange={e => handleDirectEdit('js', e.target.value)}
                     onBlur={() => pushUndo()}
+                    className="w-full h-full bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
+                    spellCheck={false}
+                  />
+                )}
+                {activeTab === 'readme' && (
+                  <textarea
+                    value={generatedApp.project?.readme || ''}
+                    onChange={e => setGeneratedApp(prev => ({
+                      ...prev,
+                      project: { ...prev.project, readme: e.target.value }
+                    }))}
                     className="w-full h-full bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
                     spellCheck={false}
                   />
