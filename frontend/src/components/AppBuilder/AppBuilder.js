@@ -8,7 +8,8 @@ import {
   FileCode, Palette, Code2, BookmarkPlus, X, Pin, Archive, Search,
   SortAsc, RefreshCw, Redo2, Upload, BookOpen, AlertTriangle, AlertCircle,
   ShieldCheck, ArchiveRestore, Bug, Zap, Gauge, Terminal, Wrench,
-  FilePlus, FolderTree, FileText, Folder
+  FilePlus, FolderTree, FileText, Folder,
+  Github, Globe, Share2, LogIn, Lock, Unlock, Link, Copy, CheckSquare
 } from 'lucide-react';
 
 // ── Coach system prompt ────────────────────────────────────────────────────────
@@ -168,6 +169,19 @@ const AppBuilder = () => {
   const [newFileName, setNewFileName] = useState('');
   const [showNewFileInput, setShowNewFileInput] = useState(false);
   const assetInputRef = useRef(null);
+
+  // Phase 4 — Publish: GitHub + Vercel + session JSON
+  const [showGithubModal, setShowGithubModal] = useState(false);
+  const [githubToken, setGithubToken] = useState('');
+  const [githubRepo, setGithubRepo] = useState('');
+  const [githubPrivate, setGithubPrivate] = useState(false);
+  const [githubLoading, setGithubLoading] = useState(false);
+  const [githubResult, setGithubResult] = useState(null);
+  const [showVercelModal, setShowVercelModal] = useState(false);
+  const [vercelToken, setVercelToken] = useState('');
+  const [vercelLoading, setVercelLoading] = useState(false);
+  const [vercelResult, setVercelResult] = useState(null);
+  const importSessionJsonRef = useRef(null);
 
   // Undo / Redo / version history
   const [undoStack, setUndoStack] = useState([]);
@@ -1008,6 +1022,84 @@ const AppBuilder = () => {
     toast.success(`Removed asset: ${name}`);
   };
 
+  // ── Phase 4: Publish handlers ─────────────────────────────────────────────────
+  const exportSessionJson = () => {
+    if (!generatedApp) return;
+    const payload = { ...generatedApp, versions, editHistory, exportedAt: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${generatedApp.name || 'session'}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('Session exported as JSON');
+  };
+
+  const importSessionJson = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (!data.project && !data.html) { toast.error('Not a valid session JSON'); return; }
+        setGeneratedApp(data);
+        if (data.versions) setVersions(data.versions);
+        if (data.editHistory) setEditHistory(data.editHistory);
+        setUndoStack([]); setRedoStack([]);
+        setActiveTab('preview');
+        setMode('build');
+        toast.success(`Imported session: "${data.name || 'unnamed'}"`);
+      } catch { toast.error('Invalid JSON file'); }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const pushToGithub = async () => {
+    if (!githubToken.trim() || !githubRepo.trim()) { toast.error('Enter token and repo name'); return; }
+    setGithubLoading(true); setGithubResult(null);
+    try {
+      const res = await axiosInstance.post('/app-builder/github-push', {
+        token: githubToken,
+        repo_name: githubRepo,
+        project: generatedApp.project,
+        name: generatedApp.name || 'generated-app',
+        description: generatedApp.description || '',
+        private: githubPrivate,
+        assets: generatedApp.project?.assets || [],
+        extra_files: generatedApp.project?.extra_files || [],
+      });
+      setGithubResult(res.data);
+      toast.success('Pushed to GitHub!');
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'GitHub push failed');
+    } finally { setGithubLoading(false); }
+  };
+
+  const deployToVercel = async () => {
+    if (!vercelToken.trim()) { toast.error('Enter your Vercel token'); return; }
+    setVercelLoading(true); setVercelResult(null);
+    try {
+      const res = await axiosInstance.post('/app-builder/deploy-vercel', {
+        token: vercelToken,
+        project: generatedApp.project,
+        name: generatedApp.name || 'generated-app',
+        assets: generatedApp.project?.assets || [],
+        extra_files: generatedApp.project?.extra_files || [],
+      });
+      setVercelResult(res.data);
+      toast.success('Deployed to Vercel!');
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Vercel deploy failed');
+    } finally { setVercelLoading(false); }
+  };
+
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text).then(() => toast.success('Copied!'));
+  };
+
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <div className="h-full flex flex-col bg-[#0a0a0f]/50" data-testid="app-builder">
@@ -1322,6 +1414,10 @@ const AppBuilder = () => {
                       className="flex items-center gap-1 px-2 py-1 text-slate-500 hover:text-cyan-400 text-[10px] font-mono uppercase border border-slate-700/40 rounded-sm hover:border-cyan-500/40 transition-all">
                       <Upload className="w-3 h-3" /> Import ZIP
                     </button>
+                    <button onClick={() => importSessionJsonRef.current?.click()}
+                      className="flex items-center gap-1 px-2 py-1 text-slate-500 hover:text-violet-400 text-[10px] font-mono uppercase border border-slate-700/40 rounded-sm hover:border-violet-500/40 transition-all">
+                      <Download className="w-3 h-3" /> Import JSON
+                    </button>
                   </div>
                 </div>
               )}
@@ -1405,6 +1501,7 @@ const AppBuilder = () => {
               <input ref={importHtmlRef} type="file" accept=".html,.htm" onChange={handleImportHtml} className="hidden" />
               <input ref={importZipRef}  type="file" accept=".zip"       onChange={handleImportZip}  className="hidden" />
               <input ref={assetInputRef} type="file" accept="image/*,.svg,.ico,.woff,.woff2,.ttf,.otf" multiple onChange={uploadAsset} className="hidden" />
+              <input ref={importSessionJsonRef} type="file" accept=".json" onChange={importSessionJson} className="hidden" />
 
               <div className="flex items-center gap-3 flex-wrap">
                 <button
@@ -1530,6 +1627,27 @@ const AppBuilder = () => {
                 <button onClick={exportZip} className="flex items-center gap-1 px-2 py-1 bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-[10px] font-mono uppercase rounded-sm hover:bg-emerald-500/30 transition-all">
                   <Package className="w-3 h-3" /> ZIP
                 </button>
+                <button onClick={exportSessionJson} title="Export full session as JSON (importable)"
+                  className="flex items-center gap-1 px-2 py-1 bg-slate-500/20 border border-slate-500/40 text-slate-400 text-[10px] font-mono uppercase rounded-sm hover:bg-slate-500/30 transition-all">
+                  <Download className="w-3 h-3" /> JSON
+                </button>
+
+                <div className="w-px h-4 bg-slate-700/60 mx-0.5" />
+
+                {/* GitHub push */}
+                <button onClick={() => { setShowGithubModal(true); setGithubResult(null); }}
+                  title="Push to GitHub repository"
+                  className="flex items-center gap-1 px-2 py-1 bg-gray-900/60 border border-gray-600/50 text-gray-300 text-[10px] font-mono uppercase rounded-sm hover:bg-gray-800 hover:text-white transition-all">
+                  <Github className="w-3 h-3" /> GitHub
+                </button>
+
+                {/* Vercel deploy */}
+                <button onClick={() => { setShowVercelModal(true); setVercelResult(null); }}
+                  title="Deploy to Vercel as a live site"
+                  className="flex items-center gap-1 px-2 py-1 bg-black border border-white/20 text-white text-[10px] font-mono uppercase rounded-sm hover:bg-white/10 transition-all">
+                  <Globe className="w-3 h-3" /> Vercel
+                </button>
+
                 <button onClick={() => { setGeneratedApp(null); setDescription(''); setEditInput(''); setEditHistory([]); setUndoStack([]); setRedoStack([]); setVersions([]); setActiveTab('preview'); setDiffView(null); setShowFileExplorer(false); setScanResult(null); setConsoleErrors([]); }}
                   className="flex items-center gap-1 px-2 py-1 text-slate-500 hover:text-slate-300 text-[10px] font-mono uppercase transition-colors border border-slate-700/30 rounded-sm hover:border-slate-500/50">
                   <RotateCcw className="w-3 h-3" /> New
@@ -2097,6 +2215,113 @@ const AppBuilder = () => {
         </div>
       )}
     </div>
+
+    {/* ── GitHub Push Modal ── */}
+    {showGithubModal && (
+      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowGithubModal(false)}>
+        <div className="bg-[#0d1117] border border-gray-700/60 rounded-lg p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center gap-3 mb-5">
+            <Github className="w-6 h-6 text-white" />
+            <h3 className="text-lg font-bold text-white">Push to GitHub</h3>
+            <button onClick={() => setShowGithubModal(false)} className="ml-auto text-gray-600 hover:text-gray-300"><X className="w-5 h-5" /></button>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="text-[10px] font-mono text-gray-400 uppercase mb-1 block">GitHub Personal Access Token</label>
+              <input
+                type="password"
+                value={githubToken}
+                onChange={e => setGithubToken(e.target.value)}
+                placeholder="ghp_..."
+                className="w-full bg-black/50 border border-gray-700 text-gray-100 placeholder:text-gray-700 rounded px-3 py-2 text-sm font-mono outline-none focus:border-gray-500"
+              />
+              <p className="text-[9px] text-gray-600 mt-1 font-mono">Needs repo scope. <a href="https://github.com/settings/tokens/new" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">Create token →</a></p>
+            </div>
+            <div>
+              <label className="text-[10px] font-mono text-gray-400 uppercase mb-1 block">Repository Name</label>
+              <input
+                value={githubRepo}
+                onChange={e => setGithubRepo(e.target.value)}
+                placeholder={generatedApp?.name?.toLowerCase().replace(/\s+/g, '-') || 'my-app'}
+                className="w-full bg-black/50 border border-gray-700 text-gray-100 placeholder:text-gray-700 rounded px-3 py-2 text-sm font-mono outline-none focus:border-gray-500"
+              />
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={githubPrivate} onChange={e => setGithubPrivate(e.target.checked)} className="accent-gray-400" />
+              <span className="text-[10px] font-mono text-gray-400">Private repository</span>
+            </label>
+
+            {githubResult && (
+              <div className="p-3 bg-green-950/40 border border-green-800/50 rounded space-y-1.5">
+                <p className="text-[10px] font-mono text-green-400 font-semibold">✓ Pushed successfully!</p>
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] font-mono text-gray-500 flex-1 truncate">{githubResult.repo_url}</span>
+                  <button onClick={() => copyToClipboard(githubResult.repo_url)} className="text-gray-500 hover:text-gray-300"><Copy className="w-3 h-3" /></button>
+                  <a href={githubResult.repo_url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300"><Link className="w-3 h-3" /></a>
+                </div>
+                <p className="text-[9px] font-mono text-gray-600">Enable GitHub Pages → Settings → Pages to get a live URL.</p>
+              </div>
+            )}
+
+            <button onClick={pushToGithub} disabled={githubLoading || !githubToken || !githubRepo}
+              className="w-full py-2.5 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white font-semibold rounded text-sm uppercase tracking-wide flex items-center justify-center gap-2 disabled:opacity-40 transition-colors">
+              {githubLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Github className="w-4 h-4" />}
+              {githubLoading ? 'Pushing...' : githubResult ? 'Push Again' : 'Push to GitHub'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ── Vercel Deploy Modal ── */}
+    {showVercelModal && (
+      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowVercelModal(false)}>
+        <div className="bg-[#0d1117] border border-white/10 rounded-lg p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center gap-3 mb-5">
+            <Globe className="w-6 h-6 text-white" />
+            <h3 className="text-lg font-bold text-white">Deploy to Vercel</h3>
+            <button onClick={() => setShowVercelModal(false)} className="ml-auto text-gray-600 hover:text-gray-300"><X className="w-5 h-5" /></button>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="text-[10px] font-mono text-gray-400 uppercase mb-1 block">Vercel Token</label>
+              <input
+                type="password"
+                value={vercelToken}
+                onChange={e => setVercelToken(e.target.value)}
+                placeholder="your Vercel API token..."
+                className="w-full bg-black/50 border border-white/10 text-gray-100 placeholder:text-gray-700 rounded px-3 py-2 text-sm font-mono outline-none focus:border-white/30"
+              />
+              <p className="text-[9px] text-gray-600 mt-1 font-mono">
+                Get yours at <a href="https://vercel.com/account/tokens" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">vercel.com/account/tokens →</a>
+              </p>
+            </div>
+
+            {vercelResult && (
+              <div className="p-3 bg-green-950/40 border border-green-800/50 rounded space-y-1.5">
+                <p className="text-[10px] font-mono text-green-400 font-semibold">
+                  ✓ Deployed! Status: {vercelResult.status}
+                </p>
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] font-mono text-gray-400 flex-1 truncate">{vercelResult.deploy_url}</span>
+                  <button onClick={() => copyToClipboard(vercelResult.deploy_url)} className="text-gray-500 hover:text-gray-300"><Copy className="w-3 h-3" /></button>
+                  <a href={vercelResult.deploy_url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300"><Link className="w-3 h-3" /></a>
+                </div>
+                <p className="text-[9px] text-gray-600 font-mono">May take ~30s to be live if status is BUILDING.</p>
+              </div>
+            )}
+
+            <button onClick={deployToVercel} disabled={vercelLoading || !vercelToken}
+              className="w-full py-2.5 bg-white hover:bg-gray-100 text-black font-semibold rounded text-sm uppercase tracking-wide flex items-center justify-center gap-2 disabled:opacity-40 transition-colors">
+              {vercelLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Globe className="w-4 h-4" />}
+              {vercelLoading ? 'Deploying...' : vercelResult ? 'Redeploy' : 'Deploy to Vercel'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
   );
 };
 

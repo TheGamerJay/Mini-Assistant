@@ -1020,6 +1020,154 @@ async def export_app_zip(request: AppBuilderExportRequest):
     )
 
 
+# ── Phase 4: GitHub push & Vercel deploy ──────────────────────────────────────
+
+class GithubPushRequest(BaseModel):
+    token: str
+    repo_name: str
+    project: dict
+    name: str = "generated-app"
+    description: str = ""
+    private: bool = False
+    assets: List[dict] = []
+    extra_files: List[dict] = []
+
+@api_router.post("/app-builder/github-push")
+async def github_push(req: GithubPushRequest):
+    """Create (or update) a GitHub repo and push all project files."""
+    import base64, re
+    import requests as _req
+
+    headers = {
+        "Authorization": f"Bearer {req.token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    # Get authenticated user
+    user_resp = _req.get("https://api.github.com/user", headers=headers, timeout=10)
+    if user_resp.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid GitHub token")
+    username = user_resp.json()["login"]
+
+    repo_slug = re.sub(r"[^a-zA-Z0-9._-]", "-", req.repo_name.strip()) or "generated-app"
+    repo_url_base = f"https://api.github.com/repos/{username}/{repo_slug}"
+
+    # Check if repo exists; create if not
+    check = _req.get(repo_url_base, headers=headers, timeout=10)
+    if check.status_code == 404:
+        create_resp = _req.post(
+            "https://api.github.com/user/repos",
+            headers=headers,
+            json={"name": repo_slug, "description": req.description, "private": req.private, "auto_init": False},
+            timeout=15,
+        )
+        if create_resp.status_code not in (200, 201):
+            raise HTTPException(status_code=400, detail=f"Failed to create repo: {create_resp.text}")
+        html_url = create_resp.json()["html_url"]
+    else:
+        html_url = check.json()["html_url"]
+
+    # Helper — upsert a file via GitHub Contents API
+    def _upsert_file(path: str, content_bytes: bytes, message: str):
+        existing = _req.get(f"{repo_url_base}/contents/{path}", headers=headers, timeout=10)
+        sha = existing.json().get("sha") if existing.status_code == 200 else None
+        payload = {
+            "message": message,
+            "content": base64.b64encode(content_bytes).decode(),
+        }
+        if sha:
+            payload["sha"] = sha
+        _req.put(f"{repo_url_base}/contents/{path}", headers=headers, json=payload, timeout=15)
+
+    p = req.project
+    _upsert_file("index.html", p.get("index_html", "").encode(), "Add index.html")
+    _upsert_file("style.css",  p.get("style_css",  "").encode(), "Add style.css")
+    _upsert_file("script.js",  p.get("script_js",  "").encode(), "Add script.js")
+    if p.get("readme"):
+        _upsert_file("README.md", p["readme"].encode(), "Add README.md")
+
+    for ef in req.extra_files:
+        if ef.get("name"):
+            _upsert_file(ef["name"], ef.get("content", "").encode(), f"Add {ef['name']}")
+
+    for asset in req.assets:
+        asset_name = asset.get("name", "").strip()
+        data_url = asset.get("dataUrl", "")
+        if asset_name and data_url and "," in data_url:
+            raw = base64.b64decode(data_url.split(",", 1)[1])
+            _upsert_file(f"assets/{asset_name}", raw, f"Add asset {asset_name}")
+
+    pages_url = f"https://{username}.github.io/{repo_slug}/"
+    return {"repo_url": html_url, "pages_url": pages_url, "username": username, "repo": repo_slug}
+
+
+class VercelDeployRequest(BaseModel):
+    token: str
+    project: dict
+    name: str = "generated-app"
+    assets: List[dict] = []
+    extra_files: List[dict] = []
+
+@api_router.post("/app-builder/deploy-vercel")
+async def deploy_vercel(req: VercelDeployRequest):
+    """Deploy project as a static site to Vercel."""
+    import base64, re, hashlib
+    import requests as _req
+
+    headers = {
+        "Authorization": f"Bearer {req.token}",
+        "Content-Type": "application/json",
+    }
+
+    slug = re.sub(r"[^a-z0-9-]", "-", req.name.lower().strip())[:50] or "generated-app"
+    p = req.project
+
+    def _make_file(path: str, content_bytes: bytes):
+        return {
+            "file": path,
+            "data": base64.b64encode(content_bytes).decode(),
+            "encoding": "base64",
+        }
+
+    files = [
+        _make_file("index.html", p.get("index_html", "").encode()),
+        _make_file("style.css",  p.get("style_css",  "").encode()),
+        _make_file("script.js",  p.get("script_js",  "").encode()),
+    ]
+    if p.get("readme"):
+        files.append(_make_file("README.md", p["readme"].encode()))
+    for ef in req.extra_files:
+        if ef.get("name"):
+            files.append(_make_file(ef["name"], ef.get("content", "").encode()))
+    for asset in req.assets:
+        asset_name = asset.get("name", "").strip()
+        data_url = asset.get("dataUrl", "")
+        if asset_name and data_url and "," in data_url:
+            raw = base64.b64decode(data_url.split(",", 1)[1])
+            files.append(_make_file(f"assets/{asset_name}", raw))
+
+    payload = {
+        "name": slug,
+        "files": files,
+        "projectSettings": {"framework": None, "outputDirectory": "."},
+        "target": "production",
+    }
+
+    resp = _req.post(
+        "https://api.vercel.com/v13/deployments",
+        headers=headers,
+        json=payload,
+        timeout=60,
+    )
+    if resp.status_code not in (200, 201):
+        raise HTTPException(status_code=400, detail=f"Vercel deploy failed: {resp.text[:300]}")
+
+    data = resp.json()
+    deploy_url = f"https://{data.get('url', '')}"
+    return {"deploy_url": deploy_url, "id": data.get("id"), "status": data.get("readyState", "BUILDING")}
+
+
 # ── Migrate table to add new columns if they don't exist yet ────────────────────
 _SESSION_MIGRATIONS = [
     # Phase 0 (original)
