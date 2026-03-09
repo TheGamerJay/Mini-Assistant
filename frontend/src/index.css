@@ -173,3 +173,22 @@ button:focus {
   -moz-user-select: none;
   -ms-user-select: none;
 }
+
+/* Prevent flash of unstyled content */
+html { background-color: #0d0d12; }
+
+/* Better focus outlines */
+*:focus-visible {
+  outline: 2px solid rgba(0, 229, 255, 0.5);
+  outline-offset: 2px;
+}
+
+/* Subtle transition for all interactive elements */
+button, a { transition: all 0.15s ease; }
+
+/* Fade-in animation for messages */
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.msg-enter { animation: fadeSlideUp 0.2s ease forwards; }

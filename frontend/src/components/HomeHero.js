@@ -18,9 +18,17 @@ const SUGGESTED_PROMPTS = [
 function HomeHero({ onSubmit, loading }) {
   return (
     <div className="h-full flex flex-col items-center justify-center gap-8 px-4">
+      {/* Animated logo ring */}
+      <div className="relative flex items-center justify-center">
+        <div className="absolute inset-0 rounded-full bg-gradient-to-br from-cyan-400/20 to-violet-600/20 blur-xl animate-pulse-glow" style={{ width: 80, height: 80, left: '50%', top: '50%', transform: 'translate(-50%,-50%)' }} />
+        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-cyan-400 to-violet-600 flex items-center justify-center text-xl font-bold text-white shadow-lg relative z-10">
+          MA
+        </div>
+      </div>
+
       {/* Heading */}
       <div className="text-center space-y-2">
-        <h1 className="text-3xl font-semibold text-slate-100 tracking-tight">
+        <h1 className="text-4xl md:text-5xl font-semibold text-slate-100 tracking-tight">
           What's on your mind today?
         </h1>
         <p className="text-sm text-slate-500">
@@ -31,6 +39,9 @@ function HomeHero({ onSubmit, loading }) {
       {/* Input */}
       <div className="w-full max-w-2xl">
         <ChatInput variant="home" onSubmit={onSubmit} loading={loading} />
+        <p className="text-center mt-3 text-xs font-mono text-slate-700">
+          Powered by local Ollama + ComfyUI
+        </p>
       </div>
 
       {/* Suggested prompts */}

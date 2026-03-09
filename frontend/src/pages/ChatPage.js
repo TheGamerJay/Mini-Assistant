@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, XCircle } from 'lucide-react';
 import { useApp, makeThumbnail } from '../context/AppContext';
 import { useChat } from '../hooks/useChat';
 import HomeHero from '../components/HomeHero';
@@ -43,6 +43,8 @@ function ChatPage() {
   const sessionIdRef = useRef(crypto.randomUUID());
   const bottomRef = useRef(null);
   const currentChatIdRef = useRef(null);
+  const submittingRef = useRef(false);
+  const lastUserTextRef = useRef('');
 
   // Load messages when active chat changes
   useEffect(() => {
@@ -67,6 +69,10 @@ function ChatPage() {
   }, [messages, loading]);
 
   const handleSubmit = useCallback(async (text) => {
+    if (submittingRef.current || loading) return;
+    submittingRef.current = true;
+    lastUserTextRef.current = text;
+
     let chatId = activeChatId;
 
     // Create new chat if none is active
@@ -127,8 +133,10 @@ function ChatPage() {
       const withErr = [...nextMessages, errMsg];
       setMessages(withErr);
       updateChatMessages(chatId, withErr);
+    } finally {
+      submittingRef.current = false;
     }
-  }, [activeChatId, messages, newChat, send, updateChatMessages, addImage, setPage]);
+  }, [activeChatId, loading, messages, newChat, send, updateChatMessages, addImage, setPage]);
 
   const handleCancel = useCallback(() => {
     cancel(sessionIdRef.current);
@@ -146,7 +154,11 @@ function ChatPage() {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 md:px-12 lg:px-24 py-6 space-y-6">
         {messages.map((msg, idx) => (
-          <ChatMessage key={idx} message={msg} />
+          <ChatMessage
+            key={idx}
+            message={msg}
+            onRetry={msg.type === 'error' ? () => handleSubmit(lastUserTextRef.current) : undefined}
+          />
         ))}
         {loading && <LoadingBubble />}
         <div ref={bottomRef} />
@@ -154,11 +166,22 @@ function ChatPage() {
 
       {/* Input footer */}
       <div className="flex-shrink-0 border-t border-white/5 px-4 md:px-12 lg:px-24 py-4 bg-[#0d0d12]">
-        <ChatInput
-          variant="chat"
-          onSubmit={handleSubmit}
-          loading={loading}
-        />
+        <div className="relative">
+          <ChatInput
+            variant="chat"
+            onSubmit={handleSubmit}
+            loading={loading}
+          />
+          {loading && (
+            <button
+              onClick={handleCancel}
+              title="Stop generating"
+              className="absolute right-[-44px] bottom-2 p-2 rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+            >
+              <XCircle size={18} />
+            </button>
+          )}
+        </div>
         {loading && (
           <div className="flex justify-center mt-2">
             <button

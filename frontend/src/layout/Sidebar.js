@@ -4,7 +4,7 @@
  * 260 px expanded · 64 px collapsed (icon-only)
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   ChevronLeft,
@@ -151,12 +151,16 @@ function ChatRow({ chat, active, collapsed, onSelect, onRename, onDelete }) {
     );
   }
 
+  const relativeTime = chat.updatedAt
+    ? new Date(chat.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    : null;
+
   return (
     <div
-      className={`group relative flex items-center gap-2 px-2 py-1.5 rounded-lg mb-0.5 cursor-pointer transition-colors
+      className={`group relative flex items-center gap-2 px-2 py-1.5 rounded-lg mb-0.5 cursor-pointer transition-colors border-l-2
         ${active
-          ? 'bg-cyan-500/10 border border-cyan-500/20 text-slate-100'
-          : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}
+          ? 'bg-cyan-500/10 border-cyan-400 text-slate-100'
+          : 'text-slate-400 hover:bg-white/5 hover:text-slate-200 border-transparent'}`}
       onClick={() => !editing && onSelect(chat.id)}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -179,7 +183,12 @@ function ChatRow({ chat, active, collapsed, onSelect, onRename, onDelete }) {
         </div>
       ) : (
         <>
-          <span className="flex-1 min-w-0 text-xs truncate">{chat.title}</span>
+          <div className="flex-1 min-w-0">
+            <span className="block text-xs truncate">{chat.title}</span>
+            {relativeTime && (
+              <span className="block text-[10px] text-slate-600 truncate">{relativeTime}</span>
+            )}
+          </div>
           {hovered && (
             <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
               <button
@@ -254,7 +263,12 @@ function ProjectRow({ project, chats, activeChatId, collapsed, onSelectChat, onR
           </div>
         ) : (
           <>
-            <span className="flex-1 min-w-0 text-xs text-slate-400 truncate">{project.name}</span>
+            <span className="flex-1 min-w-0 text-xs text-slate-400 truncate">
+              {project.name}
+              {chats.length > 0 && (
+                <span className="ml-1 text-slate-600">({chats.length})</span>
+              )}
+            </span>
             {hovered && (
               <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                 <button className="p-0.5 rounded hover:bg-white/10 text-slate-500 hover:text-slate-300" onClick={() => { setEditVal(project.name); setEditing(true); }}><Pencil size={11} /></button>
@@ -326,7 +340,7 @@ function Sidebar() {
 
   return (
     <div
-      className={`flex flex-col bg-[#0a0a0f] border-r border-white/5 transition-all duration-200 flex-shrink-0 ${sidebarCollapsed ? 'w-16' : 'w-[260px]'}`}
+      className={`flex flex-col bg-[#0a0a0f] border-r border-white/5 transition-all duration-200 ease-in-out flex-shrink-0 ${sidebarCollapsed ? 'w-16' : 'w-[260px]'}`}
       style={{ height: '100vh' }}
     >
       {/* ---- Brand + toggle ---- */}
@@ -463,8 +477,8 @@ function Sidebar() {
               title={label}
               className={`w-full flex items-center gap-2 rounded-lg px-2 py-1.5 mb-0.5 text-xs transition-colors
                 ${page === `tool-${id}`
-                  ? 'bg-cyan-500/10 border border-cyan-500/20 text-cyan-400'
-                  : 'text-slate-500 hover:bg-white/5 hover:text-slate-300'}
+                  ? 'bg-cyan-500/10 border-l-2 border-cyan-400 text-cyan-300 pl-1.5'
+                  : 'text-slate-500 hover:bg-white/5 hover:text-slate-300 border-l-2 border-transparent'}
                 ${sidebarCollapsed ? 'justify-center' : ''}`}
             >
               <Icon size={13} className="flex-shrink-0" />

@@ -4,8 +4,8 @@
  * Left panel: prompt + options. Right panel: results grid.
  */
 
-import React, { useState, useCallback } from 'react';
-import { Image, Loader2, ChevronDown, ChevronUp, Zap, BarChart2, Sparkles } from 'lucide-react';
+import React, { useState, useCallback, useRef } from 'react';
+import { Image, Loader2, ChevronDown, ChevronUp, Zap, BarChart2, Sparkles, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp, makeThumbnail } from '../context/AppContext';
 import { api } from '../api/client';
@@ -63,6 +63,7 @@ function ImagePage() {
   const [routePreview, setRoutePreview] = useState(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [routeLoading, setRouteLoading] = useState(false);
+  const sessionIdRef = useRef(crypto.randomUUID());
 
   const handleRoutePreview = useCallback(async () => {
     if (!prompt.trim()) return;
@@ -77,17 +78,22 @@ function ImagePage() {
     }
   }, [prompt]);
 
-  const handleGenerate = useCallback(async () => {
-    if (!prompt.trim()) {
+  const handleGenerate = useCallback(async (overridePrompt) => {
+    const activePrompt = (overridePrompt || prompt).trim();
+    if (!activePrompt) {
       toast.warning('Please enter a prompt first.');
       return;
     }
+    if (generating) return;
+
+    sessionIdRef.current = crypto.randomUUID();
     setGenerating(true);
     try {
       const params = {
-        prompt: prompt.trim(),
+        prompt: activePrompt,
         quality,
         dry_run: dryRun,
+        session_id: sessionIdRef.current,
       };
       if (checkpoint.trim()) params.override_checkpoint = checkpoint.trim();
       if (seed.trim()) params.override_seed = seed.trim();
@@ -96,16 +102,32 @@ function ImagePage() {
 
       if (data.image_base64 && !dryRun) {
         const thumb = await makeThumbnail(data.image_base64);
-        await addImage(thumb, prompt.trim(), data.image_base64);
+        await addImage(thumb, activePrompt, data.image_base64);
       }
 
-      setResults((prev) => [{ ...data, prompt: prompt.trim(), _id: crypto.randomUUID() }, ...prev]);
+      setResults((prev) => [{ ...data, prompt: activePrompt, _id: crypto.randomUUID() }, ...prev]);
     } catch (err) {
-      toast.error('Generation failed: ' + (err.message || 'Unknown error'));
+      if (err.name !== 'AbortError') {
+        toast.error('Generation failed: ' + (err.message || 'Unknown error'));
+        setResults((prev) => [{
+          _id: crypto.randomUUID(),
+          _error: true,
+          errorMessage: err.message || 'Unknown error',
+          prompt: activePrompt,
+        }, ...prev]);
+      }
     } finally {
       setGenerating(false);
     }
-  }, [prompt, quality, dryRun, checkpoint, seed, addImage]);
+  }, [prompt, quality, dryRun, checkpoint, seed, addImage, generating]);
+
+  const handleCancel = useCallback(async () => {
+    try {
+      await api.cancelGeneration(sessionIdRef.current);
+    } catch {}
+    setGenerating(false);
+    toast.info('Generation cancelled');
+  }, []);
 
   const handleQualityChange = (q) => {
     setQuality(q);
@@ -225,15 +247,26 @@ function ImagePage() {
           </div>
         )}
 
-        {/* Generate button */}
-        <button
-          onClick={handleGenerate}
-          disabled={!prompt.trim() || generating}
-          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-br from-cyan-500 to-violet-600 text-white text-sm font-medium hover:from-cyan-400 hover:to-violet-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-cyan-500/20"
-        >
-          {generating ? <Loader2 size={15} className="animate-spin" /> : null}
-          {dryRun ? 'Preview Plan' : 'Generate Image'}
-        </button>
+        {/* Generate / Cancel buttons */}
+        <div className="flex gap-2">
+          <button
+            onClick={() => handleGenerate()}
+            disabled={!prompt.trim() || generating}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-br from-cyan-500 to-violet-600 text-white text-sm font-medium hover:from-cyan-400 hover:to-violet-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-cyan-500/20"
+          >
+            {generating ? <Loader2 size={15} className="animate-spin" /> : null}
+            {dryRun ? 'Preview Plan' : 'Generate Image'}
+          </button>
+          {generating && (
+            <button
+              onClick={handleCancel}
+              title="Cancel generation"
+              className="px-3 py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 transition-colors"
+            >
+              <XCircle size={16} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ---- Right panel ---- */}
@@ -259,18 +292,37 @@ function ImagePage() {
             {/* Skeleton for in-progress generation */}
             {generating && <SkeletonCard />}
             {/* Results (latest first — already prepended) */}
-            {results.map((result) => (
-              <ImageCard
-                key={result._id}
-                image_base64={result.image_base64}
-                prompt={result.prompt}
-                route_result={result.route_result}
-                generation_time_ms={result.generation_time_ms}
-                retry_used={result.retry_used}
-                plan={result.plan}
-                dry_run={result.dry_run || dryRun}
-              />
-            ))}
+            {results.map((result) => {
+              if (result._error) {
+                return (
+                  <div key={result._id} className="rounded-xl border border-red-500/20 bg-red-900/10 p-4 space-y-3">
+                    <p className="text-xs text-red-400 font-mono">{result.errorMessage}</p>
+                    <button
+                      onClick={() => handleGenerate(result.prompt)}
+                      className="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 px-2.5 py-1.5 rounded-lg transition-colors"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                );
+              }
+              return (
+                <ImageCard
+                  key={result._id}
+                  image_base64={result.image_base64}
+                  prompt={result.prompt}
+                  route_result={result.route_result}
+                  generation_time_ms={result.generation_time_ms}
+                  retry_used={result.retry_used}
+                  plan={result.plan}
+                  dry_run={result.dry_run || dryRun}
+                  onRerun={() => {
+                    setPrompt(result.prompt);
+                    handleGenerate(result.prompt);
+                  }}
+                />
+              );
+            })}
           </div>
         )}
       </div>

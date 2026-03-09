@@ -74,6 +74,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
         onKeyDown={handleKeyDown}
         rows={1}
         disabled={loading}
+        autoFocus={isHome}
       />
 
       {/* Mic */}

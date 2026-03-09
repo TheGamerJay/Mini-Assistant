@@ -2,10 +2,12 @@
  * components/ChatMessage.js
  * Renders a single chat message bubble (user or assistant).
  * Props: { message: { role, type, content, image_base64, prompt, route_result,
- *                     generation_time_ms, retry_used, prompt_warnings } }
+ *                     generation_time_ms, retry_used, prompt_warnings },
+ *          onRetry?: () => void }
  */
 
 import React from 'react';
+import { RotateCcw } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import ImageCard from './ImageCard';
 
@@ -122,13 +124,13 @@ function RouteInfo({ route_result, generation_time_ms }) {
 // ---------------------------------------------------------------------------
 // ChatMessage
 // ---------------------------------------------------------------------------
-function ChatMessage({ message }) {
+function ChatMessage({ message, onRetry }) {
   const { settings } = useApp();
   const { role, type, content, image_base64, prompt, route_result, generation_time_ms, retry_used, prompt_warnings } = message;
 
   if (role === 'user') {
     return (
-      <div className="flex justify-end">
+      <div className="flex justify-end msg-enter">
         <div className="max-w-[75%] px-5 py-3 rounded-2xl rounded-tr-sm bg-[#1e2a3a] border border-cyan-500/20 text-slate-200 text-sm leading-relaxed">
           {renderText(content)}
         </div>
@@ -141,7 +143,7 @@ function ChatMessage({ message }) {
   const isError = type === 'error';
 
   return (
-    <div className="flex items-start gap-3">
+    <div className="flex items-start gap-3 msg-enter">
       {/* Avatar */}
       <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-violet-600 flex-shrink-0 flex items-center justify-center text-[10px] font-bold text-white mt-0.5">
         MA
@@ -181,6 +183,17 @@ function ChatMessage({ message }) {
               <span key={i} className="text-[10px] text-amber-500/60 font-mono">{w}</span>
             ))}
           </div>
+        )}
+
+        {/* Retry button for errors */}
+        {isError && onRetry && (
+          <button
+            onClick={onRetry}
+            className="mt-3 flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 px-2.5 py-1.5 rounded-lg transition-colors"
+          >
+            <RotateCcw size={11} />
+            Retry
+          </button>
         )}
       </div>
     </div>

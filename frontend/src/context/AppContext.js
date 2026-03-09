@@ -12,6 +12,9 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 // ---------------------------------------------------------------------------
 const fullImageMap = new Map();
 
+/** Exported so ChatPage / ImagePage can read the full base64 without context overhead */
+export { fullImageMap as imageFullMap };
+
 // ---------------------------------------------------------------------------
 // Utility helpers
 // ---------------------------------------------------------------------------
@@ -80,9 +83,19 @@ export function AppProvider({ children }) {
 
   const getPrevPage = useCallback(() => prevPageRef.current, []);
 
+  // ---- prevPage state (alias for SettingsModal back-navigation) ----
+  const [prevPage, _setPrevPage] = useState('chat');
+  const setPrevPage = useCallback((p) => _setPrevPage(p), []);
+
   // ---- Sidebar ----
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const toggleSidebar = useCallback(() => setSidebarCollapsed((v) => !v), []);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => localStorage.getItem('ma_sidebar_collapsed') === 'true'
+  );
+  const toggleSidebar = useCallback(() => setSidebarCollapsed((v) => {
+    const next = !v;
+    try { localStorage.setItem('ma_sidebar_collapsed', String(next)); } catch {}
+    return next;
+  }), []);
 
   // ---- Chats ----
   const [chats, setChats] = useState(() => loadLS('ma_v2_chats', []));
@@ -218,6 +231,8 @@ export function AppProvider({ children }) {
     page,
     setPage,
     getPrevPage,
+    prevPage,
+    setPrevPage,
     // sidebar
     sidebarCollapsed,
     setSidebarCollapsed,
