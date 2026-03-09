@@ -5,18 +5,18 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Loader2, XCircle } from 'lucide-react';
+import { toast } from 'sonner';
 import { useApp, makeThumbnail } from '../context/AppContext';
 import { useChat } from '../hooks/useChat';
 import HomeHero from '../components/HomeHero';
 import ChatMessage from '../components/ChatMessage';
 import ChatInput from '../components/ChatInput';
+import MiniOrb from '../components/MiniOrb';
 
 function LoadingBubble() {
   return (
     <div className="flex items-start gap-3">
-      <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-violet-600 flex-shrink-0 flex items-center justify-center text-[10px] font-bold text-white mt-0.5">
-        MA
-      </div>
+      <MiniOrb state="thinking" size="sm" />
       <div className="px-5 py-4 rounded-2xl rounded-tl-sm border bg-[#151520] border-white/5">
         <div className="flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
@@ -70,6 +70,10 @@ function ChatPage() {
 
   const handleSubmit = useCallback(async (text) => {
     if (submittingRef.current || loading) return;
+    if (!text || text.trim().length < 3) {
+      toast.warning('Message too short (min 3 characters)');
+      return;
+    }
     submittingRef.current = true;
     lastUserTextRef.current = text;
 
@@ -146,7 +150,7 @@ function ChatPage() {
   const showHero = !activeChatId && messages.length === 0;
 
   if (showHero) {
-    return <HomeHero onSubmit={handleSubmit} loading={loading} />;
+    return <HomeHero onSubmit={handleSubmit} loading={loading} lastTopic={lastUserTextRef.current || null} />;
   }
 
   return (

@@ -192,3 +192,26 @@ button, a { transition: all 0.15s ease; }
   to   { opacity: 1; transform: translateY(0); }
 }
 .msg-enter { animation: fadeSlideUp 0.2s ease forwards; }
+
+/* Mini Orb animations */
+@keyframes orbIdle {
+  0%, 100% { opacity: 0.85; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.03); }
+}
+@keyframes orbPulse {
+  0%, 100% { opacity: 0.7; transform: scale(0.95); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+@keyframes orbRipple {
+  0% { transform: scale(1); box-shadow: 0 0 20px rgba(0,229,255,0.4), 0 0 40px rgba(124,58,237,0.3); }
+  50% { transform: scale(1.05); box-shadow: 0 0 30px rgba(0,229,255,0.6), 0 0 60px rgba(124,58,237,0.5); }
+  100% { transform: scale(1); box-shadow: 0 0 20px rgba(0,229,255,0.4), 0 0 40px rgba(124,58,237,0.3); }
+}
+.orb-idle { animation: orbIdle 3s ease-in-out infinite; }
+.orb-pulse { animation: orbPulse 0.8s ease-in-out infinite; }
+.orb-ripple { animation: orbRipple 1.2s ease-in-out infinite; }
+
+/* Radial gradient utility */
+.bg-gradient-radial {
+  background: radial-gradient(ellipse at center, var(--tw-gradient-from), var(--tw-gradient-via), var(--tw-gradient-to));
+}

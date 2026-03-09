@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import { Package, Download, Trash2, Loader2, Plus, Check } from 'lucide-react';
@@ -12,18 +12,18 @@ const PackageManager = () => {
   const [loading, setLoading] = useState(false);
   const [installLog, setInstallLog] = useState([]);
 
-  useEffect(() => {
-    loadInstalledPackages();
-  }, [packageType]);
-
-  const loadInstalledPackages = async () => {
+  const loadInstalledPackages = useCallback(async () => {
     try {
       const response = await axiosInstance.get(`/packages/list?type=${packageType}`);
       setInstalledPackages(response.data.packages || []);
     } catch (error) {
       console.error('Load packages error:', error);
     }
-  };
+  }, [packageType]);
+
+  useEffect(() => {
+    loadInstalledPackages();
+  }, [packageType, loadInstalledPackages]);
 
   const installPackage = async () => {
     if (!packageName.trim() || loading) return;

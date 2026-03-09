@@ -10,6 +10,7 @@ import React from 'react';
 import { RotateCcw } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import ImageCard from './ImageCard';
+import IntelligencePanel from './IntelligencePanel';
 
 // ---------------------------------------------------------------------------
 // Minimal markdown-aware text renderer
@@ -145,8 +146,10 @@ function ChatMessage({ message, onRetry }) {
   return (
     <div className="flex items-start gap-3 msg-enter">
       {/* Avatar */}
-      <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-violet-600 flex-shrink-0 flex items-center justify-center text-[10px] font-bold text-white mt-0.5">
-        MA
+      <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 via-violet-500 to-violet-600 flex items-center justify-center overflow-hidden flex-shrink-0 mt-1">
+        <img src="/Logo.png" alt="Mini Assistant" className="w-full h-full object-contain"
+          onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }} />
+        <span style={{display:'none'}} className="text-white text-xs font-bold w-full h-full items-center justify-center">MA</span>
       </div>
 
       {/* Content card */}
@@ -155,6 +158,11 @@ function ChatMessage({ message, onRetry }) {
           ? 'bg-red-900/20 border-red-500/20 text-red-300'
           : 'bg-[#151520] border-white/5 text-slate-200'}`}
       >
+        {/* Intelligence panel for non-chat intents */}
+        {role === 'assistant' && route_result && route_result.intent !== 'chat' && (
+          <IntelligencePanel route_result={route_result} generation_time_ms={generation_time_ms} />
+        )}
+
         {isImage ? (
           <>
             <p className="text-slate-400 text-sm mb-3">Here's your image:</p>

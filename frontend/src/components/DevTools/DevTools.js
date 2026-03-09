@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import { Wand2, Check, Copy, Palette, FileJson, FileText, TestTube } from 'lucide-react';
 import { usePersist } from '../../hooks/usePersist';
@@ -122,7 +122,7 @@ const DevTools = () => {
     };
   };
 
-  const updateColorFormats = (hex) => {
+  const updateColorFormats = useCallback((hex) => {
     const rgb = hexToRgb(hex);
     if (rgb) {
       const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
@@ -133,11 +133,11 @@ const DevTools = () => {
         hsl: `hsl(${hsl.h}, ${hsl.s}%, ${hsl.l}%)`
       });
     }
-  };
+  }, []);
 
   useEffect(() => {
     updateColorFormats(selectedColor);
-  }, [selectedColor]);
+  }, [selectedColor, updateColorFormats]);
 
   const copyColor = (format) => {
     navigator.clipboard.writeText(colorFormats[format]);

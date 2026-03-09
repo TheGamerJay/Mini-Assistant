@@ -3738,9 +3738,20 @@ async def tester_history():
 # Health check
 @api_router.get("/health")
 async def health_check():
+    # Check ComfyUI availability
+    comfyui_status = "disconnected"
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get("http://localhost:8188/system_stats", timeout=2.0)
+            if resp.status_code == 200:
+                comfyui_status = "connected"
+    except Exception:
+        comfyui_status = "disconnected"
+
     return {
         "status": "healthy",
         "ollama": "connected" if ollama_client else "disconnected",
+        "comfyui": comfyui_status,
         "whisper": "loaded" if whisper_model else "not_loaded"
     }
 

@@ -84,6 +84,10 @@ function ImagePage() {
       toast.warning('Please enter a prompt first.');
       return;
     }
+    if (activePrompt.length < 3) {
+      toast.warning('Message too short (min 3 characters)');
+      return;
+    }
     if (generating) return;
 
     sessionIdRef.current = crypto.randomUUID();

@@ -1,3 +1,4 @@
+/* LEGACY: this component is superseded by pages/ChatPage.js. Safe to remove once confirmed unused. */
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -246,6 +247,10 @@ const ChatInterface = () => {
 
   const handleSend = async () => {
     if (!input.trim() || loading) return;
+    if (input.trim().length < 3) {
+      toast.warning('Message too short (min 3 characters)');
+      return;
+    }
 
     // Ensure a chat exists
     let chatId = activeChatId;

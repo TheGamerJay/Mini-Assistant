@@ -118,16 +118,11 @@ function AppShell() {
         const data = await api.mainHealth();
         setServerStatus({
           backend: true,
-          ollama: data.ollama === 'connected' ? true : false,
+          ollama: data.ollama === 'connected',
+          comfyui: data.comfyui === 'connected',
         });
       } catch {
-        setServerStatus({ backend: false, ollama: false });
-      }
-      try {
-        const imgData = await api.imageHealth();
-        setServerStatus({ comfyui: imgData.status === 'ok' || imgData.comfyui === 'connected' ? true : false });
-      } catch {
-        setServerStatus({ comfyui: false });
+        setServerStatus({ backend: false, ollama: false, comfyui: false });
       }
     };
 

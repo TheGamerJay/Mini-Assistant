@@ -30,7 +30,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
 
   const handleSubmit = useCallback(() => {
     const text = value.trim();
-    if (!text || loading) return;
+    if (text.length < 3 || loading) return;
     onSubmit(text);
     setValue('');
     if (textareaRef.current) {
@@ -46,11 +46,11 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
   }, [handleSubmit]);
 
   const isHome = variant === 'home';
-  const isEmpty = !value.trim();
+  const isEmpty = value.trim().length < 3;
 
   const containerClass = isHome
-    ? 'w-full max-w-2xl rounded-2xl bg-[#1a1a26] border border-white/10 flex items-end gap-2 px-4 py-3 focus-within:border-cyan-500/40 focus-within:shadow-[0_0_20px_rgba(0,229,255,0.08)] transition-all'
-    : 'w-full rounded-xl bg-[#1a1a26] border border-white/10 flex items-end gap-2 px-4 py-3 focus-within:border-cyan-500/40 focus-within:shadow-[0_0_20px_rgba(0,229,255,0.08)] transition-all';
+    ? 'w-full max-w-2xl rounded-2xl bg-[#1a1a26] border border-white/10 flex items-end gap-2 px-5 py-3.5 focus-within:border-cyan-500/40 focus-within:shadow-[0_0_20px_rgba(0,229,255,0.08)] transition-all'
+    : 'w-full rounded-xl bg-[#1a1a26] border border-white/10 flex items-end gap-2 px-5 py-3.5 focus-within:border-cyan-500/40 focus-within:shadow-[0_0_20px_rgba(0,229,255,0.08)] transition-all';
 
   return (
     <div className={containerClass}>
@@ -67,7 +67,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
       {/* Textarea */}
       <textarea
         ref={textareaRef}
-        className="flex-1 bg-transparent text-slate-200 text-sm font-sans placeholder-slate-600 resize-none outline-none border-none leading-6 max-h-[144px] py-0.5"
+        className="flex-1 bg-transparent text-slate-200 text-[15px] font-sans placeholder-slate-600 resize-none outline-none border-none leading-6 max-h-[144px] py-0.5"
         placeholder={resolvedPlaceholder}
         value={value}
         onChange={(e) => setValue(e.target.value)}

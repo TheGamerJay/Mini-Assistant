@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { axiosInstance } from '../../App';
 import { toast } from 'sonner';
 import { Settings, Plus, Trash2, Eye, EyeOff, Save, Key } from 'lucide-react';
@@ -10,11 +10,7 @@ const EnvManager = () => {
   const [loading, setLoading] = useState(false);
   const [showValues, setShowValues] = useState({});
 
-  useEffect(() => {
-    loadEnvVars();
-  }, [envType]);
-
-  const loadEnvVars = async () => {
+  const loadEnvVars = useCallback(async () => {
     try {
       const response = await axiosInstance.get(`/env/read?type=${envType}`);
       const vars = response.data.variables || [];
@@ -22,7 +18,11 @@ const EnvManager = () => {
     } catch (error) {
       console.error('Load env error:', error);
     }
-  };
+  }, [envType]);
+
+  useEffect(() => {
+    loadEnvVars();
+  }, [envType, loadEnvVars]);
 
   const addVar = () => {
     setEnvVars([...envVars, { key: '', value: '', id: Date.now() }]);
