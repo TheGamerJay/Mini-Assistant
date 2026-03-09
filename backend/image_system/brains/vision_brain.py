@@ -5,10 +5,10 @@ Wraps qwen2.5vl:7b for image understanding, style comparison, and issue detectio
 """
 
 import base64
-import json
 import logging
-import re
 from typing import Optional
+
+from ..utils.json_validator import extract_json_from_text
 
 logger = logging.getLogger(__name__)
 
@@ -175,19 +175,5 @@ class VisionBrain:
 
     @staticmethod
     def _parse_json_safe(text: str) -> Optional[dict]:
-        """Strip markdown fences and parse JSON, returning None on failure."""
-        text = text.strip()
-        if text.startswith("```"):
-            lines = text.splitlines()
-            text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-        m = re.search(r"\{.*\}", text, re.DOTALL)
-        if m:
-            try:
-                return json.loads(m.group())
-            except json.JSONDecodeError:
-                pass
-        return None
+        """Extract and parse JSON from model output, returning None on failure."""
+        return extract_json_from_text(text)

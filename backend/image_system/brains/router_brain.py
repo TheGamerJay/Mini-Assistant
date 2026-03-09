@@ -5,10 +5,15 @@ Classifies user requests using qwen3:14b (with qwen2.5:7b fallback) and returns
 a structured RouteResult dict that drives checkpoint and workflow selection.
 """
 
-import json
 import logging
-import re
 from typing import Optional
+
+from ..utils.json_validator import (
+    ROUTER_SCHEMA,
+    parse_and_validate,
+    build_repair_prompt,
+)
+from ..utils.routing_guard import validate_route as _guard_validate_route
 
 logger = logging.getLogger(__name__)
 
@@ -153,17 +158,28 @@ confidence should reflect how certain you are about the routing decision (0.0-1.
         prompt = self._build_prompt(user_request)
 
         # --- Primary: qwen3:14b ---
+        raw = None
         try:
             raw = await self._ollama.run_router(prompt=prompt, system=self.SYSTEM_PROMPT)
-            data = self._parse_json(raw)
-            if data:
+            data, errors = parse_and_validate(raw, ROUTER_SCHEMA, "router_primary")
+            if data and not errors:
                 result = self.validate_route(data)
                 if result.get("confidence", 0) >= 0.3:
                     logger.info(
                         "Router (primary): intent=%s checkpoint=%s confidence=%.2f",
                         result["intent"], result.get("selected_checkpoint"), result["confidence"],
                     )
-                    return result
+                    return _guard_validate_route(result)
+            elif data is None and raw:
+                # One-shot repair attempt
+                repair_prompt = build_repair_prompt(prompt, raw, ROUTER_SCHEMA, "router")
+                raw2 = await self._ollama.run_router(prompt=repair_prompt, system=self.SYSTEM_PROMPT)
+                data2, _ = parse_and_validate(raw2, ROUTER_SCHEMA, "router_repair")
+                if data2:
+                    result2 = self.validate_route(data2)
+                    logger.info("Router (primary+repair): intent=%s confidence=%.2f",
+                                result2["intent"], result2.get("confidence", 0))
+                    return _guard_validate_route(result2)
         except Exception as exc:
             logger.warning("Primary router failed: %s", exc)
 
@@ -172,7 +188,7 @@ confidence should reflect how certain you are about the routing decision (0.0-1.
             raw_fb = await self._ollama.run_router_fallback(
                 prompt=prompt, system=self.SYSTEM_PROMPT
             )
-            data_fb = self._parse_json(raw_fb)
+            data_fb, _ = parse_and_validate(raw_fb, ROUTER_SCHEMA, "router_fallback")
             if data_fb:
                 result_fb = self.validate_route(data_fb)
                 logger.info(
@@ -181,13 +197,13 @@ confidence should reflect how certain you are about the routing decision (0.0-1.
                     result_fb.get("selected_checkpoint"),
                     result_fb["confidence"],
                 )
-                return result_fb
+                return _guard_validate_route(result_fb)
         except Exception as exc:
             logger.warning("Fallback router failed: %s", exc)
 
         # --- Last resort: local keyword matching ---
         logger.warning("Both LLM routers failed; using keyword matching")
-        return self._apply_keyword_rules(user_request)
+        return _guard_validate_route(self._apply_keyword_rules(user_request))
 
     def validate_route(self, data: dict) -> dict:
         """
@@ -390,33 +406,6 @@ confidence should reflect how certain you are about the routing decision (0.0-1.
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _parse_json(raw: str) -> Optional[dict]:
-        """
-        Attempt to parse a JSON object from the model's raw text output.
-
-        Strips markdown fences and falls back to regex extraction.
-        """
-        text = raw.strip()
-        # Strip ```json ... ``` or ``` ... ```
-        if text.startswith("```"):
-            lines = text.splitlines()
-            inner_lines = lines[1:-1] if lines[-1].strip() == "```" else lines[1:]
-            text = "\n".join(inner_lines)
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-        # Try to find first {...} block in surrounding text
-        m = re.search(r"\{.*\}", text, re.DOTALL)
-        if m:
-            try:
-                return json.loads(m.group())
-            except json.JSONDecodeError:
-                pass
-        logger.warning("Could not parse JSON from router response: %s", raw[:200])
-        return None
 
     @staticmethod
     def _derive_from_style(

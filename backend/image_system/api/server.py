@@ -8,16 +8,30 @@ Run with:
     uvicorn backend.image_system.api.server:app --host 0.0.0.0 --port 7860
 """
 
+import asyncio
 import base64
 import logging
 import time
 import uuid
-from typing import List, Optional
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+
+from .models import (
+    GenerateRequest,
+    GenerateResponse,
+    GenerationPlan,
+    DryRunResponse,
+    RouteRequest,
+    AnalyzeRequest,
+    ChatRequest,
+    PullModelsRequest,
+    ModelStatusResponse,
+    ErrorResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +73,12 @@ async def log_requests(request: Request, call_next):
         request.method, request.url.path, response.status_code, elapsed,
     )
     return response
+
+# ---------------------------------------------------------------------------
+# Active generation tracking (for cancellation)
+# ---------------------------------------------------------------------------
+
+_active_generations: Dict[str, asyncio.Task] = {}
 
 # ---------------------------------------------------------------------------
 # Lazy brain / service singletons (created on first use to avoid import errors)
@@ -137,58 +157,29 @@ def _get_ollama():
         _ollama_client = OllamaClient()
     return _ollama_client
 
+
+def _load_registry() -> dict:
+    import json as _json
+    registry_path = Path(__file__).parent.parent / "config" / "model_registry.json"
+    with open(registry_path) as f:
+        return _json.load(f)
+
+
 # ---------------------------------------------------------------------------
 # Startup event
 # ---------------------------------------------------------------------------
 
 @app.on_event("startup")
 async def startup_event():
-    """Check that critical Ollama models are reachable at startup."""
+    """Run availability check at startup and log the report."""
     logger.info("Mini Assistant Image System starting up...")
-    ollama = _get_ollama()
     try:
-        models = await ollama.list_models()
-        logger.info("Ollama available models: %s", models)
+        from ..utils.startup_check import run_full_check, print_report
+        report = await run_full_check()
+        print_report(report)
     except Exception as exc:
-        logger.warning("Could not reach Ollama at startup: %s", exc)
+        logger.warning("Startup check failed: %s", exc)
 
-# ---------------------------------------------------------------------------
-# Request / Response schemas
-# ---------------------------------------------------------------------------
-
-class GenerateRequest(BaseModel):
-    prompt: str = Field(..., description="User image generation request")
-    quality: Optional[str] = Field("balanced", description="fast | balanced | high")
-    reference_image_base64: Optional[str] = Field(None, description="Base64 reference image")
-    session_id: Optional[str] = Field(None, description="Session identifier")
-
-
-class GenerateResponse(BaseModel):
-    image_base64: Optional[str]
-    route_result: dict
-    review: Optional[dict]
-    retry_used: bool
-    critic_result: Optional[dict]
-    session_id: str
-    generation_time_ms: float
-
-
-class RouteRequest(BaseModel):
-    prompt: str
-
-
-class AnalyzeRequest(BaseModel):
-    image_base64: str
-    question: Optional[str] = "Describe this image in detail."
-
-
-class ChatRequest(BaseModel):
-    message: str
-    session_id: Optional[str] = None
-
-
-class PullModelsRequest(BaseModel):
-    models: List[str]
 
 # ---------------------------------------------------------------------------
 # Endpoints
@@ -206,30 +197,59 @@ async def route_only(req: RouteRequest):
     Classify a prompt and return the routing decision without generating an image.
     Useful for debugging the router.
     """
+    from ..utils.routing_guard import validate_route as guard_validate
     try:
         route_result = await _get_router().route(req.prompt)
+        route_result = guard_validate(route_result)
         return {"route_result": route_result}
     except Exception as exc:
         logger.error("Route endpoint error: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@app.post("/api/image/generate", response_model=GenerateResponse)
+@app.delete("/api/image/generate/{session_id}", status_code=200)
+async def cancel_generation(session_id: str):
+    """Cancel an in-progress generation by session_id."""
+    task = _active_generations.get(session_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"No active generation for session '{session_id}'")
+    task.cancel()
+    _active_generations.pop(session_id, None)
+    logger.info("Generation cancelled: session_id=%s", session_id)
+    return {"cancelled": True, "session_id": session_id}
+
+
+@app.post("/api/image/generate")
 async def generate_image(req: GenerateRequest):
     """
     Full image generation pipeline:
-    1. RouterBrain classifies the request.
-    2. If not an image intent, delegate to the appropriate brain.
-    3. PromptBuilder crafts positive + negative prompts.
-    4. ComfyUIClient generates the image.
-    5. ImageReviewer scores the result (unless quality=='fast').
-    6. CriticBrain evaluates; retries once if warranted.
-    7. EmbedBrain stores successful routes for memory.
+    1. Prompt safety validation.
+    2. RouterBrain classifies the request (with routing_guard confidence + compatibility checks).
+    3. Apply any manual overrides.
+    4. If dry_run, return the plan without generating.
+    5. PromptBuilder crafts positive + negative prompts.
+    6. ComfyUIClient generates the image (with timeout + cancellation).
+    7. ImageReviewer scores the result (unless quality=='fast').
+    8. CriticBrain evaluates; retries once if warranted.
+    9. EmbedBrain stores successful routes for memory.
+    10. Metadata sidecar saved beside the output image.
     """
+    from ..utils.prompt_safety import validate as ps_validate
+    from ..utils.routing_guard import validate_route as guard_validate
+    from ..utils import image_logger, metadata_writer
+
     session_id = req.session_id or str(uuid.uuid4())
     start_time = time.perf_counter()
 
-    # ---- Step 1: Route ----
+    # ---- Step 1: Prompt safety ----
+    is_valid, clean_prompt, safety_error = ps_validate(req.prompt)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=f"Prompt rejected: {safety_error}")
+    prompt_warnings = []
+    if clean_prompt != req.prompt:
+        prompt_warnings.append("Prompt was sanitized (whitespace/control chars removed).")
+
+    # ---- Step 2: Route ----
     reference_bytes = None
     if req.reference_image_base64:
         try:
@@ -238,21 +258,31 @@ async def generate_image(req: GenerateRequest):
             logger.warning("Could not decode reference_image_base64")
 
     try:
-        route_result = await _get_router().route(req.prompt, reference_image=reference_bytes)
+        route_result = await _get_router().route(clean_prompt, reference_image=reference_bytes)
+        route_result = guard_validate(route_result)
     except Exception as exc:
         logger.error("Routing failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Routing error: {exc}")
 
+    # Log routing decision
+    elapsed_route = (time.perf_counter() - start_time) * 1000
+    image_logger.log_router_decision(clean_prompt, route_result, elapsed_route, session_id)
+
+    if route_result.get("_low_confidence_warning"):
+        prompt_warnings.append(route_result["_low_confidence_warning"])
+    if route_result.get("_compatibility_warning"):
+        prompt_warnings.append(route_result["_compatibility_warning"])
+
     intent = route_result.get("intent", "chat")
 
-    # ---- Step 2: Non-image intents ----
+    # ---- Step 3: Non-image intents ----
     if intent in ("chat", "planning"):
         ollama = _get_ollama()
         try:
             from ..services.ollama_client import _model_name
             reply = await ollama.run_prompt(
                 model=_model_name("router"),
-                prompt=req.prompt,
+                prompt=clean_prompt,
                 temperature=0.7,
             )
         except Exception as exc:
@@ -261,18 +291,19 @@ async def generate_image(req: GenerateRequest):
         elapsed = (time.perf_counter() - start_time) * 1000
         return GenerateResponse(
             image_base64=None,
-            route_result=route_result,
+            route_result={**route_result, "text_reply": reply},
             review=None,
             retry_used=False,
             critic_result=None,
             session_id=session_id,
             generation_time_ms=round(elapsed, 1),
+            prompt_warnings=prompt_warnings,
         )
 
     if intent == "coding":
         coding = _get_coding()
         try:
-            reply = await coding.run(req.prompt)
+            reply = await coding.run(clean_prompt)
         except Exception as exc:
             reply = f"Coding brain error: {exc}"
 
@@ -285,19 +316,18 @@ async def generate_image(req: GenerateRequest):
             critic_result=None,
             session_id=session_id,
             generation_time_ms=round(elapsed, 1),
+            prompt_warnings=prompt_warnings,
         )
 
-    # ---- Step 3: Image generation ----
-    checkpoint_key = route_result.get("selected_checkpoint", "anime_general")
+    # ---- Step 4: Image generation setup ----
+    # Apply checkpoint/workflow overrides
+    checkpoint_key = req.override_checkpoint or route_result.get("selected_checkpoint", "anime_general")
+    workflow_key = req.override_workflow or route_result.get("selected_workflow", "anime_general")
     quality = req.quality or "balanced"
 
-    # Load model registry to get checkpoint filename
+    # Load checkpoint file from registry
     try:
-        import json as _json
-        from pathlib import Path
-        registry_path = Path(__file__).parent.parent / "config" / "model_registry.json"
-        with open(registry_path) as f:
-            registry = _json.load(f)
+        registry = _load_registry()
         checkpoint_info = registry["image_checkpoints"].get(checkpoint_key, {})
         checkpoint_file = checkpoint_info.get("file", f"{checkpoint_key}.safetensors")
         checkpoint_type = checkpoint_info.get("type", "SD1.5")
@@ -308,19 +338,56 @@ async def generate_image(req: GenerateRequest):
     # Build prompts
     try:
         pb = _get_prompt_builder()
-        prompts = await pb.build(req.prompt, route_result)
+        prompts = await pb.build(clean_prompt, route_result)
         positive_prompt = prompts["positive"]
         negative_prompt = prompts["negative"]
-        width, height = pb.size_for_visual_mode(
-            route_result.get("visual_mode", "portrait"), checkpoint_type, quality
-        )
-        steps = pb.steps_for_quality(quality, checkpoint_type)
-        cfg = pb.cfg_for_style(route_result.get("style_family", "anime"))
+        width = req.override_width or 0
+        height = req.override_height or 0
+        if not (width and height):
+            width, height = pb.size_for_visual_mode(
+                route_result.get("visual_mode", "portrait"), checkpoint_type, quality
+            )
+        steps = req.override_steps or pb.steps_for_quality(quality, checkpoint_type)
+        cfg = req.override_cfg or pb.cfg_for_style(route_result.get("style_family", "anime"))
+        seed = req.override_seed
     except Exception as exc:
         logger.error("PromptBuilder failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Prompt build error: {exc}")
 
-    # Generate image via ComfyUI
+    # Collect which overrides were applied
+    overrides_applied: Dict[str, Any] = {}
+    for field in ("checkpoint", "workflow", "width", "height", "steps", "cfg", "seed"):
+        attr = f"override_{field}"
+        val = getattr(req, attr, None)
+        if val is not None:
+            overrides_applied[field] = val
+
+    plan = GenerationPlan(
+        checkpoint=checkpoint_key,
+        checkpoint_file=checkpoint_file,
+        workflow=workflow_key,
+        positive_prompt=positive_prompt,
+        negative_prompt=negative_prompt,
+        width=width,
+        height=height,
+        steps=steps,
+        cfg=cfg,
+        seed=seed,
+        quality=quality,
+        overrides_applied=overrides_applied,
+    )
+
+    # ---- Step 5: Dry run — return plan without generating ----
+    if req.dry_run:
+        elapsed = (time.perf_counter() - start_time) * 1000
+        return DryRunResponse(
+            session_id=session_id,
+            route_result=route_result,
+            plan=plan,
+            prompt_warnings=prompt_warnings,
+        )
+
+    # ---- Step 6: ComfyUI generation (with timeout + cancellation) ----
     comfyui = _get_comfyui()
     workflow = comfyui.build_standard_workflow(
         checkpoint=checkpoint_file,
@@ -330,40 +397,67 @@ async def generate_image(req: GenerateRequest):
         height=height,
         steps=steps,
         cfg=cfg,
+        seed=seed,
     )
 
     image_bytes: Optional[bytes] = None
     review: Optional[dict] = None
     critic_result: Optional[dict] = None
     retry_used = False
+    gen_start = time.perf_counter()
 
     try:
-        images = await comfyui.generate(workflow, timeout=300)
-        image_bytes = images[0] if images else None
+        gen_task = asyncio.ensure_future(comfyui.generate(workflow, timeout=300))
+        _active_generations[session_id] = gen_task
+        try:
+            images = await gen_task
+            image_bytes = images[0] if images else None
+        except asyncio.CancelledError:
+            logger.info("Generation cancelled: session_id=%s", session_id)
+            raise HTTPException(status_code=499, detail="Generation cancelled by client")
+        finally:
+            _active_generations.pop(session_id, None)
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("ComfyUI generation failed: %s", exc, exc_info=True)
+        gen_elapsed = (time.perf_counter() - gen_start) * 1000
+        image_logger.log_comfyui_execution(
+            session_id, checkpoint_key, workflow_key,
+            width, height, steps, cfg, seed or -1,
+            gen_elapsed, None, error=str(exc),
+        )
         raise HTTPException(status_code=502, detail=f"ComfyUI error: {exc}")
 
-    # ---- Step 4: Review (skip for fast quality) ----
+    gen_elapsed = (time.perf_counter() - gen_start) * 1000
+    image_logger.log_comfyui_execution(
+        session_id, checkpoint_key, workflow_key,
+        width, height, steps, cfg, seed or -1,
+        gen_elapsed, None,
+    )
+
+    # ---- Step 7: Review (skip for fast quality) ----
+    review_start = time.perf_counter()
     if image_bytes and quality != "fast":
         try:
             from ..services.image_reviewer import ImageReviewer
             reviewer = ImageReviewer()
-            review = await reviewer.review_image(image_bytes, req.prompt, route_result)
+            review = await reviewer.review_image(image_bytes, clean_prompt, route_result)
         except Exception as exc:
             logger.warning("Image review failed: %s", exc)
             review = None
 
-    # ---- Step 5: Critic evaluation + single retry ----
+    # ---- Step 8: Critic evaluation + single retry ----
     if review and image_bytes:
         try:
             critic = _get_critic()
-            critic_result = await critic.evaluate(req.prompt, route_result, review)
+            critic_result = await critic.evaluate(clean_prompt, route_result, review)
 
             if critic_result.get("should_retry"):
                 adjusted = critic_result.get("adjusted_params", {})
                 alt_checkpoint_key = critic_result.get("alt_checkpoint") or checkpoint_key
                 try:
+                    registry = _load_registry()
                     checkpoint_info_retry = registry["image_checkpoints"].get(alt_checkpoint_key, {})
                     retry_checkpoint_file = checkpoint_info_retry.get("file", checkpoint_file)
                 except Exception:
@@ -388,16 +482,51 @@ async def generate_image(req: GenerateRequest):
         except Exception as exc:
             logger.warning("Critic/retry failed: %s", exc)
 
-    # ---- Step 6: Store successful route ----
+    review_elapsed = (time.perf_counter() - review_start) * 1000
     quality_score = review.get("quality_score", 0.7) if review else 0.7
+    image_logger.log_review_event(
+        session_id, quality_score, retry_used,
+        review.get("retry_reason") if review else None,
+        critic_result.get("alt_checkpoint") if critic_result else None,
+        2 if retry_used else 1,
+        review_elapsed,
+        None,
+    )
+
+    # ---- Step 9: Store successful route ----
     if image_bytes and quality_score >= 0.5:
         try:
-            await _get_embed().store_successful_route(req.prompt, route_result, quality_score)
+            await _get_embed().store_successful_route(clean_prompt, route_result, quality_score)
         except Exception as exc:
             logger.warning("EmbedBrain store failed: %s", exc)
 
-    elapsed = (time.perf_counter() - start_time) * 1000
+    # ---- Step 10: Save image + metadata sidecar ----
+    out_path = None
+    if image_bytes:
+        try:
+            out_path = metadata_writer.save_output_image(image_bytes, session_id, seed or -1)
+            meta = metadata_writer.build_metadata(
+                original_prompt=req.prompt,
+                positive_prompt=positive_prompt,
+                negative_prompt=negative_prompt,
+                route=route_result,
+                checkpoint=checkpoint_key,
+                workflow=workflow_key,
+                seed=seed or -1,
+                width=width,
+                height=height,
+                steps=steps,
+                cfg=cfg,
+                quality=quality,
+                review_result=review,
+                session_id=session_id,
+                generation_ms=(time.perf_counter() - start_time) * 1000,
+            )
+            metadata_writer.save_metadata(out_path, meta)
+        except Exception as exc:
+            logger.warning("Metadata/image save failed: %s", exc)
 
+    elapsed = (time.perf_counter() - start_time) * 1000
     image_b64 = base64.b64encode(image_bytes).decode("utf-8") if image_bytes else None
 
     return GenerateResponse(
@@ -408,6 +537,7 @@ async def generate_image(req: GenerateRequest):
         critic_result=critic_result,
         session_id=session_id,
         generation_time_ms=round(elapsed, 1),
+        prompt_warnings=prompt_warnings,
     )
 
 
@@ -440,11 +570,19 @@ async def chat(req: ChatRequest):
     Automatically detects if the message requires image generation and
     delegates accordingly. For pure chat, uses the router model.
     """
+    from ..utils.prompt_safety import validate as ps_validate
+
     session_id = req.session_id or str(uuid.uuid4())
+
+    is_valid, clean_message, safety_error = ps_validate(req.message)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=f"Message rejected: {safety_error}")
 
     # Route to detect intent
     try:
-        route_result = await _get_router().route(req.message)
+        from ..utils.routing_guard import validate_route as guard_validate
+        route_result = await _get_router().route(clean_message)
+        route_result = guard_validate(route_result)
     except Exception as exc:
         logger.error("Chat routing failed: %s", exc)
         route_result = {"intent": "chat"}
@@ -452,23 +590,21 @@ async def chat(req: ChatRequest):
     intent = route_result.get("intent", "chat")
 
     if intent in ("image_generation", "image_edit"):
-        # Delegate to the full generation pipeline by reusing the endpoint logic
-        gen_req = GenerateRequest(prompt=req.message, session_id=session_id)
+        gen_req = GenerateRequest(prompt=clean_message, session_id=session_id)
         return await generate_image(gen_req)
 
     if intent == "coding":
         try:
-            reply = await _get_coding().run(req.message)
+            reply = await _get_coding().run(clean_message)
         except Exception as exc:
             reply = f"Coding brain error: {exc}"
     else:
-        # General chat via router model
         try:
             ollama = _get_ollama()
             from ..services.ollama_client import _model_name
             reply = await ollama.run_prompt(
                 model=_model_name("router"),
-                prompt=req.message,
+                prompt=clean_message,
                 temperature=0.7,
             )
         except Exception as exc:
@@ -491,12 +627,8 @@ async def models_status():
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Ollama unreachable: {exc}")
 
-    import json as _json
-    from pathlib import Path
-    registry_path = Path(__file__).parent.parent / "config" / "model_registry.json"
     try:
-        with open(registry_path) as f:
-            registry = _json.load(f)
+        registry = _load_registry()
         required_models = {k: v["model"] for k, v in registry["ollama_models"].items()}
     except Exception:
         required_models = {}
