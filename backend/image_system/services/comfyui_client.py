@@ -10,6 +10,7 @@ import asyncio
 import copy
 import json
 import logging
+import os
 import random
 import uuid
 from pathlib import Path
@@ -38,7 +39,7 @@ class ComfyUIClient:
         # images is a list of raw PNG bytes
     """
 
-    def __init__(self, base_url: str = "http://localhost:8188") -> None:
+    def __init__(self, base_url: str = os.environ.get("COMFYUI_URL", "http://localhost:8188")) -> None:
         self.base_url = base_url.rstrip("/")
         self._session: Optional[aiohttp.ClientSession] = None
 

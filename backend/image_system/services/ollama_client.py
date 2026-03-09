@@ -8,6 +8,7 @@ generation, chat, embeddings, and model management.
 import asyncio
 import json
 import logging
+import os
 from typing import Any, AsyncIterator, List, Optional
 
 import aiohttp
@@ -55,7 +56,7 @@ class OllamaClient:
     underlying aiohttp.ClientSession is created lazily and shared.
     """
 
-    def __init__(self, base_url: str = "http://localhost:11434") -> None:
+    def __init__(self, base_url: str = os.environ.get("OLLAMA_HOST", "http://localhost:11434")) -> None:
         self.base_url = base_url.rstrip("/")
         self._session: Optional[aiohttp.ClientSession] = None
 

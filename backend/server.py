@@ -3742,7 +3742,7 @@ async def health_check():
     comfyui_status = "disconnected"
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.get("http://localhost:8188/system_stats", timeout=2.0)
+            resp = await client.get(f"{os.environ.get('COMFYUI_URL', 'http://localhost:8188')}/system_stats", timeout=2.0)
             if resp.status_code == 200:
                 comfyui_status = "connected"
     except Exception:
