@@ -1,9 +1,12 @@
 import os
 
-# ─── Ollama endpoints ────────────────────────────────────────────────────────
-# Override OLLAMA_HOST to point at a remote/cloud Ollama gateway if needed.
+# ─── Service endpoints ───────────────────────────────────────────────────────
+# All three point at permanent Cloudflare tunnel domains in production.
+# Fall back to localhost for local development.
 OLLAMA_HOST    = os.getenv("OLLAMA_HOST",    "http://localhost:11434")
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "")
+LOCAL_AI       = os.getenv("LOCAL_AI",       "http://localhost:8000")   # FastAPI brain backend
+IMAGE_API      = os.getenv("IMAGE_API",      os.getenv("COMFYUI_URL", "http://localhost:8188"))  # ComfyUI
 
 
 def make_ollama_client(ollama_module):
@@ -47,9 +50,10 @@ SEARCH_ENGINE   = os.getenv("SEARCH_ENGINE", "duckduckgo")   # or "tavily" / "br
 TAVILY_API_KEY  = os.getenv("TAVILY_API_KEY", "")
 BRAVE_API_KEY   = os.getenv("BRAVE_API_KEY", "")
 
-# Image generation  (AUTOMATIC1111 or ComfyUI)
-SD_HOST         = os.getenv("SD_HOST", "http://localhost:7860")
-SD_BACKEND      = os.getenv("SD_BACKEND", "auto1111")         # or "comfyui"
+# Image generation  (ComfyUI via Cloudflare tunnel)
+# IMAGE_API is the canonical env var; COMFYUI_URL and SD_HOST are aliases for compatibility.
+SD_HOST         = os.getenv("IMAGE_API", os.getenv("COMFYUI_URL", os.getenv("SD_HOST", "http://localhost:8188")))
+SD_BACKEND      = os.getenv("SD_BACKEND", "comfyui")
 
 # Code execution sandbox
 CODE_TIMEOUT    = int(os.getenv("CODE_TIMEOUT", "15"))        # seconds

@@ -475,7 +475,7 @@ def _auto_select_model(message: str, has_search_context: bool = False) -> str:
 @api_router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     if not ollama_client:
-        raise HTTPException(status_code=503, detail="Ollama service not available. Please ensure Ollama is running on localhost:11434")
+        raise HTTPException(status_code=503, detail=f"Ollama service not available. Please ensure Ollama is reachable at {_ollama_host}")
 
     try:
         from datetime import date as _date
