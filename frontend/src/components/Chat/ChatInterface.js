@@ -1,383 +1,686 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
-import { Send, Loader2, Trash2, Image, Cpu, Zap } from 'lucide-react';
+import {
+  Send, Loader2, Trash2, Plus, Search, Image, FolderOpen,
+  MessageSquare, ChevronDown, ChevronRight, X, Edit2, Check,
+  Download, Cpu, MoreHorizontal,
+} from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const IMAGE_API = `${BACKEND_URL}/image-api/api`;
 
-// Renders text with clickable markdown links
-const renderMessage = (text) => {
-  if (!text) return null;
-  const tokenRe = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|https?:\/\/[^\s<>"]+/g;
-  const result = [];
-  let last = 0;
-  let i = 0;
-  let match;
-  while ((match = tokenRe.exec(text)) !== null) {
-    if (match.index > last) result.push(<span key={i++}>{text.slice(last, match.index)}</span>);
-    if (match[0].startsWith('[')) {
-      result.push(
-        <a key={i++} href={match[2]} target="_blank" rel="noopener noreferrer"
-           className="text-cyan-400 underline hover:text-cyan-300 break-all">{match[1]}</a>
-      );
-    } else {
-      result.push(
-        <a key={i++} href={match[0]} target="_blank" rel="noopener noreferrer"
-           className="text-cyan-400 underline hover:text-cyan-300 break-all">{match[0]}</a>
-      );
-    }
-    last = match.index + match[0].length;
-  }
-  if (last < text.length) result.push(<span key={i++}>{text.slice(last)}</span>);
-  return result;
+// ── localStorage helpers ────────────────────────────────────────────────────
+
+const LS_CHATS    = 'ma_chats_v1';
+const LS_PROJECTS = 'ma_projects_v1';
+const LS_IMAGES   = 'ma_images_v1';
+
+const lsGet = (key, fallback) => {
+  try { return JSON.parse(localStorage.getItem(key)) ?? fallback; }
+  catch { return fallback; }
+};
+const lsSet = (key, val) => {
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch (_) {}
 };
 
-// Intent badge shown under assistant messages
+const uuid = () => crypto.randomUUID();
+
+// Shrink an image_base64 to a thumbnail (120×120 JPEG ~5-8 KB) via canvas
+const makeThumbnail = (base64) =>
+  new Promise((resolve) => {
+    try {
+      const img = new window.Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const SIZE = 120;
+        canvas.width = SIZE; canvas.height = SIZE;
+        const ctx = canvas.getContext('2d');
+        const s = Math.min(img.width, img.height);
+        const sx = (img.width - s) / 2;
+        const sy = (img.height - s) / 2;
+        ctx.drawImage(img, sx, sy, s, s, 0, 0, SIZE, SIZE);
+        resolve(canvas.toDataURL('image/jpeg', 0.45));
+      };
+      img.onerror = () => resolve(null);
+      img.src = `data:image/png;base64,${base64}`;
+    } catch { resolve(null); }
+  });
+
+// ── Sub-components ──────────────────────────────────────────────────────────
+
+const renderText = (text) => {
+  if (!text) return null;
+  const re = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|https?:\/\/[^\s<>"]+/g;
+  const out = []; let last = 0; let i = 0; let m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push(<span key={i++}>{text.slice(last, m.index)}</span>);
+    out.push(m[0].startsWith('[')
+      ? <a key={i++} href={m[2]} target="_blank" rel="noopener noreferrer" className="text-cyan-400 underline">{m[1]}</a>
+      : <a key={i++} href={m[0]} target="_blank" rel="noopener noreferrer" className="text-cyan-400 underline">{m[0]}</a>
+    );
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(<span key={i++}>{text.slice(last)}</span>);
+  return out;
+};
+
 const IntentBadge = ({ route_result }) => {
-  if (!route_result) return null;
+  if (!route_result?.intent) return null;
   const { intent, selected_checkpoint, confidence } = route_result;
-  if (!intent) return null;
   const colors = {
     image_generation: 'text-violet-400 border-violet-500/40 bg-violet-500/10',
     image_edit: 'text-violet-400 border-violet-500/40 bg-violet-500/10',
     coding: 'text-amber-400 border-amber-500/40 bg-amber-500/10',
-    chat: 'text-slate-500 border-slate-700/40 bg-slate-800/20',
+    chat: 'text-slate-500 border-slate-700 bg-transparent',
     planning: 'text-teal-400 border-teal-500/40 bg-teal-500/10',
   };
-  const cls = colors[intent] || colors.chat;
   return (
-    <div className={`mt-2 flex flex-wrap gap-2 text-[10px] font-mono`}>
-      <span className={`px-2 py-0.5 rounded border uppercase tracking-widest ${cls}`}>{intent.replace('_', ' ')}</span>
+    <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] font-mono">
+      <span className={`px-2 py-0.5 rounded border uppercase ${colors[intent] || colors.chat}`}>
+        {intent.replace('_', ' ')}
+      </span>
       {selected_checkpoint && (
-        <span className="px-2 py-0.5 rounded border border-cyan-900/40 text-cyan-700 bg-cyan-900/10 uppercase tracking-widest">
+        <span className="px-2 py-0.5 rounded border border-cyan-900/40 text-cyan-700 bg-cyan-900/10 uppercase">
           {selected_checkpoint}
         </span>
       )}
       {typeof confidence === 'number' && (
-        <span className="px-2 py-0.5 rounded border border-slate-700/40 text-slate-600 bg-slate-800/20">
-          conf {(confidence * 100).toFixed(0)}%
+        <span className="px-2 py-0.5 rounded border border-slate-700 text-slate-600">
+          {(confidence * 100).toFixed(0)}%
         </span>
       )}
     </div>
   );
 };
 
-// Image output card
 const ImageCard = ({ image_base64, prompt, route_result, generation_time_ms, retry_used }) => {
   const src = `data:image/png;base64,${image_base64}`;
-  const ck = route_result?.selected_checkpoint || '';
-  const wf = route_result?.selected_workflow || '';
-
-  const downloadImage = () => {
+  const download = () => {
     const a = document.createElement('a');
-    a.href = src;
-    a.download = `mini-assistant-${Date.now()}.png`;
-    a.click();
+    a.href = src; a.download = `mini-assistant-${Date.now()}.png`; a.click();
   };
-
   return (
-    <div className="mt-3 rounded-lg overflow-hidden border border-violet-500/30 bg-black/40">
-      <img src={src} alt={prompt} className="w-full max-w-md object-contain" />
-      <div className="px-4 py-2 flex items-center justify-between gap-2 text-[10px] font-mono text-slate-500">
+    <div className="mt-2 rounded-lg overflow-hidden border border-violet-500/30 bg-black/40 max-w-sm">
+      <img src={src} alt={prompt} className="w-full object-contain" />
+      <div className="px-3 py-1.5 flex items-center justify-between text-[10px] font-mono text-slate-500">
         <div className="flex flex-wrap gap-2">
-          {ck && <span className="text-violet-400/70">{ck}</span>}
-          {wf && <span>{wf}</span>}
+          {route_result?.selected_checkpoint && (
+            <span className="text-violet-400/70">{route_result.selected_checkpoint}</span>
+          )}
           {retry_used && <span className="text-amber-500/70">retried</span>}
           {generation_time_ms && <span>{(generation_time_ms / 1000).toFixed(1)}s</span>}
         </div>
-        <button
-          onClick={downloadImage}
-          className="px-2 py-1 rounded border border-violet-500/30 text-violet-400 hover:text-violet-300 hover:border-violet-400/50 transition-colors uppercase tracking-widest"
-        >
-          Save
+        <button onClick={download} className="px-2 py-0.5 rounded border border-violet-500/30 text-violet-400 hover:text-violet-300 transition-colors uppercase">
+          <Download className="w-3 h-3" />
         </button>
       </div>
     </div>
   );
 };
 
+// Collapsible sidebar section
+const Section = ({ title, icon: Icon, defaultOpen = true, count, children, action }) => {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="mb-1">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-[11px] font-mono uppercase tracking-widest text-slate-500 hover:text-slate-300 transition-colors"
+      >
+        {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+        <Icon className="w-3 h-3" />
+        <span className="flex-1 text-left">{title}</span>
+        {count != null && <span className="text-slate-600">{count}</span>}
+        {action && <span onClick={e => { e.stopPropagation(); action.fn(); }} className="text-slate-600 hover:text-cyan-400 transition-colors">{action.icon}</span>}
+      </button>
+      {open && <div className="pb-1">{children}</div>}
+    </div>
+  );
+};
+
+// ── Main component ──────────────────────────────────────────────────────────
+
 const ChatInterface = () => {
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [imageServerUp, setImageServerUp] = useState(null); // null=unknown, true, false
-  const messagesEndRef = useRef(null);
-  const sessionId = useRef(null);
+  // Persisted state
+  const [chats, setChats]       = useState(() => lsGet(LS_CHATS, []));
+  const [projects, setProjects] = useState(() => lsGet(LS_PROJECTS, []));
+  const [images, setImages]     = useState(() => lsGet(LS_IMAGES, [])); // [{id,thumb,prompt,ts}]
 
-  // Restore chat history
-  useEffect(() => {
-    const saved = localStorage.getItem('imageSystemChatMessages');
-    if (saved) {
-      try { setMessages(JSON.parse(saved)); } catch (_) {}
-    }
-  }, []);
+  // Session state
+  const [activeChatId, setActiveChatId] = useState(null);
+  const [messages, setMessages]         = useState([]);
+  const [input, setInput]               = useState('');
+  const [loading, setLoading]           = useState(false);
+  const [imageServerUp, setImageServerUp] = useState(null);
+  const [search, setSearch]             = useState('');
+  const [lightbox, setLightbox]         = useState(null); // full base64 for modal
+  const [editingProject, setEditingProject] = useState(null); // {id, name}
+  const [renamingChat, setRenamingChat] = useState(null); // {id, title}
 
-  useEffect(() => {
-    localStorage.setItem('imageSystemChatMessages', JSON.stringify(messages));
-  }, [messages]);
+  const sessionRef  = useRef(null);
+  const messagesEnd = useRef(null);
+  const inputRef    = useRef(null);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  // Persist whenever they change
+  useEffect(() => { lsSet(LS_CHATS, chats); }, [chats]);
+  useEffect(() => { lsSet(LS_PROJECTS, projects); }, [projects]);
+  useEffect(() => { lsSet(LS_IMAGES, images); }, [images]);
 
-  // Check if image server is reachable
+  // Auto-scroll
+  useEffect(() => { messagesEnd.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+  // Health check
   useEffect(() => {
     axios.get(`${IMAGE_API}/health`, { timeout: 3000 })
       .then(() => setImageServerUp(true))
       .catch(() => setImageServerUp(false));
   }, []);
 
+  // ── Chat management ────────────────────────────────────────────────────────
+
+  const startNewChat = useCallback(() => {
+    const id = uuid();
+    const newChat = { id, title: 'New Chat', messages: [], projectId: null, createdAt: Date.now(), updatedAt: Date.now() };
+    setChats(prev => [newChat, ...prev]);
+    setActiveChatId(id);
+    setMessages([]);
+    sessionRef.current = uuid();
+    inputRef.current?.focus();
+  }, []);
+
+  const loadChat = useCallback((chat) => {
+    setActiveChatId(chat.id);
+    setMessages(chat.messages || []);
+    sessionRef.current = uuid();
+    inputRef.current?.focus();
+  }, []);
+
+  const deleteChat = useCallback((id, e) => {
+    e?.stopPropagation();
+    setChats(prev => prev.filter(c => c.id !== id));
+    if (activeChatId === id) {
+      setActiveChatId(null);
+      setMessages([]);
+    }
+  }, [activeChatId]);
+
+  const renameChat = useCallback((id, newTitle) => {
+    setChats(prev => prev.map(c => c.id === id ? { ...c, title: newTitle } : c));
+    setRenamingChat(null);
+  }, []);
+
+  // Derive title from first user message
+  const autoTitle = (msgs) => {
+    const first = msgs.find(m => m.role === 'user');
+    if (!first) return 'New Chat';
+    const t = first.content?.trim() || '';
+    return t.length > 40 ? t.slice(0, 40) + '…' : t || 'New Chat';
+  };
+
+  const saveMessages = useCallback((chatId, msgs) => {
+    setChats(prev => prev.map(c =>
+      c.id === chatId ? { ...c, messages: msgs, title: c.title === 'New Chat' ? autoTitle(msgs) : c.title, updatedAt: Date.now() } : c
+    ));
+  }, []);
+
+  // ── Project management ─────────────────────────────────────────────────────
+
+  const newProject = () => {
+    const name = window.prompt('Project name:');
+    if (!name?.trim()) return;
+    setProjects(prev => [{ id: uuid(), name: name.trim(), createdAt: Date.now() }, ...prev]);
+  };
+
+  const deleteProject = (id, e) => {
+    e?.stopPropagation();
+    setProjects(prev => prev.filter(p => p.id !== id));
+    setChats(prev => prev.map(c => c.projectId === id ? { ...c, projectId: null } : c));
+  };
+
+  const assignChatToProject = (chatId, projectId) => {
+    setChats(prev => prev.map(c => c.id === chatId ? { ...c, projectId } : c));
+  };
+
+  // ── Send message ───────────────────────────────────────────────────────────
+
   const handleSend = async () => {
     if (!input.trim() || loading) return;
-    if (!sessionId.current) sessionId.current = crypto.randomUUID();
 
-    const userText = input.trim();
+    // Ensure a chat exists
+    let chatId = activeChatId;
+    if (!chatId) {
+      const id = uuid();
+      const newChat = { id, title: 'New Chat', messages: [], projectId: null, createdAt: Date.now(), updatedAt: Date.now() };
+      setChats(prev => [newChat, ...prev]);
+      setActiveChatId(id);
+      chatId = id;
+    }
+    if (!sessionRef.current) sessionRef.current = uuid();
+
+    const text = input.trim();
     setInput('');
-    setMessages(prev => [...prev, { role: 'user', content: userText }]);
+
+    const userMsg = { role: 'user', content: text };
+    const nextMsgs = [...messages, userMsg];
+    setMessages(nextMsgs);
+    saveMessages(chatId, nextMsgs);
     setLoading(true);
 
     try {
       const res = await axios.post(`${IMAGE_API}/chat`, {
-        message: userText,
-        session_id: sessionId.current,
+        message: text,
+        session_id: sessionRef.current,
       }, { timeout: 360_000 });
 
       const data = res.data;
+      let assistantMsg;
 
-      // Image generation response
       if (data.image_base64) {
-        setMessages(prev => [...prev, {
-          role: 'assistant',
-          type: 'image',
+        assistantMsg = {
+          role: 'assistant', type: 'image',
           image_base64: data.image_base64,
-          prompt: userText,
+          prompt: text,
           route_result: data.route_result,
           generation_time_ms: data.generation_time_ms,
           retry_used: data.retry_used,
           prompt_warnings: data.prompt_warnings,
-        }]);
-        return;
+        };
+        // Store thumbnail
+        makeThumbnail(data.image_base64).then(thumb => {
+          if (thumb) {
+            setImages(prev => [{
+              id: uuid(), thumb, prompt: text,
+              ts: Date.now(), full: data.image_base64,
+            }, ...prev].slice(0, 50));
+          }
+        });
+      } else {
+        assistantMsg = {
+          role: 'assistant', type: 'text',
+          content: data.reply || data.route_result?.text_reply || '(no response)',
+          route_result: data.route_result,
+          generation_time_ms: data.generation_time_ms,
+          prompt_warnings: data.prompt_warnings,
+        };
       }
 
-      // Text / coding response
-      const reply = data.reply || data.route_result?.text_reply || '(no response)';
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        type: 'text',
-        content: reply,
-        route_result: data.route_result,
-        generation_time_ms: data.generation_time_ms,
-        prompt_warnings: data.prompt_warnings,
-      }]);
-
+      const finalMsgs = [...nextMsgs, assistantMsg];
+      setMessages(finalMsgs);
+      saveMessages(chatId, finalMsgs);
     } catch (err) {
       const detail = err.response?.data?.detail || err.message;
       toast.error(`Error: ${detail}`);
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        type: 'text',
-        content: `Connection error: ${detail}. Make sure the image server is running at port 7860.`,
-        route_result: null,
-      }]);
+      const errMsg = { role: 'assistant', type: 'text', content: `Error: ${detail}` };
+      const finalMsgs = [...nextMsgs, errMsg];
+      setMessages(finalMsgs);
+      saveMessages(chatId, finalMsgs);
     } finally {
       setLoading(false);
     }
   };
 
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
-  const clearChat = () => {
-    setMessages([]);
-    sessionId.current = null;
-    localStorage.removeItem('imageSystemChatMessages');
-    toast.success('Chat cleared');
-  };
+  // ── Filtered chats ─────────────────────────────────────────────────────────
+
+  const filteredChats = chats.filter(c =>
+    !search || c.title.toLowerCase().includes(search.toLowerCase())
+  );
+  const unassignedChats  = filteredChats.filter(c => !c.projectId);
+  const chatsForProject  = (pid) => filteredChats.filter(c => c.projectId === pid);
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="h-full flex flex-col bg-[#0a0a0f]/50" data-testid="chat-interface">
+    <div className="h-full flex" data-testid="chat-interface">
 
-      {/* Header */}
-      <div className="p-6 border-b border-cyan-500/20 bg-black/40 backdrop-blur-sm flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-cyan-400 uppercase" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
-            AI CHAT
-          </h2>
-          <p className="text-xs text-slate-400 font-mono mt-1 flex items-center gap-2">
-            <Cpu className="w-3 h-3" />
-            LOCAL OLLAMA + COMFYUI
-          </p>
-        </div>
-        <div className="flex items-center gap-4">
-          {/* Server status dot */}
-          <div className="flex items-center gap-2 px-3 py-2 bg-black/40 border border-cyan-500/30 rounded-sm">
-            <div className={`w-2 h-2 rounded-full ${
-              imageServerUp === null ? 'bg-slate-500 animate-pulse' :
-              imageServerUp ? 'bg-cyan-400 animate-pulse' : 'bg-red-500'
-            }`} />
-            <span className="text-xs font-mono text-cyan-400 uppercase tracking-widest">
-              {imageServerUp === null ? 'CHECKING' : imageServerUp ? 'ONLINE' : 'OFFLINE'}
-            </span>
-          </div>
+      {/* ─── LEFT SIDEBAR ─────────────────────────────────────────────────── */}
+      <aside className="w-64 flex-shrink-0 flex flex-col bg-black/60 border-r border-cyan-500/15 overflow-hidden">
+
+        {/* New Chat */}
+        <div className="p-3 border-b border-cyan-500/10">
           <button
-            onClick={clearChat}
-            className="p-2 text-slate-400 hover:text-red-400 transition-colors"
-            title="Clear chat"
+            onClick={startNewChat}
+            className="w-full flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-500/15 to-violet-500/15 border border-cyan-500/30 rounded-sm text-sm font-semibold text-cyan-400 hover:from-cyan-500/25 hover:to-violet-500/25 hover:border-cyan-400/50 transition-all uppercase tracking-wider"
           >
-            <Trash2 className="w-5 h-5" />
+            <Plus className="w-4 h-4" />
+            New Chat
           </button>
         </div>
-      </div>
 
-      {/* Offline warning */}
-      {imageServerUp === false && (
-        <div className="mx-6 mt-4 p-3 bg-red-900/20 border border-red-500/40 rounded-sm text-xs font-mono text-red-400">
-          Image server offline. Start it with:{' '}
-          <code className="bg-black/40 px-1 py-0.5 rounded">
-            uvicorn backend.image_system.api.server:app --port 7860
-          </code>
+        {/* Search */}
+        <div className="px-3 py-2 border-b border-cyan-500/10">
+          <div className="flex items-center gap-2 px-3 py-2 bg-black/40 border border-cyan-900/30 rounded-sm">
+            <Search className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search chats..."
+              className="flex-1 bg-transparent text-xs font-mono text-slate-300 placeholder:text-slate-600 outline-none"
+            />
+            {search && (
+              <button onClick={() => setSearch('')}><X className="w-3 h-3 text-slate-500 hover:text-slate-300" /></button>
+            )}
+          </div>
         </div>
-      )}
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-4" data-testid="messages-container">
-        {messages.length === 0 && (
-          <div className="h-full flex items-center justify-center">
-            <div className="text-center space-y-4">
-              <div className="w-20 h-20 mx-auto rounded-full bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center">
-                <div className="text-4xl">🎨</div>
-              </div>
-              <p className="text-slate-400 font-mono text-sm">Local AI — chat, code, or generate images</p>
-              <div className="flex flex-wrap justify-center gap-2 mt-2">
-                {[
-                  'draw a shonen anime warrior',
-                  'realistic portrait photo',
-                  'fantasy dragon at sunset',
-                  'write a python function',
-                ].map(s => (
+        {/* Scrollable sections */}
+        <div className="flex-1 overflow-y-auto py-1 scrollbar-thin">
+
+          {/* Images section */}
+          <Section title="Images" icon={Image} defaultOpen={true} count={images.length}>
+            {images.length === 0 ? (
+              <p className="px-5 py-1 text-[11px] font-mono text-slate-600">No images yet</p>
+            ) : (
+              <div className="px-3 grid grid-cols-3 gap-1 pb-1">
+                {images.slice(0, 12).map(img => (
                   <button
-                    key={s}
-                    onClick={() => setInput(s)}
-                    className="px-3 py-1 text-xs font-mono border border-cyan-900/40 text-cyan-700 hover:text-cyan-400 hover:border-cyan-500/40 rounded-sm transition-colors"
+                    key={img.id}
+                    onClick={() => setLightbox(img.full || img.thumb)}
+                    className="aspect-square rounded overflow-hidden border border-violet-900/30 hover:border-violet-500/50 transition-colors"
+                    title={img.prompt}
                   >
-                    {s}
+                    <img src={img.thumb} alt={img.prompt} className="w-full h-full object-cover" />
                   </button>
                 ))}
               </div>
-            </div>
+            )}
+          </Section>
+
+          {/* Projects section */}
+          <Section
+            title="Projects"
+            icon={FolderOpen}
+            defaultOpen={true}
+            count={projects.length}
+            action={{ icon: <Plus className="w-3 h-3" />, fn: newProject }}
+          >
+            {projects.length === 0 ? (
+              <p className="px-5 py-1 text-[11px] font-mono text-slate-600">No projects yet</p>
+            ) : projects.map(proj => (
+              <div key={proj.id}>
+                {editingProject?.id === proj.id ? (
+                  <div className="flex items-center gap-1 px-3 py-1">
+                    <input
+                      autoFocus
+                      value={editingProject.name}
+                      onChange={e => setEditingProject(v => ({ ...v, name: e.target.value }))}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          setProjects(prev => prev.map(p => p.id === proj.id ? { ...p, name: editingProject.name } : p));
+                          setEditingProject(null);
+                        }
+                        if (e.key === 'Escape') setEditingProject(null);
+                      }}
+                      className="flex-1 bg-black/40 border border-cyan-500/30 rounded px-2 py-0.5 text-xs text-cyan-300 outline-none font-mono"
+                    />
+                    <button onClick={() => {
+                      setProjects(prev => prev.map(p => p.id === proj.id ? { ...p, name: editingProject.name } : p));
+                      setEditingProject(null);
+                    }}>
+                      <Check className="w-3 h-3 text-cyan-400" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="group flex items-center gap-2 px-4 py-1.5 hover:bg-white/5 rounded-sm mx-1 cursor-pointer">
+                    <FolderOpen className="w-3.5 h-3.5 text-amber-500/70 flex-shrink-0" />
+                    <span className="flex-1 text-xs font-mono text-slate-300 truncate">{proj.name}</span>
+                    <div className="hidden group-hover:flex items-center gap-1">
+                      <button onClick={() => setEditingProject({ id: proj.id, name: proj.name })}>
+                        <Edit2 className="w-3 h-3 text-slate-500 hover:text-slate-300" />
+                      </button>
+                      <button onClick={e => deleteProject(proj.id, e)}>
+                        <X className="w-3 h-3 text-slate-500 hover:text-red-400" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {/* Chats in this project */}
+                {chatsForProject(proj.id).map(chat => (
+                  <ChatRow
+                    key={chat.id} chat={chat} active={activeChatId === chat.id}
+                    onLoad={() => loadChat(chat)}
+                    onDelete={e => deleteChat(chat.id, e)}
+                    renaming={renamingChat?.id === chat.id ? renamingChat : null}
+                    onStartRename={() => setRenamingChat({ id: chat.id, title: chat.title })}
+                    onRename={(t) => renameChat(chat.id, t)}
+                    onCancelRename={() => setRenamingChat(null)}
+                    indented
+                  />
+                ))}
+              </div>
+            ))}
+          </Section>
+
+          {/* Your Chats section */}
+          <Section title="Your Chats" icon={MessageSquare} defaultOpen={true} count={unassignedChats.length}>
+            {unassignedChats.length === 0 ? (
+              <p className="px-5 py-1 text-[11px] font-mono text-slate-600">
+                {search ? 'No matches' : 'No chats yet — start one!'}
+              </p>
+            ) : unassignedChats.map(chat => (
+              <ChatRow
+                key={chat.id} chat={chat} active={activeChatId === chat.id}
+                onLoad={() => loadChat(chat)}
+                onDelete={e => deleteChat(chat.id, e)}
+                renaming={renamingChat?.id === chat.id ? renamingChat : null}
+                onStartRename={() => setRenamingChat({ id: chat.id, title: chat.title })}
+                onRename={(t) => renameChat(chat.id, t)}
+                onCancelRename={() => setRenamingChat(null)}
+              />
+            ))}
+          </Section>
+
+        </div>
+
+        {/* Bottom: server status */}
+        <div className="px-4 py-2 border-t border-cyan-500/10 flex items-center gap-2">
+          <Cpu className="w-3.5 h-3.5 text-slate-600" />
+          <div className={`w-1.5 h-1.5 rounded-full ${
+            imageServerUp === null ? 'bg-slate-600 animate-pulse' :
+            imageServerUp ? 'bg-cyan-400 animate-pulse' : 'bg-red-500'
+          }`} />
+          <span className="text-[10px] font-mono text-slate-600 uppercase tracking-wider">
+            {imageServerUp === null ? 'checking' : imageServerUp ? 'local ai online' : 'server offline'}
+          </span>
+        </div>
+      </aside>
+
+      {/* ─── CHAT WINDOW ──────────────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col min-w-0">
+
+        {/* Chat header */}
+        <div className="px-6 py-4 border-b border-cyan-500/15 bg-black/30 flex items-center justify-between flex-shrink-0">
+          <div>
+            <h2 className="text-lg font-bold text-cyan-400 uppercase tracking-wider" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+              {activeChatId ? (chats.find(c => c.id === activeChatId)?.title || 'Chat') : 'Mini Assistant'}
+            </h2>
+            <p className="text-[10px] font-mono text-slate-500 mt-0.5">Ollama · ComfyUI · Local AI</p>
+          </div>
+          {activeChatId && (
+            <button
+              onClick={e => deleteChat(activeChatId, e)}
+              className="p-2 text-slate-600 hover:text-red-400 transition-colors"
+              title="Delete this chat"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        {/* Offline warning */}
+        {imageServerUp === false && (
+          <div className="mx-6 mt-3 p-2.5 bg-red-900/20 border border-red-500/30 rounded-sm text-[11px] font-mono text-red-400">
+            Server offline —{' '}
+            <code className="bg-black/40 px-1 rounded">uvicorn backend.image_system.api.server:app --port 7860</code>
           </div>
         )}
 
-        {messages.map((msg, idx) => (
-          <div
-            key={idx}
-            data-testid={`message-${msg.role}`}
-            className={`flex items-start gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            {msg.role === 'assistant' && (
-              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-cyan-500 via-violet-500 to-violet-600 flex items-center justify-center overflow-hidden flex-shrink-0 mt-1">
-                <img src="/Logo.png" alt="Mini Assistant" className="w-full h-full object-contain"
-                     onError={(e) => { e.target.style.display = 'none'; }} />
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+          {messages.length === 0 && (
+            <div className="h-full flex items-center justify-center">
+              <div className="text-center space-y-4 max-w-md">
+                <div className="w-16 h-16 mx-auto rounded-full bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-3xl">🎨</div>
+                <p className="text-slate-400 font-mono text-sm">Chat, generate images, or write code</p>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {['draw a shonen anime warrior', 'realistic portrait photo', 'explain async/await', 'fantasy dragon at dusk'].map(s => (
+                    <button key={s} onClick={() => setInput(s)}
+                      className="px-3 py-1.5 text-xs font-mono border border-cyan-900/40 text-cyan-700 hover:text-cyan-400 hover:border-cyan-500/40 rounded-sm transition-colors">
+                      {s}
+                    </button>
+                  ))}
+                </div>
               </div>
-            )}
+            </div>
+          )}
 
-            <div className={`max-w-[80%] px-6 py-4 rounded-lg backdrop-blur-sm ${
-              msg.role === 'user'
-                ? 'bg-cyan-500/20 border border-cyan-500/50 text-cyan-100'
-                : 'bg-black/40 border border-cyan-900/30 text-slate-300'
-            }`}>
-              <div className="text-xs font-mono text-cyan-400/70 uppercase mb-2">
-                {msg.role === 'user' ? 'YOU' : 'MINI ASSISTANT'}
-              </div>
+          {messages.map((msg, idx) => (
+            <div key={idx} data-testid={`message-${msg.role}`}
+              className={`flex items-start gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
 
-              {/* Image response */}
-              {msg.type === 'image' && (
-                <>
-                  <p className="text-slate-400 text-sm mb-1">Here's your image:</p>
-                  <ImageCard
-                    image_base64={msg.image_base64}
-                    prompt={msg.prompt}
-                    route_result={msg.route_result}
-                    generation_time_ms={msg.generation_time_ms}
-                    retry_used={msg.retry_used}
-                  />
-                </>
-              )}
-
-              {/* Text response */}
-              {msg.type === 'text' && (
-                <div className="whitespace-pre-wrap font-sans">{renderMessage(msg.content)}</div>
-              )}
-
-              {/* Plain user message */}
-              {!msg.type && (
-                <div className="whitespace-pre-wrap font-sans">{renderMessage(msg.content)}</div>
-              )}
-
-              {/* Warnings */}
-              {msg.prompt_warnings?.length > 0 && (
-                <div className="mt-2 text-[10px] font-mono text-amber-500/60">
-                  {msg.prompt_warnings.join(' · ')}
+              {msg.role === 'assistant' && (
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 via-violet-500 to-violet-600 flex items-center justify-center overflow-hidden flex-shrink-0 mt-1">
+                  <img src="/Logo.png" alt="MA" className="w-full h-full object-contain"
+                    onError={e => { e.target.style.display = 'none'; }} />
                 </div>
               )}
 
-              {/* Intent badge (assistant messages only) */}
-              {msg.role === 'assistant' && <IntentBadge route_result={msg.route_result} />}
-            </div>
-          </div>
-        ))}
+              <div className={`max-w-[75%] px-5 py-3.5 rounded-lg ${
+                msg.role === 'user'
+                  ? 'bg-cyan-500/15 border border-cyan-500/40 text-cyan-100'
+                  : 'bg-black/40 border border-cyan-900/20 text-slate-300'
+              }`}>
+                <div className="text-[10px] font-mono text-cyan-400/60 uppercase mb-1.5">
+                  {msg.role === 'user' ? 'You' : 'Mini Assistant'}
+                </div>
 
-        {loading && (
-          <div className="flex items-center gap-3 justify-start" data-testid="loading-indicator">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-cyan-500 via-violet-500 to-violet-600 flex items-center justify-center overflow-hidden flex-shrink-0">
-              <img src="/Logo.png" alt="Mini Assistant" className="w-full h-full object-contain"
-                   onError={(e) => { e.target.style.display = 'none'; }} />
-            </div>
-            <div className="max-w-[80%] px-6 py-4 rounded-lg bg-black/40 border border-cyan-900/30 backdrop-blur-sm">
-              <div className="flex items-center gap-3">
-                <Loader2 className="w-5 h-5 animate-spin text-cyan-400" />
-                <span className="text-slate-400 font-mono text-sm">Thinking... (image gen can take 30–120s)</span>
+                {msg.type === 'image' ? (
+                  <>
+                    <p className="text-sm text-slate-400 mb-1">Generated:</p>
+                    <ImageCard
+                      image_base64={msg.image_base64} prompt={msg.prompt}
+                      route_result={msg.route_result} generation_time_ms={msg.generation_time_ms}
+                      retry_used={msg.retry_used}
+                    />
+                  </>
+                ) : (
+                  <div className="whitespace-pre-wrap text-sm leading-relaxed">{renderText(msg.content)}</div>
+                )}
+
+                {msg.prompt_warnings?.length > 0 && (
+                  <div className="mt-1.5 text-[10px] font-mono text-amber-500/50">
+                    {msg.prompt_warnings.join(' · ')}
+                  </div>
+                )}
+
+                {msg.role === 'assistant' && <IntentBadge route_result={msg.route_result} />}
               </div>
             </div>
-          </div>
-        )}
+          ))}
 
-        <div ref={messagesEndRef} />
-      </div>
+          {loading && (
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 via-violet-500 to-violet-600 flex items-center justify-center overflow-hidden flex-shrink-0">
+                <img src="/Logo.png" alt="MA" className="w-full h-full object-contain"
+                  onError={e => { e.target.style.display = 'none'; }} />
+              </div>
+              <div className="px-5 py-3.5 rounded-lg bg-black/40 border border-cyan-900/20">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+                  <span className="text-slate-400 font-mono text-xs">Thinking… image gen can take 30–120s</span>
+                </div>
+              </div>
+            </div>
+          )}
 
-      {/* Input */}
-      <div className="p-6 border-t border-cyan-500/20 bg-black/40 backdrop-blur-sm">
-        <div className="flex gap-4">
-          <textarea
-            data-testid="chat-input"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Chat, ask to generate an image, write code... (Shift+Enter for new line)"
-            className="flex-1 bg-black/50 border border-cyan-900/50 text-cyan-100 placeholder:text-cyan-900/50 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 rounded-sm font-mono p-4 resize-none outline-none"
-            rows={3}
-            disabled={loading}
-          />
-          <button
-            data-testid="send-message-btn"
-            onClick={handleSend}
-            disabled={loading || !input.trim()}
-            className="px-8 bg-gradient-to-r from-cyan-500 to-violet-600 text-white font-bold hover:from-cyan-400 hover:to-violet-500 hover:shadow-[0_0_20px_rgba(0,243,255,0.5),0_0_15px_rgba(147,51,234,0.3)] uppercase tracking-wider rounded-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Send className="w-5 h-5" />
-          </button>
+          <div ref={messagesEnd} />
         </div>
-        <p className="text-[10px] font-mono text-slate-700 mt-2">
-          Powered by local Ollama + ComfyUI · Models: qwen3:14b router · qwen2.5vl:7b vision · nomic-embed embeddings
-        </p>
+
+        {/* Input */}
+        <div className="px-6 py-4 border-t border-cyan-500/15 bg-black/30 flex-shrink-0">
+          <div className="flex gap-3">
+            <textarea
+              ref={inputRef}
+              data-testid="chat-input"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Message Mini Assistant… (Shift+Enter for new line)"
+              className="flex-1 bg-black/50 border border-cyan-900/40 text-cyan-100 placeholder:text-slate-700 focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 rounded-sm font-mono text-sm p-3.5 resize-none outline-none"
+              rows={3}
+              disabled={loading}
+            />
+            <button
+              data-testid="send-message-btn"
+              onClick={handleSend}
+              disabled={loading || !input.trim()}
+              className="px-6 bg-gradient-to-r from-cyan-500 to-violet-600 text-white font-bold hover:from-cyan-400 hover:to-violet-500 transition-all rounded-sm disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Send className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
       </div>
+
+      {/* ─── IMAGE LIGHTBOX ────────────────────────────────────────────────── */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center p-6"
+          onClick={() => setLightbox(null)}
+        >
+          <button onClick={() => setLightbox(null)} className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white">
+            <X className="w-6 h-6" />
+          </button>
+          <img
+            src={lightbox.startsWith('data:') ? lightbox : `data:image/png;base64,${lightbox}`}
+            alt="Generated"
+            className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 };
+
+// ── ChatRow sub-component ───────────────────────────────────────────────────
+
+const ChatRow = ({ chat, active, onLoad, onDelete, renaming, onStartRename, onRename, onCancelRename, indented }) => (
+  <div className={`group relative flex items-center gap-2 mx-1 px-${indented ? 6 : 4} py-1.5 rounded-sm cursor-pointer transition-colors ${
+    active ? 'bg-cyan-500/10 border border-cyan-500/20' : 'hover:bg-white/5 border border-transparent'
+  }`}>
+    {renaming ? (
+      <input
+        autoFocus
+        value={renaming.title}
+        onChange={e => onRename({ ...renaming, title: e.target.value }.title)}
+        onKeyDown={e => {
+          if (e.key === 'Enter') onRename(e.target.value);
+          if (e.key === 'Escape') onCancelRename();
+        }}
+        onBlur={e => onRename(e.target.value)}
+        className="flex-1 bg-black/40 border border-cyan-500/30 rounded px-2 py-0.5 text-xs text-cyan-300 outline-none font-mono"
+        onClick={e => e.stopPropagation()}
+      />
+    ) : (
+      <span onClick={onLoad} className="flex-1 text-xs font-mono text-slate-400 truncate hover:text-slate-200 transition-colors">
+        {chat.title}
+      </span>
+    )}
+    <div className="hidden group-hover:flex items-center gap-1 flex-shrink-0">
+      <button onClick={onStartRename} title="Rename">
+        <Edit2 className="w-3 h-3 text-slate-600 hover:text-slate-300" />
+      </button>
+      <button onClick={onDelete} title="Delete">
+        <X className="w-3 h-3 text-slate-600 hover:text-red-400" />
+      </button>
+    </div>
+  </div>
+);
 
 export default ChatInterface;
