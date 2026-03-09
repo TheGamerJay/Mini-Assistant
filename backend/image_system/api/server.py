@@ -146,7 +146,8 @@ def _get_comfyui():
     global _comfyui_client
     if _comfyui_client is None:
         from ..services.comfyui_client import ComfyUIClient
-        _comfyui_client = ComfyUIClient()
+        comfyui_url = os.environ.get("COMFYUI_URL", "http://localhost:8188")
+        _comfyui_client = ComfyUIClient(base_url=comfyui_url)
     return _comfyui_client
 
 
