@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Loader2, XCircle } from 'lucide-react';
+import { XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp, makeThumbnail } from '../context/AppContext';
 import { useChat } from '../hooks/useChat';
@@ -12,6 +12,7 @@ import HomeHero from '../components/HomeHero';
 import ChatMessage from '../components/ChatMessage';
 import ChatInput from '../components/ChatInput';
 import MiniOrb from '../components/MiniOrb';
+import CognitiveStream from '../components/CognitiveStream';
 
 function LoadingBubble() {
   return (
@@ -39,12 +40,18 @@ function ChatPage() {
   } = useApp();
 
   const { send, cancel, loading } = useChat();
-  const [messages, setMessages] = useState([]);
-  const sessionIdRef = useRef(crypto.randomUUID());
-  const bottomRef = useRef(null);
-  const currentChatIdRef = useRef(null);
-  const submittingRef = useRef(false);
-  const lastUserTextRef = useRef('');
+  const [messages, setMessages]   = useState([]);
+
+  // Cognitive stream state
+  const [streamActive, setStreamActive]     = useState(false);
+  const [streamPrompt, setStreamPrompt]     = useState('');
+  const [streamResponse, setStreamResponse] = useState(null);
+
+  const sessionIdRef      = useRef(crypto.randomUUID());
+  const bottomRef         = useRef(null);
+  const currentChatIdRef  = useRef(null);
+  const submittingRef     = useRef(false);
+  const lastUserTextRef   = useRef('');
 
   // Load messages when active chat changes
   useEffect(() => {
@@ -56,17 +63,14 @@ function ChatPage() {
       } else {
         setMessages([]);
       }
-      // New session per conversation
       sessionIdRef.current = crypto.randomUUID();
     }
   }, [activeChatId, chats]);
 
-  // Auto-scroll to bottom when messages change or loading changes
+  // Auto-scroll to bottom on new message or loading change
   useEffect(() => {
-    if (bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages, loading]);
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loading, streamActive]);
 
   const handleSubmit = useCallback(async (text) => {
     if (submittingRef.current || loading) return;
@@ -78,34 +82,31 @@ function ChatPage() {
     lastUserTextRef.current = text;
 
     let chatId = activeChatId;
-
-    // Create new chat if none is active
     if (!chatId) {
       chatId = newChat();
       currentChatIdRef.current = chatId;
       sessionIdRef.current = crypto.randomUUID();
-      // Ensure page is 'chat' (it should already be)
       setPage('chat');
     }
 
-    // Build user message
-    const userMsg = {
-      role: 'user',
-      type: 'text',
-      content: text,
-      timestamp: Date.now(),
-    };
-
+    const userMsg = { role: 'user', type: 'text', content: text, timestamp: Date.now() };
     const nextMessages = [...messages, userMsg];
     setMessages(nextMessages);
     updateChatMessages(chatId, nextMessages);
 
+    // Kick off the cognitive stream
+    setStreamPrompt(text);
+    setStreamResponse(null);
+    setStreamActive(true);
+
     try {
       const data = await send(text, sessionIdRef.current);
 
+      // Pass real response data to the stream so stages can show actual results
+      setStreamResponse(data);
+
       const isImage = !!data.image_base64;
       let thumb = null;
-
       if (isImage && data.image_base64) {
         thumb = await makeThumbnail(data.image_base64);
         await addImage(thumb, text, data.image_base64);
@@ -128,6 +129,7 @@ function ChatPage() {
       setMessages(withAssistant);
       updateChatMessages(chatId, withAssistant);
     } catch (err) {
+      setStreamActive(false);
       const errMsg = {
         role: 'assistant',
         type: 'error',
@@ -144,13 +146,26 @@ function ChatPage() {
 
   const handleCancel = useCallback(() => {
     cancel(sessionIdRef.current);
+    setStreamActive(false);
   }, [cancel]);
 
-  // Show hero when no active conversation
+  // Called by CognitiveStream after its auto-collapse animation finishes
+  const handleStreamDone = useCallback(() => {
+    setStreamActive(false);
+    setStreamResponse(null);
+    setStreamPrompt('');
+  }, []);
+
   const showHero = !activeChatId && messages.length === 0;
 
   if (showHero) {
-    return <HomeHero onSubmit={handleSubmit} loading={loading} lastTopic={lastUserTextRef.current || null} />;
+    return (
+      <HomeHero
+        onSubmit={handleSubmit}
+        loading={loading}
+        lastTopic={lastUserTextRef.current || null}
+      />
+    );
   }
 
   return (
@@ -164,7 +179,21 @@ function ChatPage() {
             onRetry={msg.type === 'error' ? () => handleSubmit(lastUserTextRef.current) : undefined}
           />
         ))}
-        {loading && <LoadingBubble />}
+
+        {/* Cognitive stream + dots bubble while loading */}
+        {loading && (
+          <div className="space-y-3">
+            <CognitiveStream
+              active={streamActive}
+              prompt={streamPrompt}
+              response={streamResponse}
+              onDone={handleStreamDone}
+            />
+            {/* Dots bubble only when stream has collapsed or hasn't mounted yet */}
+            {!streamActive && <LoadingBubble />}
+          </div>
+        )}
+
         <div ref={bottomRef} />
       </div>
 
