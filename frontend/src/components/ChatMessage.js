@@ -152,12 +152,13 @@ function MetaBar({ model_used, memory_stored }) {
 }
 
 function ChatMessage({ message, onRetry }) {
-  const { settings } = useApp();
+  const { settings, user } = useApp();
   const { role, type, content, image_base64, prompt, route_result, generation_time_ms, retry_used, prompt_warnings, model_used, memory_stored } = message;
 
   if (role === 'user') {
+    const initial = user?.name ? user.name[0].toUpperCase() : 'U';
     return (
-      <div className="flex justify-end msg-enter">
+      <div className="flex justify-end items-start gap-2 msg-enter">
         <div className="max-w-[75%] flex flex-col items-end gap-2">
           {type === 'image_input' && image_base64 && (
             <img
@@ -171,6 +172,10 @@ function ChatMessage({ message, onRetry }) {
               {renderText(content)}
             </div>
           )}
+        </div>
+        {/* User avatar */}
+        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-blue-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-1 select-none">
+          {initial}
         </div>
       </div>
     );

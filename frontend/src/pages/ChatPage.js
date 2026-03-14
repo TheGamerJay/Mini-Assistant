@@ -92,10 +92,7 @@ function ChatPage() {
 
   const handleSubmit = useCallback(async (text, imageBase64 = null, preferredModel = null) => {
     if (submittingRef.current || loading) return;
-    if (!text || text.trim().length < 3) {
-      toast.warning('Message too short (min 3 characters)');
-      return;
-    }
+    if (!text && !imageBase64) return;
     submittingRef.current = true;
     lastUserTextRef.current = text;
 

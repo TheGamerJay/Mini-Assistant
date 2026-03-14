@@ -4,17 +4,33 @@
  * All nav actions live in the profile menu.
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
-  Settings, Github, Code2, User, LogOut, Moon, Sun,
-  HelpCircle, ChevronDown, Terminal, GitBranch,
+  Settings, Github, User, LogOut, Moon, Sun,
+  HelpCircle, ChevronDown, Terminal, GitBranch, RefreshCw,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { api } from '../api/client';
+
+// ---------------------------------------------------------------------------
+// Status dot
+// ---------------------------------------------------------------------------
+function StatusDot({ label, ok }) {
+  const color = ok === null || ok === undefined
+    ? 'bg-slate-600'
+    : ok ? 'bg-emerald-400' : 'bg-red-400 animate-pulse';
+  return (
+    <div className="flex items-center gap-1">
+      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${color}`} />
+      <span className="text-[10px] font-mono text-slate-500">{label}</span>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Profile dropdown
 // ---------------------------------------------------------------------------
-function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme }) {
+function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme, user, logout }) {
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -30,11 +46,8 @@ function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme }) {
   const go = (page) => { setPage(page); onClose(); };
 
   const handleSignOut = () => {
-    if (window.confirm('Clear all local data and reset workspace?')) {
-      localStorage.clear();
-      sessionStorage.clear();
-      window.location.reload();
-    }
+    onClose();
+    logout();
   };
 
   const handleTheme = () => {
@@ -65,11 +78,12 @@ function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme }) {
       {/* User info + status */}
       <div className="px-4 py-3 border-b border-white/5">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
-            M
+          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center text-white text-sm font-bold flex-shrink-0 select-none">
+            {user?.name ? user.name[0].toUpperCase() : 'U'}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-slate-200 truncate">Mini Assistant</p>
+            <p className="text-sm font-medium text-slate-200 truncate">{user?.name || 'Mini Assistant'}</p>
+            <p className="text-[10px] text-slate-600 font-mono truncate">{user?.email || ''}</p>
             <div className="flex items-center gap-1.5 mt-0.5">
               <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${allOk ? 'bg-emerald-400' : 'bg-red-400 animate-pulse'}`} />
               <span className="text-[10px] font-mono text-slate-500">{allOk ? 'All systems online' : 'Backend offline'}</span>
@@ -142,8 +156,27 @@ function MenuItem({ icon: Icon, label, onClick, hint }) {
 // TopBar
 // ---------------------------------------------------------------------------
 function TopBar() {
-  const { setPage, serverStatus, theme, toggleTheme } = useApp();
+  const { setPage, serverStatus, setServerStatus, theme, toggleTheme, user, logout } = useApp();
   const [profileOpen, setProfileOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    setServerStatus({ backend: null, ollama: null, comfyui: null });
+    try {
+      const data = await api.mainHealth();
+      setServerStatus({
+        backend: true,
+        ollama: data.ollama === 'connected',
+        comfyui: data.comfyui === 'connected',
+      });
+    } catch {
+      setServerStatus({ backend: false, ollama: false, comfyui: false });
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshing, setServerStatus]);
 
   return (
     <header className="flex items-center h-14 px-5 border-b border-white/[0.06] bg-[#0b0d16] flex-shrink-0 z-20">
@@ -161,6 +194,21 @@ function TopBar() {
         <span className="text-[15px] font-semibold text-white tracking-tight">Mini Assistant</span>
       </div>
 
+      {/* Status indicators */}
+      <div className="flex items-center gap-3 ml-5 pl-5 border-l border-white/[0.06]">
+        <StatusDot label="Backend" ok={serverStatus.backend} />
+        <StatusDot label="Ollama" ok={serverStatus.ollama} />
+        <StatusDot label="ComfyUI" ok={serverStatus.comfyui} />
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing}
+          title="Refresh status"
+          className="ml-1 p-1 rounded text-slate-600 hover:text-slate-400 transition-colors disabled:opacity-40"
+        >
+          <RefreshCw size={11} className={refreshing ? 'animate-spin' : ''} />
+        </button>
+      </div>
+
       <div className="flex-1" />
 
       {/* Profile button */}
@@ -173,7 +221,7 @@ function TopBar() {
           <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-cyan-500
             flex items-center justify-center text-white text-xs font-bold
             group-hover:opacity-80 transition-opacity select-none">
-            M
+            {user?.name ? user.name[0].toUpperCase() : 'U'}
           </div>
           <ChevronDown
             size={12}
@@ -188,6 +236,8 @@ function TopBar() {
             serverStatus={serverStatus}
             theme={theme}
             toggleTheme={toggleTheme}
+            user={user}
+            logout={logout}
           />
         )}
       </div>

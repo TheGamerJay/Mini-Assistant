@@ -97,6 +97,101 @@ _prompt_builder = None
 _comfyui_client = None
 _ollama_client = None
 
+# ---------------------------------------------------------------------------
+# Mini Assistant identity system prompt
+# ---------------------------------------------------------------------------
+
+_MINI_SYSTEM_PROMPT = """\
+You are Mini Assistant — a smart, capable AI workspace assistant built for developers and creators.
+
+## What you CAN do:
+- Answer questions on any topic using your knowledge
+- Generate AI images from text descriptions (e.g. "draw a dragon", "paint an anime warrior") or via /image
+- Analyze and describe images that users attach
+- Write, review, debug, and execute code in any programming language
+- Help build complete web apps, UI components, and full projects through the workspace
+- Fetch real-time weather data for any location
+- Plan and manage multi-step development tasks
+- Search and research topics, summarize documents, brainstorm ideas
+
+## What is coming soon (not yet available):
+- Video generation
+
+## Important response rules:
+- Short greetings ("hi", "hello", "hey", "?") → respond warmly and briefly: "Hi! I'm Mini Assistant — what would you like to do today?"
+- Single punctuation or very short messages → respond helpfully, ask what the user needs
+- If [REAL-TIME DATA] appears in the context, use it directly and accurately — NEVER say you don't have internet access when live data is present
+- You CAN generate images — NEVER tell users you cannot generate images
+- Code execution IS built into this platform — you actively help write and run code
+- For legal, medical, or financial topics: always recommend consulting a qualified professional
+- Be helpful, direct, and conversational. Match the user's tone.
+"""
+
+# ---------------------------------------------------------------------------
+# Real-time weather fetching (wttr.in — no API key required)
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+_WEATHER_PATTERNS = [
+    _re.compile(r"what(?:'?s| is) the weather\s+(?:for|in|at)\s+(.+?)(?:\s+today|\s+tonight|\s+tomorrow|\?|$)", _re.I),
+    _re.compile(r"how(?:'?s| is) the weather\s+(?:in|at|for)?\s*(.+?)(?:\s+today|\s+tonight|\?|$)", _re.I),
+    _re.compile(r"weather\s+(?:for|in|at)\s+(.+?)(?:\s+today|\s+tonight|\s+tomorrow|\?|$)", _re.I),
+    _re.compile(r"(?:forecast|temperature)\s+(?:for|in|at)\s+(.+?)(?:\s+today|\s+tonight|\?|$)", _re.I),
+    _re.compile(r"whats the weather\s+(?:for|in|at)\s+(.+?)(?:\s+today|\s+tonight|\?|$)", _re.I),
+]
+
+
+def _detect_weather_location(message: str) -> Optional[str]:
+    """Return location string from a weather query, or None."""
+    msg = message.strip()
+    for pat in _WEATHER_PATTERNS:
+        m = pat.search(msg)
+        if m:
+            loc = m.group(1).strip().rstrip("?.!,")
+            if 1 < len(loc) < 60:
+                return loc
+    return None
+
+
+async def _fetch_weather(location: str) -> Optional[str]:
+    """Fetch current weather from wttr.in (free, no auth). Returns formatted string or None."""
+    try:
+        import httpx
+        url = f"https://wttr.in/{location.replace(' ', '+')}?format=j1"
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as _c:
+            r = await _c.get(url, headers={"User-Agent": "MiniAssistant/1.0"})
+        if r.status_code != 200:
+            return None
+        d = r.json()
+        cur = d.get("current_condition", [{}])[0]
+        area_info = d.get("nearest_area", [{}])[0]
+        area    = area_info.get("areaName",  [{}])[0].get("value", location)
+        region  = area_info.get("region",    [{}])[0].get("value", "")
+        country = area_info.get("country",   [{}])[0].get("value", "")
+        loc_str = ", ".join(filter(None, [area, region, country]))
+        desc    = cur.get("weatherDesc", [{}])[0].get("value", "")
+        temp_f  = cur.get("temp_F",         "?")
+        temp_c  = cur.get("temp_C",         "?")
+        feels_f = cur.get("FeelsLikeF",     "?")
+        humidity= cur.get("humidity",       "?")
+        wind_mph= cur.get("windspeedMiles", "?")
+        wind_dir= cur.get("winddir16Point", "?")
+        uv      = cur.get("uvIndex",        "?")
+        vis_km  = cur.get("visibility",     "?")
+        return (
+            f"[REAL-TIME DATA from wttr.in]\n"
+            f"Location: {loc_str}\n"
+            f"Condition: {desc}\n"
+            f"Temperature: {temp_f}°F ({temp_c}°C)  |  Feels Like: {feels_f}°F\n"
+            f"Humidity: {humidity}%  |  Wind: {wind_mph} mph {wind_dir}\n"
+            f"UV Index: {uv}  |  Visibility: {vis_km} km\n"
+            f"[END REAL-TIME DATA]\n"
+        )
+    except Exception as _we:
+        logger.warning("Weather fetch failed for '%s': %s", location, _we)
+        return None
+
 
 def _get_router():
     global _router_brain
@@ -1037,14 +1132,27 @@ async def chat(req: ChatRequest):
                 except Exception:
                     pass
 
-            history_msgs: list[dict] = []
+            # System message always first
+            history_msgs: list[dict] = [{"role": "system", "content": _MINI_SYSTEM_PROMPT}]
             if req.history:
                 for h in req.history[-10:]:
                     history_msgs.append({"role": h.role, "content": h.content})
 
+            # Real-time weather injection
+            rt_context = ""
+            weather_loc = _detect_weather_location(effective_msg)
+            if weather_loc:
+                weather_data = await _fetch_weather(weather_loc)
+                if weather_data:
+                    rt_context = (
+                        f"{weather_data}\n"
+                        "Use ONLY the live data above to answer the weather question accurately. "
+                        "Do not say you lack internet access.\n\n"
+                    )
+
             # Prepend Phase 9 self-improvement context (lessons + long-term memory)
             phase9_prefix = phase9_ctx.prefix if phase9_ctx else ""
-            combined_prefix = phase9_prefix + (system_prefix or "")
+            combined_prefix = rt_context + phase9_prefix + (system_prefix or "")
             user_content = (combined_prefix + effective_msg) if combined_prefix else effective_msg
             history_msgs.append({"role": "user", "content": user_content})
 

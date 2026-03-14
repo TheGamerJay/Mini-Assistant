@@ -217,6 +217,50 @@ export function AppProvider({ children }) {
     document.documentElement.setAttribute('data-theme', theme);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ---- Auth ----
+  const [user, _setUser] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ma_session') || 'null'); } catch { return null; }
+  });
+
+  const _persistSession = useCallback((u) => {
+    try { localStorage.setItem('ma_session', JSON.stringify(u)); } catch {}
+    _setUser(u);
+  }, []);
+
+  const logout = useCallback(() => {
+    localStorage.removeItem('ma_session');
+    _setUser(null);
+  }, []);
+
+  const loginWithCredentials = useCallback(async (email, password) => {
+    const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
+    const found = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    if (!found) throw new Error('No account found with this email.');
+    const encoder = new TextEncoder();
+    const buf = await crypto.subtle.digest('SHA-256', encoder.encode(password + 'ma_salt_2025'));
+    const hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    if (found.passwordHash !== hash) throw new Error('Incorrect password.');
+    const session = { id: found.id, name: found.name, email: found.email };
+    _persistSession(session);
+    return session;
+  }, [_persistSession]);
+
+  const register = useCallback(async (name, email, password) => {
+    const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
+    if (users.find(u => u.email.toLowerCase() === email.toLowerCase())) {
+      throw new Error('An account with this email already exists.');
+    }
+    const encoder = new TextEncoder();
+    const buf = await crypto.subtle.digest('SHA-256', encoder.encode(password + 'ma_salt_2025'));
+    const passwordHash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    const newUser = { id: crypto.randomUUID(), name, email, passwordHash, createdAt: Date.now() };
+    users.push(newUser);
+    localStorage.setItem('ma_users', JSON.stringify(users));
+    const session = { id: newUser.id, name, email };
+    _persistSession(session);
+    return session;
+  }, [_persistSession]);
+
   // ---- Settings ----
   const defaultSettings = {
     showRouteInfo: true,
@@ -284,6 +328,11 @@ export function AppProvider({ children }) {
     // server status
     serverStatus,
     setServerStatus,
+    // auth
+    user,
+    logout,
+    loginWithCredentials,
+    register,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

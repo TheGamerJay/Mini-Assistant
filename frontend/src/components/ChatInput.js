@@ -10,7 +10,7 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Paperclip, Mic, MicOff, Send, Loader2, X, Image, ChevronDown, Cpu } from 'lucide-react';
+import { Paperclip, Mic, MicOff, Send, Loader2, X, Image } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../api/client';
 
@@ -71,11 +71,6 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
   const [transcribing, setTranscribing] = useState(false);
   const mediaRecorderRef = useRef(null);
 
-  // Model selector state (Phase 6)
-  const [availableModels, setAvailableModels] = useState([]);
-  const [selectedModel, setSelectedModel]     = useState('');
-  const [modelPickerOpen, setModelPickerOpen] = useState(false);
-
   const textareaRef = useRef(null);
 
   const defaultPlaceholder =
@@ -103,18 +98,6 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
     setSlashHints(SLASH_COMMANDS.filter(c => c.cmd.startsWith(typed)));
   }, [value]);
 
-  // Fetch available Ollama models once on mount (Phase 6 model selector)
-  useEffect(() => {
-    api.modelsStatus().then(data => {
-      const models = data?.available_models || [];
-      if (models.length > 0) {
-        setAvailableModels(models);
-        // Default to first available model
-        if (!selectedModel) setSelectedModel(models[0]);
-      }
-    }).catch(() => { /* Ollama offline — selector stays hidden */ });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   const applySlashHint = useCallback((cmd) => {
     setValue(cmd + ' ');
     setSlashHints([]);
@@ -125,14 +108,13 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
 
   const handleSubmit = useCallback(() => {
     const text = value.trim();
-    if ((text.length < 2 && !attachedImage) || loading) return;
+    if ((!text && !attachedImage) || loading) return;
     setSlashHints([]);
-    setModelPickerOpen(false);
-    onSubmit(text || '/analyze', attachedImage?.base64 || null, selectedModel || null);
+    onSubmit(text || '/analyze', attachedImage?.base64 || null, null);
     setValue('');
     setAttachedImage(null);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-  }, [value, loading, attachedImage, selectedModel, onSubmit]);
+  }, [value, loading, attachedImage, onSubmit]);
 
   const handleKeyDown = useCallback((e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
@@ -244,7 +226,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
   // ── Render ──────────────────────────────────────────────────────────────────
 
   const isHome  = variant === 'home';
-  const isEmpty = value.trim().length < 2 && !attachedImage;
+  const isEmpty = !value.trim() && !attachedImage;
   const isSlash = value.trimStart().startsWith('/');
 
   const containerClass = isHome
@@ -379,47 +361,6 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
         </div>
       </div>
 
-      {/* Model selector pill — only shown when Ollama models are available */}
-      {availableModels.length > 0 && (
-        <div className="relative mt-1.5 flex justify-start">
-          <button
-            type="button"
-            onClick={() => setModelPickerOpen(prev => !prev)}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-xs text-slate-500 hover:text-slate-300 hover:border-white/20 transition-colors"
-          >
-            <Cpu size={11} />
-            <span className="font-mono truncate max-w-[140px]">{selectedModel || 'Select model'}</span>
-            <ChevronDown size={10} className={`transition-transform ${modelPickerOpen ? 'rotate-180' : ''}`} />
-          </button>
-
-          {modelPickerOpen && (
-            <div className="absolute bottom-full mb-1 left-0 z-50 w-56 rounded-xl bg-[#13131f] border border-white/10 shadow-xl overflow-hidden">
-              <div className="px-3 py-2 border-b border-white/5">
-                <span className="text-xs text-slate-600 font-mono">Available models</span>
-              </div>
-              <div className="max-h-48 overflow-y-auto">
-                {availableModels.map(model => (
-                  <button
-                    key={model}
-                    type="button"
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      setSelectedModel(model);
-                      setModelPickerOpen(false);
-                    }}
-                    className={`w-full text-left px-3 py-2 text-xs font-mono truncate transition-colors
-                      ${model === selectedModel
-                        ? 'text-cyan-400 bg-cyan-500/10'
-                        : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}
-                  >
-                    {model}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }

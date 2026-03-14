@@ -24,6 +24,7 @@ import TopBar from './components/TopBar';
 import ChatPage from './pages/ChatPage';
 import ImagePage from './pages/ImagePage';
 import SettingsModal from './pages/SettingsModal';
+import AuthPage from './pages/AuthPage';
 
 // Existing tool components (kept for backward compat via 'tool-X' pages)
 import Dashboard from './pages/Dashboard';
@@ -171,25 +172,48 @@ function AppShell() {
 }
 
 // ---------------------------------------------------------------------------
+// Auth gate — shown inside AppProvider so hooks work
+// ---------------------------------------------------------------------------
+function AuthGate() {
+  const { user } = useApp();
+  const toasterProps = {
+    position: 'top-right',
+    theme: 'dark',
+    toastOptions: {
+      style: {
+        background: 'rgba(17, 17, 24, 0.95)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        color: '#e2e8f0',
+        fontFamily: 'Inter, system-ui, sans-serif',
+        fontSize: '13px',
+      },
+    },
+  };
+
+  if (!user) {
+    return (
+      <>
+        <AuthPage />
+        <Toaster {...toasterProps} />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <AppShell />
+      <Toaster {...toasterProps} />
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // App root
 // ---------------------------------------------------------------------------
 function App() {
   return (
     <AppProvider>
-      <AppShell />
-      <Toaster
-        position="top-right"
-        theme="dark"
-        toastOptions={{
-          style: {
-            background: 'rgba(17, 17, 24, 0.95)',
-            border: '1px solid rgba(255,255,255,0.08)',
-            color: '#e2e8f0',
-            fontFamily: 'Inter, system-ui, sans-serif',
-            fontSize: '13px',
-          },
-        }}
-      />
+      <AuthGate />
     </AppProvider>
   );
 }
