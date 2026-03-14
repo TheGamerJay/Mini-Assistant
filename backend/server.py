@@ -4314,6 +4314,118 @@ async def active_mission_for_session(session_id: str):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Phase 9 — Self-Improvement Layer  (/api/learning/*, /api/longmem/*)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class _LessonRequest(BaseModel):
+    text:       str
+    intent:     str   = "chat"
+    source:     str   = "explicit"
+    confidence: float = 0.80
+
+class _LongMemStoreRequest(BaseModel):
+    key:        str
+    value:      str
+    category:   str   = "explicit"
+    confidence: float = 0.85
+    source_session: str = "global"
+
+@app.get("/api/learning/patterns", tags=["learning"])
+async def get_learning_patterns():
+    """Return cross-session learning patterns + top lessons."""
+    try:
+        from mini_assistant.phase9.learning_brain import get_learning_brain
+        return get_learning_brain().get_patterns()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/learning/lesson", tags=["learning"])
+async def add_lesson(req: _LessonRequest):
+    """Manually add a lesson to the LearningBrain."""
+    try:
+        from mini_assistant.phase9.learning_brain import get_learning_brain
+        lesson = get_learning_brain().record_reflection(
+            lesson=req.text, intent=req.intent,
+            quality_score=req.confidence, source=req.source,
+        )
+        return {"stored": True, "lesson": lesson.to_dict() if lesson else None}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.delete("/api/learning/lesson/{lesson_id}", tags=["learning"])
+async def delete_lesson(lesson_id: str):
+    """Delete a specific lesson."""
+    try:
+        from mini_assistant.phase9.learning_brain import get_learning_brain
+        ok = get_learning_brain().delete_lesson(lesson_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Lesson not found")
+        return {"deleted": True, "lesson_id": lesson_id}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.get("/api/longmem", tags=["longmem"])
+async def get_long_memory(category: Optional[str] = None):
+    """Return long-term cross-session memory facts."""
+    try:
+        from mini_assistant.phase9.cross_session_memory import get_cross_memory
+        cm = get_cross_memory()
+        facts = cm.get_all(category=category)
+        return {"facts": [f.to_dict() for f in facts], "total": len(facts), "stats": cm.stats()}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/longmem", tags=["longmem"])
+async def store_long_memory(req: _LongMemStoreRequest):
+    """Store or reinforce a long-term memory fact."""
+    try:
+        from mini_assistant.phase9.cross_session_memory import get_cross_memory
+        fact = get_cross_memory().store(
+            key=req.key, value=req.value, category=req.category,
+            confidence=req.confidence, source_session=req.source_session,
+        )
+        return {"stored": True, "fact": fact.to_dict()}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.get("/api/longmem/search", tags=["longmem"])
+async def search_long_memory(q: str, top_k: int = 10):
+    """Keyword search across long-term memory facts."""
+    try:
+        from mini_assistant.phase9.cross_session_memory import get_cross_memory
+        facts = get_cross_memory().search(q, top_k=top_k)
+        return {"facts": [f.to_dict() for f in facts], "total": len(facts)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.delete("/api/longmem/{fact_id}", tags=["longmem"])
+async def delete_long_memory(fact_id: str):
+    """Delete a specific long-term memory fact."""
+    try:
+        from mini_assistant.phase9.cross_session_memory import get_cross_memory
+        ok = get_cross_memory().delete(fact_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Fact not found")
+        return {"deleted": True, "fact_id": fact_id}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.delete("/api/longmem", tags=["longmem"])
+async def clear_long_memory():
+    """Clear all long-term memory facts."""
+    try:
+        from mini_assistant.phase9.cross_session_memory import get_cross_memory
+        count = get_cross_memory().clear()
+        return {"cleared": True, "facts_removed": count}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Phase 8 — Tool & Security Layer  (/api/tools/*)
 # ══════════════════════════════════════════════════════════════════════════════
 

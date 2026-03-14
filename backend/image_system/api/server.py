@@ -909,6 +909,22 @@ async def chat(req: ChatRequest):
             route_result     = {"intent": "chat"}
             execution_intent = execution_intent or "chat"
 
+    # ── Phase 9 Step 1: Self-Improvement Context Injection ──────────────────────
+    phase9_ctx = None
+    try:
+        from mini_assistant.phase9.context_injector import get_injector
+        phase9_ctx = get_injector().build(
+            intent     = execution_intent or "chat",
+            session_id = session_id,
+        )
+        if phase9_ctx.sources:
+            logger.info(
+                "Phase9Injector: lessons=%d memory=%d (%.1f ms)",
+                phase9_ctx.lessons_used, phase9_ctx.memory_facts_used, phase9_ctx.assembly_ms,
+            )
+    except Exception as _p9_err:
+        logger.debug("Phase9 context injection failed (non-fatal): %s", _p9_err)
+
     # ── Phase 6 Step 1: Engineering Assistant context assembly ──────────────────
     try:
         from mini_assistant.phase6.engineering_assistant import get_engineering_assistant
@@ -1036,7 +1052,10 @@ async def chat(req: ChatRequest):
                 for h in req.history[-10:]:
                     history_msgs.append({"role": h.role, "content": h.content})
 
-            user_content = (system_prefix + effective_msg) if system_prefix else effective_msg
+            # Prepend Phase 9 self-improvement context (lessons + long-term memory)
+            phase9_prefix = phase9_ctx.prefix if phase9_ctx else ""
+            combined_prefix = phase9_prefix + (system_prefix or "")
+            user_content = (combined_prefix + effective_msg) if combined_prefix else effective_msg
             history_msgs.append({"role": "user", "content": user_content})
 
             reply = await ollama_client.run_chat(
@@ -1073,6 +1092,20 @@ async def chat(req: ChatRequest):
             except Exception as _ref_err:
                 logger.warning("Reflection failed (non-fatal): %s", _ref_err)
                 reflection_record = None
+
+            # ── Phase 9 Step 2: Feed reflection lesson into LearningBrain ─────
+            try:
+                from mini_assistant.phase9.learning_brain import get_learning_brain
+                if reflection_record and reflection_record.lesson:
+                    get_learning_brain().record_reflection(
+                        lesson       = reflection_record.lesson,
+                        intent       = phase1_plan.intent if phase1_plan else "chat",
+                        quality_score= getattr(reflection_record, "quality_score", 0.7),
+                        success      = True,
+                        source       = "reflection",
+                    )
+            except Exception as _lb_err:
+                logger.debug("LearningBrain feed failed (non-fatal): %s", _lb_err)
 
             # ── Phase 6 Step 2: Session Memory extraction (after reply known) ───
             try:
@@ -1141,6 +1174,8 @@ async def chat(req: ChatRequest):
                     {"key": f.key, "value": f.value, "confidence": f.confidence}
                     for f in memory_facts_stored
                 ]
+            if phase9_ctx and phase9_ctx.sources:
+                response["self_improvement"] = phase9_ctx.to_dict()
             response["model_used"] = _active_model
             return response
         except Exception as _c_err:
