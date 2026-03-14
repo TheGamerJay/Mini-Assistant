@@ -123,6 +123,8 @@ You are Mini Assistant — a smart, capable AI workspace assistant built for dev
 - Short greetings ("hi", "hello", "hey", "?") → respond warmly and briefly: "Hi! I'm Mini Assistant — what would you like to do today?"
 - Single punctuation or very short messages → respond helpfully, ask what the user needs
 - If [REAL-TIME DATA] appears in the context, use it directly and accurately — NEVER say you don't have internet access when live data is present
+- If [NO REAL-TIME DATA] appears in the context, honestly tell the user you couldn't fetch that information right now — do NOT make up or estimate weather, time, prices, scores, or any live data
+- NEVER fabricate real-time information (weather, current time, stock prices, sports scores, news, etc.) — if you don't have a live data block for it, say you don't know or couldn't fetch it
 - You CAN generate images — NEVER tell users you cannot generate images
 - Code execution IS built into this platform — you actively help write and run code
 - For legal, medical, or financial topics: always recommend consulting a qualified professional
@@ -1396,6 +1398,11 @@ async def chat(req: ChatRequest):
                         "Use ONLY the live data above to answer the weather question accurately. "
                         "Do not say you lack internet access.\n\n"
                     )
+                else:
+                    rt_context = (
+                        f"[NO REAL-TIME DATA] Weather fetch failed for '{weather_loc}'. "
+                        "Tell the user you couldn't retrieve the weather right now — do NOT guess or make up any values.\n\n"
+                    )
 
             # Prepend Phase 9 self-improvement context (lessons + long-term memory)
             phase9_prefix = phase9_ctx.prefix if phase9_ctx else ""
@@ -1591,6 +1598,11 @@ async def chat_stream(req: ChatRequest):
                     f"{weather_data}\n"
                     "Use ONLY the live data above to answer the weather question accurately. "
                     "Do not say you lack internet access.\n\n"
+                )
+            else:
+                rt_context = (
+                    f"[NO REAL-TIME DATA] Weather fetch failed for '{weather_loc}'. "
+                    "Tell the user you couldn't retrieve the weather right now — do NOT guess or make up any values.\n\n"
                 )
 
         # ── Build message list ────────────────────────────────────────────────
