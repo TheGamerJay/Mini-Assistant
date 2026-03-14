@@ -302,12 +302,12 @@ export function AppProvider({ children }) {
     const buf = await crypto.subtle.digest('SHA-256', encoder.encode(password + 'ma_salt_2025'));
     const hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
     if (found.passwordHash !== hash) throw new Error('Incorrect password.');
-    const session = { id: found.id, name: found.name, email: found.email };
+    const session = { id: found.id, name: found.name, email: found.email, role: found.role || 'user' };
     _persistSession(session);
     return session;
   }, [_persistSession]);
 
-  const register = useCallback(async (name, email, password) => {
+  const register = useCallback(async (name, email, password, securityQuestion, securityAnswer) => {
     const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
     if (users.find(u => u.email.toLowerCase() === email.toLowerCase())) {
       throw new Error('An account with this email already exists.');
@@ -315,13 +315,45 @@ export function AppProvider({ children }) {
     const encoder = new TextEncoder();
     const buf = await crypto.subtle.digest('SHA-256', encoder.encode(password + 'ma_salt_2025'));
     const passwordHash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-    const newUser = { id: crypto.randomUUID(), name, email, passwordHash, createdAt: Date.now() };
+    let securityAnswerHash = null;
+    if (securityQuestion && securityAnswer) {
+      const aBuf = await crypto.subtle.digest('SHA-256', encoder.encode(securityAnswer.trim().toLowerCase() + 'ma_salt_2025'));
+      securityAnswerHash = Array.from(new Uint8Array(aBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+    const isFirst = users.length === 0;
+    const newUser = {
+      id: crypto.randomUUID(), name, email, passwordHash,
+      securityQuestion: securityQuestion || null,
+      securityAnswerHash,
+      role: isFirst ? 'admin' : 'user',
+      createdAt: Date.now(),
+    };
     users.push(newUser);
     localStorage.setItem('ma_users', JSON.stringify(users));
-    const session = { id: newUser.id, name, email };
+    const session = { id: newUser.id, name, email, role: newUser.role };
     _persistSession(session);
     return session;
   }, [_persistSession]);
+
+  const getUserSecurityQuestion = useCallback((email) => {
+    const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
+    const found = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    return found?.securityQuestion || null;
+  }, []);
+
+  const resetPasswordWithSecurityAnswer = useCallback(async (email, answer, newPassword) => {
+    const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
+    const found = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    if (!found) throw new Error('No account found with this email.');
+    if (!found.securityAnswerHash) throw new Error('No security question set for this account. Please contact support.');
+    const encoder = new TextEncoder();
+    const buf = await crypto.subtle.digest('SHA-256', encoder.encode(answer.trim().toLowerCase() + 'ma_salt_2025'));
+    const hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    if (found.securityAnswerHash !== hash) throw new Error('Incorrect answer. Please try again.');
+    const newBuf = await crypto.subtle.digest('SHA-256', encoder.encode(newPassword + 'ma_salt_2025'));
+    found.passwordHash = Array.from(new Uint8Array(newBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    localStorage.setItem('ma_users', JSON.stringify(users));
+  }, []);
 
   // ---- Avatar ----
   const [avatar, _setAvatar] = useState(() => {
@@ -424,6 +456,26 @@ export function AppProvider({ children }) {
     setPromptTemplates((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
+  // ---- Conversation forking ----
+  const forkChat = useCallback((chatId, upToMsgIdx) => {
+    const source = chats.find(c => c.id === chatId);
+    if (!source) return;
+    const id = crypto.randomUUID();
+    const forkedMessages = source.messages.slice(0, upToMsgIdx + 1);
+    const chat = {
+      id,
+      title: `Fork: ${source.title.slice(0, 45)}`,
+      messages: forkedMessages,
+      projectId: source.projectId || null,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    setChats((prev) => [chat, ...prev]);
+    setActiveChatId(id);
+    setPage('chat');
+    return id;
+  }, [chats, setPage]);
+
   // Pending template — Sidebar fires it, ChatInput consumes it
   const [pendingTemplate, _setPendingTemplate] = useState(null);
   const firePendingTemplate = useCallback((text) => _setPendingTemplate(text), []);
@@ -473,6 +525,8 @@ export function AppProvider({ children }) {
     logout,
     loginWithCredentials,
     register,
+    getUserSecurityQuestion,
+    resetPasswordWithSecurityAnswer,
     // profile
     avatar,
     updateAvatar,
@@ -488,6 +542,8 @@ export function AppProvider({ children }) {
     promptTemplates,
     addPromptTemplate,
     deletePromptTemplate,
+    // conversation forking
+    forkChat,
     // pending template bridge
     pendingTemplate,
     firePendingTemplate,

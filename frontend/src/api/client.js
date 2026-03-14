@@ -124,8 +124,19 @@ export const api = {
     return request(`${MAIN_API}/voice/stt`, {
       method: 'POST',
       body: formData,
-      headers: {},  // let browser set multipart boundary
+      headers: {},
     }, 30000);
+  },
+
+  /** Extract text from a PDF or plain-text file */
+  extractTextFromFile(file) {
+    const formData = new FormData();
+    formData.append('file', file, file.name);
+    return request(`${MAIN_API}/extract-text`, {
+      method: 'POST',
+      body: formData,
+      headers: {},
+    }, 60000);
   },
 
   /**

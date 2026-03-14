@@ -113,14 +113,18 @@ function TermsModal({ onClose }) {
 // Login tab
 // ---------------------------------------------------------------------------
 function LoginForm({ onSwitchToSignup }) {
-  const { loginWithCredentials } = useApp();
+  const { loginWithCredentials, getUserSecurityQuestion, resetPasswordWithSecurityAnswer } = useApp();
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [error, setError]       = useState('');
   const [loading, setLoading]   = useState(false);
-  const [showForgot, setShowForgot] = useState(false);
+  // forgot flow: null → 'email' → 'answer' → 'done'
+  const [forgotStep, setForgotStep] = useState(null);
   const [forgotEmail, setForgotEmail] = useState('');
-  const [forgotSent, setForgotSent]   = useState(false);
+  const [securityQuestion, setSecurityQuestion] = useState('');
+  const [forgotAnswer, setForgotAnswer] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNew, setConfirmNew] = useState('');
 
   const handleLogin = useCallback(async (e) => {
     e.preventDefault();
@@ -136,44 +140,85 @@ function LoginForm({ onSwitchToSignup }) {
     }
   }, [email, password, loginWithCredentials]);
 
-  const handleForgot = useCallback((e) => {
+  const handleForgotEmail = useCallback((e) => {
     e.preventDefault();
+    setError('');
     if (!forgotEmail) { setError('Enter your email address.'); return; }
-    // No real email backend — just show confirmation UI
-    setForgotSent(true);
-  }, [forgotEmail]);
+    const q = getUserSecurityQuestion(forgotEmail);
+    if (!q) { setError('No account found with this email, or no security question was set.'); return; }
+    setSecurityQuestion(q);
+    setForgotStep('answer');
+  }, [forgotEmail, getUserSecurityQuestion]);
 
-  if (showForgot) {
+  const handleForgotReset = useCallback(async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!forgotAnswer) { setError('Please answer the security question.'); return; }
+    if (!newPassword || newPassword.length < 8) { setError('New password must be at least 8 characters.'); return; }
+    if (newPassword !== confirmNew) { setError('Passwords do not match.'); return; }
+    setLoading(true);
+    try {
+      await resetPasswordWithSecurityAnswer(forgotEmail, forgotAnswer, newPassword);
+      setForgotStep('done');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [forgotAnswer, newPassword, confirmNew, forgotEmail, resetPasswordWithSecurityAnswer]);
+
+  const resetForgot = () => {
+    setForgotStep(null); setForgotEmail(''); setSecurityQuestion('');
+    setForgotAnswer(''); setNewPassword(''); setConfirmNew(''); setError('');
+  };
+
+  if (forgotStep) {
     return (
       <div className="space-y-5">
         <div>
           <h2 className="text-lg font-semibold text-white">Reset Password</h2>
-          <p className="text-xs text-slate-500 mt-1">Enter your email and we'll send a reset link.</p>
+          <p className="text-xs text-slate-500 mt-1">Answer your security question to set a new password.</p>
         </div>
-        {forgotSent ? (
+        {error && <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>}
+
+        {forgotStep === 'done' ? (
           <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 text-sm text-emerald-400">
-            If an account exists for <strong>{forgotEmail}</strong>, a reset link has been sent.
+            Password reset successfully! You can now sign in with your new password.
           </div>
-        ) : (
-          <form onSubmit={handleForgot} className="space-y-4">
+        ) : forgotStep === 'email' ? (
+          <form onSubmit={handleForgotEmail} className="space-y-4">
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium text-slate-400">Email</label>
-              <input
-                type="email"
-                value={forgotEmail}
-                onChange={e => setForgotEmail(e.target.value)}
+              <input type="email" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)}
                 placeholder="you@example.com"
-                className="w-full bg-[#0d0d16] border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-colors"
-              />
+                className="w-full bg-[#0d0d16] border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-colors" />
             </div>
-            <button type="submit"
-              className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-600 text-white text-sm font-medium hover:from-cyan-400 hover:to-violet-500 transition-all shadow-lg">
-              Send Reset Link
+            <button type="submit" className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-600 text-white text-sm font-medium hover:from-cyan-400 hover:to-violet-500 transition-all shadow-lg">
+              Continue
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleForgotReset} className="space-y-4">
+            <div className="rounded-xl bg-cyan-500/5 border border-cyan-500/20 px-4 py-3">
+              <p className="text-[11px] text-slate-500 mb-1">Security question</p>
+              <p className="text-sm text-slate-200">{securityQuestion}</p>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-slate-400">Your Answer</label>
+              <input type="text" value={forgotAnswer} onChange={e => setForgotAnswer(e.target.value)}
+                placeholder="Answer (case-insensitive)"
+                className="w-full bg-[#0d0d16] border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-colors" />
+            </div>
+            <PasswordField id="new-pwd" label="New Password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Min. 8 characters" autoComplete="new-password" />
+            <PasswordField id="confirm-new-pwd" label="Confirm New Password" value={confirmNew} onChange={e => setConfirmNew(e.target.value)} placeholder="Repeat new password" autoComplete="new-password" />
+            <button type="submit" disabled={loading}
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-600 text-white text-sm font-medium hover:from-cyan-400 hover:to-violet-500 transition-all shadow-lg disabled:opacity-50 flex items-center justify-center gap-2">
+              {loading && <Loader2 size={14} className="animate-spin" />}
+              {loading ? 'Resetting…' : 'Reset Password'}
             </button>
           </form>
         )}
-        <button onClick={() => { setShowForgot(false); setForgotSent(false); setForgotEmail(''); }}
-          className="text-xs text-slate-500 hover:text-slate-300 transition-colors">
+        <button onClick={resetForgot} className="text-xs text-slate-500 hover:text-slate-300 transition-colors">
           ← Back to login
         </button>
       </div>
@@ -213,7 +258,7 @@ function LoginForm({ onSwitchToSignup }) {
         {loading ? 'Signing in…' : 'Sign In'}
       </button>
       <div className="flex items-center justify-between text-xs">
-        <button type="button" onClick={() => setShowForgot(true)}
+        <button type="button" onClick={() => setForgotStep('email')}
           className="text-slate-500 hover:text-slate-300 transition-colors">
           Forgot password?
         </button>
@@ -229,12 +274,24 @@ function LoginForm({ onSwitchToSignup }) {
 // ---------------------------------------------------------------------------
 // Sign-up tab
 // ---------------------------------------------------------------------------
+const SECURITY_QUESTIONS = [
+  "What was the name of your first pet?",
+  "What city were you born in?",
+  "What is your mother's maiden name?",
+  "What was the name of your elementary school?",
+  "What was the make of your first car?",
+  "What is your oldest sibling's middle name?",
+  "What street did you grow up on?",
+];
+
 function SignupForm({ onSwitchToLogin }) {
   const { register } = useApp();
   const [name, setName]         = useState('');
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm]   = useState('');
+  const [securityQuestion, setSecurityQuestion] = useState(SECURITY_QUESTIONS[0]);
+  const [securityAnswer, setSecurityAnswer]     = useState('');
   const [agreed, setAgreed]     = useState(false);
   const [showTerms, setShowTerms] = useState(false);
   const [error, setError]       = useState('');
@@ -245,17 +302,18 @@ function SignupForm({ onSwitchToLogin }) {
     if (!name || !email || !password || !confirm) { setError('Please fill in all fields.'); return; }
     if (password.length < 8) { setError('Password must be at least 8 characters.'); return; }
     if (password !== confirm) { setError('Passwords do not match.'); return; }
+    if (!securityAnswer.trim()) { setError('Please provide an answer to your security question.'); return; }
     if (!agreed) { setError('You must accept the Terms of Service to continue.'); return; }
     setError('');
     setLoading(true);
     try {
-      await register(name, email, password);
+      await register(name, email, password, securityQuestion, securityAnswer);
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, [name, email, password, confirm, agreed, register]);
+  }, [name, email, password, confirm, securityQuestion, securityAnswer, agreed, register]);
 
   return (
     <>
@@ -301,6 +359,28 @@ function SignupForm({ onSwitchToLogin }) {
           placeholder="Repeat your password"
           autoComplete="new-password"
         />
+
+        {/* Security question for password recovery */}
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-slate-400">Security Question <span className="text-slate-600">(for password recovery)</span></label>
+          <select
+            value={securityQuestion}
+            onChange={e => setSecurityQuestion(e.target.value)}
+            className="w-full bg-[#0d0d16] border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-colors"
+          >
+            {SECURITY_QUESTIONS.map(q => <option key={q} value={q}>{q}</option>)}
+          </select>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-slate-400">Your Answer</label>
+          <input
+            type="text"
+            value={securityAnswer}
+            onChange={e => setSecurityAnswer(e.target.value)}
+            placeholder="Your answer (case-insensitive)"
+            className="w-full bg-[#0d0d16] border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-colors"
+          />
+        </div>
 
         {/* Terms checkbox */}
         <label className="flex items-start gap-3 cursor-pointer group">

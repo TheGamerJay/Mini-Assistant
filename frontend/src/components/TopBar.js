@@ -7,7 +7,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Settings, Github, User, LogOut, Moon, Sun,
-  HelpCircle, ChevronDown, Terminal, GitBranch, RefreshCw,
+  HelpCircle, ChevronDown, Terminal, GitBranch, RefreshCw, ShieldCheck,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/client';
@@ -99,6 +99,9 @@ function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme, user,
       <div className="py-1.5 border-b border-white/5">
         <MenuItem icon={User} label="My Profile" onClick={() => go('profile')} />
         <MenuItem icon={Settings} label="Settings" onClick={() => go('settings')} />
+        {user?.role === 'admin' && (
+          <MenuItem icon={ShieldCheck} label="Admin Dashboard" onClick={() => go('admin')} />
+        )}
         <MenuItem icon={Terminal} label="/context — Scan project" onClick={() => go('chat')} hint="slash" />
         <MenuItem icon={HelpCircle} label="/help — All commands" onClick={() => { go('chat'); }} hint="slash" />
       </div>

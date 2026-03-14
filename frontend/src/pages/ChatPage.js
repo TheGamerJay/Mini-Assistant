@@ -70,6 +70,7 @@ function ChatPage() {
     addImage,
     setPage,
     rateMessage,
+    forkChat,
   } = useApp();
 
   const handleExport = useCallback(() => {
@@ -399,6 +400,7 @@ function ChatPage() {
               message={msg}
               onRetry={msg.type === 'error' ? () => handleSubmit(lastUserTextRef.current) : undefined}
               onRate={msg.role === 'assistant' ? (rating) => rateMessage(activeChatId, idx, rating) : undefined}
+              onFork={msg.role === 'assistant' && activeChatId ? () => forkChat(activeChatId, idx) : undefined}
             />
           ))}
 

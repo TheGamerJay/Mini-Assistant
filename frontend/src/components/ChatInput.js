@@ -10,7 +10,7 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Paperclip, Mic, MicOff, Send, Loader2, X, Image } from 'lucide-react';
+import { Paperclip, Mic, MicOff, Send, Loader2, X, Image, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../api/client';
 import { useApp } from '../context/AppContext';
@@ -31,7 +31,10 @@ const SLASH_COMMANDS = [
 ];
 
 const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const ACCEPTED_DOC_TYPES   = ['application/pdf', 'text/plain', 'text/markdown', 'text/csv'];
+const ACCEPTED_DOC_EXTS    = ['.pdf', '.txt', '.md', '.csv'];
 const MAX_IMAGE_SIZE_MB = 15;
+const MAX_DOC_SIZE_MB = 20;
 
 // ── Image helpers ─────────────────────────────────────────────────────────────
 
@@ -66,7 +69,11 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
 
   // Image attach state
   const [attachedImage, setAttachedImage] = useState(null); // { base64, preview, name }
+  // Document attach state
+  const [attachedDoc, setAttachedDoc] = useState(null); // { name, text, extracting }
+  const [extractingDoc, setExtractingDoc] = useState(false);
   const fileInputRef = useRef(null);
+  const docInputRef  = useRef(null);
 
   // Mic / recording state
   const [recording, setRecording]       = useState(false);
@@ -119,13 +126,20 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
 
   const handleSubmit = useCallback(() => {
     const text = value.trim();
-    if ((!text && !attachedImage) || loading) return;
+    if ((!text && !attachedImage && !attachedDoc) || loading) return;
     setSlashHints([]);
-    onSubmit(text || '/analyze', attachedImage?.base64 || null, null);
+    // Prepend document text if one is attached
+    let finalText = text || (attachedImage ? '/analyze' : '');
+    if (attachedDoc?.text) {
+      const docPrefix = `[Document: ${attachedDoc.name}]\n\`\`\`\n${attachedDoc.text}\n\`\`\`\n\n`;
+      finalText = finalText ? docPrefix + finalText : docPrefix.trimEnd();
+    }
+    onSubmit(finalText, attachedImage?.base64 || null, null);
     setValue('');
     setAttachedImage(null);
+    setAttachedDoc(null);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-  }, [value, loading, attachedImage, onSubmit]);
+  }, [value, loading, attachedImage, attachedDoc, onSubmit]);
 
   const handleKeyDown = useCallback((e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
@@ -162,6 +176,39 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
   }, [processImageFile]);
 
   const openFilePicker = useCallback(() => { fileInputRef.current?.click(); }, []);
+  const openDocPicker  = useCallback(() => { docInputRef.current?.click(); },  []);
+
+  const processDocFile = useCallback(async (file) => {
+    const ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
+    const okType = ACCEPTED_DOC_TYPES.includes(file.type) || ACCEPTED_DOC_EXTS.includes(ext);
+    if (!okType) { toast.error('Supported document types: PDF, TXT, MD, CSV'); return; }
+    if (file.size > MAX_DOC_SIZE_MB * 1024 * 1024) { toast.error(`File too large — max ${MAX_DOC_SIZE_MB} MB`); return; }
+    setExtractingDoc(true);
+    setAttachedDoc({ name: file.name, text: null });
+    try {
+      const data = await api.extractTextFromFile(file);
+      setAttachedDoc({ name: file.name, text: data.text });
+      if (data.truncated) toast.info('Document truncated to 50 000 characters.');
+      else toast.success(`Document loaded: ${data.chars.toLocaleString()} characters`);
+    } catch (err) {
+      toast.error('Could not extract text: ' + (err?.message || 'unknown error'));
+      setAttachedDoc(null);
+    } finally {
+      setExtractingDoc(false);
+      textareaRef.current?.focus();
+    }
+  }, []);
+
+  const handleDocChange = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (file) processDocFile(file);
+    e.target.value = '';
+  }, [processDocFile]);
+
+  const removeDoc = useCallback(() => {
+    setAttachedDoc(null);
+    textareaRef.current?.focus();
+  }, []);
 
   const removeImage = useCallback(() => {
     setAttachedImage(null);
@@ -237,7 +284,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
   // ── Render ──────────────────────────────────────────────────────────────────
 
   const isHome  = variant === 'home';
-  const isEmpty = !value.trim() && !attachedImage;
+  const isEmpty = !value.trim() && !attachedImage && !attachedDoc;
   const isSlash = value.trimStart().startsWith('/');
 
   const containerClass = isHome
@@ -250,13 +297,20 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
       onDrop={handleDrop}
       onDragOver={handleDragOver}
     >
-      {/* Hidden file input */}
+      {/* Hidden file inputs */}
       <input
         ref={fileInputRef}
         type="file"
         accept={ACCEPTED_IMAGE_TYPES.join(',')}
         className="hidden"
         onChange={handleFileChange}
+      />
+      <input
+        ref={docInputRef}
+        type="file"
+        accept={[...ACCEPTED_DOC_TYPES, ...ACCEPTED_DOC_EXTS].join(',')}
+        className="hidden"
+        onChange={handleDocChange}
       />
 
       {/* Slash command hints dropdown */}
@@ -304,9 +358,30 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
           </div>
         )}
 
+        {/* Attached document preview */}
+        {attachedDoc && (
+          <div className="px-4 pt-3 pb-0 flex items-center gap-2">
+            <div className="flex items-center gap-2 bg-violet-500/10 border border-violet-500/20 rounded-lg px-3 py-2 flex-1 min-w-0">
+              {extractingDoc
+                ? <Loader2 size={13} className="text-violet-400 animate-spin flex-shrink-0" />
+                : <FileText size={13} className="text-violet-400 flex-shrink-0" />}
+              <span className="text-xs text-violet-300 truncate">{attachedDoc.name}</span>
+              {attachedDoc.text && (
+                <span className="text-[10px] text-violet-500/70 flex-shrink-0">
+                  {attachedDoc.text.length.toLocaleString()} chars
+                </span>
+              )}
+            </div>
+            <button type="button" onClick={removeDoc}
+              className="flex-shrink-0 p-1 rounded text-slate-600 hover:text-red-400 transition-colors">
+              <X size={12} />
+            </button>
+          </div>
+        )}
+
         {/* Input row */}
         <div className="flex items-end gap-2 px-5 py-3.5">
-          {/* Attach */}
+          {/* Attach image */}
           <button
             type="button"
             onClick={openFilePicker}
@@ -319,13 +394,26 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
           >
             <Paperclip size={16} />
           </button>
+          {/* Attach document */}
+          <button
+            type="button"
+            onClick={openDocPicker}
+            disabled={loading || extractingDoc}
+            className={`flex-shrink-0 p-1.5 rounded-lg transition-colors mb-0.5
+              ${attachedDoc
+                ? 'text-violet-400 hover:text-violet-300 hover:bg-white/5'
+                : 'text-slate-600 hover:text-slate-400 hover:bg-white/5'}`}
+            title="Attach PDF or text document"
+          >
+            <FileText size={16} />
+          </button>
 
           {/* Textarea */}
           <textarea
             ref={textareaRef}
             className={`flex-1 bg-transparent text-[15px] font-sans placeholder-slate-600 resize-none outline-none border-none leading-6 max-h-[144px] py-0.5
               ${isSlash ? 'text-cyan-300 font-mono' : 'text-slate-200'}`}
-            placeholder={attachedImage ? 'Ask about this image…' : resolvedPlaceholder}
+            placeholder={attachedImage ? 'Ask about this image…' : attachedDoc ? 'Ask about this document…' : resolvedPlaceholder}
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -362,7 +450,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
             className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5
               ${isEmpty || loading
                 ? 'bg-slate-700/50 text-slate-600 cursor-not-allowed'
-                : isSlash || attachedImage
+                : isSlash || attachedImage || attachedDoc
                   ? 'bg-gradient-to-br from-cyan-400 to-cyan-600 text-white hover:from-cyan-300 hover:to-cyan-500 shadow-lg hover:shadow-cyan-500/30'
                   : 'bg-gradient-to-br from-cyan-500 to-violet-600 text-white hover:from-cyan-400 hover:to-violet-500 shadow-lg hover:shadow-cyan-500/20'}`}
             title="Send message"

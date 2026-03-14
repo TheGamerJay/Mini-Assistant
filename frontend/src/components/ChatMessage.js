@@ -1,11 +1,15 @@
 /**
  * components/ChatMessage.js
  * Renders a single chat message bubble (user or assistant).
- * Props: { message, onRetry?, onRate? }
+ * Props: { message, onRetry?, onRate?, onFork? }
  */
 
-import React, { useState, useCallback } from 'react';
-import { RotateCcw, Copy, Check, Volume2, VolumeX, ThumbsUp, ThumbsDown } from 'lucide-react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import {
+  RotateCcw, Copy, Check, Volume2, VolumeX,
+  ThumbsUp, ThumbsDown, GitFork, Share2, MoreHorizontal, Clock,
+} from 'lucide-react';
+import { toast } from 'sonner';
 import { useApp } from '../context/AppContext';
 import ImageCard from './ImageCard';
 import IntelligencePanel from './IntelligencePanel';
@@ -173,72 +177,151 @@ function renderContent(text) {
 }
 
 // ---------------------------------------------------------------------------
-// TTS button
+// Shared small action button
 // ---------------------------------------------------------------------------
-function TTSButton({ text }) {
-  const [speaking, setSpeaking] = useState(false);
-  const handle = useCallback(() => {
+function ActionBtn({ onClick, title, active, activeClass, children }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className={`p-1.5 rounded-lg transition-colors hover:bg-white/5
+        ${active && activeClass ? activeClass : 'text-slate-600 hover:text-slate-300'}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Bottom message action bar  (copy · thumbs · speaker · share · ⋯)
+// ---------------------------------------------------------------------------
+function MessageActions({ content, rating, onRate, onRetry, onFork, timestamp }) {
+  const [speaking, setSpeaking]   = useState(false);
+  const [copied, setCopied]       = useState(false);
+  const [menuOpen, setMenuOpen]   = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(content)
+      .then(() => { setCopied(true); setTimeout(() => setCopied(false), 1800); })
+      .catch(() => {});
+  }, [content]);
+
+  const handleShare = useCallback(() => {
+    const text = `Mini Assistant:\n\n${content}`;
+    navigator.clipboard.writeText(text)
+      .then(() => toast.success('Copied to clipboard!'))
+      .catch(() => toast.error('Could not copy'));
+  }, [content]);
+
+  const handleTTS = useCallback(() => {
     if (speaking) { window.speechSynthesis.cancel(); setSpeaking(false); return; }
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.onend = () => setSpeaking(false);
+    const utt = new SpeechSynthesisUtterance(content);
+    utt.onend  = () => setSpeaking(false);
     utt.onerror = () => setSpeaking(false);
     window.speechSynthesis.speak(utt);
     setSpeaking(true);
-  }, [speaking, text]);
+  }, [speaking, content]);
 
-  if (!('speechSynthesis' in window)) return null;
-  return (
-    <button
-      onClick={handle}
-      title={speaking ? 'Stop reading' : 'Read aloud'}
-      className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-slate-600 hover:text-slate-300"
-    >
-      {speaking ? <VolumeX size={12} /> : <Volume2 size={12} />}
-    </button>
-  );
-}
+  const timeLabel = timestamp
+    ? new Date(timestamp).toLocaleString([], {
+        weekday: 'short', month: 'short', day: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+      })
+    : null;
 
-// ---------------------------------------------------------------------------
-// Thumbs up / down rating bar
-// ---------------------------------------------------------------------------
-function ThumbsBar({ rating, onRate }) {
-  if (!onRate) return null;
   return (
-    <div className="flex items-center gap-0.5 mt-2 pt-2 border-t border-white/5">
-      <button
-        onClick={() => onRate(rating === 1 ? null : 1)}
+    <div className="flex items-center gap-0.5 mt-3 pt-2 border-t border-white/5">
+      {/* Copy */}
+      <ActionBtn onClick={handleCopy} title={copied ? 'Copied!' : 'Copy message'} active={copied} activeClass="text-emerald-400">
+        {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+      </ActionBtn>
+
+      {/* Thumbs up */}
+      <ActionBtn
+        onClick={() => onRate && onRate(rating === 1 ? null : 1)}
         title="Good response"
-        className={`p-1 rounded transition-colors ${rating === 1 ? 'text-emerald-400' : 'text-slate-600 hover:text-slate-400'}`}
+        active={rating === 1}
+        activeClass="text-emerald-400"
       >
-        <ThumbsUp size={11} />
-      </button>
-      <button
-        onClick={() => onRate(rating === -1 ? null : -1)}
-        title="Poor response"
-        className={`p-1 rounded transition-colors ${rating === -1 ? 'text-red-400' : 'text-slate-600 hover:text-slate-400'}`}
-      >
-        <ThumbsDown size={11} />
-      </button>
-    </div>
-  );
-}
+        <ThumbsUp size={12} className={rating === 1 ? 'text-emerald-400' : ''} />
+      </ActionBtn>
 
-// ---------------------------------------------------------------------------
-// Copy full message button
-// ---------------------------------------------------------------------------
-function CopyMessageButton({ text }) {
-  const [copied, setCopied] = useState(false);
-  const handle = useCallback(() => {
-    navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1800); }).catch(() => {});
-  }, [text]);
-  return (
-    <button
-      onClick={handle}
-      className="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-2 right-0 flex items-center gap-1 text-[10px] font-mono text-slate-500 hover:text-slate-300 bg-[#1a1c2e] border border-white/10 px-2 py-1 rounded-lg shadow"
-    >
-      {copied ? <Check size={10} className="text-emerald-400" /> : <Copy size={10} />}
-      {copied ? 'Copied' : 'Copy'}
-    </button>
+      {/* Thumbs down */}
+      <ActionBtn
+        onClick={() => onRate && onRate(rating === -1 ? null : -1)}
+        title="Poor response"
+        active={rating === -1}
+        activeClass="text-red-400"
+      >
+        <ThumbsDown size={12} className={rating === -1 ? 'text-red-400' : ''} />
+      </ActionBtn>
+
+      {/* Speaker / TTS */}
+      {'speechSynthesis' in window && (
+        <ActionBtn onClick={handleTTS} title={speaking ? 'Stop reading' : 'Read aloud'} active={speaking} activeClass="text-cyan-400">
+          {speaking ? <VolumeX size={12} className="text-cyan-400" /> : <Volume2 size={12} />}
+        </ActionBtn>
+      )}
+
+      {/* Share (copy as shareable text) */}
+      <ActionBtn onClick={handleShare} title="Copy as shareable text">
+        <Share2 size={12} />
+      </ActionBtn>
+
+      {/* Spacer */}
+      <div className="flex-1" />
+
+      {/* 3-dot menu */}
+      <div className="relative" ref={menuRef}>
+        <ActionBtn onClick={() => setMenuOpen(v => !v)} title="More options" active={menuOpen} activeClass="text-slate-300 bg-white/5">
+          <MoreHorizontal size={12} />
+        </ActionBtn>
+
+        {menuOpen && (
+          <div className="absolute bottom-full right-0 mb-1 w-52 rounded-xl bg-[#13131f] border border-white/10 shadow-2xl z-50 overflow-hidden">
+            {/* Timestamp */}
+            {timeLabel && (
+              <div className="flex items-center gap-2 px-3 py-2.5 text-[10px] font-mono text-slate-500 border-b border-white/5">
+                <Clock size={10} className="flex-shrink-0" />
+                {timeLabel}
+              </div>
+            )}
+
+            {/* Retry */}
+            {onRetry && (
+              <button
+                onClick={() => { setMenuOpen(false); onRetry(); }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors"
+              >
+                <RotateCcw size={11} />
+                Retry
+              </button>
+            )}
+
+            {/* Branch in new chat */}
+            {onFork && (
+              <button
+                onClick={() => { setMenuOpen(false); onFork(); }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-400 hover:text-violet-400 hover:bg-white/5 transition-colors"
+              >
+                <GitFork size={11} />
+                Branch in new chat
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -274,7 +357,7 @@ function MetaBar({ model_used, memory_stored }) {
   const memCount = memory_stored ? memory_stored.length : 0;
   if (!hasModel && memCount === 0) return null;
   return (
-    <div className="flex flex-wrap items-center gap-1 mt-2 pt-2 border-t border-white/5">
+    <div className="flex flex-wrap items-center gap-1 mt-2">
       {hasModel && <span className="text-[10px] font-mono rounded px-1.5 py-0.5 border text-cyan-400/60 bg-cyan-500/5 border-cyan-500/15 truncate max-w-[140px]" title={model_used}>{model_used}</span>}
       {memCount > 0 && <span className="text-[10px] font-mono rounded px-1.5 py-0.5 border text-emerald-400/60 bg-emerald-500/5 border-emerald-500/15" title={memory_stored.map(f => `${f.key}: ${f.value}`).join(', ')}>+{memCount} mem</span>}
     </div>
@@ -284,9 +367,9 @@ function MetaBar({ model_used, memory_stored }) {
 // ---------------------------------------------------------------------------
 // ChatMessage
 // ---------------------------------------------------------------------------
-function ChatMessage({ message, onRetry, onRate }) {
+function ChatMessage({ message, onRetry, onRate, onFork }) {
   const { settings, user } = useApp();
-  const { role, type, content, image_base64, prompt, route_result, generation_time_ms, retry_used, prompt_warnings, model_used, memory_stored, rating } = message;
+  const { role, type, content, image_base64, prompt, route_result, generation_time_ms, retry_used, prompt_warnings, model_used, memory_stored, rating, timestamp } = message;
 
   if (role === 'user') {
     const initial = user?.name ? user.name[0].toUpperCase() : 'U';
@@ -341,14 +424,6 @@ function ChatMessage({ message, onRetry, onRate }) {
       <div className={`relative group max-w-[80%] px-5 py-4 rounded-2xl rounded-tl-sm border text-sm leading-relaxed
         ${isError ? 'bg-red-900/20 border-red-500/20 text-red-300' : 'bg-[#151520] border-white/5 text-slate-200'}`}
       >
-        {/* Top-right action buttons (copy + TTS) */}
-        {!isError && !isImage && content && (
-          <div className="absolute -top-2 right-0 flex items-center gap-1">
-            <TTSButton text={content} />
-            <CopyMessageButton text={content} />
-          </div>
-        )}
-
         {role === 'assistant' && route_result && route_result.intent !== 'chat' && (
           <IntelligencePanel route_result={route_result} generation_time_ms={generation_time_ms} />
         )}
@@ -375,9 +450,19 @@ function ChatMessage({ message, onRetry, onRate }) {
 
         {!isError && <MetaBar model_used={model_used} memory_stored={memory_stored} />}
 
-        {/* Thumbs up/down — only on non-error assistant text messages */}
-        {!isError && !isImage && <ThumbsBar rating={rating} onRate={onRate} />}
+        {/* Bottom action bar — copy, thumbs, speaker, share, 3-dot */}
+        {!isError && !isImage && content && (
+          <MessageActions
+            content={content}
+            rating={rating}
+            onRate={onRate}
+            onRetry={onRetry}
+            onFork={onFork}
+            timestamp={timestamp}
+          />
+        )}
 
+        {/* Error retry button */}
         {isError && onRetry && (
           <button onClick={onRetry}
             className="mt-3 flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 px-2.5 py-1.5 rounded-lg transition-colors">

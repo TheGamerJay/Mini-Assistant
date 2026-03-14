@@ -26,6 +26,7 @@ import ImagePage from './pages/ImagePage';
 import SettingsModal from './pages/SettingsModal';
 import AuthPage from './pages/AuthPage';
 import ProfilePage from './pages/ProfilePage';
+import AdminPage from './pages/AdminPage';
 
 // Existing tool components (kept for backward compat via 'tool-X' pages)
 import Dashboard from './pages/Dashboard';
@@ -140,6 +141,7 @@ function AppShell() {
     if (page === 'tool-appbuilder') { setPage('chat'); return <ChatPage />; }
     if (page === 'images') return <ImagePage />;
     if (page === 'profile') return <ProfilePage />;
+    if (page === 'admin') return <AdminPage />;
 
     const toolEntry = TOOL_PAGES[page];
     if (toolEntry) {

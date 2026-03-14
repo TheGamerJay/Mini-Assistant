@@ -17,7 +17,9 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, HTTPException, Request
+import io
+
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -482,6 +484,44 @@ async def startup_event():
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+@app.post("/api/extract-text")
+async def extract_text(file: UploadFile = File(...)):
+    """Extract text from an uploaded PDF or plain-text file."""
+    try:
+        content = await file.read()
+        filename = file.filename or ""
+
+        if filename.lower().endswith(".pdf") or (file.content_type or "").startswith("application/pdf"):
+            try:
+                from pypdf import PdfReader
+                reader = PdfReader(io.BytesIO(content))
+                text = "\n\n".join(
+                    page.extract_text() or "" for page in reader.pages
+                )
+            except Exception as exc:
+                raise HTTPException(status_code=422, detail=f"PDF parsing failed: {exc}")
+        else:
+            # Treat as plain text
+            try:
+                text = content.decode("utf-8")
+            except UnicodeDecodeError:
+                text = content.decode("latin-1", errors="replace")
+
+        text = text.strip()
+        if not text:
+            raise HTTPException(status_code=422, detail="No text could be extracted from the file.")
+
+        # Cap at 50 000 chars to keep context manageable
+        truncated = len(text) > 50000
+        text = text[:50000]
+
+        return {"text": text, "filename": filename, "chars": len(text), "truncated": truncated}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
 
 @app.get("/api/health")
 async def health_check():
