@@ -77,6 +77,26 @@ function uk(base, uid) {
   return uid ? `${base}_${uid}` : base;
 }
 
+/**
+ * One-time migration: if the user-scoped key is empty but the old unscoped
+ * key has data, copy it over and remove the old key.
+ */
+function migrateLS(base, uid, fallback) {
+  if (!uid) return loadLS(base, fallback);
+  const scopedKey = `${base}_${uid}`;
+  const existing = localStorage.getItem(scopedKey);
+  if (existing !== null) return JSON.parse(existing); // already migrated
+  const old = localStorage.getItem(base);
+  if (old !== null) {
+    try {
+      localStorage.setItem(scopedKey, old);
+      localStorage.removeItem(base);
+      return JSON.parse(old);
+    } catch { /* quota */ }
+  }
+  return fallback;
+}
+
 // ---------------------------------------------------------------------------
 // Context
 // ---------------------------------------------------------------------------
@@ -111,7 +131,7 @@ export function AppProvider({ children }) {
   }), []);
 
   // ---- Chats ----
-  const [chats, setChats] = useState(() => loadLS(uk('ma_v2_chats', getSessionId()), []));
+  const [chats, setChats] = useState(() => migrateLS('ma_v2_chats', getSessionId(), []));
   const [activeChatId, setActiveChatId] = useState(null);
 
   const newChat = useCallback(() => {
@@ -164,7 +184,7 @@ export function AppProvider({ children }) {
   }, []);
 
   // ---- Projects ----
-  const [projects, setProjects] = useState(() => loadLS(uk('ma_v2_projects', getSessionId()), []));
+  const [projects, setProjects] = useState(() => migrateLS('ma_v2_projects', getSessionId(), []));
 
   const newProject = useCallback((name) => {
     const id = crypto.randomUUID();
@@ -191,7 +211,7 @@ export function AppProvider({ children }) {
   }, []);
 
   // ---- Images ----
-  const [images, setImages] = useState(() => loadLS(uk('ma_v2_images', getSessionId()), []));
+  const [images, setImages] = useState(() => migrateLS('ma_v2_images', getSessionId(), []));
 
   const addImage = useCallback(async (thumbDataUrl, prompt, fullBase64) => {
     const id = crypto.randomUUID();
@@ -212,7 +232,7 @@ export function AppProvider({ children }) {
     quality: 'balanced',
   };
   const [settings, setSettings] = useState(() =>
-    loadLS(uk('ma_v2_settings', getSessionId()), defaultSettings)
+    migrateLS('ma_v2_settings', getSessionId(), defaultSettings)
   );
 
   const updateSettings = useCallback((patch) => {
