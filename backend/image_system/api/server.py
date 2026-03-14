@@ -643,6 +643,8 @@ async def chat(req: ChatRequest):
     ceo_posture      = None
     manager_packet   = None
     supervisor_result= None
+    skill_match      = None
+    reflection_record= None
 
     try:
         from mini_assistant.phase1.command_parser import parse as cmd_parse
@@ -712,12 +714,38 @@ async def chat(req: ChatRequest):
             logger.warning("Manager failed (%s) — skipping context injection.", _mgr_err)
             manager_packet = None
 
+        # ── Phase 3 Step 1: Skill Selector ─────────────────────────────────────
+        try:
+            from mini_assistant.phase3.skill_selector import get_selector
+            skill_match = get_selector().select(
+                plan          = phase1_plan,
+                message       = effective_msg,
+                slash_command = parsed_cmd.command if parsed_cmd and parsed_cmd.is_slash else None,
+            )
+            if skill_match.matched:
+                logger.info(
+                    "SkillSelector matched: %s (conf=%.2f, %d steps) ms=%.1f",
+                    skill_match.skill.name, skill_match.confidence,
+                    len(skill_match.override_steps), skill_match.selector_ms,
+                )
+            else:
+                logger.debug("SkillSelector: no match (ms=%.1f)", skill_match.selector_ms)
+        except Exception as _ss_err:
+            logger.warning("SkillSelector failed (%s) — continuing without skill.", _ss_err)
+            skill_match = None
+
         # ── Phase 2 Step 3: Supervisor — task state tracking ───────────────────
         try:
             from mini_assistant.phase2.supervisor import Supervisor
             if manager_packet:
                 supervisor = Supervisor(manager_packet)
-                supervisor_result = supervisor.supervise(phase1_plan.sequential_tasks)
+                # If a skill matched, use its refined steps; otherwise use Planner's
+                tasks_to_run = (
+                    skill_match.override_steps
+                    if skill_match and skill_match.matched and skill_match.override_steps
+                    else phase1_plan.sequential_tasks
+                )
+                supervisor_result = supervisor.supervise(tasks_to_run)
                 logger.info(
                     "Supervisor → %d/%d tasks completed, overall=%s ms=%.1f",
                     len(supervisor_result.completed_tasks),
@@ -825,6 +853,27 @@ async def chat(req: ChatRequest):
             from mini_assistant.phase1.critic import critique
             from mini_assistant.phase1.composer import compose as phase1_compose
             critic_result = critique(reply, phase1_plan)
+
+            # ── Phase 3 Step 2: Reflection (after Critic, before Composer) ─────
+            try:
+                from mini_assistant.phase3.reflection_layer import reflect
+                reflection_record = reflect(
+                    message     = effective_msg,
+                    plan        = phase1_plan,
+                    critic      = critic_result,
+                    skill_match = skill_match,
+                    reply       = reply,
+                )
+                logger.debug(
+                    "Reflection logged=%s lesson=%s ms=%.1f",
+                    reflection_record.logged,
+                    reflection_record.lesson[:60],
+                    reflection_record.reflection_ms,
+                )
+            except Exception as _ref_err:
+                logger.warning("Reflection failed (non-fatal): %s", _ref_err)
+                reflection_record = None
+
             response = phase1_compose(
                 reply        = reply,
                 plan         = phase1_plan,
@@ -832,13 +881,17 @@ async def chat(req: ChatRequest):
                 session_id   = session_id,
                 route_result = route_result,
             )
-            # Enrich with Phase 2 executive metadata
+            # Enrich with Phase 2+3 executive metadata
             if ceo_posture:
                 response["ceo"] = ceo_posture.to_dict()
             if manager_packet:
                 response["manager"] = manager_packet.to_dict()
             if supervisor_result:
                 response["supervisor"] = supervisor_result.to_dict()
+            if skill_match:
+                response["skill"] = skill_match.to_dict()
+            if reflection_record:
+                response["reflection"] = reflection_record.to_dict()
             return response
         except Exception as _c_err:
             logger.warning("Phase 1+2 Critic/Composer failed (%s) — returning raw reply.", _c_err)

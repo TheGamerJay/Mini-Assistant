@@ -4075,10 +4075,28 @@ app.include_router(api_router)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Phase 2 — Executive layer diagnostics
+# Phase 2+3 — Executive + Skill Library diagnostics
 # GET /api/session/{session_id}  — Manager session summary
-# GET /api/executive/health      — Phase 1+2 module availability check
+# GET /api/executive/health      — Phase 1-3 module availability check
+# GET /api/skills                — Skill Library listing
 # ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/skills", tags=["skills"])
+async def list_skills(category: str = "", status: str = ""):
+    """
+    List all registered skills from the Phase 3 Skill Library.
+    Optional query params: ?category=standard|3d  ?status=active|stub
+    """
+    try:
+        from mini_assistant.phase3.skill_registry import all_skills
+        skills = all_skills()
+        if category:
+            skills = [s for s in skills if s.category == category]
+        if status:
+            skills = [s for s in skills if s.status == status]
+        return {"total": len(skills), "skills": [s.to_dict() for s in skills]}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 @app.get("/api/session/{session_id}", tags=["executive"])
 async def session_summary(session_id: str):
