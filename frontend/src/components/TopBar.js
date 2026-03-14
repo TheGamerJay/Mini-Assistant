@@ -3,12 +3,84 @@
  * Top navigation header — Mini Assistant workspace design.
  */
 
-import React from 'react';
-import { Settings, CheckCircle2, Github, Code2 } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Settings, CheckCircle2, Github, Code2, User, LogOut, Moon, HelpCircle, ChevronDown } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+
+function ProfileMenu({ onClose, setPage }) {
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) onClose();
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={menuRef}
+      className="absolute right-0 top-full mt-2 w-56 rounded-xl bg-[#13131f] border border-white/10 shadow-2xl z-50 overflow-hidden"
+    >
+      {/* User info */}
+      <div className="px-4 py-3 border-b border-white/5">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
+            M
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-slate-200 truncate">Mini Assistant</p>
+            <p className="text-[11px] text-slate-500 truncate">Local AI Workspace</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Menu items */}
+      <div className="py-1.5">
+        <button
+          onClick={() => { setPage('tool-profiles'); onClose(); }}
+          className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors"
+        >
+          <User size={14} />
+          Project Profiles
+        </button>
+        <button
+          onClick={() => { setPage('settings'); onClose(); }}
+          className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors"
+        >
+          <Settings size={14} />
+          Settings
+        </button>
+        <button
+          className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors"
+        >
+          <HelpCircle size={14} />
+          Help & Docs
+        </button>
+        <button
+          className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors"
+        >
+          <Moon size={14} />
+          Theme
+        </button>
+      </div>
+
+      <div className="border-t border-white/5 py-1.5">
+        <button
+          className="w-full flex items-center gap-3 px-4 py-2 text-sm text-red-400/70 hover:text-red-400 hover:bg-red-500/5 transition-colors"
+        >
+          <LogOut size={14} />
+          Sign Out
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function TopBar() {
   const { setPage, serverStatus } = useApp();
+  const [profileOpen, setProfileOpen] = useState(false);
   const allOk = serverStatus.backend && serverStatus.ollama;
 
   return (
@@ -72,10 +144,25 @@ function TopBar() {
           <Code2 size={13} />
           Connect VS Code
         </button>
-        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-cyan-500
-          flex items-center justify-center text-white text-xs font-bold ml-1
-          cursor-pointer hover:opacity-80 transition-opacity select-none">
-          M
+
+        {/* Profile button */}
+        <div className="relative ml-1">
+          <button
+            onClick={() => setProfileOpen(v => !v)}
+            className="flex items-center gap-1 group"
+            title="Profile"
+          >
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-cyan-500
+              flex items-center justify-center text-white text-xs font-bold
+              hover:opacity-80 transition-opacity select-none">
+              M
+            </div>
+            <ChevronDown size={11} className={`text-slate-600 group-hover:text-slate-400 transition-all ${profileOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {profileOpen && (
+            <ProfileMenu onClose={() => setProfileOpen(false)} setPage={setPage} />
+          )}
         </div>
       </div>
     </header>

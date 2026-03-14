@@ -43,7 +43,6 @@ import {
   Zap,
   Globe,
   FileSearch,
-  User,
   Wand2,
 } from 'lucide-react';
 
@@ -74,7 +73,6 @@ const TOOLS = [
   { id: 'websearch', label: 'Web Search', icon: Globe },
   { id: 'codesearch', label: 'Code Search', icon: FileSearch },
   { id: 'voice', label: 'Voice', icon: Mic },
-  { id: 'profiles', label: 'Profiles', icon: User },
 ];
 
 // ---------------------------------------------------------------------------
@@ -344,20 +342,40 @@ function Sidebar() {
       style={{ height: '100vh' }}
     >
       {/* ---- Brand + toggle ---- */}
-      <div className={`flex items-center h-14 flex-shrink-0 px-3 border-b border-white/5 ${sidebarCollapsed ? 'justify-center' : 'justify-between'}`}>
-        {!sidebarCollapsed && (
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-cyan-400 to-violet-600 flex-shrink-0" />
-            <span className="text-sm font-semibold text-slate-100 truncate">Mini Assistant</span>
-          </div>
+      <div className={`flex items-center h-14 flex-shrink-0 px-3 border-b border-white/5 ${sidebarCollapsed ? 'flex-col justify-center gap-1' : 'justify-between'}`}>
+        {sidebarCollapsed ? (
+          <>
+            {/* Collapsed: show logo icon + toggle below it */}
+            <div className="w-7 h-7 rounded-lg overflow-hidden flex-shrink-0 bg-gradient-to-br from-cyan-400 to-violet-600">
+              <img src="/Logo.png" alt="Mini Assistant" className="w-full h-full object-contain"
+                onError={e => { e.target.style.display = 'none'; }} />
+            </div>
+            <button
+              onClick={toggleSidebar}
+              className="p-1 rounded-lg text-slate-600 hover:text-slate-300 hover:bg-white/5 transition-colors"
+              title="Expand sidebar"
+            >
+              <Menu size={13} />
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-7 h-7 rounded-lg overflow-hidden flex-shrink-0 bg-gradient-to-br from-cyan-400 to-violet-600">
+                <img src="/Logo.png" alt="Mini Assistant" className="w-full h-full object-contain"
+                  onError={e => { e.target.style.display = 'none'; }} />
+              </div>
+              <span className="text-sm font-semibold text-slate-100 truncate">Mini Assistant</span>
+            </div>
+            <button
+              onClick={toggleSidebar}
+              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-colors flex-shrink-0"
+              title="Collapse sidebar"
+            >
+              <ChevronLeft size={16} />
+            </button>
+          </>
         )}
-        <button
-          onClick={toggleSidebar}
-          className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-colors flex-shrink-0"
-          title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          {sidebarCollapsed ? <Menu size={16} /> : <ChevronLeft size={16} />}
-        </button>
       </div>
 
       {/* ---- New Chat ---- */}

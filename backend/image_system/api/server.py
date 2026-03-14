@@ -48,6 +48,8 @@ app = FastAPI(
 
 _CORS_DEFAULTS = ",".join([
     "https://mini-assistant-production.up.railway.app",
+    "https://www.miniassistantai.com",
+    "https://miniassistantai.com",
     "https://ai.miniassistantai.com",
     "http://localhost:3000",
     "http://localhost:3001",

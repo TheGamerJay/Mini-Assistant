@@ -4722,8 +4722,12 @@ if _static_dir.exists():
 
 _CORS_DEFAULTS = ",".join([
     "https://mini-assistant-production.up.railway.app",
+    "https://www.miniassistantai.com",
+    "https://miniassistantai.com",
     "https://ai.miniassistantai.com",
     "http://localhost:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3000",
     "http://localhost:8080",
 ])
 app.add_middleware(
