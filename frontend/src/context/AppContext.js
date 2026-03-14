@@ -64,6 +64,19 @@ function saveLS(key, value) {
   }
 }
 
+/** Read the logged-in user's id directly from localStorage (used in useState initializers). */
+function getSessionId() {
+  try {
+    const s = JSON.parse(localStorage.getItem('ma_session') || 'null');
+    return s?.id || null;
+  } catch { return null; }
+}
+
+/** Scope a storage key to a user id so each account has its own data bucket. */
+function uk(base, uid) {
+  return uid ? `${base}_${uid}` : base;
+}
+
 // ---------------------------------------------------------------------------
 // Context
 // ---------------------------------------------------------------------------
@@ -98,10 +111,8 @@ export function AppProvider({ children }) {
   }), []);
 
   // ---- Chats ----
-  const [chats, setChats] = useState(() => loadLS('ma_v2_chats', []));
+  const [chats, setChats] = useState(() => loadLS(uk('ma_v2_chats', getSessionId()), []));
   const [activeChatId, setActiveChatId] = useState(null);
-
-  useEffect(() => { saveLS('ma_v2_chats', chats); }, [chats]);
 
   const newChat = useCallback(() => {
     const id = crypto.randomUUID();
@@ -153,9 +164,7 @@ export function AppProvider({ children }) {
   }, []);
 
   // ---- Projects ----
-  const [projects, setProjects] = useState(() => loadLS('ma_v2_projects', []));
-
-  useEffect(() => { saveLS('ma_v2_projects', projects); }, [projects]);
+  const [projects, setProjects] = useState(() => loadLS(uk('ma_v2_projects', getSessionId()), []));
 
   const newProject = useCallback((name) => {
     const id = crypto.randomUUID();
@@ -182,9 +191,7 @@ export function AppProvider({ children }) {
   }, []);
 
   // ---- Images ----
-  const [images, setImages] = useState(() => loadLS('ma_v2_images', []));
-
-  useEffect(() => { saveLS('ma_v2_images', images); }, [images]);
+  const [images, setImages] = useState(() => loadLS(uk('ma_v2_images', getSessionId()), []));
 
   const addImage = useCallback(async (thumbDataUrl, prompt, fullBase64) => {
     const id = crypto.randomUUID();
@@ -221,6 +228,26 @@ export function AppProvider({ children }) {
   const [user, _setUser] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ma_session') || 'null'); } catch { return null; }
   });
+
+  // Reload per-user data buckets when user logs in or out
+  const _prevUidRef = useRef(getSessionId());
+  useEffect(() => {
+    const uid = user?.id || null;
+    if (uid === _prevUidRef.current) return; // same user, no reload needed
+    _prevUidRef.current = uid;
+    const def = { showRouteInfo: true, dryRun: false, autoReview: true, quality: 'balanced' };
+    setChats(loadLS(uk('ma_v2_chats', uid), []));
+    setProjects(loadLS(uk('ma_v2_projects', uid), []));
+    setImages(loadLS(uk('ma_v2_images', uid), []));
+    setSettings(loadLS(uk('ma_v2_settings', uid), def));
+    setActiveChatId(null);
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Persist per-user data whenever it changes
+  useEffect(() => { saveLS(uk('ma_v2_chats',    user?.id), chats);    }, [chats,    user?.id]);
+  useEffect(() => { saveLS(uk('ma_v2_projects', user?.id), projects); }, [projects, user?.id]);
+  useEffect(() => { saveLS(uk('ma_v2_images',   user?.id), images);   }, [images,   user?.id]);
+  useEffect(() => { saveLS(uk('ma_v2_settings', user?.id), settings); }, [settings, user?.id]);
 
   const _persistSession = useCallback((u) => {
     try { localStorage.setItem('ma_session', JSON.stringify(u)); } catch {}
@@ -269,10 +296,8 @@ export function AppProvider({ children }) {
     quality: 'balanced',
   };
   const [settings, setSettings] = useState(() =>
-    loadLS('ma_v2_settings', defaultSettings)
+    loadLS(uk('ma_v2_settings', getSessionId()), defaultSettings)
   );
-
-  useEffect(() => { saveLS('ma_v2_settings', settings); }, [settings]);
 
   const updateSettings = useCallback((patch) => {
     setSettings((prev) => ({ ...prev, ...patch }));
