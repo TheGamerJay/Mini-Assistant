@@ -204,6 +204,21 @@ export function AppProvider({ children }) {
 
   const getFullImage = useCallback((id) => fullImageMap.get(id) || null, []);
 
+  // ---- Settings ----
+  const defaultSettings = {
+    showRouteInfo: true,
+    dryRun: false,
+    autoReview: true,
+    quality: 'balanced',
+  };
+  const [settings, setSettings] = useState(() =>
+    loadLS(uk('ma_v2_settings', getSessionId()), defaultSettings)
+  );
+
+  const updateSettings = useCallback((patch) => {
+    setSettings((prev) => ({ ...prev, ...patch }));
+  }, []);
+
   // ---- Theme ----
   const [theme, _setTheme] = useState(
     () => localStorage.getItem('ma_theme') || 'dark'
@@ -347,21 +362,6 @@ export function AppProvider({ children }) {
     _setUser(null);
     _setAvatar(null);
   }, [user]);
-
-  // ---- Settings ----
-  const defaultSettings = {
-    showRouteInfo: true,
-    dryRun: false,
-    autoReview: true,
-    quality: 'balanced',
-  };
-  const [settings, setSettings] = useState(() =>
-    loadLS(uk('ma_v2_settings', getSessionId()), defaultSettings)
-  );
-
-  const updateSettings = useCallback((patch) => {
-    setSettings((prev) => ({ ...prev, ...patch }));
-  }, []);
 
   // ---- Server Status ----
   const [serverStatus, _setServerStatus] = useState({
