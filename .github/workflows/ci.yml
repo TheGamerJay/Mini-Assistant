@@ -18,20 +18,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node 20
+      - name: Setup Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
+        # .npmrc in frontend/ sets legacy-peer-deps=true — handles React 19
+        # peer dep mismatches from CRA / react-scripts ecosystem.
         run: npm ci
 
       - name: Build
         run: npm run build
         env:
-          CI: false   # treat warnings as warnings, not errors
+          CI: false   # treat ESLint warnings as warnings, not hard errors
           REACT_APP_BACKEND_URL: https://mini-assistant-production.up.railway.app
           REACT_APP_IMAGE_API_URL: https://mini-assistant-production.up.railway.app/image-api
 
@@ -53,10 +55,13 @@ jobs:
           cache: 'pip'
           cache-dependency-path: backend/requirements.txt
 
-      - name: Install core dependencies
+      - name: Install test dependencies
+        # Only install what the phase unit-tests actually import.
+        # mini_assistant/__init__.py now uses lazy __getattr__ so importing
+        # any phase sub-package no longer cascades into the heavy main.py tree.
         run: |
           pip install --upgrade pip
-          pip install pytest pytest-asyncio fastapi httpx pydantic
+          pip install pytest pytest-asyncio fastapi httpx pydantic starlette
 
       - name: Run Phase 8 tests (Security)
         run: pytest tests/test_phase8_security.py -v
