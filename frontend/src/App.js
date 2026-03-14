@@ -25,6 +25,7 @@ import ChatPage from './pages/ChatPage';
 import ImagePage from './pages/ImagePage';
 import SettingsModal from './pages/SettingsModal';
 import AuthPage from './pages/AuthPage';
+import ProfilePage from './pages/ProfilePage';
 
 // Existing tool components (kept for backward compat via 'tool-X' pages)
 import Dashboard from './pages/Dashboard';
@@ -138,6 +139,7 @@ function AppShell() {
     // App Builder is unified into Chat workspace — redirect
     if (page === 'tool-appbuilder') { setPage('chat'); return <ChatPage />; }
     if (page === 'images') return <ImagePage />;
+    if (page === 'profile') return <ProfilePage />;
 
     const toolEntry = TOOL_PAGES[page];
     if (toolEntry) {

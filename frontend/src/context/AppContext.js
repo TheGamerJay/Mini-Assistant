@@ -288,6 +288,66 @@ export function AppProvider({ children }) {
     return session;
   }, [_persistSession]);
 
+  // ---- Avatar ----
+  const [avatar, _setAvatar] = useState(() => {
+    const uid = getSessionId();
+    return uid ? (localStorage.getItem(`ma_avatar_${uid}`) || null) : null;
+  });
+
+  const updateAvatar = useCallback((dataUrl) => {
+    if (!user?.id) return;
+    try { localStorage.setItem(`ma_avatar_${user.id}`, dataUrl); } catch {}
+    _setAvatar(dataUrl);
+  }, [user?.id]);
+
+  const removeAvatar = useCallback(() => {
+    if (!user?.id) return;
+    localStorage.removeItem(`ma_avatar_${user.id}`);
+    _setAvatar(null);
+  }, [user?.id]);
+
+  // ---- Profile mutations ----
+  const updateDisplayName = useCallback((name) => {
+    if (!user?.id || !name.trim()) return;
+    const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
+    const idx = users.findIndex(u => u.id === user.id);
+    if (idx === -1) return;
+    users[idx].name = name.trim();
+    localStorage.setItem('ma_users', JSON.stringify(users));
+    const session = { ...user, name: name.trim() };
+    _persistSession(session);
+  }, [user, _persistSession]);
+
+  const changePassword = useCallback(async (currentPwd, newPwd) => {
+    if (!user?.id) throw new Error('Not logged in.');
+    const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
+    const found = users.find(u => u.id === user.id);
+    if (!found) throw new Error('Account not found.');
+    const encoder = new TextEncoder();
+    const currentBuf = await crypto.subtle.digest('SHA-256', encoder.encode(currentPwd + 'ma_salt_2025'));
+    const currentHash = Array.from(new Uint8Array(currentBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    if (found.passwordHash !== currentHash) throw new Error('Current password is incorrect.');
+    const newBuf = await crypto.subtle.digest('SHA-256', encoder.encode(newPwd + 'ma_salt_2025'));
+    found.passwordHash = Array.from(new Uint8Array(newBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    localStorage.setItem('ma_users', JSON.stringify(users));
+  }, [user]);
+
+  const deleteAccount = useCallback(() => {
+    if (!user?.id) return;
+    const uid = user.id;
+    // Remove user record
+    const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
+    localStorage.setItem('ma_users', JSON.stringify(users.filter(u => u.id !== uid)));
+    // Remove all user-scoped data
+    ['ma_v2_chats', 'ma_v2_projects', 'ma_v2_images', 'ma_v2_settings'].forEach(k => {
+      localStorage.removeItem(`${k}_${uid}`);
+    });
+    localStorage.removeItem(`ma_avatar_${uid}`);
+    localStorage.removeItem('ma_session');
+    _setUser(null);
+    _setAvatar(null);
+  }, [user]);
+
   // ---- Settings ----
   const defaultSettings = {
     showRouteInfo: true,
@@ -358,6 +418,13 @@ export function AppProvider({ children }) {
     logout,
     loginWithCredentials,
     register,
+    // profile
+    avatar,
+    updateAvatar,
+    removeAvatar,
+    updateDisplayName,
+    changePassword,
+    deleteAccount,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

@@ -12,6 +12,7 @@ import {
 import { useApp } from '../context/AppContext';
 import { api } from '../api/client';
 
+
 // ---------------------------------------------------------------------------
 // Status dot
 // ---------------------------------------------------------------------------
@@ -30,7 +31,7 @@ function StatusDot({ label, ok }) {
 // ---------------------------------------------------------------------------
 // Profile dropdown
 // ---------------------------------------------------------------------------
-function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme, user, logout }) {
+function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme, user, logout, avatar }) {
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -78,8 +79,10 @@ function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme, user,
       {/* User info + status */}
       <div className="px-4 py-3 border-b border-white/5">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center text-white text-sm font-bold flex-shrink-0 select-none">
-            {user?.name ? user.name[0].toUpperCase() : 'U'}
+          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center text-white text-sm font-bold flex-shrink-0 select-none overflow-hidden">
+            {avatar
+              ? <img src={avatar} alt="Avatar" className="w-full h-full object-cover" />
+              : (user?.name ? user.name[0].toUpperCase() : 'U')}
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-slate-200 truncate">{user?.name || 'Mini Assistant'}</p>
@@ -94,7 +97,7 @@ function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme, user,
 
       {/* Navigation */}
       <div className="py-1.5 border-b border-white/5">
-        <MenuItem icon={User} label="Project Profiles" onClick={() => go('tool-profiles')} />
+        <MenuItem icon={User} label="My Profile" onClick={() => go('profile')} />
         <MenuItem icon={Settings} label="Settings" onClick={() => go('settings')} />
         <MenuItem icon={Terminal} label="/context — Scan project" onClick={() => go('chat')} hint="slash" />
         <MenuItem icon={HelpCircle} label="/help — All commands" onClick={() => { go('chat'); }} hint="slash" />
@@ -130,7 +133,7 @@ function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme, user,
           className="w-full flex items-center gap-3 px-4 py-2 text-sm text-red-400/70 hover:text-red-400 hover:bg-red-500/5 transition-colors"
         >
           <LogOut size={14} />
-          Clear & Reset Workspace
+          Sign out
         </button>
       </div>
     </div>
@@ -156,7 +159,7 @@ function MenuItem({ icon: Icon, label, onClick, hint }) {
 // TopBar
 // ---------------------------------------------------------------------------
 function TopBar() {
-  const { setPage, serverStatus, setServerStatus, theme, toggleTheme, user, logout } = useApp();
+  const { setPage, serverStatus, setServerStatus, theme, toggleTheme, user, logout, avatar } = useApp();
   const [profileOpen, setProfileOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -220,8 +223,10 @@ function TopBar() {
         >
           <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-cyan-500
             flex items-center justify-center text-white text-xs font-bold
-            group-hover:opacity-80 transition-opacity select-none">
-            {user?.name ? user.name[0].toUpperCase() : 'U'}
+            group-hover:opacity-80 transition-opacity select-none overflow-hidden">
+            {avatar
+              ? <img src={avatar} alt="Avatar" className="w-full h-full object-cover" />
+              : (user?.name ? user.name[0].toUpperCase() : 'U')}
           </div>
           <ChevronDown
             size={12}
@@ -238,6 +243,7 @@ function TopBar() {
             toggleTheme={toggleTheme}
             user={user}
             logout={logout}
+            avatar={avatar}
           />
         )}
       </div>
