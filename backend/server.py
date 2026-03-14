@@ -4722,13 +4722,27 @@ _static_dir = Path(__file__).parent / "static"
 if _static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(_static_dir / "static")), name="static-assets")
 
-    # Serve root-level public assets (Logo.png, favicon, etc.) before the catch-all
+    # Serve root-level public assets (Logo.png, manifest.json, favicon, etc.) before the catch-all
     @app.get("/Logo.png")
     async def serve_logo():
         logo = _static_dir / "Logo.png"
         if logo.exists():
             return FileResponse(str(logo), media_type="image/png")
         raise HTTPException(status_code=404, detail="Logo not found")
+
+    @app.get("/manifest.json")
+    async def serve_manifest():
+        manifest = _static_dir / "manifest.json"
+        if manifest.exists():
+            return FileResponse(str(manifest), media_type="application/json")
+        raise HTTPException(status_code=404, detail="manifest.json not found")
+
+    @app.get("/favicon.ico")
+    async def serve_favicon():
+        fav = _static_dir / "favicon.ico"
+        if fav.exists():
+            return FileResponse(str(fav), media_type="image/x-icon")
+        raise HTTPException(status_code=404, detail="favicon not found")
 
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
