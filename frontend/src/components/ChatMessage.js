@@ -341,7 +341,7 @@ function RouteInfo({ route_result, generation_time_ms }) {
     : 'text-slate-400/80 bg-white/5 border-white/10';
   return (
     <div className="flex flex-wrap items-center gap-1 mt-2">
-      {intent && <span className={`text-[10px] font-mono rounded px-1.5 py-0.5 border ${intentColor}`}>{intent}</span>}
+      {intent && intent !== 'chat' && <span className={`text-[10px] font-mono rounded px-1.5 py-0.5 border ${intentColor}`}>{intent}</span>}
       {checkpoint && <span className="text-[10px] font-mono rounded px-1.5 py-0.5 border text-cyan-400/70 bg-cyan-500/5 border-cyan-500/20 truncate max-w-[120px]">{checkpoint}</span>}
       {confidence && <span className="text-[10px] font-mono rounded px-1.5 py-0.5 border text-slate-400/70 bg-white/5 border-white/10">{confidence}</span>}
       {timeS && <span className="text-[10px] font-mono rounded px-1.5 py-0.5 border text-slate-500/70 bg-white/5 border-white/10">{timeS}</span>}
