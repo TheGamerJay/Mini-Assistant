@@ -27,7 +27,7 @@ _BLOCKED_PATTERNS: List[re.Pattern] = [re.compile(p, re.IGNORECASE) for p in [
     r"rm\s+-rf\s+/",            # wipe root filesystem
     r"dd\s+if=",                # disk-wipe via dd
     r"mkfs\.",                  # format filesystem
-    r":()\{.*\};:",             # fork bomb
+    r":\(\)\{.*\};:",            # fork bomb
     r"curl\s+.*\|\s*sh",        # curl-pipe-sh
     r"wget\s+.*\|\s*sh",        # wget-pipe-sh
     r"chmod\s+777\s+/",         # open-up root

@@ -3737,23 +3737,35 @@ async def tester_history():
 
 # Health check
 @api_router.get("/health")
-async def health_check():
-    # Check ComfyUI availability
-    comfyui_status = "disconnected"
+async def health_check(deep: bool = False):
+    """
+    Health check endpoint.
+    ?deep=true runs full dependency probes (Ollama, ComfyUI, Redis, MongoDB).
+    """
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(f"{os.environ.get('COMFYUI_URL', 'http://localhost:8188')}/system_stats", timeout=2.0)
-            if resp.status_code == 200:
-                comfyui_status = "connected"
+        from mini_assistant.phase10.health_checks import run_health_checks
+        report = await run_health_checks(include_slow=deep)
+        report["whisper"] = "loaded" if whisper_model else "not_loaded"
+        return report
     except Exception:
+        # Fallback to legacy check if Phase 10 unavailable
         comfyui_status = "disconnected"
-
-    return {
-        "status": "healthy",
-        "ollama": "connected" if ollama_client else "disconnected",
-        "comfyui": comfyui_status,
-        "whisper": "loaded" if whisper_model else "not_loaded"
-    }
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"{os.environ.get('COMFYUI_URL', 'http://localhost:8188')}/system_stats",
+                    timeout=2.0,
+                )
+                if resp.status_code == 200:
+                    comfyui_status = "connected"
+        except Exception:
+            pass
+        return {
+            "status":  "healthy",
+            "ollama":  "connected" if ollama_client else "disconnected",
+            "comfyui": comfyui_status,
+            "whisper": "loaded" if whisper_model else "not_loaded",
+        }
 
 # ==================== Multi-Brain Assistant API ====================
 try:
@@ -4722,23 +4734,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── API Key auth middleware ───────────────────────────────────────────────────
-_API_KEY = os.environ.get('API_KEY', '')
-
-@app.middleware("http")
-async def api_key_guard(request, call_next):
-    # Skip auth if no key configured (local dev), for health checks, or preflight
-    if not _API_KEY or request.method == "OPTIONS":
-        return await call_next(request)
-    path = request.url.path
-    if path in ("/", "/api/health") or path.startswith("/static") or path.startswith("/_"):
-        return await call_next(request)
-    # Check header or query param
-    key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
-    if key != _API_KEY:
-        from fastapi.responses import JSONResponse
-        return JSONResponse({"detail": "Unauthorized"}, status_code=401)
-    return await call_next(request)
+# ── Phase 10: Production middleware stack ─────────────────────────────────────
+try:
+    from mini_assistant.phase10.request_tracer import attach_tracer
+    from mini_assistant.phase10.rate_limiter   import attach_rate_limiter
+    from mini_assistant.phase10.auth_middleware import attach_auth
+    attach_tracer(app)        # 1. request ID + latency logging
+    attach_rate_limiter(app)  # 2. sliding-window rate limits
+    attach_auth(app)          # 3. X-API-Key validation (no-op if API_KEY unset)
+    logging.getLogger(__name__).info("✓ Phase 10 middleware stack attached")
+except Exception as _p10_err:
+    logging.getLogger(__name__).warning("Phase 10 middleware unavailable: %s", _p10_err)
 
 logging.basicConfig(
     level=logging.INFO,

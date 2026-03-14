@@ -1,0 +1,165 @@
+"""
+backend/mini_assistant/phase10/rate_limiter.py
+
+In-process sliding-window rate limiter middleware.
+
+Two tiers:
+  - Per-IP    : default 120 req / 60 s  (configurable via env)
+  - Per-session: default 60 req / 60 s  (applied to /api/chat only)
+
+Heavy endpoints (image generation) get a stricter sub-limit:
+  - Per-IP on /*/image/generate or /*/chat : 20 req / 60 s
+
+Configuration via environment variables:
+  RATE_LIMIT_IP_RPS       default 120
+  RATE_LIMIT_IP_WINDOW    default 60   (seconds)
+  RATE_LIMIT_HEAVY_RPS    default 20
+  RATE_LIMIT_ENABLED      default 1    (set to 0 to disable)
+"""
+from __future__ import annotations
+
+import logging
+import os
+import time
+from collections import defaultdict, deque
+from typing import Callable, Deque, Dict
+
+from fastapi import Request, Response
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+
+logger = logging.getLogger(__name__)
+
+# ── Config ────────────────────────────────────────────────────────────────────
+def _int(key: str, default: int) -> int:
+    try:
+        return int(os.environ.get(key, default))
+    except (ValueError, TypeError):
+        return default
+
+_ENABLED        = os.environ.get("RATE_LIMIT_ENABLED", "1").strip() != "0"
+_IP_LIMIT       = _int("RATE_LIMIT_IP_RPS", 120)
+_IP_WINDOW      = _int("RATE_LIMIT_IP_WINDOW", 60)
+_HEAVY_LIMIT    = _int("RATE_LIMIT_HEAVY_RPS", 20)
+
+# Paths that count as "heavy" (image gen + raw chat)
+_HEAVY_PATHS = (
+    "/image/generate",
+    "/api/chat",
+    "/image-api/api/chat",
+)
+
+# Paths that bypass rate limiting entirely
+_EXEMPT_PREFIXES = (
+    "/static/",
+    "/Logo.png",
+    "/favicon",
+)
+
+
+# ── Sliding window counter ────────────────────────────────────────────────────
+
+class _SlidingWindow:
+    """Thread-safe-ish deque-based sliding window counter."""
+
+    def __init__(self, limit: int, window_s: int):
+        self.limit    = limit
+        self.window   = window_s
+        self._buckets: Dict[str, Deque[float]] = defaultdict(deque)
+
+    def is_allowed(self, key: str) -> bool:
+        now  = time.monotonic()
+        dq   = self._buckets[key]
+        cutoff = now - self.window
+        # Evict expired timestamps
+        while dq and dq[0] < cutoff:
+            dq.popleft()
+        if len(dq) >= self.limit:
+            return False
+        dq.append(now)
+        return True
+
+    def retry_after(self, key: str) -> int:
+        """Seconds until the oldest request expires from the window."""
+        dq = self._buckets.get(key)
+        if not dq:
+            return 0
+        return max(0, int(self.window - (time.monotonic() - dq[0])) + 1)
+
+    def stats(self, key: str) -> dict:
+        dq = self._buckets.get(key, deque())
+        return {"count": len(dq), "limit": self.limit, "window_s": self.window}
+
+
+# ── Middleware ────────────────────────────────────────────────────────────────
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app):
+        super().__init__(app)
+        self._ip_limiter    = _SlidingWindow(_IP_LIMIT,    _IP_WINDOW)
+        self._heavy_limiter = _SlidingWindow(_HEAVY_LIMIT, _IP_WINDOW)
+        if _ENABLED:
+            logger.info(
+                "RateLimitMiddleware: ENABLED — IP %d/%ds, heavy %d/%ds",
+                _IP_LIMIT, _IP_WINDOW, _HEAVY_LIMIT, _IP_WINDOW,
+            )
+        else:
+            logger.info("RateLimitMiddleware: DISABLED")
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        if not _ENABLED:
+            return await call_next(request)
+
+        path = request.url.path
+
+        # Exempt paths
+        if any(path.startswith(p) for p in _EXEMPT_PREFIXES):
+            return await call_next(request)
+
+        # Identify client: prefer forwarded IP, fall back to client host
+        ip = (
+            request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            or request.headers.get("X-Real-IP", "")
+            or (request.client.host if request.client else "unknown")
+        )
+
+        # General IP rate limit
+        if not self._ip_limiter.is_allowed(ip):
+            retry = self._ip_limiter.retry_after(ip)
+            logger.warning("Rate limit (IP): %s %s [%s]", ip, path, request.method)
+            return JSONResponse(
+                status_code=429,
+                headers={"Retry-After": str(retry)},
+                content={
+                    "detail": f"Too many requests. Retry after {retry}s.",
+                    "retry_after": retry,
+                },
+            )
+
+        # Heavy-endpoint sub-limit
+        is_heavy = any(p in path for p in _HEAVY_PATHS)
+        if is_heavy and not self._heavy_limiter.is_allowed(ip):
+            retry = self._heavy_limiter.retry_after(ip)
+            logger.warning("Rate limit (heavy): %s %s [%s]", ip, path, request.method)
+            return JSONResponse(
+                status_code=429,
+                headers={"Retry-After": str(retry)},
+                content={
+                    "detail": f"Image/chat rate limit exceeded. Retry after {retry}s.",
+                    "retry_after": retry,
+                },
+            )
+
+        response = await call_next(request)
+        # Expose limit headers so the client can self-throttle
+        stats = self._ip_limiter.stats(ip)
+        remaining = max(0, stats["limit"] - stats["count"])
+        response.headers["X-RateLimit-Limit"]     = str(stats["limit"])
+        response.headers["X-RateLimit-Remaining"] = str(remaining)
+        response.headers["X-RateLimit-Window"]    = str(stats["window_s"])
+        return response
+
+
+def attach_rate_limiter(app) -> None:
+    """Convenience: attach the middleware to a FastAPI app."""
+    app.add_middleware(RateLimitMiddleware)

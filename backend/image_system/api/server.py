@@ -63,30 +63,18 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
-# Request logging + auth middleware
+# Phase 10: Production middleware stack
 # ---------------------------------------------------------------------------
-
-_API_KEY = os.environ.get("API_KEY", "")
-
-@app.middleware("http")
-async def auth_and_log(request: Request, call_next):
-    # API key guard (skip if no key configured, health checks, or preflight)
-    if _API_KEY and request.method != "OPTIONS":
-        path = request.url.path
-        if path not in ("/api/health",):
-            key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
-            if key != _API_KEY:
-                from fastapi.responses import JSONResponse as _JR
-                return _JR({"detail": "Unauthorized"}, status_code=401)
-
-    start = time.perf_counter()
-    response = await call_next(request)
-    elapsed = (time.perf_counter() - start) * 1000
-    logger.info(
-        "%s %s → %d (%.0fms)",
-        request.method, request.url.path, response.status_code, elapsed,
-    )
-    return response
+try:
+    from mini_assistant.phase10.request_tracer  import attach_tracer
+    from mini_assistant.phase10.rate_limiter    import attach_rate_limiter
+    from mini_assistant.phase10.auth_middleware import attach_auth
+    attach_tracer(app)
+    attach_rate_limiter(app)
+    attach_auth(app)
+    logger.info("✓ Phase 10 middleware stack attached (image_system)")
+except Exception as _p10_err:
+    logger.warning("Phase 10 middleware unavailable (image_system): %s", _p10_err)
 
 # ---------------------------------------------------------------------------
 # Active generation tracking (for cancellation)
