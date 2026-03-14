@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Frontend build ─────────────────────────────────────────────────────────
+  frontend:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+        env:
+          CI: false   # treat warnings as warnings, not errors
+          REACT_APP_BACKEND_URL: https://mini-assistant-production.up.railway.app
+          REACT_APP_IMAGE_API_URL: https://mini-assistant-production.up.railway.app/image-api
+
+  # ── Backend tests ──────────────────────────────────────────────────────────
+  backend:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install core dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pytest pytest-asyncio fastapi httpx pydantic
+
+      - name: Run Phase 8 tests (Security)
+        run: pytest tests/test_phase8_security.py -v
+
+      - name: Run Phase 9 tests (Learning)
+        run: pytest tests/test_phase9_learning.py -v
+
+      - name: Run Phase 10 tests (Middleware)
+        run: pytest tests/test_phase10_middleware.py -v
+
+  # ── Summary gate ───────────────────────────────────────────────────────────
+  all-green:
+    name: All checks passed
+    needs: [frontend, backend]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "All CI checks passed!"
