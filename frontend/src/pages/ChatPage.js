@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { XCircle } from 'lucide-react';
+import { XCircle, PanelRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp, makeThumbnail } from '../context/AppContext';
 import { useChat } from '../hooks/useChat';
@@ -14,7 +14,15 @@ import ChatInput from '../components/ChatInput';
 import MiniOrb from '../components/MiniOrb';
 import CognitiveStream from '../components/CognitiveStream';
 import ApprovalModal from '../components/ApprovalModal';
+import RightPanel from '../components/RightPanel';
 import api from '../api/client';
+
+/** Detect if a message/prompt suggests app-building intent */
+function isBuildIntent(text, routeResult) {
+  if (routeResult === 'app_builder') return true;
+  if (!text) return false;
+  return /\/build|build me|create (a|an|the) (app|website|page|ui|component|form|dashboard)|make (a|an) (web|react|html)|generate (a|an) (app|website|page)/i.test(text);
+}
 
 function LoadingBubble() {
   return (
@@ -42,8 +50,9 @@ function ChatPage() {
   } = useApp();
 
   const { send, cancel, loading } = useChat();
-  const [messages, setMessages]   = useState([]);
+  const [messages, setMessages]       = useState([]);
   const [pendingApproval, setPendingApproval] = useState(null);
+  const [rightPanelOpen, setRightPanelOpen]   = useState(false);
 
   // Cognitive stream state
   const [streamActive, setStreamActive]     = useState(false);
@@ -104,6 +113,9 @@ function ChatPage() {
     setMessages(nextMessages);
     updateChatMessages(chatId, nextMessages);
 
+    // Auto-open right panel for build intent
+    if (isBuildIntent(text, null)) setRightPanelOpen(true);
+
     // Kick off the cognitive stream
     setStreamPrompt(text);
     setStreamResponse(null);
@@ -132,6 +144,9 @@ function ChatPage() {
           if (found) setPendingApproval(found);
         } catch (_) { /* non-fatal */ }
       }
+
+      // Auto-open right panel if build intent detected in response
+      if (isBuildIntent(text, data.route_result)) setRightPanelOpen(true);
 
       const assistantMsg = {
         role: 'assistant',
@@ -222,7 +237,7 @@ function ChatPage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full overflow-hidden">
       {/* Phase 8: Tool Approval Modal */}
       {pendingApproval && (
         <ApprovalModal
@@ -231,62 +246,85 @@ function ChatPage() {
           onDeny={handleDeny}
         />
       )}
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 md:px-12 lg:px-24 py-6 space-y-6">
-        {messages.map((msg, idx) => (
-          <ChatMessage
-            key={idx}
-            message={msg}
-            onRetry={msg.type === 'error' ? () => handleSubmit(lastUserTextRef.current) : undefined}
-          />
-        ))}
 
-        {/* Cognitive stream + dots bubble while loading */}
-        {loading && (
-          <div className="space-y-3">
-            <CognitiveStream
-              active={streamActive}
-              prompt={streamPrompt}
-              response={streamResponse}
-              onDone={handleStreamDone}
+      {/* ── Chat center column ── */}
+      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto px-4 md:px-10 lg:px-16 py-6 space-y-6">
+          {messages.map((msg, idx) => (
+            <ChatMessage
+              key={idx}
+              message={msg}
+              onRetry={msg.type === 'error' ? () => handleSubmit(lastUserTextRef.current) : undefined}
             />
-            {/* Dots bubble only when stream has collapsed or hasn't mounted yet */}
-            {!streamActive && <LoadingBubble />}
-          </div>
-        )}
+          ))}
 
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Input footer */}
-      <div className="flex-shrink-0 border-t border-white/5 px-4 md:px-12 lg:px-24 py-4 bg-[#0d0d12]">
-        <div className="relative">
-          <ChatInput
-            variant="chat"
-            onSubmit={handleSubmit}
-            loading={loading}
-          />
+          {/* Cognitive stream + dots bubble while loading */}
           {loading && (
-            <button
-              onClick={handleCancel}
-              title="Stop generating"
-              className="absolute right-[-44px] bottom-2 p-2 rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-            >
-              <XCircle size={18} />
-            </button>
+            <div className="space-y-3">
+              <CognitiveStream
+                active={streamActive}
+                prompt={streamPrompt}
+                response={streamResponse}
+                onDone={handleStreamDone}
+              />
+              {!streamActive && <LoadingBubble />}
+            </div>
           )}
+
+          <div ref={bottomRef} />
         </div>
-        {loading && (
-          <div className="flex justify-center mt-2">
+
+        {/* Input footer */}
+        <div className="flex-shrink-0 border-t border-white/5 px-4 md:px-10 lg:px-16 py-4 bg-[#0d0d12]">
+          <div className="relative">
+            <ChatInput
+              variant="chat"
+              onSubmit={handleSubmit}
+              loading={loading}
+              placeholder={rightPanelOpen ? 'Describe changes or chat…' : 'Message Mini Assistant, or say /build to create an app…'}
+            />
+            {loading && (
+              <button
+                onClick={handleCancel}
+                title="Stop generating"
+                className="absolute right-[-44px] bottom-2 p-2 rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+              >
+                <XCircle size={18} />
+              </button>
+            )}
+          </div>
+          <div className="flex items-center justify-between mt-2">
+            {loading && (
+              <button
+                onClick={handleCancel}
+                className="text-[11px] text-slate-600 hover:text-slate-400 transition-colors font-mono"
+              >
+                Stop generating
+              </button>
+            )}
+            {!loading && <div />}
             <button
-              onClick={handleCancel}
-              className="text-[11px] text-slate-600 hover:text-slate-400 transition-colors font-mono"
+              onClick={() => setRightPanelOpen(v => !v)}
+              title={rightPanelOpen ? 'Close preview panel' : 'Open preview panel'}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] transition-colors
+                ${rightPanelOpen
+                  ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
+                  : 'bg-white/5 text-slate-500 hover:text-slate-300 border border-white/5'}`}
             >
-              Stop generating
+              <PanelRight size={12} />
+              {rightPanelOpen ? 'Hide Preview' : 'Show Preview'}
             </button>
           </div>
-        )}
+        </div>
       </div>
+
+      {/* ── Right panel ── */}
+      <RightPanel
+        messages={messages}
+        open={rightPanelOpen}
+        onClose={() => setRightPanelOpen(false)}
+      />
     </div>
   );
 }

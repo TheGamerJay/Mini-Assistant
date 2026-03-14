@@ -34,7 +34,6 @@ import CommandTerminal from './components/Terminal/CommandTerminal';
 import WebSearch from './components/Search/WebSearch';
 import CodebaseSearch from './components/Search/CodebaseSearch';
 import ProjectProfiles from './components/Profiles/ProjectProfiles';
-import AppBuilder from './components/AppBuilder/AppBuilder';
 import CodeReview from './components/CodeReview/CodeReview';
 import GitIntegration from './components/Git/GitIntegration';
 import CodeRunner from './components/CodeRunner/CodeRunner';
@@ -69,9 +68,10 @@ export const axiosInstance = axios.create({
 
 // ---------------------------------------------------------------------------
 // Tool page map: page id → { component, title }
+// Note: 'tool-appbuilder' is intentionally removed — App Builder is now
+// unified into the Chat workspace (right panel with Preview/Code tabs).
 // ---------------------------------------------------------------------------
 const TOOL_PAGES = {
-  'tool-appbuilder': { component: AppBuilder, title: 'App Builder' },
   'tool-tasks': { component: TaskMonitor, title: 'Task Monitor' },
   'tool-agent': { component: AgentPipeline, title: 'Agent Pipeline' },
   'tool-codereview': { component: CodeReview, title: 'Code Review' },
@@ -134,6 +134,8 @@ function AppShell() {
   // Render current page content
   const renderContent = () => {
     if (page === 'chat') return <ChatPage />;
+    // App Builder is unified into Chat workspace — redirect
+    if (page === 'tool-appbuilder') { setPage('chat'); return <ChatPage />; }
     if (page === 'images') return <ImagePage />;
 
     const toolEntry = TOOL_PAGES[page];

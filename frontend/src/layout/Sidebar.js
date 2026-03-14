@@ -51,7 +51,7 @@ import {
 // Tool definitions
 // ---------------------------------------------------------------------------
 const TOOLS = [
-  { id: 'appbuilder', label: 'App Builder', icon: Wand2 },
+  { id: 'appbuilder', label: 'Build (Workspace)', icon: Wand2, page: 'chat' },
   { id: 'tasks', label: 'Task Monitor', icon: ListTodo },
   { id: 'agent', label: 'Agent Pipeline', icon: Brain },
   { id: 'codereview', label: 'Code Review', icon: Shield },
@@ -470,21 +470,25 @@ function Sidebar() {
 
         {/* Tools */}
         <SidebarSection icon={Wrench} label="Tools" collapsed={sidebarCollapsed} defaultOpen={false}>
-          {TOOLS.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => setPage(`tool-${id}`)}
-              title={label}
-              className={`w-full flex items-center gap-2 rounded-lg px-2 py-1.5 mb-0.5 text-xs transition-colors
-                ${page === `tool-${id}`
-                  ? 'bg-cyan-500/10 border-l-2 border-cyan-400 text-cyan-300 pl-1.5'
-                  : 'text-slate-500 hover:bg-white/5 hover:text-slate-300 border-l-2 border-transparent'}
-                ${sidebarCollapsed ? 'justify-center' : ''}`}
-            >
-              <Icon size={13} className="flex-shrink-0" />
-              {!sidebarCollapsed && <span className="truncate">{label}</span>}
-            </button>
-          ))}
+          {TOOLS.map(({ id, label, icon: Icon, page: customPage }) => {
+            const targetPage = customPage || `tool-${id}`;
+            const isActive = customPage ? page === customPage : page === `tool-${id}`;
+            return (
+              <button
+                key={id}
+                onClick={() => setPage(targetPage)}
+                title={label}
+                className={`w-full flex items-center gap-2 rounded-lg px-2 py-1.5 mb-0.5 text-xs transition-colors
+                  ${isActive
+                    ? 'bg-cyan-500/10 border-l-2 border-cyan-400 text-cyan-300 pl-1.5'
+                    : 'text-slate-500 hover:bg-white/5 hover:text-slate-300 border-l-2 border-transparent'}
+                  ${sidebarCollapsed ? 'justify-center' : ''}`}
+              >
+                <Icon size={13} className="flex-shrink-0" />
+                {!sidebarCollapsed && <span className="truncate">{label}</span>}
+              </button>
+            );
+          })}
         </SidebarSection>
       </div>
 
