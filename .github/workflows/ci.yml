@@ -16,7 +16,7 @@ jobs:
         working-directory: frontend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node 22
         uses: actions/setup-node@v4
@@ -46,7 +46,7 @@ jobs:
         working-directory: backend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
