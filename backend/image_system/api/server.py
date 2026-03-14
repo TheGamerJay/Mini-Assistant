@@ -228,6 +228,86 @@ Structure: [Intro] → [Verse 1] → [Chorus] → [Verse 2] → [Chorus] → [Br
 - Bridge is the emotional climax — builds to a peak
 - Backup vocals in ( ) are call-and-response worship moments
 
+### Bachata (Spanish — Dominican Republic)
+Structure: [Intro] → [Verso 1] → [Coro] → [Verso 2] → [Coro] → [Mambo] → [Coro] → [Outro]
+- Written in Spanish — raw, emotional, romantic or heartbreak themes
+- [Mambo] = instrumental guitar / güira break section, can include call-response vocals
+- Delivery is intimate, close, conversational — lyrics feel like whispers or confessions
+- Common themes: love, jealousy, longing, betrayal, desire
+- Adlibs: (ay), (amor), (mi vida), (oh oh oh)
+- Lines often end with rhythmic syllables that match the guitar: "ay amor (ay)", "te quiero (te quiero)"
+
+### Merengue (Spanish — Dominican Republic)
+Structure: [Intro] → [Verso 1] → [Coro] → [Verso 2] → [Coro] → [Jaleo] → [Coro] → [Outro]
+- Fast, upbeat, celebratory — 2/4 rhythm drives the phrasing
+- [Jaleo] = freestyle improvised vocal section, often call-and-response with horns
+- Lyrics are fun, playful, danceable — humor and flirting are common
+- Short punchy lines that land on the beat: "ella baila, ella goza, ella mueve"
+- Brass/accordion stabs reflected in lyric punches
+
+### Salsa (Spanish — Cuban / Puerto Rican / Colombian roots)
+Structure: [Intro] → [Verso 1] → [Coro] → [Verso 2] → [Coro] → [Montuno / Coro-Pregón] → [Mambo] → [Coro] → [Outro]
+- [Montuno] = the heart of salsa — repeating coro while the lead singer improvises (pregón)
+- [Pregón] = improvised shout lines over the coro loop, e.g. lead: "dime lo que tú quieres" / coro: (lo que yo quiero)"
+- Themes: romance, street life, Afro-Caribbean pride, dancing, social commentary
+- Clave rhythm (3-2 or 2-3) shapes syllable placement
+- Adlibs: (eso es), (azúcar), (wepa), (pa' lante), (oye)
+
+### Cumbia (Spanish — Colombian / Mexican / Central American)
+Structure: [Intro] → [Verso 1] → [Coro] → [Verso 2] → [Coro] → [Instrumental Break] → [Coro] → [Outro]
+- Roots in Colombian coast — spreads across Latin America with regional variations
+- Medium tempo, hypnotic groove — lyrics match the steady rhythmic pulse
+- Themes: celebration, folk stories, nostalgia, love, regional pride
+- Colombian cumbia: poetic, Afro-Indigenous imagery
+- Mexican cumbia: more festive, narco-corrido crossovers common
+- Lines are rhythmically even, often syllabically matched to the beat
+- Adlibs: (ay ay ay), (cumbia), (baila baila)
+
+### Ballad / Power Ballad (English — universal)
+Structure: [Intro] → [Verse 1] → [Chorus] → [Verse 2] → [Chorus] → [Bridge] → [Key Change Chorus] → [Outro]
+- Slow, emotionally heavy — every line carries weight
+- [Key Change Chorus] = the climactic final chorus, typically a half or whole step up
+- Verses are vulnerable and narrative; chorus is the release
+- Bridge is the emotional breaking point — often the most raw lines in the song
+- Power Ballad variation: builds from soft verse to huge rock/orchestra chorus
+- Themes: love, loss, longing, resilience, heartbreak
+- No adlibs — let the vocals breathe. Harmonies in ( ) on chorus lifts
+
+### Corrido / Regional Mexican (Spanish)
+Structure: [Intro] → [Verso 1] → [Coro] → [Verso 2] → [Coro] → [Verso 3] → [Outro]
+- Storytelling tradition — narrates real or dramatized events (heroes, outlaws, tragedies)
+- Traditional corrido: 3+ verses, brass banda or guitarrón backing
+- Narcocorrido / Corrido Tumbado: modern trap-influenced, dark themes, flex and loyalty
+- First verse usually introduces the protagonist or setting
+- Third verse often contains the resolution or moral
+- Adlibs (corrido tumbado): (arriba), (puro sinaloa), (que viva), (ánimo)
+
+### Vallenato (Spanish — Colombian)
+Structure: [Intro] → [Verso 1] → [Coro] → [Verso 2] → [Coro] → [Piqueria / Acordeón Solo] → [Coro] → [Outro]
+- [Piqueria] = accordion duel / improvised vocal challenge section
+- Poetic, storytelling — love, nostalgia, place names, personal memory
+- Four rhythms: paseo, merengue vallenato, puya, son — paseo is most common for lyrics
+- Lyrics flow with the accordion melody closely
+- Themes: romantic love, longing for home, nature, friendship
+
+### Flamenco / Rumba Flamenca (Spanish — Andalusian)
+Structure: [Introducción] → [Copla 1] → [Estribillo] → [Copla 2] → [Estribillo] → [Falseta / Solo de Guitarra] → [Estribillo] → [Cierre]
+- [Copla] = verse (flamenco term), [Estribillo] = chorus, [Falseta] = guitar solo, [Cierre] = closing
+- Deep emotional content — "duende" (raw soul) is everything
+- Themes: sorrow (pena), passion, death, exile, love
+- Short intense lines, often just 4 lines per copla
+- Guttural exclamations are traditional: ¡Olé!, ¡Ay!, ¡Eso!, (jaleando)
+- Rumba flamenca is faster and more festive — used in pop crossovers
+
+### Bossa Nova / Samba (Portuguese — Brazilian)
+Structure: [Intro] → [Verso A] → [Verso B] → [Refrão] → [Verso A] → [Verso B] → [Refrão] → [Coda]
+- Written in Portuguese (Brazilian) — Bossa Nova: cool, intimate, jazzy
+- Samba: celebratory, percussive, fast
+- Bossa Nova lines are conversational, gentle, understated
+- [Refrão] = chorus; [Coda] = ending section
+- Themes: nature, Rio de Janeiro, longing (saudade), love, beauty
+- Adlibs: (ai, ai), (oba), (saudade)
+
 ## Always follow the user's requested genre, theme, and language. If no genre is specified, ask or default to Pop structure. Match the authentic language, slang, and cultural feel of the genre.
 """
 
