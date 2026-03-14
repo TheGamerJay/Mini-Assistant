@@ -612,14 +612,20 @@ async def analyze_image(req: AnalyzeRequest):
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
     """
-    Multi-purpose chat endpoint — Phase 1: Planner-First Routing.
+    Multi-purpose chat endpoint — Phase 2: Full Executive Hierarchy.
 
-    Every request passes through the Planner before any brain or tool runs.
-    The Planner detects intent, builds a task plan, and selects execution_intent.
-    The execution layer (image generation, coding brain, chat) then acts on that.
-    Finally a Critic validates the reply and a Composer assembles the response.
+    Request flow:
+      Command Parser  → slash command detection
+      Planner         → intent + task list  (ALWAYS FIRST)
+      CEO             → posture: mode, risk, priority
+      Manager         → session context, normalization
+      Supervisor      → task state tracking
+      Brain           → image gen / coding / chat execution
+      Critic          → reply validation
+      Composer        → final response assembly
 
     Slash commands (/fix, /image, /code, etc.) override intent detection.
+    Phase 2 adds CEO posture, Manager session context, and Supervisor task tracking.
     """
     from ..utils.prompt_safety import validate as ps_validate
 
@@ -630,10 +636,13 @@ async def chat(req: ChatRequest):
         raise HTTPException(status_code=400, detail=f"Message rejected: {safety_error}")
 
     # ── Phase 1 Step 1: Command Parser ─────────────────────────────────────────
-    phase1_plan   = None
-    phase1_critic = None
-    parsed_cmd    = None
-    effective_msg = clean_message
+    phase1_plan      = None
+    phase1_critic    = None
+    parsed_cmd       = None
+    effective_msg    = clean_message
+    ceo_posture      = None
+    manager_packet   = None
+    supervisor_result= None
 
     try:
         from mini_assistant.phase1.command_parser import parse as cmd_parse
@@ -668,9 +677,66 @@ async def chat(req: ChatRequest):
                 route_result = {},
             )
 
+        # ── Phase 2 Step 1: CEO — set posture ──────────────────────────────────
+        try:
+            from mini_assistant.phase2.ceo import assess as ceo_assess
+            ceo_posture = ceo_assess(phase1_plan, effective_msg)
+            logger.info(
+                "CEO → mode=%s risk=%s priority=%s ms=%.1f",
+                ceo_posture.mode, ceo_posture.risk_posture,
+                ceo_posture.priority, ceo_posture.ceo_ms,
+            )
+        except Exception as _ceo_err:
+            logger.warning("CEO failed (%s) — using defaults.", _ceo_err)
+            ceo_posture = None
+
+        # ── Phase 2 Step 2: Manager — normalize + inject session context ───────
+        try:
+            from mini_assistant.phase2.manager import prepare as mgr_prepare
+            history_list = [{"role": h.role, "content": h.content} for h in (req.history or [])]
+            manager_packet = mgr_prepare(
+                message    = effective_msg,
+                session_id = session_id,
+                plan       = phase1_plan,
+                posture    = ceo_posture,
+                history    = history_list,
+            )
+            logger.info(
+                "Manager → turn=%d is_continuation=%s ceo_mode=%s ms=%.1f",
+                manager_packet.session_context.get("turn_count", 0),
+                manager_packet.is_continuation,
+                manager_packet.ceo_mode,
+                manager_packet.manager_ms,
+            )
+        except Exception as _mgr_err:
+            logger.warning("Manager failed (%s) — skipping context injection.", _mgr_err)
+            manager_packet = None
+
+        # ── Phase 2 Step 3: Supervisor — task state tracking ───────────────────
+        try:
+            from mini_assistant.phase2.supervisor import Supervisor
+            if manager_packet:
+                supervisor = Supervisor(manager_packet)
+                supervisor_result = supervisor.supervise(phase1_plan.sequential_tasks)
+                logger.info(
+                    "Supervisor → %d/%d tasks completed, overall=%s ms=%.1f",
+                    len(supervisor_result.completed_tasks),
+                    len(supervisor_result.tasks),
+                    supervisor_result.overall_state,
+                    supervisor_result.supervisor_ms,
+                )
+            else:
+                supervisor_result = None
+        except Exception as _sup_err:
+            logger.warning("Supervisor failed (%s) — continuing without task tracking.", _sup_err)
+            supervisor_result = None
+
     except Exception as _p1_err:
-        logger.warning("Phase 1 pipeline failed (%s) — falling back to legacy routing.", _p1_err)
+        logger.warning("Phase 1/2 pipeline failed (%s) — falling back to legacy routing.", _p1_err)
         phase1_plan = None
+        ceo_posture = None
+        manager_packet = None
+        supervisor_result = None
 
     # ── Phase 1 Step 3: Execution Router ───────────────────────────────────────
     # Use Planner's execution_intent to drive the existing image_system router.
@@ -753,21 +819,29 @@ async def chat(req: ChatRequest):
         except Exception as exc:
             reply = f"I'm having trouble responding right now: {exc}"
 
-    # ── Phase 1 Step 5: Critic + Composer ──────────────────────────────────────
+    # ── Phase 1+2 Step 5: Critic + Composer ────────────────────────────────────
     if phase1_plan is not None:
         try:
             from mini_assistant.phase1.critic import critique
             from mini_assistant.phase1.composer import compose as phase1_compose
             critic_result = critique(reply, phase1_plan)
-            return phase1_compose(
+            response = phase1_compose(
                 reply        = reply,
                 plan         = phase1_plan,
                 critic       = critic_result,
                 session_id   = session_id,
                 route_result = route_result,
             )
+            # Enrich with Phase 2 executive metadata
+            if ceo_posture:
+                response["ceo"] = ceo_posture.to_dict()
+            if manager_packet:
+                response["manager"] = manager_packet.to_dict()
+            if supervisor_result:
+                response["supervisor"] = supervisor_result.to_dict()
+            return response
         except Exception as _c_err:
-            logger.warning("Phase 1 Critic/Composer failed (%s) — returning raw reply.", _c_err)
+            logger.warning("Phase 1+2 Critic/Composer failed (%s) — returning raw reply.", _c_err)
 
     # Legacy fallback response shape (Phase 1 unavailable)
     return {

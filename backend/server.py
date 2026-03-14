@@ -4075,6 +4075,45 @@ app.include_router(api_router)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Phase 2 — Executive layer diagnostics
+# GET /api/session/{session_id}  — Manager session summary
+# GET /api/executive/health      — Phase 1+2 module availability check
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/session/{session_id}", tags=["executive"])
+async def session_summary(session_id: str):
+    """Return the Manager's in-memory session state for a given session."""
+    try:
+        from mini_assistant.phase2.manager import get_session_summary
+        return get_session_summary(session_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/executive/health", tags=["executive"])
+async def executive_health():
+    """Check which Phase 1+2 modules are available."""
+    modules = {
+        "phase1.command_parser": False,
+        "phase1.intent_planner": False,
+        "phase1.critic":         False,
+        "phase1.composer":       False,
+        "phase2.ceo":            False,
+        "phase2.manager":        False,
+        "phase2.supervisor":     False,
+        "scanner":               False,
+    }
+    for mod_key in list(modules.keys()):
+        try:
+            __import__(f"mini_assistant.{mod_key.replace('.', '.')}")
+            modules[mod_key] = True
+        except Exception:
+            pass
+    all_ok = all(modules.values())
+    return {"status": "ok" if all_ok else "partial", "modules": modules}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Phase 0 — Project Context Scanner
 # GET /api/project/context
 # Returns a structured snapshot of the codebase for Planner / Manager use.
