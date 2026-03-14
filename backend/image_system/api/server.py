@@ -960,6 +960,56 @@ async def chat(req: ChatRequest):
         except Exception as exc:
             reply = f"Coding brain error: {exc}"
 
+    elif execution_intent in ("tool_use", "code_runner", "shell"):
+        # ── Phase 8: Tool Brain ─────────────────────────────────────────────
+        # Parse "TOOL:<tool_name> CMD:<command>" pattern from message,
+        # or route the raw message to shell_safe as a read-only shell command.
+        try:
+            from mini_assistant.phase8.tool_brain import tool_brain
+            from mini_assistant.phase8.security_brain import evaluate_tool
+
+            import re as _re
+            _m = _re.search(r"TOOL:(\S+)\s+CMD:(.*)", effective_msg, _re.DOTALL)
+            if _m:
+                _tool_name = _m.group(1).strip()
+                _command   = _m.group(2).strip()
+            else:
+                _tool_name = "shell_safe"
+                _command   = effective_msg
+
+            sec = evaluate_tool(_tool_name, _command)
+            if sec.blocked:
+                reply = f"⛔ Blocked: {'; '.join(sec.reasons)}"
+            elif sec.requires_approval:
+                from mini_assistant.phase8.approval_store import approval_store
+                aid = approval_store.add_pending(
+                    tool_name  = _tool_name,
+                    command    = _command,
+                    session_id = session_id,
+                    risk_level = sec.risk_level,
+                    reasons    = sec.reasons,
+                )
+                reply = (
+                    f"⚠️ This action requires approval before it runs.\n\n"
+                    f"**Tool:** `{_tool_name}`\n"
+                    f"**Command:** `{_command}`\n"
+                    f"**Risk:** {sec.risk_level}\n\n"
+                    f"Approval ID: `{aid}`"
+                )
+            else:
+                result = await tool_brain.execute(
+                    tool_name       = _tool_name,
+                    command         = _command,
+                    session_id      = session_id,
+                    auto_approve_safe = True,
+                )
+                if result.status == "success":
+                    reply = f"```\n{result.output or '(no output)'}\n```"
+                else:
+                    reply = f"❌ Error (exit {result.exit_code}):\n```\n{result.error or result.output}\n```"
+        except Exception as exc:
+            reply = f"Tool brain error: {exc}"
+
     else:
         # General chat / research / planning / file_analysis / web_search
         try:

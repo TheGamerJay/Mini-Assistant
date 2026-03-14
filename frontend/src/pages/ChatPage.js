@@ -13,6 +13,8 @@ import ChatMessage from '../components/ChatMessage';
 import ChatInput from '../components/ChatInput';
 import MiniOrb from '../components/MiniOrb';
 import CognitiveStream from '../components/CognitiveStream';
+import ApprovalModal from '../components/ApprovalModal';
+import api from '../api/client';
 
 function LoadingBubble() {
   return (
@@ -41,6 +43,7 @@ function ChatPage() {
 
   const { send, cancel, loading } = useChat();
   const [messages, setMessages]   = useState([]);
+  const [pendingApproval, setPendingApproval] = useState(null);
 
   // Cognitive stream state
   const [streamActive, setStreamActive]     = useState(false);
@@ -120,6 +123,16 @@ function ChatPage() {
         await addImage(thumb, text, data.image_base64);
       }
 
+      // Check if the reply contains a pending approval request
+      const approvalIdMatch = data.reply && data.reply.match(/Approval ID: `([^`]+)`/);
+      if (approvalIdMatch) {
+        try {
+          const approvals = await api.listApprovals(sessionIdRef.current);
+          const found = (approvals.approvals || []).find(a => a.id === approvalIdMatch[1]);
+          if (found) setPendingApproval(found);
+        } catch (_) { /* non-fatal */ }
+      }
+
       const assistantMsg = {
         role: 'assistant',
         type: isImage ? 'image' : 'text',
@@ -159,6 +172,36 @@ function ChatPage() {
     setStreamActive(false);
   }, [cancel]);
 
+  const handleApprove = useCallback(async (approvalId) => {
+    setPendingApproval(null);
+    try {
+      const result = await api.approveTool(approvalId);
+      const resultMsg = {
+        role: 'assistant',
+        type: 'text',
+        content: result.status === 'success'
+          ? `\`\`\`\n${result.output || '(no output)'}\n\`\`\``
+          : `❌ Error (exit ${result.exit_code}):\n\`\`\`\n${result.error || result.output}\n\`\`\``,
+        timestamp: Date.now(),
+      };
+      setMessages(prev => {
+        const next = [...prev, resultMsg];
+        if (activeChatId) updateChatMessages(activeChatId, next);
+        return next;
+      });
+    } catch (err) {
+      toast.error(`Tool execution failed: ${err.message}`);
+    }
+  }, [activeChatId, updateChatMessages]);
+
+  const handleDeny = useCallback(async (approvalId) => {
+    setPendingApproval(null);
+    try {
+      await api.denyTool(approvalId);
+      toast.info('Tool execution denied.');
+    } catch (_) { /* non-fatal */ }
+  }, []);
+
   // Called by CognitiveStream after its auto-collapse animation finishes
   const handleStreamDone = useCallback(() => {
     setStreamActive(false);
@@ -180,6 +223,14 @@ function ChatPage() {
 
   return (
     <div className="flex flex-col h-full">
+      {/* Phase 8: Tool Approval Modal */}
+      {pendingApproval && (
+        <ApprovalModal
+          approval={pendingApproval}
+          onApprove={handleApprove}
+          onDeny={handleDeny}
+        />
+      )}
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 md:px-12 lg:px-24 py-6 space-y-6">
         {messages.map((msg, idx) => (

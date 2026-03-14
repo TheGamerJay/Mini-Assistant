@@ -4314,6 +4314,90 @@ async def active_mission_for_session(session_id: str):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Phase 8 — Tool & Security Layer  (/api/tools/*)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class _ToolExecuteRequest(BaseModel):
+    tool_name:    str
+    command:      str
+    session_id:   str  = "default"
+    cwd:          Optional[str] = None
+    auto_approve: bool = False   # True = skip approval queue for caution-level tools
+
+@app.post("/api/tools/execute", tags=["tools"])
+async def execute_tool(req: _ToolExecuteRequest):
+    """Execute a registered tool after security classification."""
+    try:
+        from mini_assistant.phase8.tool_brain import tool_brain
+        result = await tool_brain.execute(
+            tool_name=req.tool_name,
+            command=req.command,
+            session_id=req.session_id,
+            cwd=req.cwd,
+            auto_approve_safe=req.auto_approve,
+        )
+        return result.to_dict()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.get("/api/tools", tags=["tools"])
+async def list_tools_endpoint(category: Optional[str] = None):
+    """Return the tool registry (optionally filtered by category)."""
+    try:
+        from mini_assistant.phase8.tool_registry import tools_as_dict, list_tools
+        tools = list_tools(category)
+        return {"tools": [{"name": t.name, "category": t.category, "description": t.description,
+                            "default_risk": t.default_risk, "requires_approval": t.requires_approval,
+                            "examples": t.examples} for t in tools], "total": len(tools)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.get("/api/tools/approvals", tags=["tools"])
+async def list_pending_approvals(session_id: Optional[str] = None):
+    """List tool calls pending user approval."""
+    try:
+        from mini_assistant.phase8.approval_store import approval_store
+        pending = approval_store.list_pending(session_id)
+        return {"approvals": pending, "total": len(pending)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/tools/approve/{approval_id}", tags=["tools"])
+async def approve_tool(approval_id: str, cwd: Optional[str] = None):
+    """Approve and execute a pending tool call."""
+    try:
+        from mini_assistant.phase8.tool_brain import tool_brain
+        result = await tool_brain.execute_approved(approval_id, cwd=cwd)
+        return result.to_dict()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/tools/deny/{approval_id}", tags=["tools"])
+async def deny_tool(approval_id: str):
+    """Deny a pending tool call."""
+    try:
+        from mini_assistant.phase8.approval_store import approval_store
+        ok = approval_store.mark_denied(approval_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Approval not found")
+        return {"denied": True, "approval_id": approval_id}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/tools/evaluate", tags=["tools"])
+async def evaluate_tool_endpoint(req: _ToolExecuteRequest):
+    """Dry-run security evaluation without executing the tool."""
+    try:
+        from mini_assistant.phase8.security_brain import evaluate_tool
+        decision = evaluate_tool(req.tool_name, req.command)
+        return decision.to_dict()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Image System API  (/api/image/*, /api/models/*)
 # Mounts the local Ollama+ComfyUI multi-brain image router as a sub-application.
 # ══════════════════════════════════════════════════════════════════════════════

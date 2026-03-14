@@ -162,6 +162,57 @@ export const api = {
   mainHealth() {
     return get(`${MAIN_API}/health`, 10000);
   },
+
+  // ── Phase 8: Tool & Security Layer ──────────────────────────────────────
+
+  /** List registered tools (optionally filter by category) */
+  listTools(category) {
+    const url = category
+      ? `${MAIN_API}/tools?category=${encodeURIComponent(category)}`
+      : `${MAIN_API}/tools`;
+    return get(url, 10000);
+  },
+
+  /** Execute a tool immediately (auto_approve=true skips the approval queue) */
+  executeTool(toolName, command, sessionId = 'default', cwd = null, autoApprove = false) {
+    return post(`${MAIN_API}/tools/execute`, {
+      tool_name: toolName,
+      command,
+      session_id: sessionId,
+      cwd,
+      auto_approve: autoApprove,
+    }, 60000);
+  },
+
+  /** Dry-run security evaluation without executing */
+  evaluateTool(toolName, command, sessionId = 'default') {
+    return post(`${MAIN_API}/tools/evaluate`, {
+      tool_name: toolName,
+      command,
+      session_id: sessionId,
+    }, 10000);
+  },
+
+  /** List pending tool approvals for a session */
+  listApprovals(sessionId) {
+    const url = sessionId
+      ? `${MAIN_API}/tools/approvals?session_id=${encodeURIComponent(sessionId)}`
+      : `${MAIN_API}/tools/approvals`;
+    return get(url, 10000);
+  },
+
+  /** Approve and execute a pending tool call */
+  approveTool(approvalId, cwd = null) {
+    const url = cwd
+      ? `${MAIN_API}/tools/approve/${approvalId}?cwd=${encodeURIComponent(cwd)}`
+      : `${MAIN_API}/tools/approve/${approvalId}`;
+    return post(url, {}, 60000);
+  },
+
+  /** Deny a pending tool call */
+  denyTool(approvalId) {
+    return post(`${MAIN_API}/tools/deny/${approvalId}`, {}, 10000);
+  },
 };
 
 export default api;
