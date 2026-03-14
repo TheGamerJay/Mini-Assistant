@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { XCircle, PanelRight } from 'lucide-react';
+import { XCircle, PanelRight, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp, makeThumbnail } from '../context/AppContext';
 import { useChat } from '../hooks/useChat';
@@ -69,7 +69,25 @@ function ChatPage() {
     updateChatMessages,
     addImage,
     setPage,
+    rateMessage,
   } = useApp();
+
+  const handleExport = useCallback(() => {
+    const chat = chats.find(c => c.id === activeChatId);
+    if (!chat) return;
+    const lines = [`# ${chat.title}`, ''];
+    chat.messages.forEach(m => {
+      if (m.role === 'user') lines.push(`**You:** ${m.content || ''}`, '');
+      else if (m.role === 'assistant' && m.type !== 'image_generating') lines.push(`**Mini:** ${m.content || ''}`, '');
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${chat.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [chats, activeChatId]);
 
   const { send, sendStream, cancel, loading } = useChat();
   const [messages, setMessages]       = useState([]);
@@ -356,6 +374,23 @@ function ChatPage() {
 
       {/* ── Chat center column ── */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+        {/* Chat header — title + export */}
+        {activeChatId && (
+          <div className="flex items-center justify-between px-4 md:px-10 lg:px-16 py-2 border-b border-white/5 flex-shrink-0">
+            <span className="text-[11px] font-mono text-slate-600 truncate">
+              {chats.find(c => c.id === activeChatId)?.title || 'Chat'}
+            </span>
+            <button
+              onClick={handleExport}
+              title="Export chat as Markdown"
+              className="flex items-center gap-1.5 text-[11px] text-slate-600 hover:text-slate-300 transition-colors px-2 py-1 rounded hover:bg-white/5"
+            >
+              <Download size={12} />
+              Export
+            </button>
+          </div>
+        )}
+
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-4 md:px-10 lg:px-16 py-6 space-y-6">
           {messages.map((msg, idx) => (
@@ -363,6 +398,7 @@ function ChatPage() {
               key={idx}
               message={msg}
               onRetry={msg.type === 'error' ? () => handleSubmit(lastUserTextRef.current) : undefined}
+              onRate={msg.role === 'assistant' ? (rating) => rateMessage(activeChatId, idx, rating) : undefined}
             />
           ))}
 

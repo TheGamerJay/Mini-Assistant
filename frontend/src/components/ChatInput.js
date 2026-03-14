@@ -13,6 +13,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Paperclip, Mic, MicOff, Send, Loader2, X, Image } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../api/client';
+import { useApp } from '../context/AppContext';
 
 // Known slash commands — mirrors backend command_parser.py
 const SLASH_COMMANDS = [
@@ -59,6 +60,7 @@ function readFileAsDataUrl(file) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder }) {
+  const { pendingTemplate, clearPendingTemplate } = useApp();
   const [value, setValue]           = useState('');
   const [slashHints, setSlashHints] = useState([]);
 
@@ -78,6 +80,15 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
       ? 'Ask anything, generate an image, or write code…'
       : 'Message Mini Assistant…';
   const resolvedPlaceholder = placeholder || defaultPlaceholder;
+
+  // Consume pending template from sidebar
+  useEffect(() => {
+    if (pendingTemplate) {
+      setValue(pendingTemplate);
+      clearPendingTemplate();
+      textareaRef.current?.focus();
+    }
+  }, [pendingTemplate, clearPendingTemplate]);
 
   // Auto-resize textarea
   useEffect(() => {

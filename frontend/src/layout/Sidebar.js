@@ -22,6 +22,8 @@ import {
   Trash2,
   Check,
   X,
+  Pin,
+  BookMarked,
   // Tool icons
   Code,
   Terminal,
@@ -32,7 +34,6 @@ import {
   Play,
   Database,
   Package,
-  BookMarked,
   Rocket,
   Train,
   Bug,
@@ -126,7 +127,7 @@ function SidebarSection({ icon: Icon, label, collapsed, defaultOpen = true, acti
 // ---------------------------------------------------------------------------
 // ChatRow
 // ---------------------------------------------------------------------------
-function ChatRow({ chat, active, collapsed, onSelect, onRename, onDelete }) {
+function ChatRow({ chat, active, collapsed, onSelect, onRename, onDelete, onPin }) {
   const [editing, setEditing] = useState(false);
   const [editVal, setEditVal] = useState(chat.title);
   const [hovered, setHovered] = useState(false);
@@ -163,17 +164,16 @@ function ChatRow({ chat, active, collapsed, onSelect, onRename, onDelete }) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <MessageSquare size={13} className="flex-shrink-0 text-slate-600" />
+      {chat.pinned
+        ? <Pin size={11} className="flex-shrink-0 text-amber-500/60" />
+        : <MessageSquare size={13} className="flex-shrink-0 text-slate-600" />}
       {editing ? (
         <div className="flex items-center gap-1 flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
           <input
             className="flex-1 min-w-0 bg-transparent text-xs text-slate-200 outline-none border-b border-cyan-500/50"
             value={editVal}
             onChange={(e) => setEditVal(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') commitRename();
-              if (e.key === 'Escape') setEditing(false);
-            }}
+            onKeyDown={(e) => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setEditing(false); }}
             autoFocus
           />
           <button onClick={commitRename} className="text-emerald-400 hover:text-emerald-300"><Check size={11} /></button>
@@ -183,12 +183,17 @@ function ChatRow({ chat, active, collapsed, onSelect, onRename, onDelete }) {
         <>
           <div className="flex-1 min-w-0">
             <span className="block text-xs truncate">{chat.title}</span>
-            {relativeTime && (
-              <span className="block text-[10px] text-slate-600 truncate">{relativeTime}</span>
-            )}
+            {relativeTime && <span className="block text-[10px] text-slate-600 truncate">{relativeTime}</span>}
           </div>
           {hovered && (
-            <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-0.5 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+              <button
+                className={`p-0.5 rounded hover:bg-white/10 transition-colors ${chat.pinned ? 'text-amber-400' : 'text-slate-500 hover:text-amber-400'}`}
+                onClick={() => onPin(chat.id)}
+                title={chat.pinned ? 'Unpin' : 'Pin'}
+              >
+                <Pin size={10} />
+              </button>
               <button
                 className="p-0.5 rounded hover:bg-white/10 text-slate-500 hover:text-slate-300"
                 onClick={() => { setEditVal(chat.title); setEditing(true); }}
@@ -225,10 +230,7 @@ function ProjectRow({ project, chats, activeChatId, collapsed, onSelectChat, onR
 
   if (collapsed) {
     return (
-      <button
-        className="w-full flex justify-center items-center h-8 rounded-lg mb-0.5 text-slate-500 hover:bg-white/5 hover:text-slate-300"
-        title={project.name}
-      >
+      <button className="w-full flex justify-center items-center h-8 rounded-lg mb-0.5 text-slate-500 hover:bg-white/5 hover:text-slate-300" title={project.name}>
         <FolderOpen size={14} />
       </button>
     );
@@ -250,10 +252,7 @@ function ProjectRow({ project, chats, activeChatId, collapsed, onSelectChat, onR
               className="flex-1 min-w-0 bg-transparent text-xs text-slate-200 outline-none border-b border-cyan-500/50"
               value={editVal}
               onChange={(e) => setEditVal(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') commitRename();
-                if (e.key === 'Escape') setEditing(false);
-              }}
+              onKeyDown={(e) => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setEditing(false); }}
               autoFocus
             />
             <button onClick={commitRename} className="text-emerald-400"><Check size={11} /></button>
@@ -263,9 +262,7 @@ function ProjectRow({ project, chats, activeChatId, collapsed, onSelectChat, onR
           <>
             <span className="flex-1 min-w-0 text-xs text-slate-400 truncate">
               {project.name}
-              {chats.length > 0 && (
-                <span className="ml-1 text-slate-600">({chats.length})</span>
-              )}
+              {chats.length > 0 && <span className="ml-1 text-slate-600">({chats.length})</span>}
             </span>
             {hovered && (
               <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
@@ -293,6 +290,49 @@ function ProjectRow({ project, chats, activeChatId, collapsed, onSelectChat, onR
 }
 
 // ---------------------------------------------------------------------------
+// PromptTemplateRow
+// ---------------------------------------------------------------------------
+function PromptTemplateRow({ template, collapsed, onUse, onDelete }) {
+  const [hovered, setHovered] = useState(false);
+
+  if (collapsed) {
+    return (
+      <button
+        className="w-full flex justify-center items-center h-8 rounded-lg mb-0.5 text-slate-500 hover:bg-white/5 hover:text-cyan-400 transition-colors"
+        title={template.title}
+        onClick={() => onUse(template.text)}
+      >
+        <BookMarked size={13} />
+      </button>
+    );
+  }
+
+  return (
+    <div
+      className="group flex items-center gap-2 px-2 py-1.5 rounded-lg mb-0.5 cursor-pointer hover:bg-white/5 transition-colors"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={() => onUse(template.text)}
+    >
+      <BookMarked size={11} className="flex-shrink-0 text-violet-400/60" />
+      <div className="flex-1 min-w-0">
+        <span className="block text-xs text-slate-400 truncate">{template.title}</span>
+        <span className="block text-[10px] text-slate-600 truncate">{template.text}</span>
+      </div>
+      {hovered && (
+        <button
+          className="p-0.5 rounded hover:bg-red-500/20 text-slate-600 hover:text-red-400 flex-shrink-0"
+          onClick={(e) => { e.stopPropagation(); onDelete(template.id); }}
+          title="Delete template"
+        >
+          <Trash2 size={10} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Sidebar
 // ---------------------------------------------------------------------------
 function Sidebar() {
@@ -307,12 +347,17 @@ function Sidebar() {
     selectChat,
     deleteChat,
     renameChat,
+    togglePinChat,
     projects,
     newProject,
     deleteProject,
     renameProject,
     images,
     serverStatus,
+    promptTemplates,
+    addPromptTemplate,
+    deletePromptTemplate,
+    firePendingTemplate,
   } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -322,11 +367,22 @@ function Sidebar() {
     if (name && name.trim()) newProject(name.trim());
   }, [newProject]);
 
+  const handleAddTemplate = useCallback(() => {
+    const title = window.prompt('Template name (e.g. "Write a Bachata song"):');
+    if (!title?.trim()) return;
+    const text = window.prompt('Template text (the prompt that will fill the input):');
+    if (!text?.trim()) return;
+    addPromptTemplate(title, text);
+  }, [addPromptTemplate]);
+
   const filteredChats = chats.filter((c) =>
     c.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const unassignedChats = filteredChats.filter((c) => !c.projectId)
+  const pinnedChats = filteredChats.filter((c) => c.pinned)
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+
+  const unassignedChats = filteredChats.filter((c) => !c.projectId && !c.pinned)
     .sort((a, b) => b.updatedAt - a.updatedAt);
 
   const ollamaUp = serverStatus.ollama === true;
@@ -345,16 +401,10 @@ function Sidebar() {
       <div className={`flex items-center h-14 flex-shrink-0 px-3 border-b border-white/5 ${sidebarCollapsed ? 'flex-col justify-center gap-1' : 'justify-between'}`}>
         {sidebarCollapsed ? (
           <>
-            {/* Collapsed: show logo icon + toggle below it */}
             <div className="w-7 h-7 rounded-lg overflow-hidden flex-shrink-0 bg-gradient-to-br from-cyan-400 to-violet-600">
-              <img src="/Logo.png" alt="Mini Assistant" className="w-full h-full object-contain"
-                onError={e => { e.target.style.display = 'none'; }} />
+              <img src="/Logo.png" alt="Mini Assistant" className="w-full h-full object-contain" onError={e => { e.target.style.display = 'none'; }} />
             </div>
-            <button
-              onClick={toggleSidebar}
-              className="p-1 rounded-lg text-slate-600 hover:text-slate-300 hover:bg-white/5 transition-colors"
-              title="Expand sidebar"
-            >
+            <button onClick={toggleSidebar} className="p-1 rounded-lg text-slate-600 hover:text-slate-300 hover:bg-white/5 transition-colors" title="Expand sidebar">
               <Menu size={13} />
             </button>
           </>
@@ -362,16 +412,11 @@ function Sidebar() {
           <>
             <div className="flex items-center gap-2 min-w-0">
               <div className="w-7 h-7 rounded-lg overflow-hidden flex-shrink-0 bg-gradient-to-br from-cyan-400 to-violet-600">
-                <img src="/Logo.png" alt="Mini Assistant" className="w-full h-full object-contain"
-                  onError={e => { e.target.style.display = 'none'; }} />
+                <img src="/Logo.png" alt="Mini Assistant" className="w-full h-full object-contain" onError={e => { e.target.style.display = 'none'; }} />
               </div>
               <span className="text-sm font-semibold text-slate-100 truncate">Mini Assistant</span>
             </div>
-            <button
-              onClick={toggleSidebar}
-              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-colors flex-shrink-0"
-              title="Collapse sidebar"
-            >
+            <button onClick={toggleSidebar} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-colors flex-shrink-0" title="Collapse sidebar">
               <ChevronLeft size={16} />
             </button>
           </>
@@ -403,6 +448,11 @@ function Sidebar() {
               onChange={(e) => setSearchQuery(e.target.value)}
               className="flex-1 bg-transparent text-xs text-slate-300 placeholder-slate-600 outline-none"
             />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')} className="text-slate-600 hover:text-slate-400">
+                <X size={10} />
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -413,9 +463,7 @@ function Sidebar() {
         {/* Images */}
         <SidebarSection icon={Image} label="Images" collapsed={sidebarCollapsed} defaultOpen={true}>
           {images.length === 0 ? (
-            !sidebarCollapsed && (
-              <p className="text-[10px] text-slate-600 px-2 py-2">No images yet</p>
-            )
+            !sidebarCollapsed && <p className="text-[10px] text-slate-600 px-2 py-2">No images yet</p>
           ) : (
             <div className={`${sidebarCollapsed ? 'flex flex-col gap-1 px-1' : 'grid grid-cols-3 gap-1 px-2 py-1'}`}>
               {images.slice(0, 9).map((img) => (
@@ -426,18 +474,35 @@ function Sidebar() {
                   className="rounded-md overflow-hidden border border-white/10 hover:border-cyan-500/30 transition-colors aspect-square bg-black/40"
                   style={sidebarCollapsed ? { width: 36, height: 36 } : {}}
                 >
-                  {img.thumb ? (
-                    <img src={img.thumb} alt={img.prompt} className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-slate-600">
-                      <Image size={10} />
-                    </div>
-                  )}
+                  {img.thumb
+                    ? <img src={img.thumb} alt={img.prompt} className="w-full h-full object-cover" />
+                    : <div className="w-full h-full flex items-center justify-center text-slate-600"><Image size={10} /></div>}
                 </button>
               ))}
             </div>
           )}
         </SidebarSection>
+
+        {/* Pinned Chats */}
+        {(pinnedChats.length > 0 || !sidebarCollapsed) && (
+          <SidebarSection icon={Pin} label="Pinned" collapsed={sidebarCollapsed} defaultOpen={true}>
+            {pinnedChats.length === 0 && !sidebarCollapsed && (
+              <p className="text-[10px] text-slate-600 px-2 py-1">No pinned chats</p>
+            )}
+            {pinnedChats.map((chat) => (
+              <ChatRow
+                key={chat.id}
+                chat={chat}
+                active={activeChatId === chat.id}
+                collapsed={sidebarCollapsed}
+                onSelect={selectChat}
+                onRename={renameChat}
+                onDelete={deleteChat}
+                onPin={togglePinChat}
+              />
+            ))}
+          </SidebarSection>
+        )}
 
         {/* Projects */}
         <SidebarSection
@@ -451,8 +516,7 @@ function Sidebar() {
             <p className="text-[10px] text-slate-600 px-2 py-1">No projects yet</p>
           )}
           {projects.map((proj) => {
-            const projChats = chats.filter((c) => c.projectId === proj.id)
-              .sort((a, b) => b.updatedAt - a.updatedAt);
+            const projChats = chats.filter((c) => c.projectId === proj.id).sort((a, b) => b.updatedAt - a.updatedAt);
             return (
               <ProjectRow
                 key={proj.id}
@@ -482,6 +546,29 @@ function Sidebar() {
               onSelect={selectChat}
               onRename={renameChat}
               onDelete={deleteChat}
+              onPin={togglePinChat}
+            />
+          ))}
+        </SidebarSection>
+
+        {/* Prompt Templates */}
+        <SidebarSection
+          icon={BookMarked}
+          label="Templates"
+          collapsed={sidebarCollapsed}
+          defaultOpen={false}
+          action={{ fn: handleAddTemplate, icon: <Plus size={11} /> }}
+        >
+          {promptTemplates.length === 0 && !sidebarCollapsed && (
+            <p className="text-[10px] text-slate-600 px-2 py-1">No templates — click + to add</p>
+          )}
+          {promptTemplates.map((t) => (
+            <PromptTemplateRow
+              key={t.id}
+              template={t}
+              collapsed={sidebarCollapsed}
+              onUse={(text) => { firePendingTemplate(text); setPage('chat'); }}
+              onDelete={deletePromptTemplate}
             />
           ))}
         </SidebarSection>
@@ -512,21 +599,14 @@ function Sidebar() {
 
       {/* ---- Bottom fixed area ---- */}
       <div className="flex-shrink-0 border-t border-white/5 px-2 py-3 space-y-1">
-        {/* Server status */}
         <div className={`flex items-center gap-2 px-2 py-1.5 rounded-lg ${sidebarCollapsed ? 'justify-center' : ''}`}>
           <span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDot}`} />
-          {!sidebarCollapsed && (
-            <span className="text-[11px] font-mono text-slate-500">
-              Local AI
-            </span>
-          )}
+          {!sidebarCollapsed && <span className="text-[11px] font-mono text-slate-500">Local AI</span>}
         </div>
-        {/* Settings */}
         <button
           onClick={() => setPage('settings')}
           title="Settings"
-          className={`w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-colors
-            ${sidebarCollapsed ? 'justify-center' : ''}`}
+          className={`w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-colors ${sidebarCollapsed ? 'justify-center' : ''}`}
         >
           <Settings size={15} />
           {!sidebarCollapsed && <span className="text-xs">Settings</span>}

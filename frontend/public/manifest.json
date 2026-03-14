@@ -1,0 +1,24 @@
+{
+  "short_name": "Mini AI",
+  "name": "Mini Assistant",
+  "description": "All-in-one local AI assistant with chat, image generation, voice, and code tools",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#0b0d16",
+  "background_color": "#0b0d16",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/Logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/Logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

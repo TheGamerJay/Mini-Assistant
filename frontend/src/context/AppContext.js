@@ -394,6 +394,41 @@ export function AppProvider({ children }) {
     _setServerStatus((prev) => ({ ...prev, ...patch }));
   }, []);
 
+  // ---- Pinned chats ----
+  const togglePinChat = useCallback((id) => {
+    setChats((prev) => prev.map((c) => c.id === id ? { ...c, pinned: !c.pinned } : c));
+  }, []);
+
+  // ---- Message ratings ----
+  const rateMessage = useCallback((chatId, msgIdx, rating) => {
+    setChats((prev) => prev.map((c) => {
+      if (c.id !== chatId) return c;
+      const msgs = [...c.messages];
+      msgs[msgIdx] = { ...msgs[msgIdx], rating };
+      return { ...c, messages: msgs };
+    }));
+  }, []);
+
+  // ---- Prompt templates ----
+  const [promptTemplates, setPromptTemplates] = useState(() =>
+    migrateLS('ma_v2_templates', getSessionId(), [])
+  );
+  useEffect(() => { saveLS(uk('ma_v2_templates', user?.id), promptTemplates); }, [promptTemplates, user?.id]); // eslint-disable-line
+
+  const addPromptTemplate = useCallback((title, text) => {
+    const t = { id: crypto.randomUUID(), title: title.trim(), text: text.trim(), createdAt: Date.now() };
+    setPromptTemplates((prev) => [t, ...prev]);
+  }, []);
+
+  const deletePromptTemplate = useCallback((id) => {
+    setPromptTemplates((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  // Pending template — Sidebar fires it, ChatInput consumes it
+  const [pendingTemplate, _setPendingTemplate] = useState(null);
+  const firePendingTemplate = useCallback((text) => _setPendingTemplate(text), []);
+  const clearPendingTemplate = useCallback(() => _setPendingTemplate(null), []);
+
   // ---------------------------------------------------------------------------
   const value = {
     // navigation
@@ -445,6 +480,18 @@ export function AppProvider({ children }) {
     updateDisplayName,
     changePassword,
     deleteAccount,
+    // pinned chats
+    togglePinChat,
+    // message ratings
+    rateMessage,
+    // prompt templates
+    promptTemplates,
+    addPromptTemplate,
+    deletePromptTemplate,
+    // pending template bridge
+    pendingTemplate,
+    firePendingTemplate,
+    clearPendingTemplate,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
