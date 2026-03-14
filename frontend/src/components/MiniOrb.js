@@ -17,11 +17,15 @@ const MiniOrb = ({ state = 'idle', size = 'md' }) => {
         state === 'thinking' ? 'orb-pulse' : state === 'responding' ? 'orb-ripple' : 'orb-idle'
       }`} />
       {/* Core orb */}
-      <div className={`relative ${sizes[size]} rounded-full bg-gradient-to-br from-cyan-400 via-cyan-500 to-violet-600 shadow-[0_0_20px_rgba(0,229,255,0.4),0_0_40px_rgba(124,58,237,0.3)] ${
+      <div className={`relative ${sizes[size]} rounded-full bg-gradient-to-br from-cyan-400 via-cyan-500 to-violet-600 shadow-[0_0_20px_rgba(0,229,255,0.4),0_0_40px_rgba(124,58,237,0.3)] overflow-hidden ${
         state === 'thinking' ? 'orb-pulse' : state === 'responding' ? 'orb-ripple' : 'orb-idle'
       }`}>
-        {/* Inner highlight */}
-        <div className="absolute top-1 left-1 w-1/3 h-1/3 rounded-full bg-white/30 blur-sm" />
+        <img
+          src="/Logo.png"
+          alt="Mini Assistant"
+          className="w-full h-full object-contain"
+          onError={e => { e.target.style.display = 'none'; }}
+        />
       </div>
     </div>
   );

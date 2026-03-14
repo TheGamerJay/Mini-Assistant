@@ -39,7 +39,7 @@ body {
 
 /* ── Light theme — invert all colors so dark→white, white→dark ── */
 [data-theme="light"] #root {
-  filter: invert(1) hue-rotate(180deg);
+  filter: invert(1) hue-rotate(180deg) contrast(1.25);
 }
 /* Cancel inversion on images and iframes so they stay natural */
 [data-theme="light"] img,
@@ -185,8 +185,11 @@ button:focus {
   -ms-user-select: none;
 }
 
-/* Prevent flash of unstyled content */
-html { background-color: #0d0d12; }
+/* Prevent flash of unstyled content + scale base font up */
+html {
+  background-color: #0d0d12;
+  font-size: 18px; /* rem base — all Tailwind text-* classes scale from here */
+}
 
 /* Better focus outlines */
 *:focus-visible {
