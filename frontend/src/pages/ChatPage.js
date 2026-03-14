@@ -45,6 +45,22 @@ function LoadingBubble() {
   );
 }
 
+/** Blinking cursor appended while streaming */
+function StreamingBubble({ text }) {
+  return (
+    <div className="flex items-start gap-3 msg-enter">
+      <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 via-violet-500 to-violet-600 flex items-center justify-center overflow-hidden flex-shrink-0 mt-1">
+        <img src="/Logo.png" alt="Mini Assistant" className="w-full h-full object-contain"
+          onError={e => { e.target.style.display = 'none'; }} />
+      </div>
+      <div className="max-w-[80%] px-5 py-4 rounded-2xl rounded-tl-sm border bg-[#151520] border-white/5 text-sm leading-relaxed text-slate-200 whitespace-pre-wrap">
+        {text || <span className="text-slate-600 text-xs italic">Thinking…</span>}
+        <span className="inline-block w-0.5 h-3.5 bg-cyan-400 ml-0.5 align-middle animate-pulse" />
+      </div>
+    </div>
+  );
+}
+
 function ChatPage() {
   const {
     activeChatId,
@@ -55,12 +71,15 @@ function ChatPage() {
     setPage,
   } = useApp();
 
-  const { send, cancel, loading } = useChat();
+  const { send, sendStream, cancel, loading } = useChat();
   const [messages, setMessages]       = useState([]);
   const [pendingApproval, setPendingApproval] = useState(null);
   const [rightPanelOpen, setRightPanelOpen]   = useState(false);
 
-  // Cognitive stream state
+  // Streaming text state (non-image responses)
+  const [streamingText, setStreamingText] = useState(null); // null = not streaming
+
+  // Cognitive stream state (image / loading visual)
   const [streamActive, setStreamActive]     = useState(false);
   const [streamPrompt, setStreamPrompt]     = useState('');
   const [streamResponse, setStreamResponse] = useState(null);
@@ -85,10 +104,10 @@ function ChatPage() {
     }
   }, [activeChatId, chats]);
 
-  // Auto-scroll to bottom on new message or loading change
+  // Auto-scroll to bottom on new message, loading change, or streaming text
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading, streamActive]);
+  }, [messages, loading, streamActive, streamingText]);
 
   const handleSubmit = useCallback(async (text, imageBase64 = null, preferredModel = null) => {
     if (submittingRef.current || loading) return;
@@ -104,7 +123,6 @@ function ChatPage() {
       setPage('chat');
     }
 
-    // Build user message — include image preview if attached
     const userMsg = {
       role: 'user',
       type: imageBase64 ? 'image_input' : 'text',
@@ -116,92 +134,164 @@ function ChatPage() {
     setMessages(nextMessages);
     updateChatMessages(chatId, nextMessages);
 
-    // Auto-open right panel for build intent
     if (isBuildIntent(text, null)) setRightPanelOpen(true);
 
-    // Insert image generating placeholder immediately if this looks like an image request
     const imageIntentDetected = isImageIntent(text);
-    if (imageIntentDetected) {
-      const placeholder = {
-        role: 'assistant',
-        type: 'image_generating',
-        content: 'Rendering your image...',
-        timestamp: Date.now(),
-        _placeholder: true,
-      };
-      setMessages([...nextMessages, placeholder]);
+
+    // ── IMAGE path: use non-streaming endpoint + shimmer ──────────────────
+    if (imageIntentDetected || imageBase64) {
+      if (imageIntentDetected) {
+        setMessages([...nextMessages, {
+          role: 'assistant', type: 'image_generating',
+          content: 'Rendering your image...', timestamp: Date.now(), _placeholder: true,
+        }]);
+      }
+      setStreamPrompt(text);
+      setStreamResponse(null);
+      setStreamActive(true);
+
+      try {
+        const history = nextMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
+        const data = await send(text, sessionIdRef.current, history, imageBase64, preferredModel);
+        setStreamResponse(data);
+
+        const isImg = !!data.image_base64;
+        if (isImg) {
+          const thumb = await makeThumbnail(data.image_base64);
+          await addImage(thumb, text, data.image_base64);
+        }
+
+        const assistantMsg = {
+          role: 'assistant',
+          type: isImg ? 'image' : 'text',
+          content: data.reply || (isImg ? '' : 'Done.'),
+          image_base64: data.image_base64 || null,
+          prompt: text,
+          route_result: data.route_result || null,
+          generation_time_ms: data.generation_time_ms || null,
+          retry_used: data.retry_used || false,
+          prompt_warnings: data.prompt_warnings || [],
+          model_used: data.model_used || null,
+          memory_stored: data.memory_stored || [],
+          timestamp: Date.now(),
+        };
+        const withAssistant = [...nextMessages, assistantMsg];
+        setMessages(withAssistant);
+        updateChatMessages(chatId, withAssistant);
+      } catch (err) {
+        setStreamActive(false);
+        const withErr = [...nextMessages, {
+          role: 'assistant', type: 'error',
+          content: err.message || 'Something went wrong.', timestamp: Date.now(),
+        }];
+        setMessages(withErr);
+        updateChatMessages(chatId, withErr);
+      } finally {
+        submittingRef.current = false;
+      }
+      return;
     }
 
-    // Kick off the cognitive stream
-    setStreamPrompt(text);
-    setStreamResponse(null);
-    setStreamActive(true);
+    // ── TEXT path: streaming ───────────────────────────────────────────────
+    // Show a live-updating streaming bubble immediately
+    setStreamingText('');
 
-    try {
-      const history = nextMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
-      const data = await send(text, sessionIdRef.current, history, imageBase64, preferredModel);
+    const chatIdRef_local = chatId; // capture for callbacks
+    const history = nextMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
 
-      // Pass real response data to the stream so stages can show actual results
-      setStreamResponse(data);
+    await sendStream(text, sessionIdRef.current, history, null, {
+      onToken(token) {
+        setStreamingText(prev => (prev === null ? token : prev + token));
+      },
 
-      const isImage = !!data.image_base64;
-      let thumb = null;
-      if (isImage && data.image_base64) {
-        thumb = await makeThumbnail(data.image_base64);
-        await addImage(thumb, text, data.image_base64);
-      }
+      async onDone(meta) {
+        // Backend signalled image redirect — fall back to non-streaming
+        if (meta.type === 'image_redirect') {
+          setStreamingText(null);
+          setStreamPrompt(text);
+          setStreamResponse(null);
+          setStreamActive(true);
+          setMessages([...nextMessages, {
+            role: 'assistant', type: 'image_generating',
+            content: 'Rendering your image...', timestamp: Date.now(), _placeholder: true,
+          }]);
+          try {
+            const data = await send(text, sessionIdRef.current, history, null, preferredModel);
+            setStreamResponse(data);
+            const isImg = !!data.image_base64;
+            if (isImg) {
+              const thumb = await makeThumbnail(data.image_base64);
+              await addImage(thumb, text, data.image_base64);
+            }
+            const assistantMsg = {
+              role: 'assistant', type: isImg ? 'image' : 'text',
+              content: data.reply || '', image_base64: data.image_base64 || null,
+              prompt: text, route_result: data.route_result || null,
+              generation_time_ms: data.generation_time_ms || null,
+              model_used: data.model_used || null, memory_stored: data.memory_stored || [],
+              timestamp: Date.now(),
+            };
+            const withA = [...nextMessages, assistantMsg];
+            setMessages(withA);
+            updateChatMessages(chatIdRef_local, withA);
+          } catch (err) {
+            const withErr = [...nextMessages, {
+              role: 'assistant', type: 'error',
+              content: err.message || 'Something went wrong.', timestamp: Date.now(),
+            }];
+            setMessages(withErr);
+            updateChatMessages(chatIdRef_local, withErr);
+          }
+          setStreamingText(null);
+          submittingRef.current = false;
+          return;
+        }
 
-      // Check if the reply contains a pending approval request
-      const approvalIdMatch = data.reply && data.reply.match(/Approval ID: `([^`]+)`/);
-      if (approvalIdMatch) {
-        try {
-          const approvals = await api.listApprovals(sessionIdRef.current);
-          const found = (approvals.approvals || []).find(a => a.id === approvalIdMatch[1]);
-          if (found) setPendingApproval(found);
-        } catch (_) { /* non-fatal */ }
-      }
+        // Normal text done — finalise message with metadata
+        const finalMsg = {
+          role: 'assistant', type: 'text',
+          content: meta.reply || '',
+          route_result: meta.route_result || null,
+          model_used: meta.model_used || null,
+          memory_stored: meta.memory_stored || [],
+          timestamp: Date.now(),
+        };
+        const withFinal = [...nextMessages, finalMsg];
+        setMessages(withFinal);
+        updateChatMessages(chatIdRef_local, withFinal);
+        setStreamingText(null);
+        submittingRef.current = false;
 
-      // Auto-open right panel if build intent detected in response
-      if (isBuildIntent(text, data.route_result)) setRightPanelOpen(true);
+        // Check for tool approval
+        const approvalIdMatch = meta.reply && meta.reply.match(/Approval ID: `([^`]+)`/);
+        if (approvalIdMatch) {
+          try {
+            const approvals = await api.listApprovals(sessionIdRef.current);
+            const found = (approvals.approvals || []).find(a => a.id === approvalIdMatch[1]);
+            if (found) setPendingApproval(found);
+          } catch (_) { /* non-fatal */ }
+        }
+        if (isBuildIntent(text, meta.route_result)) setRightPanelOpen(true);
+      },
 
-      const assistantMsg = {
-        role: 'assistant',
-        type: isImage ? 'image' : 'text',
-        content: data.reply || (isImage ? '' : 'Done.'),
-        image_base64: data.image_base64 || null,
-        prompt: text,
-        route_result: data.route_result || null,
-        generation_time_ms: data.generation_time_ms || null,
-        retry_used: data.retry_used || false,
-        prompt_warnings: data.prompt_warnings || [],
-        model_used: data.model_used || null,
-        memory_stored: data.memory_stored || [],
-        timestamp: Date.now(),
-      };
-
-      const withAssistant = [...nextMessages, assistantMsg];
-      setMessages(withAssistant);
-      updateChatMessages(chatId, withAssistant);
-    } catch (err) {
-      setStreamActive(false);
-      const errMsg = {
-        role: 'assistant',
-        type: 'error',
-        content: err.message || 'Something went wrong. Please try again.',
-        timestamp: Date.now(),
-      };
-      // Replace placeholder (if any) with error message
-      const withErr = [...nextMessages, errMsg];
-      setMessages(withErr);
-      updateChatMessages(chatId, withErr);
-    } finally {
-      submittingRef.current = false;
-    }
-  }, [activeChatId, loading, messages, newChat, send, updateChatMessages, addImage, setPage]);
+      onError(err) {
+        const withErr = [...nextMessages, {
+          role: 'assistant', type: 'error',
+          content: err.message || 'Something went wrong.', timestamp: Date.now(),
+        }];
+        setMessages(withErr);
+        updateChatMessages(chatIdRef_local, withErr);
+        setStreamingText(null);
+        submittingRef.current = false;
+      },
+    });
+  }, [activeChatId, loading, messages, newChat, send, sendStream, updateChatMessages, addImage, setPage]);
 
   const handleCancel = useCallback(() => {
     cancel(sessionIdRef.current);
     setStreamActive(false);
+    setStreamingText(null);
+    submittingRef.current = false;
   }, [cancel]);
 
   const handleApprove = useCallback(async (approvalId) => {
@@ -276,8 +366,13 @@ function ChatPage() {
             />
           ))}
 
-          {/* Cognitive stream + dots bubble while loading */}
-          {loading && (
+          {/* Live streaming text bubble */}
+          {streamingText !== null && (
+            <StreamingBubble text={streamingText} />
+          )}
+
+          {/* Cognitive stream + dots bubble while loading (image/non-streaming path) */}
+          {loading && streamingText === null && (
             <div className="space-y-3">
               <CognitiveStream
                 active={streamActive}

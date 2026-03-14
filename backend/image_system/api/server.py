@@ -19,7 +19,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from .models import (
     GenerateRequest,
@@ -1286,6 +1286,125 @@ async def chat(req: ChatRequest):
         "route_result": route_result,
         "session_id":   session_id,
     }
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(req: ChatRequest):
+    """
+    Streaming chat endpoint — returns SSE tokens for general chat.
+    Each event: data: {"t": "<token>"}
+    Final event: data: {"done": true, "meta": {...}}
+    Image-gen intents signal: data: {"done": true, "meta": {"type": "image_redirect"}}
+    """
+    import json as _json
+
+    session_id = req.session_id or str(uuid.uuid4())
+
+    from ..utils.prompt_safety import validate as ps_validate
+    is_valid, clean_message, safety_error = ps_validate(req.message)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=f"Message rejected: {safety_error}")
+
+    async def generate():
+        effective_msg = clean_message
+        phase1_plan = None
+        execution_intent = "chat"
+
+        # ── Phase 1 intent routing (fast, non-blocking) ──────────────────────
+        try:
+            from mini_assistant.phase1.command_parser import parse as cmd_parse
+            from mini_assistant.phase1.intent_planner import plan as make_plan
+            parsed_cmd = cmd_parse(clean_message)
+            effective_msg = parsed_cmd.args if parsed_cmd.is_slash else clean_message
+            phase1_plan = make_plan(
+                message=effective_msg,
+                parsed_command=parsed_cmd,
+                history=req.history or [],
+            )
+            execution_intent = phase1_plan.execution_intent or "chat"
+        except Exception as _e:
+            logger.warning("Phase1 failed in stream endpoint: %s", _e)
+
+        # Image / coding intents can't stream meaningfully — signal redirect
+        if execution_intent in ("image_generation", "image_edit"):
+            yield f"data: {_json.dumps({'done': True, 'meta': {'type': 'image_redirect'}})}\n\n"
+            return
+
+        # ── Model selection ───────────────────────────────────────────────────
+        from ..services.ollama_client import _model_name as _reg_model_name
+        _active_model = req.preferred_model or _reg_model_name("router")
+
+        # ── Real-time weather injection ───────────────────────────────────────
+        rt_context = ""
+        weather_loc = _detect_weather_location(effective_msg)
+        if weather_loc:
+            weather_data = await _fetch_weather(weather_loc)
+            if weather_data:
+                rt_context = (
+                    f"{weather_data}\n"
+                    "Use ONLY the live data above to answer the weather question accurately. "
+                    "Do not say you lack internet access.\n\n"
+                )
+
+        # ── Build message list ────────────────────────────────────────────────
+        history_msgs: list[dict] = [{"role": "system", "content": _MINI_SYSTEM_PROMPT}]
+        if req.history:
+            for h in req.history[-10:]:
+                history_msgs.append({"role": h.role, "content": h.content})
+        user_content = (rt_context + effective_msg) if rt_context else effective_msg
+        history_msgs.append({"role": "user", "content": user_content})
+
+        # ── Stream tokens from Ollama ─────────────────────────────────────────
+        reply_text = ""
+        try:
+            ollama_client = _get_ollama()
+            async for token in ollama_client.run_chat_stream(
+                model=_active_model,
+                messages=history_msgs,
+                temperature=0.7,
+            ):
+                reply_text += token
+                yield f"data: {_json.dumps({'t': token})}\n\n"
+        except Exception as exc:
+            err = f"I'm having trouble responding right now: {exc}"
+            yield f"data: {_json.dumps({'t': err})}\n\n"
+            reply_text = err
+
+        # ── Post-processing: session memory (non-fatal) ───────────────────────
+        memory_facts_stored = []
+        try:
+            from mini_assistant.phase6.session_memory import get_memory
+            memory_facts_stored = get_memory().extract_and_store(
+                message=effective_msg,
+                reply=reply_text,
+                session_id=session_id,
+                intent=phase1_plan.intent if phase1_plan else "normal_chat",
+            )
+        except Exception:
+            pass
+
+        # ── Final done event with metadata ────────────────────────────────────
+        meta = {
+            "reply": reply_text,
+            "session_id": session_id,
+            "model_used": _active_model,
+            "route_result": {"intent": execution_intent},
+            "memory_stored": [
+                {"key": f.key, "value": f.value, "confidence": f.confidence}
+                for f in memory_facts_stored
+            ] if memory_facts_stored else [],
+        }
+        yield f"data: {_json.dumps({'done': True, 'meta': meta})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @app.get("/api/models/status")

@@ -159,6 +159,40 @@ class OllamaClient:
         data = json.loads(raw) if isinstance(raw, str) else raw
         return data.get("message", {}).get("content", "").strip()
 
+    async def run_chat_stream(
+        self,
+        model: str,
+        messages: List[dict],
+        temperature: float = 0.7,
+    ) -> AsyncIterator[str]:
+        """
+        Call /api/chat with stream=True and yield content tokens as they arrive.
+        """
+        logger.debug("run_chat_stream model=%s turns=%d", model, len(messages))
+        session = await self._get_session()
+        url = f"{self.base_url}/api/chat"
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+            "options": {"temperature": temperature},
+        }
+        async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=300)) as resp:
+            resp.raise_for_status()
+            async for raw_line in resp.content:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                    token = data.get("message", {}).get("content", "")
+                    if token:
+                        yield token
+                    if data.get("done", False):
+                        break
+                except (json.JSONDecodeError, KeyError):
+                    continue
+
     async def embed(self, model: str, text: str) -> List[float]:
         """
         Call /api/embeddings and return the embedding vector.

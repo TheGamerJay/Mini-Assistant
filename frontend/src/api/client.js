@@ -88,6 +88,20 @@ export const api = {
     return post(`${IMAGE_API}/chat`, body, 120000);
   },
 
+  /** Open a streaming chat connection. Returns a raw fetch Response (SSE). */
+  chatStream(message, sessionId, history = [], imageBase64 = null, signal = null) {
+    const trimmedHistory = history.slice(-10).map(m => ({ role: m.role, content: m.content }));
+    const body = { message, session_id: sessionId, history: trimmedHistory };
+    if (imageBase64) body.image_base64 = imageBase64;
+    const authHeaders = API_KEY ? { 'X-API-Key': API_KEY } : {};
+    return fetch(`${IMAGE_API}/chat/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify(body),
+      signal,
+    });
+  },
+
   /** Get session memory facts */
   getMemory(sessionId) {
     return get(`${MAIN_API}/memory/${sessionId}`, 10000);

@@ -8,8 +8,10 @@ import { api } from '../api/client';
 
 /**
  * useChat()
- * Returns { send, cancel, loading }
- * send(text, sessionId, history, imageBase64) → API response data
+ * Returns { send, sendStream, cancel, loading }
+ *
+ * send(text, sessionId, history, imageBase64) → API response data (non-streaming)
+ * sendStream(text, sessionId, history, imageBase64, { onToken, onDone, onError }) → streaming
  * cancel(sessionId) → cancels in-flight request
  */
 export function useChat() {
@@ -29,24 +31,76 @@ export function useChat() {
     }
   }, []);
 
+  /**
+   * Stream tokens for a general-chat message.
+   * Calls onToken(text) for each chunk, onDone(meta) when complete.
+   * If the backend signals image_redirect, calls onDone with {type:'image_redirect'}.
+   */
+  const sendStream = useCallback(async (
+    text,
+    sessionId,
+    history = [],
+    imageBase64 = null,
+    { onToken, onDone, onError } = {}
+  ) => {
+    setLoading(true);
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    try {
+      const res = await api.chatStream(text, sessionId, history, imageBase64, controller.signal);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // keep incomplete trailing line
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const raw = line.slice(6).trim();
+          if (!raw) continue;
+          try {
+            const evt = JSON.parse(raw);
+            if (evt.done) {
+              onDone && onDone(evt.meta || {});
+            } else if (evt.t !== undefined) {
+              onToken && onToken(evt.t);
+            }
+          } catch { /* malformed SSE line — ignore */ }
+        }
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        onError && onError(err);
+      }
+    } finally {
+      setLoading(false);
+      abortControllerRef.current = null;
+    }
+  }, []);
+
   const cancel = useCallback(async (sessionId) => {
-    // Abort in-flight fetch if possible
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
-    // Also call the backend cancel endpoint
     if (sessionId) {
       try {
         await api.cancelGeneration(sessionId);
-      } catch {
-        // ignore errors on cancel
-      }
+      } catch { /* ignore */ }
     }
     setLoading(false);
   }, []);
 
-  return { send, cancel, loading };
+  return { send, sendStream, cancel, loading };
 }
 
 export default useChat;
