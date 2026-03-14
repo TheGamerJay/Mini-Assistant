@@ -140,14 +140,21 @@ function LoginForm({ onSwitchToSignup }) {
     }
   }, [email, password, loginWithCredentials]);
 
-  const handleForgotEmail = useCallback((e) => {
+  const handleForgotEmail = useCallback(async (e) => {
     e.preventDefault();
     setError('');
     if (!forgotEmail) { setError('Enter your email address.'); return; }
-    const q = getUserSecurityQuestion(forgotEmail);
-    if (!q) { setError('No account found with this email, or no security question was set.'); return; }
-    setSecurityQuestion(q);
-    setForgotStep('answer');
+    setLoading(true);
+    try {
+      const q = await getUserSecurityQuestion(forgotEmail);
+      if (!q) { setError('No account found with this email, or no security question was set.'); return; }
+      setSecurityQuestion(q);
+      setForgotStep('answer');
+    } catch {
+      setError('No account found with this email, or no security question was set.');
+    } finally {
+      setLoading(false);
+    }
   }, [forgotEmail, getUserSecurityQuestion]);
 
   const handleForgotReset = useCallback(async (e) => {
@@ -193,8 +200,9 @@ function LoginForm({ onSwitchToSignup }) {
                 placeholder="you@example.com"
                 className="w-full bg-[#0d0d16] border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-colors" />
             </div>
-            <button type="submit" className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-600 text-white text-sm font-medium hover:from-cyan-400 hover:to-violet-500 transition-all shadow-lg">
-              Continue
+            <button type="submit" disabled={loading} className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-600 text-white text-sm font-medium hover:from-cyan-400 hover:to-violet-500 transition-all shadow-lg disabled:opacity-50 flex items-center justify-center gap-2">
+              {loading && <Loader2 size={14} className="animate-spin" />}
+              {loading ? 'Looking up…' : 'Continue'}
             </button>
           </form>
         ) : (

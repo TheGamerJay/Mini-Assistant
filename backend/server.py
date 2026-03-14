@@ -4091,6 +4091,15 @@ async def agent_run(request: AgentRunRequest):
 
 app.include_router(api_router)
 
+# ── Auth + DB-sync routes ─────────────────────────────────────────────────────
+try:
+    from auth_routes import auth_router, db_router
+    app.include_router(auth_router)
+    app.include_router(db_router)
+    logging.info("✓ Auth routes registered (/api/auth/*, /api/db/*)")
+except Exception as _auth_err:
+    logging.warning("Auth routes unavailable: %s", _auth_err)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Phase 2+3 — Executive + Skill Library diagnostics

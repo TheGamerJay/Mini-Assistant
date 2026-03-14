@@ -10,6 +10,13 @@ const API_KEY = process.env.REACT_APP_API_KEY || '';
 
 export { BACKEND_URL };
 
+// ---------------------------------------------------------------------------
+// JWT token management
+// ---------------------------------------------------------------------------
+export function getToken() { return localStorage.getItem('ma_token'); }
+export function setToken(t) { localStorage.setItem('ma_token', t); }
+export function clearToken() { localStorage.removeItem('ma_token'); }
+
 export class ApiError extends Error {
   constructor(message, status, data) {
     super(message);
@@ -23,7 +30,11 @@ async function request(url, options = {}, timeoutMs = 30000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  const authHeaders = API_KEY ? { 'X-API-Key': API_KEY } : {};
+  const _token = getToken();
+  const authHeaders = {
+    ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+    ...(_token ? { 'Authorization': `Bearer ${_token}` } : {}),
+  };
 
   // If caller passed headers: {} (empty), skip Content-Type so browser sets it (multipart)
   const callerHeaders = options.headers;
@@ -93,7 +104,11 @@ export const api = {
     const trimmedHistory = history.slice(-10).map(m => ({ role: m.role, content: m.content }));
     const body = { message, session_id: sessionId, history: trimmedHistory };
     if (imageBase64) body.image_base64 = imageBase64;
-    const authHeaders = API_KEY ? { 'X-API-Key': API_KEY } : {};
+    const _streamToken = getToken();
+    const authHeaders = {
+      ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+      ...(_streamToken ? { 'Authorization': `Bearer ${_streamToken}` } : {}),
+    };
     return fetch(`${IMAGE_API}/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders },
@@ -237,6 +252,94 @@ export const api = {
   /** Deny a pending tool call */
   denyTool(approvalId) {
     return post(`${MAIN_API}/tools/deny/${approvalId}`, {}, 10000);
+  },
+
+  // ── Auth endpoints ──────────────────────────────────────────────────────────
+
+  /** Register a new account. Returns { token, user }. */
+  authRegister(name, email, password, securityQuestion, securityAnswer) {
+    return post(`${MAIN_API}/auth/register`, {
+      name,
+      email,
+      password,
+      security_question: securityQuestion || null,
+      security_answer: securityAnswer || null,
+    }, 15000);
+  },
+
+  /** Login with credentials. Returns { token, user }. */
+  authLogin(email, password) {
+    return post(`${MAIN_API}/auth/login`, { email, password }, 15000);
+  },
+
+  /** Get current user profile (requires Bearer token). */
+  authMe() {
+    return get(`${MAIN_API}/auth/me`, 10000);
+  },
+
+  /** Update display name. */
+  authUpdateProfile(name) {
+    return request(`${MAIN_API}/auth/profile`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    }, 10000);
+  },
+
+  /** Update avatar (base64 dataUrl or null to remove). */
+  authUpdateAvatar(avatar) {
+    return request(`${MAIN_API}/auth/avatar`, {
+      method: 'PATCH',
+      body: JSON.stringify({ avatar }),
+    }, 15000);
+  },
+
+  /** Change password. */
+  authChangePassword(currentPassword, newPassword) {
+    return post(`${MAIN_API}/auth/change-password`, {
+      current_password: currentPassword,
+      new_password: newPassword,
+    }, 15000);
+  },
+
+  /** Delete account. */
+  authDeleteAccount() {
+    return del(`${MAIN_API}/auth/account`, 15000);
+  },
+
+  /** Get security question for a given email (no auth required). */
+  authSecurityQuestion(email) {
+    return get(`${MAIN_API}/auth/security-question?email=${encodeURIComponent(email)}`, 10000);
+  },
+
+  /** Reset password using security answer. */
+  authResetPassword(email, answer, newPassword) {
+    return post(`${MAIN_API}/auth/reset-password`, {
+      email,
+      answer,
+      new_password: newPassword,
+    }, 15000);
+  },
+
+  // ── DB sync endpoints ───────────────────────────────────────────────────────
+
+  /** Fetch all chats for the current user from MongoDB. */
+  dbGetChats() {
+    return get(`${MAIN_API}/db/chats`, 15000);
+  },
+
+  /** Replace all chats for the current user in MongoDB. */
+  dbSaveChats(chats) {
+    return post(`${MAIN_API}/db/chats`, { chats }, 20000);
+  },
+
+  /** Fetch all projects for the current user from MongoDB. */
+  dbGetProjects() {
+    return get(`${MAIN_API}/db/projects`, 15000);
+  },
+
+  /** Replace all projects for the current user in MongoDB. */
+  dbSaveProjects(projects) {
+    return post(`${MAIN_API}/db/projects`, { projects }, 20000);
   },
 };
 

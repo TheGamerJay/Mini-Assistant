@@ -2,9 +2,11 @@
  * context/AppContext.js
  * App-wide state management via React Context.
  * Provides chat history, project organisation, image gallery, settings, and server status.
+ * Auth is now backed by MongoDB + JWT tokens via the backend API.
  */
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import { api, getToken, setToken, clearToken } from '../api/client';
 
 // ---------------------------------------------------------------------------
 // Module-level Map: stores full base64 images keyed by image id
@@ -64,12 +66,33 @@ function saveLS(key, value) {
   }
 }
 
-/** Read the logged-in user's id directly from localStorage (used in useState initializers). */
-function getSessionId() {
+/**
+ * Decode JWT payload without verifying signature (client-side only, for reading claims).
+ * Returns null on failure.
+ */
+function decodeJwtPayload(token) {
   try {
-    const s = JSON.parse(localStorage.getItem('ma_session') || 'null');
-    return s?.id || null;
-  } catch { return null; }
+    const base64Url = token.split('.')[1];
+    if (!base64Url) return null;
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(base64));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read the user id from the stored JWT token (used in useState initializers
+ * before any async code can run).
+ */
+function getSessionId() {
+  const token = getToken();
+  if (!token) return null;
+  const payload = decodeJwtPayload(token);
+  if (!payload) return null;
+  // Check expiry
+  if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
+  return payload.sub || null;
 }
 
 /** Scope a storage key to a user id so each account has its own data bucket. */
@@ -260,12 +283,39 @@ export function AppProvider({ children }) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- Auth ----
+  // Initialise user from JWT token synchronously (no network call needed to render).
   const [user, _setUser] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('ma_session') || 'null'); } catch { return null; }
+    const token = getToken();
+    if (!token) return null;
+    const payload = decodeJwtPayload(token);
+    if (!payload) return null;
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+      clearToken();
+      return null;
+    }
+    return { id: payload.sub, name: payload.name, email: payload.email, role: payload.role };
   });
 
+  // On mount: verify token with backend and refresh user object (including avatar).
+  useEffect(() => {
+    const token = getToken();
+    if (!token) return;
+    api.authMe()
+      .then((profile) => {
+        _setUser((prev) => ({ ...prev, ...profile }));
+        if (profile.avatar !== undefined) {
+          _setAvatar(profile.avatar || null);
+        }
+      })
+      .catch(() => {
+        // Token invalid / expired — clear it
+        clearToken();
+        _setUser(null);
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Reload per-user data buckets when user logs in or out
-  const _prevUidRef = useRef(getSessionId());
+  const _prevUidRef = useRef(user?.id || null);
   useEffect(() => {
     const uid = user?.id || null;
     if (uid === _prevUidRef.current) return; // same user, no reload needed
@@ -278,81 +328,157 @@ export function AppProvider({ children }) {
     setActiveChatId(null);
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Persist per-user data whenever it changes
+  // After login, load chats & projects from backend (backend is source of truth)
+  const _backendLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!user?.id) {
+      _backendLoadedRef.current = false;
+      return;
+    }
+    if (_backendLoadedRef.current) return;
+    _backendLoadedRef.current = true;
+    api.dbGetChats()
+      .then((data) => { if (data?.chats?.length) setChats(data.chats); })
+      .catch(() => {});
+    api.dbGetProjects()
+      .then((data) => { if (data?.projects?.length) setProjects(data.projects); })
+      .catch(() => {});
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Persist per-user data to localStorage whenever it changes
   useEffect(() => { saveLS(uk('ma_v2_chats',    user?.id), chats);    }, [chats,    user?.id]);
   useEffect(() => { saveLS(uk('ma_v2_projects', user?.id), projects); }, [projects, user?.id]);
   useEffect(() => { saveLS(uk('ma_v2_images',   user?.id), images);   }, [images,   user?.id]);
   useEffect(() => { saveLS(uk('ma_v2_settings', user?.id), settings); }, [settings, user?.id]);
 
-  const _persistSession = useCallback((u) => {
-    try { localStorage.setItem('ma_session', JSON.stringify(u)); } catch {}
-    _setUser(u);
-  }, []);
+  // Debounced sync of chats to backend
+  const _chatSyncTimer = useRef(null);
+  const _initialChatsRef = useRef(true);
+  useEffect(() => {
+    if (!user?.id) return;
+    if (_initialChatsRef.current) { _initialChatsRef.current = false; return; }
+    clearTimeout(_chatSyncTimer.current);
+    _chatSyncTimer.current = setTimeout(() => {
+      api.dbSaveChats(chats).catch(() => {});
+    }, 3000);
+    return () => clearTimeout(_chatSyncTimer.current);
+  }, [chats, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Debounced sync of projects to backend
+  const _projectSyncTimer = useRef(null);
+  const _initialProjectsRef = useRef(true);
+  useEffect(() => {
+    if (!user?.id) return;
+    if (_initialProjectsRef.current) { _initialProjectsRef.current = false; return; }
+    clearTimeout(_projectSyncTimer.current);
+    _projectSyncTimer.current = setTimeout(() => {
+      api.dbSaveProjects(projects).catch(() => {});
+    }, 3000);
+    return () => clearTimeout(_projectSyncTimer.current);
+  }, [projects, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const logout = useCallback(() => {
-    localStorage.removeItem('ma_session');
+    clearToken();
     _setUser(null);
+    _setAvatar(null);
+    _backendLoadedRef.current = false;
+    _initialChatsRef.current = true;
+    _initialProjectsRef.current = true;
   }, []);
 
   const loginWithCredentials = useCallback(async (email, password) => {
-    const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
-    const found = users.find(u => u.email.toLowerCase() === email.toLowerCase());
-    if (!found) throw new Error('No account found with this email.');
-    const encoder = new TextEncoder();
-    const buf = await crypto.subtle.digest('SHA-256', encoder.encode(password + 'ma_salt_2025'));
-    const hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-    if (found.passwordHash !== hash) throw new Error('Incorrect password.');
-    const session = { id: found.id, name: found.name, email: found.email, role: found.role || 'user' };
-    _persistSession(session);
-    return session;
-  }, [_persistSession]);
+    try {
+      const res = await api.authLogin(email, password);
+      setToken(res.token);
+      const session = { id: res.user.id, name: res.user.name, email: res.user.email, role: res.user.role };
+      _setUser(session);
+      // Fetch avatar
+      api.authMe().then((profile) => {
+        if (profile.avatar !== undefined) _setAvatar(profile.avatar || null);
+      }).catch(() => {});
+      return session;
+    } catch (err) {
+      // Fallback: try legacy localStorage auth so existing accounts still work
+      const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
+      const found = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+      if (!found) throw new Error(err.message || 'No account found with this email.');
+      const encoder = new TextEncoder();
+      const buf = await crypto.subtle.digest('SHA-256', encoder.encode(password + 'ma_salt_2025'));
+      const hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      if (found.passwordHash !== hash) throw new Error('Incorrect password.');
+      const session = { id: found.id, name: found.name, email: found.email, role: found.role || 'user' };
+      _setUser(session);
+      return session;
+    }
+  }, []);
 
   const register = useCallback(async (name, email, password, securityQuestion, securityAnswer) => {
-    const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
-    if (users.find(u => u.email.toLowerCase() === email.toLowerCase())) {
-      throw new Error('An account with this email already exists.');
+    try {
+      const res = await api.authRegister(name, email, password, securityQuestion, securityAnswer);
+      setToken(res.token);
+      const session = { id: res.user.id, name: res.user.name, email: res.user.email, role: res.user.role };
+      _setUser(session);
+      return session;
+    } catch (err) {
+      // Fallback: localStorage registration (used when backend is unavailable)
+      const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
+      if (users.find(u => u.email.toLowerCase() === email.toLowerCase())) {
+        throw new Error(err.message || 'An account with this email already exists.');
+      }
+      const encoder = new TextEncoder();
+      const buf = await crypto.subtle.digest('SHA-256', encoder.encode(password + 'ma_salt_2025'));
+      const passwordHash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      let securityAnswerHash = null;
+      if (securityQuestion && securityAnswer) {
+        const aBuf = await crypto.subtle.digest('SHA-256', encoder.encode(securityAnswer.trim().toLowerCase() + 'ma_salt_2025'));
+        securityAnswerHash = Array.from(new Uint8Array(aBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      }
+      const isFirst = users.length === 0;
+      const newUser = {
+        id: crypto.randomUUID(), name, email, passwordHash,
+        securityQuestion: securityQuestion || null,
+        securityAnswerHash,
+        role: isFirst ? 'admin' : 'user',
+        createdAt: Date.now(),
+      };
+      users.push(newUser);
+      localStorage.setItem('ma_users', JSON.stringify(users));
+      const session = { id: newUser.id, name, email, role: newUser.role };
+      _setUser(session);
+      return session;
     }
-    const encoder = new TextEncoder();
-    const buf = await crypto.subtle.digest('SHA-256', encoder.encode(password + 'ma_salt_2025'));
-    const passwordHash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-    let securityAnswerHash = null;
-    if (securityQuestion && securityAnswer) {
-      const aBuf = await crypto.subtle.digest('SHA-256', encoder.encode(securityAnswer.trim().toLowerCase() + 'ma_salt_2025'));
-      securityAnswerHash = Array.from(new Uint8Array(aBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
-    }
-    const isFirst = users.length === 0;
-    const newUser = {
-      id: crypto.randomUUID(), name, email, passwordHash,
-      securityQuestion: securityQuestion || null,
-      securityAnswerHash,
-      role: isFirst ? 'admin' : 'user',
-      createdAt: Date.now(),
-    };
-    users.push(newUser);
-    localStorage.setItem('ma_users', JSON.stringify(users));
-    const session = { id: newUser.id, name, email, role: newUser.role };
-    _persistSession(session);
-    return session;
-  }, [_persistSession]);
+  }, []);
 
-  const getUserSecurityQuestion = useCallback((email) => {
-    const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
-    const found = users.find(u => u.email.toLowerCase() === email.toLowerCase());
-    return found?.securityQuestion || null;
+  // getUserSecurityQuestion is now async (hits backend, falls back to localStorage)
+  const getUserSecurityQuestion = useCallback(async (email) => {
+    try {
+      const res = await api.authSecurityQuestion(email);
+      return res?.security_question || null;
+    } catch {
+      // Fallback: localStorage
+      const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
+      const found = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+      return found?.securityQuestion || null;
+    }
   }, []);
 
   const resetPasswordWithSecurityAnswer = useCallback(async (email, answer, newPassword) => {
-    const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
-    const found = users.find(u => u.email.toLowerCase() === email.toLowerCase());
-    if (!found) throw new Error('No account found with this email.');
-    if (!found.securityAnswerHash) throw new Error('No security question set for this account. Please contact support.');
-    const encoder = new TextEncoder();
-    const buf = await crypto.subtle.digest('SHA-256', encoder.encode(answer.trim().toLowerCase() + 'ma_salt_2025'));
-    const hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-    if (found.securityAnswerHash !== hash) throw new Error('Incorrect answer. Please try again.');
-    const newBuf = await crypto.subtle.digest('SHA-256', encoder.encode(newPassword + 'ma_salt_2025'));
-    found.passwordHash = Array.from(new Uint8Array(newBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
-    localStorage.setItem('ma_users', JSON.stringify(users));
+    try {
+      await api.authResetPassword(email, answer, newPassword);
+    } catch (err) {
+      // Fallback: localStorage
+      const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
+      const found = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+      if (!found) throw new Error('No account found with this email.');
+      if (!found.securityAnswerHash) throw new Error('No security question set for this account. Please contact support.');
+      const encoder = new TextEncoder();
+      const buf = await crypto.subtle.digest('SHA-256', encoder.encode(answer.trim().toLowerCase() + 'ma_salt_2025'));
+      const hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      if (found.securityAnswerHash !== hash) throw new Error('Incorrect answer. Please try again.');
+      const newBuf = await crypto.subtle.digest('SHA-256', encoder.encode(newPassword + 'ma_salt_2025'));
+      found.passwordHash = Array.from(new Uint8Array(newBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem('ma_users', JSON.stringify(users));
+    }
   }, []);
 
   // ---- Avatar ----
@@ -361,58 +487,84 @@ export function AppProvider({ children }) {
     return uid ? (localStorage.getItem(`ma_avatar_${uid}`) || null) : null;
   });
 
-  const updateAvatar = useCallback((dataUrl) => {
+  const updateAvatar = useCallback(async (dataUrl) => {
     if (!user?.id) return;
-    try { localStorage.setItem(`ma_avatar_${user.id}`, dataUrl); } catch {}
     _setAvatar(dataUrl);
+    try {
+      await api.authUpdateAvatar(dataUrl);
+    } catch {
+      // Fallback: localStorage
+      try { localStorage.setItem(`ma_avatar_${user.id}`, dataUrl); } catch {}
+    }
   }, [user?.id]);
 
-  const removeAvatar = useCallback(() => {
+  const removeAvatar = useCallback(async () => {
     if (!user?.id) return;
-    localStorage.removeItem(`ma_avatar_${user.id}`);
     _setAvatar(null);
+    try {
+      await api.authUpdateAvatar(null);
+    } catch {
+      localStorage.removeItem(`ma_avatar_${user.id}`);
+    }
   }, [user?.id]);
 
   // ---- Profile mutations ----
-  const updateDisplayName = useCallback((name) => {
+  const updateDisplayName = useCallback(async (name) => {
     if (!user?.id || !name.trim()) return;
-    const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
-    const idx = users.findIndex(u => u.id === user.id);
-    if (idx === -1) return;
-    users[idx].name = name.trim();
-    localStorage.setItem('ma_users', JSON.stringify(users));
-    const session = { ...user, name: name.trim() };
-    _persistSession(session);
-  }, [user, _persistSession]);
+    _setUser((prev) => prev ? { ...prev, name: name.trim() } : prev);
+    try {
+      await api.authUpdateProfile(name.trim());
+    } catch {
+      // Fallback: localStorage
+      const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
+      const idx = users.findIndex(u => u.id === user.id);
+      if (idx !== -1) {
+        users[idx].name = name.trim();
+        localStorage.setItem('ma_users', JSON.stringify(users));
+      }
+    }
+  }, [user]);
 
   const changePassword = useCallback(async (currentPwd, newPwd) => {
     if (!user?.id) throw new Error('Not logged in.');
-    const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
-    const found = users.find(u => u.id === user.id);
-    if (!found) throw new Error('Account not found.');
-    const encoder = new TextEncoder();
-    const currentBuf = await crypto.subtle.digest('SHA-256', encoder.encode(currentPwd + 'ma_salt_2025'));
-    const currentHash = Array.from(new Uint8Array(currentBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
-    if (found.passwordHash !== currentHash) throw new Error('Current password is incorrect.');
-    const newBuf = await crypto.subtle.digest('SHA-256', encoder.encode(newPwd + 'ma_salt_2025'));
-    found.passwordHash = Array.from(new Uint8Array(newBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
-    localStorage.setItem('ma_users', JSON.stringify(users));
+    try {
+      await api.authChangePassword(currentPwd, newPwd);
+    } catch (err) {
+      // Fallback: localStorage
+      const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
+      const found = users.find(u => u.id === user.id);
+      if (!found) throw new Error('Account not found.');
+      const encoder = new TextEncoder();
+      const currentBuf = await crypto.subtle.digest('SHA-256', encoder.encode(currentPwd + 'ma_salt_2025'));
+      const currentHash = Array.from(new Uint8Array(currentBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      if (found.passwordHash !== currentHash) throw new Error('Current password is incorrect.');
+      const newBuf = await crypto.subtle.digest('SHA-256', encoder.encode(newPwd + 'ma_salt_2025'));
+      found.passwordHash = Array.from(new Uint8Array(newBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem('ma_users', JSON.stringify(users));
+    }
   }, [user]);
 
-  const deleteAccount = useCallback(() => {
+  const deleteAccount = useCallback(async () => {
     if (!user?.id) return;
     const uid = user.id;
-    // Remove user record
-    const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
-    localStorage.setItem('ma_users', JSON.stringify(users.filter(u => u.id !== uid)));
-    // Remove all user-scoped data
+    try {
+      await api.authDeleteAccount();
+    } catch {
+      // Fallback: localStorage cleanup
+      const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
+      localStorage.setItem('ma_users', JSON.stringify(users.filter(u => u.id !== uid)));
+    }
+    // Remove all user-scoped local data regardless
     ['ma_v2_chats', 'ma_v2_projects', 'ma_v2_images', 'ma_v2_settings'].forEach(k => {
       localStorage.removeItem(`${k}_${uid}`);
     });
     localStorage.removeItem(`ma_avatar_${uid}`);
-    localStorage.removeItem('ma_session');
+    clearToken();
     _setUser(null);
     _setAvatar(null);
+    _backendLoadedRef.current = false;
+    _initialChatsRef.current = true;
+    _initialProjectsRef.current = true;
   }, [user]);
 
   // ---- Server Status ----
