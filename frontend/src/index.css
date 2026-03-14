@@ -37,6 +37,17 @@ body {
   position: relative;
 }
 
+/* ── Light theme — invert all colors so dark→white, white→dark ── */
+[data-theme="light"] #root {
+  filter: invert(1) hue-rotate(180deg);
+}
+/* Cancel inversion on images and iframes so they stay natural */
+[data-theme="light"] img,
+[data-theme="light"] iframe,
+[data-theme="light"] video {
+  filter: invert(1) hue-rotate(180deg);
+}
+
 /* Custom scrollbar — slim dark style */
 ::-webkit-scrollbar {
   width: 4px;

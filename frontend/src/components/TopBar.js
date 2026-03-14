@@ -9,15 +9,13 @@ import {
   Settings, Github, Code2, User, LogOut, Moon, Sun,
   HelpCircle, ChevronDown, Terminal, GitBranch,
 } from 'lucide-react';
-import { toast } from 'sonner';
 import { useApp } from '../context/AppContext';
 
 // ---------------------------------------------------------------------------
 // Profile dropdown
 // ---------------------------------------------------------------------------
-function ProfileMenu({ onClose, setPage, serverStatus }) {
+function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme }) {
   const menuRef = useRef(null);
-  const [darkMode, setDarkMode] = useState(true); // always dark for now
 
   useEffect(() => {
     const handler = (e) => {
@@ -40,8 +38,8 @@ function ProfileMenu({ onClose, setPage, serverStatus }) {
   };
 
   const handleTheme = () => {
-    setDarkMode(v => !v);
-    toast.info('Only dark theme is available right now.');
+    toggleTheme();
+    onClose();
   };
 
   const handleHelp = () => {
@@ -102,11 +100,11 @@ function ProfileMenu({ onClose, setPage, serverStatus }) {
           className="w-full flex items-center justify-between px-4 py-2 text-sm text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors"
         >
           <span className="flex items-center gap-3">
-            {darkMode ? <Moon size={14} /> : <Sun size={14} />}
+            {theme === 'dark' ? <Moon size={14} /> : <Sun size={14} />}
             Theme
           </span>
           <span className="text-[10px] font-mono text-slate-600 bg-white/5 px-2 py-0.5 rounded">
-            {darkMode ? 'Dark' : 'Light'}
+            {theme === 'dark' ? 'Dark' : 'Light'}
           </span>
         </button>
         <MenuItem icon={HelpCircle} label="Help & Docs" onClick={handleHelp} />
@@ -144,7 +142,7 @@ function MenuItem({ icon: Icon, label, onClick, hint }) {
 // TopBar
 // ---------------------------------------------------------------------------
 function TopBar() {
-  const { setPage, serverStatus } = useApp();
+  const { setPage, serverStatus, theme, toggleTheme } = useApp();
   const [profileOpen, setProfileOpen] = useState(false);
 
   return (
@@ -188,6 +186,8 @@ function TopBar() {
             onClose={() => setProfileOpen(false)}
             setPage={setPage}
             serverStatus={serverStatus}
+            theme={theme}
+            toggleTheme={toggleTheme}
           />
         )}
       </div>

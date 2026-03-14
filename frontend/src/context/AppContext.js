@@ -197,6 +197,26 @@ export function AppProvider({ children }) {
 
   const getFullImage = useCallback((id) => fullImageMap.get(id) || null, []);
 
+  // ---- Theme ----
+  const [theme, _setTheme] = useState(
+    () => localStorage.getItem('ma_theme') || 'dark'
+  );
+
+  const toggleTheme = useCallback(() => {
+    _setTheme((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('ma_theme', next);
+      // Apply immediately to the document root
+      document.documentElement.setAttribute('data-theme', next);
+      return next;
+    });
+  }, []);
+
+  // Sync on first mount
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ---- Settings ----
   const defaultSettings = {
     showRouteInfo: true,
@@ -258,6 +278,9 @@ export function AppProvider({ children }) {
     // settings
     settings,
     updateSettings,
+    // theme
+    theme,
+    toggleTheme,
     // server status
     serverStatus,
     setServerStatus,
