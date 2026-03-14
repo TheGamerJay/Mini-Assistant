@@ -360,40 +360,95 @@ def _detect_weather_location(message: str) -> Optional[str]:
     return None
 
 
+_WMO_CODES = {
+    0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+    45: "Foggy", 48: "Icy fog",
+    51: "Light drizzle", 53: "Moderate drizzle", 55: "Dense drizzle",
+    61: "Slight rain", 63: "Moderate rain", 65: "Heavy rain",
+    71: "Slight snow", 73: "Moderate snow", 75: "Heavy snow", 77: "Snow grains",
+    80: "Light showers", 81: "Moderate showers", 82: "Heavy showers",
+    85: "Light snow showers", 86: "Heavy snow showers",
+    95: "Thunderstorm", 96: "Thunderstorm with hail", 99: "Severe thunderstorm with hail",
+}
+
+
 async def _fetch_weather(location: str) -> Optional[str]:
-    """Fetch current weather from wttr.in (free, no auth). Returns formatted string or None."""
+    """Fetch current weather from Open-Meteo (free, no API key). Returns formatted string or None."""
     try:
         import httpx
-        from datetime import datetime, timezone
-        url = f"https://wttr.in/{location.replace(' ', '+')}?format=j1"
+        from datetime import datetime, timezone, timedelta
+
+        # Step 1: Geocode the location
+        geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={location.replace(' ', '+')}&count=1&language=en&format=json"
         async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as _c:
-            r = await _c.get(url, headers={"User-Agent": "MiniAssistant/1.0"})
-        if r.status_code != 200:
+            geo_r = await _c.get(geo_url, headers={"User-Agent": "MiniAssistant/1.0"})
+        if geo_r.status_code != 200:
             return None
-        d = r.json()
-        cur = d.get("current_condition", [{}])[0]
-        area_info = d.get("nearest_area", [{}])[0]
-        area    = area_info.get("areaName",  [{}])[0].get("value", location)
-        region  = area_info.get("region",    [{}])[0].get("value", "")
-        country = area_info.get("country",   [{}])[0].get("value", "")
-        loc_str = ", ".join(filter(None, [area, region, country]))
-        desc    = cur.get("weatherDesc", [{}])[0].get("value", "")
-        temp_f  = cur.get("temp_F",         "?")
-        temp_c  = cur.get("temp_C",         "?")
-        feels_f = cur.get("FeelsLikeF",     "?")
-        humidity= cur.get("humidity",       "?")
-        wind_mph= cur.get("windspeedMiles", "?")
-        wind_dir= cur.get("winddir16Point", "?")
-        uv      = cur.get("uvIndex",        "?")
-        vis_km  = cur.get("visibility",     "?")
-        utc_now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        geo_d = geo_r.json()
+        results = geo_d.get("results")
+        if not results:
+            return None
+        loc_info = results[0]
+        lat  = loc_info["latitude"]
+        lon  = loc_info["longitude"]
+        name = loc_info.get("name", location)
+        admin = loc_info.get("admin1", "")
+        country = loc_info.get("country", "")
+        loc_str = ", ".join(filter(None, [name, admin, country]))
+        tz_name = loc_info.get("timezone", "UTC")
+
+        # Step 2: Fetch weather
+        wx_url = (
+            f"https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}&longitude={lon}"
+            f"&current=temperature_2m,apparent_temperature,relative_humidity_2m,"
+            f"wind_speed_10m,wind_direction_10m,weather_code,uv_index,visibility"
+            f"&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone={tz_name}"
+        )
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as _c:
+            wx_r = await _c.get(wx_url, headers={"User-Agent": "MiniAssistant/1.0"})
+        if wx_r.status_code != 200:
+            return None
+        wx_d = wx_r.json()
+        cur  = wx_d.get("current", {})
+        utc_offset_s = wx_d.get("utc_offset_seconds", 0)
+
+        temp_f   = cur.get("temperature_2m", "?")
+        feels_f  = cur.get("apparent_temperature", "?")
+        humidity = cur.get("relative_humidity_2m", "?")
+        wind_mph = cur.get("wind_speed_10m", "?")
+        wind_deg = cur.get("wind_direction_10m", 0)
+        wmo_code = cur.get("weather_code", -1)
+        uv       = cur.get("uv_index", "?")
+        vis_m    = cur.get("visibility", None)
+
+        # Convert Fahrenheit to Celsius
+        temp_c = round((float(temp_f) - 32) * 5 / 9, 1) if temp_f != "?" else "?"
+        feels_c = round((float(feels_f) - 32) * 5 / 9, 1) if feels_f != "?" else "?"
+
+        # Wind direction degrees → compass
+        dirs = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"]
+        wind_dir = dirs[round(wind_deg / 22.5) % 16] if isinstance(wind_deg, (int, float)) else "?"
+
+        # Visibility
+        vis_str = f"{round(vis_m / 1000, 1)} km" if vis_m is not None else "?"
+
+        desc = _WMO_CODES.get(wmo_code, f"Code {wmo_code}")
+
+        # Local time at the queried location
+        local_dt = datetime.now(timezone.utc) + timedelta(seconds=utc_offset_s)
+        local_time_str = local_dt.strftime("%I:%M %p, %A %B %-d %Y")
+        tz_offset_h = utc_offset_s // 3600
+        tz_label = f"UTC{'+' if tz_offset_h >= 0 else ''}{tz_offset_h}"
+
         return (
-            f"[REAL-TIME DATA from wttr.in — fetched {utc_now}]\n"
+            f"[REAL-TIME DATA from Open-Meteo]\n"
             f"Location: {loc_str}\n"
+            f"Local time: {local_time_str} ({tz_label})\n"
             f"Condition: {desc}\n"
-            f"Temperature: {temp_f}°F ({temp_c}°C)  |  Feels Like: {feels_f}°F\n"
+            f"Temperature: {temp_f}°F ({temp_c}°C)  |  Feels Like: {feels_f}°F ({feels_c}°C)\n"
             f"Humidity: {humidity}%  |  Wind: {wind_mph} mph {wind_dir}\n"
-            f"UV Index: {uv}  |  Visibility: {vis_km} km\n"
+            f"UV Index: {uv}  |  Visibility: {vis_str}\n"
             f"[END REAL-TIME DATA]\n"
         )
     except Exception as _we:
