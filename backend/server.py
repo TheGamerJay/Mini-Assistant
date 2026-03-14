@@ -3746,6 +3746,12 @@ async def health_check(deep: bool = False):
         from mini_assistant.phase10.health_checks import run_health_checks
         report = await run_health_checks(include_slow=deep)
         report["whisper"] = "loaded" if whisper_model else "not_loaded"
+        # Add legacy flat keys expected by the frontend status bar
+        checks_by_name = {c["name"]: c for c in report.get("checks", [])}
+        ollama_check  = checks_by_name.get("ollama",  {})
+        comfyui_check = checks_by_name.get("comfyui", {})
+        report["ollama"]  = "connected" if ollama_check.get("status") == "ok" and ollama_check.get("http_status", 0) == 200 else "disconnected"
+        report["comfyui"] = "connected" if comfyui_check.get("status") == "ok" and comfyui_check.get("http_status", 0) == 200 else "disconnected"
         return report
     except Exception:
         # Fallback to legacy check if Phase 10 unavailable

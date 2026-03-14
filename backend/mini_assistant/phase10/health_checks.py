@@ -25,7 +25,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-_OLLAMA_URL  = os.environ.get("OLLAMA_URL",  "http://localhost:11434")
+_OLLAMA_URL  = os.environ.get("OLLAMA_URL") or os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 _COMFY_URL   = os.environ.get("COMFYUI_URL", "http://localhost:8188")
 _TIMEOUT     = 5.0   # seconds per probe
 

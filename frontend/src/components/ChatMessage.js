@@ -358,7 +358,7 @@ function MetaBar({ model_used, memory_stored }) {
   if (!hasModel && memCount === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-1 mt-2">
-      {hasModel && <span className="text-[10px] font-mono rounded px-1.5 py-0.5 border text-cyan-400/60 bg-cyan-500/5 border-cyan-500/15 truncate max-w-[140px]" title={model_used}>{model_used}</span>}
+      {hasModel && <span className="text-[10px] font-mono rounded px-1.5 py-0.5 border text-cyan-400/60 bg-cyan-500/5 border-cyan-500/15" title={model_used}>mini</span>}
       {memCount > 0 && <span className="text-[10px] font-mono rounded px-1.5 py-0.5 border text-emerald-400/60 bg-emerald-500/5 border-emerald-500/15" title={memory_stored.map(f => `${f.key}: ${f.value}`).join(', ')}>+{memCount} mem</span>}
     </div>
   );
