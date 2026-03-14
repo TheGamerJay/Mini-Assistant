@@ -1270,7 +1270,7 @@ async def chat(req: ChatRequest):
 
     # Model override from request (Phase 6 model selector)
     from ..services.ollama_client import _model_name as _reg_model_name
-    _active_model = req.preferred_model or _reg_model_name("router")
+    _active_model = req.preferred_model or os.environ.get("FAST_MODEL") or _reg_model_name("router")
 
     if execution_intent in ("image_generation", "image_edit"):
         gen_req = GenerateRequest(prompt=effective_msg, session_id=session_id)
@@ -1573,7 +1573,7 @@ async def chat_stream(req: ChatRequest):
 
         # ── Model selection ───────────────────────────────────────────────────
         from ..services.ollama_client import _model_name as _reg_model_name
-        _active_model = req.preferred_model or _reg_model_name("router")
+        _active_model = req.preferred_model or os.environ.get("FAST_MODEL") or _reg_model_name("router")
 
         # ── Real-time weather injection ───────────────────────────────────────
         rt_context = ""
