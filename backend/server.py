@@ -4075,6 +4075,27 @@ app.include_router(api_router)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Phase 0 — Project Context Scanner
+# GET /api/project/context
+# Returns a structured snapshot of the codebase for Planner / Manager use.
+# ══════════════════════════════════════════════════════════════════════════════
+@app.get("/api/project/context", tags=["scanner"])
+async def project_context():
+    """
+    Scan the Mini Assistant codebase and return a structured context snapshot:
+    stack, entrypoints, feature-to-file map, duplicate-risk register, warnings.
+    Pure filesystem scan — no LLM calls, runs in < 100 ms.
+    """
+    try:
+        from mini_assistant.scanner import get_context
+        ctx = get_context()
+        return ctx.to_dict()
+    except Exception as exc:
+        logging.exception("Project context scanner failed")
+        raise HTTPException(status_code=500, detail=f"Scanner error: {exc}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Image System API  (/api/image/*, /api/models/*)
 # Mounts the local Ollama+ComfyUI multi-brain image router as a sub-application.
 # ══════════════════════════════════════════════════════════════════════════════
