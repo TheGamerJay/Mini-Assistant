@@ -612,10 +612,14 @@ async def analyze_image(req: AnalyzeRequest):
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
     """
-    Multi-purpose chat endpoint.
+    Multi-purpose chat endpoint — Phase 1: Planner-First Routing.
 
-    Automatically detects if the message requires image generation and
-    delegates accordingly. For pure chat, uses the router model.
+    Every request passes through the Planner before any brain or tool runs.
+    The Planner detects intent, builds a task plan, and selects execution_intent.
+    The execution layer (image generation, coding brain, chat) then acts on that.
+    Finally a Critic validates the reply and a Composer assembles the response.
+
+    Slash commands (/fix, /image, /code, etc.) override intent detection.
     """
     from ..utils.prompt_safety import validate as ps_validate
 
@@ -625,49 +629,152 @@ async def chat(req: ChatRequest):
     if not is_valid:
         raise HTTPException(status_code=400, detail=f"Message rejected: {safety_error}")
 
-    # Route to detect intent
+    # ── Phase 1 Step 1: Command Parser ─────────────────────────────────────────
+    phase1_plan   = None
+    phase1_critic = None
+    parsed_cmd    = None
+    effective_msg = clean_message
+
     try:
-        from ..utils.routing_guard import validate_route as guard_validate
-        route_result = await _get_router().route(clean_message)
-        route_result = guard_validate(route_result)
-    except Exception as exc:
-        logger.error("Chat routing failed: %s", exc)
-        route_result = {"intent": "chat"}
+        from mini_assistant.phase1.command_parser import parse as cmd_parse
+        from mini_assistant.phase1.intent_planner import plan as make_plan
+        from mini_assistant.phase1.critic import critique
+        from mini_assistant.phase1.composer import compose as phase1_compose
+        from mini_assistant.phase1.command_parser import help_text
 
-    intent = route_result.get("intent", "chat")
+        # Parse slash command (if any)
+        parsed_cmd  = cmd_parse(clean_message)
+        effective_msg = parsed_cmd.args if parsed_cmd.is_slash else clean_message
 
-    if intent in ("image_generation", "image_edit"):
-        gen_req = GenerateRequest(prompt=clean_message, session_id=session_id)
-        return await generate_image(gen_req)
+        # ── Phase 1 Step 2: Planner (ALWAYS RUNS FIRST) ────────────────────────
+        phase1_plan = make_plan(
+            message        = effective_msg,
+            parsed_command = parsed_cmd,
+            history        = req.history or [],
+        )
+        logger.info(
+            "Planner → intent=%s confidence=%.2f method=%s ms=%.1f",
+            phase1_plan.intent, phase1_plan.confidence,
+            phase1_plan.routing_method, phase1_plan.planner_ms,
+        )
 
-    if intent == "coding":
+        # /help shortcut — return command list without hitting any brain
+        if parsed_cmd.help_requested:
+            return phase1_compose(
+                reply        = help_text(),
+                plan         = phase1_plan,
+                critic       = critique(help_text(), phase1_plan),
+                session_id   = session_id,
+                route_result = {},
+            )
+
+    except Exception as _p1_err:
+        logger.warning("Phase 1 pipeline failed (%s) — falling back to legacy routing.", _p1_err)
+        phase1_plan = None
+
+    # ── Phase 1 Step 3: Execution Router ───────────────────────────────────────
+    # Use Planner's execution_intent to drive the existing image_system router.
+    # If Planner is unavailable, fall back to the RouterBrain as before.
+
+    execution_intent = (
+        phase1_plan.execution_intent if phase1_plan else None
+    )
+    route_result: dict = {}
+
+    # For image generation, still run the RouterBrain to get checkpoint/workflow detail
+    if execution_intent == "image_generation" or execution_intent is None:
         try:
-            reply = await _get_coding().run(clean_message)
+            from ..utils.routing_guard import validate_route as guard_validate
+            rr = await _get_router().route(effective_msg)
+            rr = guard_validate(rr)
+            route_result = rr if isinstance(rr, dict) else (rr.dict() if hasattr(rr, "dict") else {})
+            if execution_intent is None:
+                execution_intent = route_result.get("intent", "chat")
+        except Exception as exc:
+            logger.error("RouterBrain failed: %s", exc)
+            route_result     = {"intent": "chat"}
+            execution_intent = execution_intent or "chat"
+
+    # ── Phase 1 Step 4: Brain Execution ────────────────────────────────────────
+    reply = ""
+
+    if execution_intent in ("image_generation", "image_edit"):
+        gen_req = GenerateRequest(prompt=effective_msg, session_id=session_id)
+        image_response = await generate_image(gen_req)
+        # Image generation returns its own response — inject plan metadata and return
+        if isinstance(image_response, dict):
+            image_response["plan"]         = phase1_plan.to_dict() if phase1_plan else {}
+            image_response["intent"]       = "image_generate"
+            image_response["slash_command"]= parsed_cmd.command if parsed_cmd and parsed_cmd.is_slash else None
+        return image_response
+
+    elif execution_intent == "coding":
+        try:
+            reply = await _get_coding().run(effective_msg)
         except Exception as exc:
             reply = f"Coding brain error: {exc}"
+
     else:
+        # General chat / research / planning / file_analysis / web_search
+        # All use the Ollama run_chat with conversation history
         try:
-            ollama = _get_ollama()
+            ollama_client = _get_ollama()
             from ..services.ollama_client import _model_name
-            # Build messages with history context (last 10 turns max)
-            history_msgs = []
+
+            # Inject project context summary for file_analysis requests
+            system_prefix = ""
+            if phase1_plan and phase1_plan.intent == "file_analysis":
+                try:
+                    from mini_assistant.scanner import get_context
+                    ctx = get_context()
+                    # Compact summary for context injection
+                    feat_names = [f["feature"] for f in ctx.to_dict().get("feature_map", [])]
+                    warnings   = ctx.to_dict().get("warnings", [])[:3]
+                    system_prefix = (
+                        f"[PROJECT CONTEXT — {len(feat_names)} features mapped. "
+                        f"Key warnings: {'; '.join(warnings) if warnings else 'none'}]\n\n"
+                    )
+                except Exception:
+                    pass
+
+            history_msgs: list[dict] = []
             if req.history:
                 for h in req.history[-10:]:
                     history_msgs.append({"role": h.role, "content": h.content})
-            history_msgs.append({"role": "user", "content": clean_message})
-            reply = await ollama.run_chat(
-                model=_model_name("router"),
-                messages=history_msgs,
-                temperature=0.7,
+
+            user_content = (system_prefix + effective_msg) if system_prefix else effective_msg
+            history_msgs.append({"role": "user", "content": user_content})
+
+            reply = await ollama_client.run_chat(
+                model       = _model_name("router"),
+                messages    = history_msgs,
+                temperature = 0.7,
             )
         except Exception as exc:
             reply = f"I'm having trouble responding right now: {exc}"
 
+    # ── Phase 1 Step 5: Critic + Composer ──────────────────────────────────────
+    if phase1_plan is not None:
+        try:
+            from mini_assistant.phase1.critic import critique
+            from mini_assistant.phase1.composer import compose as phase1_compose
+            critic_result = critique(reply, phase1_plan)
+            return phase1_compose(
+                reply        = reply,
+                plan         = phase1_plan,
+                critic       = critic_result,
+                session_id   = session_id,
+                route_result = route_result,
+            )
+        except Exception as _c_err:
+            logger.warning("Phase 1 Critic/Composer failed (%s) — returning raw reply.", _c_err)
+
+    # Legacy fallback response shape (Phase 1 unavailable)
     return {
-        "reply": reply,
-        "intent": intent,
+        "reply":        reply,
+        "intent":       execution_intent,
         "route_result": route_result,
-        "session_id": session_id,
+        "session_id":   session_id,
     }
 
 
