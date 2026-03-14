@@ -339,6 +339,10 @@ _WEATHER_PATTERNS = [
     _re.compile(r"weather\s+(?:for|in|at)\s+(.+?)(?:\s+today|\s+tonight|\s+tomorrow|\?|$)", _re.I),
     _re.compile(r"(?:forecast|temperature)\s+(?:for|in|at)\s+(.+?)(?:\s+today|\s+tonight|\?|$)", _re.I),
     _re.compile(r"whats the weather\s+(?:for|in|at)\s+(.+?)(?:\s+today|\s+tonight|\?|$)", _re.I),
+    # Flexible: "weather ... for/in/at <location>" with arbitrary words between
+    _re.compile(r"weather.{0,40}?(?:for|in|at)\s+([A-Za-z][A-Za-z\s,]{1,50})(?:\s+today|\s+tonight|\?|$|[,.])", _re.I),
+    # "in <location>" near weather-related words
+    _re.compile(r"(?:weather|temperature|forecast|time).{0,60}?\bin\s+([A-Za-z][A-Za-z\s,]{1,50})(?:\s+(?:right now|currently|today|now)|\?|$|[,.])", _re.I),
 ]
 
 
@@ -358,6 +362,7 @@ async def _fetch_weather(location: str) -> Optional[str]:
     """Fetch current weather from wttr.in (free, no auth). Returns formatted string or None."""
     try:
         import httpx
+        from datetime import datetime, timezone
         url = f"https://wttr.in/{location.replace(' ', '+')}?format=j1"
         async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as _c:
             r = await _c.get(url, headers={"User-Agent": "MiniAssistant/1.0"})
@@ -379,8 +384,9 @@ async def _fetch_weather(location: str) -> Optional[str]:
         wind_dir= cur.get("winddir16Point", "?")
         uv      = cur.get("uvIndex",        "?")
         vis_km  = cur.get("visibility",     "?")
+        utc_now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         return (
-            f"[REAL-TIME DATA from wttr.in]\n"
+            f"[REAL-TIME DATA from wttr.in — fetched {utc_now}]\n"
             f"Location: {loc_str}\n"
             f"Condition: {desc}\n"
             f"Temperature: {temp_f}°F ({temp_c}°C)  |  Feels Like: {feels_f}°F\n"
