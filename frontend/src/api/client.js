@@ -90,20 +90,24 @@ function del(url, timeoutMs) {
 }
 
 export const api = {
-  /** Send a chat message with optional conversation history, attached image, and model override */
-  chat(message, sessionId, history = [], imageBase64 = null, preferredModel = null) {
+  /** Send a chat message with optional conversation history, attached images, and model override */
+  chat(message, sessionId, history = [], imagesBase64 = null, preferredModel = null) {
     const trimmedHistory = history.slice(-10).map(m => ({ role: m.role, content: m.content }));
     const body = { message, session_id: sessionId, history: trimmedHistory };
-    if (imageBase64)     body.image_base64     = imageBase64;
+    const imgs = Array.isArray(imagesBase64) ? imagesBase64.filter(Boolean) : (imagesBase64 ? [imagesBase64] : []);
+    if (imgs.length === 1) body.image_base64 = imgs[0];
+    else if (imgs.length > 1) body.images_base64 = imgs;
     if (preferredModel)  body.preferred_model  = preferredModel;
     return post(`${IMAGE_API}/chat`, body, 120000);
   },
 
   /** Open a streaming chat connection. Returns a raw fetch Response (SSE). */
-  chatStream(message, sessionId, history = [], imageBase64 = null, signal = null) {
+  chatStream(message, sessionId, history = [], imagesBase64 = null, signal = null) {
     const trimmedHistory = history.slice(-10).map(m => ({ role: m.role, content: m.content }));
     const body = { message, session_id: sessionId, history: trimmedHistory };
-    if (imageBase64) body.image_base64 = imageBase64;
+    const imgs = Array.isArray(imagesBase64) ? imagesBase64.filter(Boolean) : (imagesBase64 ? [imagesBase64] : []);
+    if (imgs.length === 1) body.image_base64 = imgs[0];
+    else if (imgs.length > 1) body.images_base64 = imgs;
     const _streamToken = getToken();
     const authHeaders = {
       ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),

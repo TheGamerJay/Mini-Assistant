@@ -128,9 +128,10 @@ function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading, streamActive, streamingText]);
 
-  const handleSubmit = useCallback(async (text, imageBase64 = null, preferredModel = null) => {
+  const handleSubmit = useCallback(async (text, imagesBase64 = null, preferredModel = null) => {
     if (submittingRef.current || loading) return;
-    if (!text && !imageBase64) return;
+    const imgs = Array.isArray(imagesBase64) ? imagesBase64.filter(Boolean) : (imagesBase64 ? [imagesBase64] : []);
+    if (!text && !imgs.length) return;
     submittingRef.current = true;
     lastUserTextRef.current = text;
 
@@ -144,9 +145,9 @@ function ChatPage() {
 
     const userMsg = {
       role: 'user',
-      type: imageBase64 ? 'image_input' : 'text',
+      type: imgs.length ? 'image_input' : 'text',
       content: text,
-      image_base64: imageBase64 || null,
+      image_base64: imgs[0] || null,
       timestamp: Date.now(),
     };
     const nextMessages = [...messages, userMsg];
@@ -158,7 +159,7 @@ function ChatPage() {
     const imageIntentDetected = isImageIntent(text);
 
     // ── IMAGE path: use non-streaming endpoint + shimmer ──────────────────
-    if (imageIntentDetected || imageBase64) {
+    if (imageIntentDetected || imgs.length) {
       if (imageIntentDetected) {
         setMessages([...nextMessages, {
           role: 'assistant', type: 'image_generating',
@@ -171,7 +172,7 @@ function ChatPage() {
 
       try {
         const history = nextMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
-        const data = await send(text, sessionIdRef.current, history, imageBase64, preferredModel);
+        const data = await send(text, sessionIdRef.current, history, imgs.length ? imgs : null, preferredModel);
         setStreamResponse(data);
 
         const isImg = !!data.image_base64;
@@ -218,7 +219,7 @@ function ChatPage() {
     const chatIdRef_local = chatId; // capture for callbacks
     const history = nextMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
 
-    await sendStream(text, sessionIdRef.current, history, null, {
+    await sendStream(text, sessionIdRef.current, history, imgs.length ? imgs : null, {
       onToken(token) {
         setStreamingText(prev => (prev === null ? token : prev + token));
       },

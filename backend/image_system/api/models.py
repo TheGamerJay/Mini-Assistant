@@ -57,7 +57,8 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
     history: Optional[List[ChatHistoryMessage]] = []  # recent conversation turns
-    image_base64: Optional[str] = None               # user-attached image (Phase 5)
+    image_base64: Optional[str] = None               # single attached image (legacy)
+    images_base64: Optional[List[str]] = None        # multiple attached images (Phase 5+)
     preferred_model: Optional[str] = None            # Ollama model override (Phase 6)
 
 

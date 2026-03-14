@@ -1669,7 +1669,14 @@ async def chat_stream(req: ChatRequest):
             for h in req.history[-10:]:
                 history_msgs.append({"role": h.role, "content": h.content})
         user_content = (rt_context + effective_msg) if rt_context else effective_msg
-        history_msgs.append({"role": "user", "content": user_content})
+        # Collect all attached images (multi-image support)
+        all_images = list(req.images_base64 or [])
+        if req.image_base64 and req.image_base64 not in all_images:
+            all_images.insert(0, req.image_base64)
+        user_msg: dict = {"role": "user", "content": user_content}
+        if all_images:
+            user_msg["images"] = all_images
+        history_msgs.append(user_msg)
 
         # ── Stream tokens from Ollama ─────────────────────────────────────────
         reply_text = ""

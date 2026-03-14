@@ -67,8 +67,8 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
   const [value, setValue]           = useState('');
   const [slashHints, setSlashHints] = useState([]);
 
-  // Image attach state
-  const [attachedImage, setAttachedImage] = useState(null); // { base64, preview, name }
+  // Image attach state — supports multiple images
+  const [attachedImages, setAttachedImages] = useState([]); // [{ base64, preview, name }, ...]
   // Document attach state
   const [attachedDoc, setAttachedDoc] = useState(null); // { name, text, extracting }
   const [extractingDoc, setExtractingDoc] = useState(false);
@@ -126,20 +126,21 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
 
   const handleSubmit = useCallback(() => {
     const text = value.trim();
-    if ((!text && !attachedImage && !attachedDoc) || loading) return;
+    if ((!text && !attachedImages.length && !attachedDoc) || loading) return;
     setSlashHints([]);
     // Prepend document text if one is attached
-    let finalText = text || (attachedImage ? '/analyze' : '');
+    let finalText = text || (attachedImages.length ? '/analyze' : '');
     if (attachedDoc?.text) {
       const docPrefix = `[Document: ${attachedDoc.name}]\n\`\`\`\n${attachedDoc.text}\n\`\`\`\n\n`;
       finalText = finalText ? docPrefix + finalText : docPrefix.trimEnd();
     }
-    onSubmit(finalText, attachedImage?.base64 || null, null);
+    const imagesBase64 = attachedImages.length ? attachedImages.map(i => i.base64) : null;
+    onSubmit(finalText, imagesBase64, null);
     setValue('');
-    setAttachedImage(null);
+    setAttachedImages([]);
     setAttachedDoc(null);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-  }, [value, loading, attachedImage, attachedDoc, onSubmit]);
+  }, [value, loading, attachedImages, attachedDoc, onSubmit]);
 
   const handleKeyDown = useCallback((e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
@@ -150,30 +151,40 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
   const processImageFile = useCallback(async (file) => {
     if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
       toast.error('Only JPEG, PNG, WebP, and GIF images are supported.');
-      return;
+      return null;
     }
     if (file.size > MAX_IMAGE_SIZE_MB * 1024 * 1024) {
       toast.error(`Image too large — maximum ${MAX_IMAGE_SIZE_MB} MB.`);
-      return;
+      return null;
     }
     try {
       const [base64, preview] = await Promise.all([
         readFileAsBase64(file),
         readFileAsDataUrl(file),
       ]);
-      setAttachedImage({ base64, preview, name: file.name });
-      if (!value.trim()) setValue('/analyze ');
-      textareaRef.current?.focus();
+      return { base64, preview, name: file.name };
     } catch {
       toast.error('Could not read image file.');
+      return null;
     }
-  }, [value]);
+  }, []);
+
+  const addImages = useCallback(async (files) => {
+    const results = await Promise.all(Array.from(files).map(processImageFile));
+    const valid = results.filter(Boolean);
+    if (!valid.length) return;
+    setAttachedImages(prev => {
+      const combined = [...prev, ...valid].slice(0, 8); // max 8 images
+      return combined;
+    });
+    if (!value.trim()) setValue('/analyze ');
+    textareaRef.current?.focus();
+  }, [processImageFile, value]);
 
   const handleFileChange = useCallback((e) => {
-    const file = e.target.files?.[0];
-    if (file) processImageFile(file);
+    if (e.target.files?.length) addImages(e.target.files);
     e.target.value = '';
-  }, [processImageFile]);
+  }, [addImages]);
 
   const openFilePicker = useCallback(() => { fileInputRef.current?.click(); }, []);
   const openDocPicker  = useCallback(() => { docInputRef.current?.click(); },  []);
@@ -210,18 +221,21 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
     textareaRef.current?.focus();
   }, []);
 
-  const removeImage = useCallback(() => {
-    setAttachedImage(null);
-    if (value.trimStart().startsWith('/analyze')) setValue('');
+  const removeImage = useCallback((idx) => {
+    setAttachedImages(prev => {
+      const next = prev.filter((_, i) => i !== idx);
+      if (!next.length && value.trimStart().startsWith('/analyze')) setValue('');
+      return next;
+    });
     textareaRef.current?.focus();
   }, [value]);
 
-  // Drag-and-drop onto the input area
+  // Drag-and-drop onto the input area — supports multiple files
   const handleDrop = useCallback((e) => {
     e.preventDefault();
-    const file = e.dataTransfer.files?.[0];
-    if (file) processImageFile(file);
-  }, [processImageFile]);
+    const files = e.dataTransfer.files;
+    if (files?.length) addImages(files);
+  }, [addImages]);
 
   const handleDragOver = useCallback((e) => { e.preventDefault(); }, []);
 
@@ -284,7 +298,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
   // ── Render ──────────────────────────────────────────────────────────────────
 
   const isHome  = variant === 'home';
-  const isEmpty = !value.trim() && !attachedImage && !attachedDoc;
+  const isEmpty = !value.trim() && !attachedImages.length && !attachedDoc;
   const isSlash = value.trimStart().startsWith('/');
 
   const containerClass = isHome
@@ -302,6 +316,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
         ref={fileInputRef}
         type="file"
         accept={ACCEPTED_IMAGE_TYPES.join(',')}
+        multiple
         className="hidden"
         onChange={handleFileChange}
       />
@@ -331,29 +346,31 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
       )}
 
       <div className={containerClass}>
-        {/* Attached image preview strip */}
-        {attachedImage && (
-          <div className="px-4 pt-3 pb-0 flex items-start gap-2">
-            <div className="relative group flex-shrink-0">
-              <img
-                src={attachedImage.preview}
-                alt={attachedImage.name}
-                className="h-16 w-16 rounded-lg object-cover border border-white/10"
-              />
-              <button
-                type="button"
-                onClick={removeImage}
-                className="absolute -top-1.5 -right-1.5 bg-slate-800 border border-white/20 rounded-full p-0.5 text-slate-400 hover:text-white hover:bg-red-500/80 transition-colors opacity-0 group-hover:opacity-100"
-                title="Remove image"
-              >
-                <X size={10} />
-              </button>
-            </div>
+        {/* Attached images preview strip — multiple images */}
+        {attachedImages.length > 0 && (
+          <div className="px-4 pt-3 pb-0 flex items-start gap-2 flex-wrap">
+            {attachedImages.map((img, idx) => (
+              <div key={idx} className="relative group flex-shrink-0">
+                <img
+                  src={img.preview}
+                  alt={img.name}
+                  className="h-16 w-16 rounded-lg object-cover border border-white/10"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeImage(idx)}
+                  className="absolute -top-1.5 -right-1.5 bg-slate-800 border border-white/20 rounded-full p-0.5 text-slate-400 hover:text-white hover:bg-red-500/80 transition-colors opacity-0 group-hover:opacity-100"
+                  title="Remove image"
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            ))}
             <div className="flex flex-col justify-center pt-1 min-w-0">
-              <span className="text-xs text-slate-400 truncate max-w-[180px]">{attachedImage.name}</span>
-              <span className="text-xs text-cyan-500/70 mt-0.5 flex items-center gap-1">
-                <Image size={10} /> Ready to analyze
+              <span className="text-xs text-cyan-500/70 flex items-center gap-1">
+                <Image size={10} /> {attachedImages.length} image{attachedImages.length > 1 ? 's' : ''} attached
               </span>
+              <span className="text-[10px] text-slate-600 mt-0.5">Drop more or click 📎</span>
             </div>
           </div>
         )}
@@ -387,10 +404,10 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
             onClick={openFilePicker}
             disabled={loading}
             className={`flex-shrink-0 p-1.5 rounded-lg transition-colors mb-0.5
-              ${attachedImage
+              ${attachedImages.length
                 ? 'text-cyan-400 hover:text-cyan-300 hover:bg-white/5'
                 : 'text-slate-600 hover:text-slate-400 hover:bg-white/5'}`}
-            title="Attach image (drag & drop also works)"
+            title="Attach images — click to pick or drag & drop multiple"
           >
             <Paperclip size={16} />
           </button>
@@ -413,7 +430,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
             ref={textareaRef}
             className={`flex-1 bg-transparent text-[15px] font-sans placeholder-slate-600 resize-none outline-none border-none leading-6 max-h-[144px] py-0.5
               ${isSlash ? 'text-cyan-300 font-mono' : 'text-slate-200'}`}
-            placeholder={attachedImage ? 'Ask about this image…' : attachedDoc ? 'Ask about this document…' : resolvedPlaceholder}
+            placeholder={attachedImages.length ? `Ask about ${attachedImages.length > 1 ? 'these images' : 'this image'}…` : attachedDoc ? 'Ask about this document…' : resolvedPlaceholder}
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -450,7 +467,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
             className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5
               ${isEmpty || loading
                 ? 'bg-slate-700/50 text-slate-600 cursor-not-allowed'
-                : isSlash || attachedImage || attachedDoc
+                : isSlash || attachedImages.length || attachedDoc
                   ? 'bg-gradient-to-br from-cyan-400 to-cyan-600 text-white hover:from-cyan-300 hover:to-cyan-500 shadow-lg hover:shadow-cyan-500/30'
                   : 'bg-gradient-to-br from-cyan-500 to-violet-600 text-white hover:from-cyan-400 hover:to-violet-500 shadow-lg hover:shadow-cyan-500/20'}`}
             title="Send message"

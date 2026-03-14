@@ -18,12 +18,12 @@ export function useChat() {
   const [loading, setLoading] = useState(false);
   const abortControllerRef = useRef(null);
 
-  const send = useCallback(async (text, sessionId, history = [], imageBase64 = null, preferredModel = null) => {
+  const send = useCallback(async (text, sessionId, history = [], imagesBase64 = null, preferredModel = null) => {
     setLoading(true);
     abortControllerRef.current = new AbortController();
 
     try {
-      const data = await api.chat(text, sessionId, history, imageBase64, preferredModel);
+      const data = await api.chat(text, sessionId, history, imagesBase64, preferredModel);
       return data;
     } finally {
       setLoading(false);
@@ -40,7 +40,7 @@ export function useChat() {
     text,
     sessionId,
     history = [],
-    imageBase64 = null,
+    imagesBase64 = null,
     { onToken, onDone, onError } = {}
   ) => {
     setLoading(true);
@@ -48,7 +48,7 @@ export function useChat() {
     abortControllerRef.current = controller;
 
     try {
-      const res = await api.chatStream(text, sessionId, history, imageBase64, controller.signal);
+      const res = await api.chatStream(text, sessionId, history, imagesBase64, controller.signal);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const reader = res.body.getReader();
