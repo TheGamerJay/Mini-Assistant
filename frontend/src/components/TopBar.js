@@ -197,7 +197,7 @@ function TopBar() {
       {/* Status indicators */}
       <div className="flex items-center gap-3 ml-5 pl-5 border-l border-white/[0.06]">
         <StatusDot label="Backend" ok={serverStatus.backend} />
-        <StatusDot label="Ollama" ok={serverStatus.ollama} />
+        <StatusDot label="Mini" ok={serverStatus.ollama} />
         <StatusDot label="ComfyUI" ok={serverStatus.comfyui} />
         <button
           onClick={handleRefresh}
