@@ -5,7 +5,7 @@
  */
 
 import React, { useState, useCallback } from 'react';
-import { Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 // ---------------------------------------------------------------------------
@@ -32,10 +32,10 @@ function PasswordField({ id, label, value, onChange, placeholder = 'Password', a
           type="button"
           onClick={() => setVisible(v => !v)}
           tabIndex={-1}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-base leading-none hover:opacity-70 transition-opacity"
           title={visible ? 'Hide password' : 'Show password'}
         >
-          {visible ? <EyeOff size={15} /> : <Eye size={15} />}
+          {visible ? '🙈' : '👁️'}
         </button>
       </div>
     </div>
@@ -390,7 +390,7 @@ export default function AuthPage() {
                     ? 'text-white border-b-2 border-cyan-400 bg-white/[0.02]'
                     : 'text-slate-500 hover:text-slate-300'}`}
               >
-                {t === 'login' ? 'Sign In' : 'Create Account'}
+                {t === 'login' ? 'Sign In' : 'Sign Up'}
               </button>
             ))}
           </div>
