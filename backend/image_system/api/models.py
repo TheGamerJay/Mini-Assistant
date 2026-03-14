@@ -47,9 +47,14 @@ class AnalyzeRequest(BaseModel):
     question: Optional[str] = "Describe this image in detail."
 
 
+class ChatHistoryMessage(BaseModel):
+    role: str   # "user" | "assistant"
+    content: str
+
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+    history: Optional[List[ChatHistoryMessage]] = []  # recent conversation turns
 
 
 class PullModelsRequest(BaseModel):

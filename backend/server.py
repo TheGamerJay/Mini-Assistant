@@ -4273,13 +4273,37 @@ if _static_dir.exists():
         index = _static_dir / "index.html"
         return FileResponse(str(index))
 
+_CORS_DEFAULTS = ",".join([
+    "https://mini-assistant-production.up.railway.app",
+    "https://ai.miniassistantai.com",
+    "http://localhost:3000",
+    "http://localhost:8080",
+])
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=os.environ.get('CORS_ORIGINS', _CORS_DEFAULTS).split(','),
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── API Key auth middleware ───────────────────────────────────────────────────
+_API_KEY = os.environ.get('API_KEY', '')
+
+@app.middleware("http")
+async def api_key_guard(request, call_next):
+    # Skip auth if no key configured (local dev), for health checks, or preflight
+    if not _API_KEY or request.method == "OPTIONS":
+        return await call_next(request)
+    path = request.url.path
+    if path in ("/", "/api/health") or path.startswith("/static") or path.startswith("/_"):
+        return await call_next(request)
+    # Check header or query param
+    key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
+    if key != _API_KEY:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+    return await call_next(request)
 
 logging.basicConfig(
     level=logging.INFO,

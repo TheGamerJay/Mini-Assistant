@@ -6,6 +6,7 @@
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
 export const IMAGE_API = `${BACKEND_URL}/image-api/api`;
 const MAIN_API = `${BACKEND_URL}/api`;
+const API_KEY = process.env.REACT_APP_API_KEY || '';
 
 export { BACKEND_URL };
 
@@ -22,12 +23,15 @@ async function request(url, options = {}, timeoutMs = 30000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+  const authHeaders = API_KEY ? { 'X-API-Key': API_KEY } : {};
+
   try {
     const res = await fetch(url, {
       ...options,
       signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders,
         ...(options.headers || {}),
       },
     });
@@ -73,9 +77,11 @@ function del(url, timeoutMs) {
 }
 
 export const api = {
-  /** Send a chat message */
-  chat(message, sessionId) {
-    return post(`${IMAGE_API}/chat`, { message, session_id: sessionId }, 120000);
+  /** Send a chat message with optional conversation history */
+  chat(message, sessionId, history = []) {
+    // Only send last 10 turns to keep payload small
+    const trimmedHistory = history.slice(-10).map(m => ({ role: m.role, content: m.content }));
+    return post(`${IMAGE_API}/chat`, { message, session_id: sessionId, history: trimmedHistory }, 120000);
   },
 
   /** Generate an image */

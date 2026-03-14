@@ -115,7 +115,8 @@ async def cmd_generate(
     if seed is not None:
         payload["override_seed"] = seed
 
-    url = "http://localhost:7860/api/image/generate"
+    _image_api_base = os.environ.get("LOCAL_AI", "http://localhost:8000")
+    url = f"{_image_api_base}/image-api/api/image/generate"
     print(f"\nPOST {url}")
     print(f"Payload: {json.dumps(payload, indent=2)}")
     print()
@@ -127,8 +128,8 @@ async def cmd_generate(
             response.raise_for_status()
             data = response.json()
     except httpx.ConnectError:
-        print("ERROR: Could not connect to image server at localhost:7860.")
-        print("Start it with: uvicorn backend.image_system.api.server:app --port 7860")
+        print(f"ERROR: Could not connect to image server at {_image_api_base}.")
+        print("Ensure the Mini Assistant backend is running.")
         sys.exit(1)
     except Exception as exc:
         print(f"ERROR: {exc}")

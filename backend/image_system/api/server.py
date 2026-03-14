@@ -46,26 +46,39 @@ app = FastAPI(
     version="1.0.0",
 )
 
+_CORS_DEFAULTS = ",".join([
+    "https://mini-assistant-production.up.railway.app",
+    "https://ai.miniassistantai.com",
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3000",
+    "http://localhost:8080",
+])
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "http://localhost:8080",
-    ],
+    allow_origins=os.environ.get("CORS_ORIGINS", _CORS_DEFAULTS).split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ---------------------------------------------------------------------------
-# Request logging middleware
+# Request logging + auth middleware
 # ---------------------------------------------------------------------------
 
+_API_KEY = os.environ.get("API_KEY", "")
+
 @app.middleware("http")
-async def log_requests(request: Request, call_next):
+async def auth_and_log(request: Request, call_next):
+    # API key guard (skip if no key configured, health checks, or preflight)
+    if _API_KEY and request.method != "OPTIONS":
+        path = request.url.path
+        if path not in ("/api/health",):
+            key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
+            if key != _API_KEY:
+                from fastapi.responses import JSONResponse as _JR
+                return _JR({"detail": "Unauthorized"}, status_code=401)
+
     start = time.perf_counter()
     response = await call_next(request)
     elapsed = (time.perf_counter() - start) * 1000
@@ -189,8 +202,40 @@ async def startup_event():
 
 @app.get("/api/health")
 async def health_check():
-    """Simple health check endpoint."""
-    return {"status": "ok", "service": "mini-assistant-image-system"}
+    """Health check: reports ComfyUI connectivity and checkpoint availability."""
+    comfyui_url = os.environ.get("COMFYUI_URL", "http://localhost:8188")
+    comfyui_ok = False
+    try:
+        import httpx as _httpx
+        async with _httpx.AsyncClient() as _client:
+            r = await _client.get(f"{comfyui_url}/system_stats", timeout=3.0)
+            comfyui_ok = r.status_code == 200
+    except Exception:
+        pass
+
+    # Check for installed checkpoints
+    checkpoints_dir = Path(os.environ.get(
+        "COMFYUI_CHECKPOINTS_DIR",
+        "C:/Users/jaaye/ai-panels/ComfyUI/models/checkpoints"
+    ))
+    checkpoint_files = []
+    checkpoints_ok = False
+    if checkpoints_dir.exists():
+        checkpoint_files = [f.name for f in checkpoints_dir.iterdir()
+                            if f.suffix in (".safetensors", ".ckpt", ".pt")]
+        checkpoints_ok = len(checkpoint_files) > 0
+
+    status = {
+        "status": "ok",
+        "service": "mini-assistant-image-system",
+        "comfyui": "connected" if comfyui_ok else "disconnected",
+        "checkpoints": {
+            "available": checkpoints_ok,
+            "count": len(checkpoint_files),
+            "message": None if checkpoints_ok else "No checkpoint models found. Place .safetensors files in ComfyUI/models/checkpoints/",
+        },
+    }
+    return status
 
 
 @app.post("/api/image/route")
@@ -604,9 +649,15 @@ async def chat(req: ChatRequest):
         try:
             ollama = _get_ollama()
             from ..services.ollama_client import _model_name
-            reply = await ollama.run_prompt(
+            # Build messages with history context (last 10 turns max)
+            history_msgs = []
+            if req.history:
+                for h in req.history[-10:]:
+                    history_msgs.append({"role": h.role, "content": h.content})
+            history_msgs.append({"role": "user", "content": clean_message})
+            reply = await ollama.run_chat(
                 model=_model_name("router"),
-                prompt=clean_message,
+                messages=history_msgs,
                 temperature=0.7,
             )
         except Exception as exc:
