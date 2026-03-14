@@ -176,6 +176,25 @@ function ChatMessage({ message, onRetry }) {
     );
   }
 
+  // Image generating placeholder
+  if (type === 'image_generating') {
+    return (
+      <div className="flex items-start gap-3 msg-enter">
+        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 via-violet-500 to-violet-600 flex items-center justify-center overflow-hidden flex-shrink-0 mt-1">
+          <img src="/Logo.png" alt="Mini Assistant" className="w-full h-full object-contain"
+            onError={e => { e.target.style.display = 'none'; }} />
+        </div>
+        <div className="max-w-[80%] w-72 px-5 py-4 rounded-2xl rounded-tl-sm border bg-[#151520] border-white/5">
+          <p className="text-xs text-violet-400/80 font-mono mb-3 flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse inline-block" />
+            {content || 'Rendering image...'}
+          </p>
+          <div className="image-shimmer" />
+        </div>
+      </div>
+    );
+  }
+
   // Assistant message
   const isImage = type === 'image' || !!image_base64;
   const isError = type === 'error';

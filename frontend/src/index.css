@@ -225,6 +225,18 @@ button, a { transition: all 0.15s ease; }
 .orb-pulse { animation: orbPulse 0.8s ease-in-out infinite; }
 .orb-ripple { animation: orbRipple 1.2s ease-in-out infinite; }
 
+/* Image generation shimmer placeholder */
+.image-shimmer {
+  height: 300px;
+  border-radius: 12px;
+  background: linear-gradient(110deg, #1a1a2e 8%, #2a2a4a 18%, #1a1a2e 33%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s linear infinite;
+}
+@keyframes shimmer {
+  to { background-position-x: -200%; }
+}
+
 /* Radial gradient utility */
 .bg-gradient-radial {
   background: radial-gradient(ellipse at center, var(--tw-gradient-from), var(--tw-gradient-via), var(--tw-gradient-to));

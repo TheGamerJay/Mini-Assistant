@@ -17,6 +17,12 @@ import ApprovalModal from '../components/ApprovalModal';
 import RightPanel from '../components/RightPanel';
 import api from '../api/client';
 
+/** Detect if a message looks like an image generation request */
+function isImageIntent(text) {
+  if (!text) return false;
+  return /\b(draw|paint|generate|create|make|render|design|illustrate|sketch|produce)\b.{0,50}\b(image|photo|picture|illustration|artwork|portrait|landscape|anime|realistic|wallpaper|avatar|banner|logo|thumbnail)\b|\b(image|picture|photo)\s+of\b|\banime\b|\bdigital art\b|\bphoto realistic\b/i.test(text);
+}
+
 /** Detect if a message/prompt suggests app-building intent */
 function isBuildIntent(text, routeResult) {
   if (routeResult === 'app_builder') return true;
@@ -116,6 +122,19 @@ function ChatPage() {
     // Auto-open right panel for build intent
     if (isBuildIntent(text, null)) setRightPanelOpen(true);
 
+    // Insert image generating placeholder immediately if this looks like an image request
+    const imageIntentDetected = isImageIntent(text);
+    if (imageIntentDetected) {
+      const placeholder = {
+        role: 'assistant',
+        type: 'image_generating',
+        content: 'Rendering your image...',
+        timestamp: Date.now(),
+        _placeholder: true,
+      };
+      setMessages([...nextMessages, placeholder]);
+    }
+
     // Kick off the cognitive stream
     setStreamPrompt(text);
     setStreamResponse(null);
@@ -174,6 +193,7 @@ function ChatPage() {
         content: err.message || 'Something went wrong. Please try again.',
         timestamp: Date.now(),
       };
+      // Replace placeholder (if any) with error message
       const withErr = [...nextMessages, errMsg];
       setMessages(withErr);
       updateChatMessages(chatId, withErr);
