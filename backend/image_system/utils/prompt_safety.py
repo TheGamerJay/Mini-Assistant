@@ -16,8 +16,8 @@ from typing import List, Tuple
 
 logger = logging.getLogger(__name__)
 
-MAX_PROMPT_LENGTH = 1_000
-MIN_PROMPT_LENGTH = 3
+MAX_PROMPT_LENGTH = 8_000
+MIN_PROMPT_LENGTH = 1
 
 # Control characters (except tab \x09, newline \x0a, CR \x0d)
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
