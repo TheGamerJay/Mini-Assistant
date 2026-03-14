@@ -72,7 +72,7 @@ function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading, streamActive]);
 
-  const handleSubmit = useCallback(async (text) => {
+  const handleSubmit = useCallback(async (text, imageBase64 = null, preferredModel = null) => {
     if (submittingRef.current || loading) return;
     if (!text || text.trim().length < 3) {
       toast.warning('Message too short (min 3 characters)');
@@ -89,7 +89,14 @@ function ChatPage() {
       setPage('chat');
     }
 
-    const userMsg = { role: 'user', type: 'text', content: text, timestamp: Date.now() };
+    // Build user message — include image preview if attached
+    const userMsg = {
+      role: 'user',
+      type: imageBase64 ? 'image_input' : 'text',
+      content: text,
+      image_base64: imageBase64 || null,
+      timestamp: Date.now(),
+    };
     const nextMessages = [...messages, userMsg];
     setMessages(nextMessages);
     updateChatMessages(chatId, nextMessages);
@@ -100,7 +107,8 @@ function ChatPage() {
     setStreamActive(true);
 
     try {
-      const data = await send(text, sessionIdRef.current);
+      const history = nextMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
+      const data = await send(text, sessionIdRef.current, history, imageBase64, preferredModel);
 
       // Pass real response data to the stream so stages can show actual results
       setStreamResponse(data);
@@ -122,6 +130,8 @@ function ChatPage() {
         generation_time_ms: data.generation_time_ms || null,
         retry_used: data.retry_used || false,
         prompt_warnings: data.prompt_warnings || [],
+        model_used: data.model_used || null,
+        memory_stored: data.memory_stored || [],
         timestamp: Date.now(),
       };
 

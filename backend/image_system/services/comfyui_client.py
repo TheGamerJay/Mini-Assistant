@@ -310,6 +310,17 @@ class ComfyUIClient:
                 if "filename_prefix" in params_dict:
                     inputs["filename_prefix"] = params_dict["filename_prefix"]
 
+            # LoadImage (init / reference image)
+            elif class_type == "LoadImage" and "init_image_filename" in params_dict:
+                # Only inject if this is NOT the mask node
+                if "mask" not in title.lower():
+                    inputs["image"] = params_dict["init_image_filename"]
+
+            # LoadImage used as mask (title contains "mask")
+            elif class_type == "LoadImage" and "mask_image_filename" in params_dict:
+                if "mask" in title.lower():
+                    inputs["image"] = params_dict["mask_image_filename"]
+
             node["inputs"] = inputs
 
         return wf
@@ -403,6 +414,50 @@ class ComfyUIClient:
             checkpoint, width, height, steps, cfg, seed,
         )
         return workflow
+
+    # ------------------------------------------------------------------
+    # Image upload
+    # ------------------------------------------------------------------
+
+    async def upload_image(
+        self, image_bytes: bytes, filename: str = "input.png", overwrite: bool = True
+    ) -> str:
+        """
+        Upload an image to ComfyUI's input directory via /upload/image.
+
+        Args:
+            image_bytes: Raw image bytes (PNG or JPEG).
+            filename:    Filename to store under in ComfyUI's input folder.
+            overwrite:   Whether to overwrite an existing file with the same name.
+
+        Returns:
+            The stored filename as reported by ComfyUI (use in LoadImage nodes).
+        """
+        import io as _io
+
+        session = await self._get_session()
+        url = f"{self.base_url}/upload/image"
+
+        form_data = aiohttp.FormData()
+        form_data.add_field(
+            "image",
+            _io.BytesIO(image_bytes),
+            filename=filename,
+            content_type="image/png",
+        )
+        form_data.add_field("type", "input")
+        form_data.add_field("overwrite", "true" if overwrite else "false")
+
+        logger.debug("Uploading image '%s' (%d bytes) to ComfyUI", filename, len(image_bytes))
+        async with session.post(url, data=form_data, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            if resp.status != 200:
+                body = await resp.text()
+                raise ComfyUIError(f"upload_image HTTP {resp.status}: {body[:200]}")
+            data = await resp.json()
+
+        stored_name: str = data.get("name", filename)
+        logger.info("Uploaded image as '%s'", stored_name)
+        return stored_name
 
     # ------------------------------------------------------------------
     # WebSocket progress

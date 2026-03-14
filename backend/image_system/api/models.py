@@ -29,10 +29,12 @@ class GenerateRequest(BaseModel):
     override_cfg: Optional[float] = Field(None, ge=1.0, le=30.0, description="Force CFG scale")
     override_seed: Optional[int] = Field(None, ge=0, description="Force random seed")
 
-    # img2img / inpaint / ControlNet (stubs — not yet active)
+    # img2img / inpaint / reference (Phase 7 — ComfyUI smart router)
     init_image_base64: Optional[str] = Field(None, description="Base64 init image for img2img")
     denoise_strength: Optional[float] = Field(None, ge=0.0, le=1.0)
-    mask_image_base64: Optional[str] = Field(None, description="Base64 mask for inpainting")
+    mask_image_base64: Optional[str] = Field(None, description="Base64 mask for inpainting/edit mode")
+    pose_image_base64: Optional[str] = Field(None, description="Base64 pose guide image → reference-guided mode")
+    style_image_base64: Optional[str] = Field(None, description="Base64 style reference image → reference-guided mode")
     controlnet_image_base64: Optional[str] = Field(None, description="Base64 ControlNet guide image")
     controlnet_name: Optional[str] = Field(None, description="ControlNet model filename")
     controlnet_strength: Optional[float] = Field(None, ge=0.0, le=2.0)
@@ -55,6 +57,8 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
     history: Optional[List[ChatHistoryMessage]] = []  # recent conversation turns
+    image_base64: Optional[str] = None               # user-attached image (Phase 5)
+    preferred_model: Optional[str] = None            # Ollama model override (Phase 6)
 
 
 class PullModelsRequest(BaseModel):

@@ -298,11 +298,29 @@ async def generate_image(req: GenerateRequest):
 
     # ---- Step 2: Route ----
     reference_bytes = None
+    mask_bytes      = None
+    pose_bytes      = None
+    style_bytes     = None
     if req.reference_image_base64:
         try:
             reference_bytes = base64.b64decode(req.reference_image_base64)
         except Exception:
             logger.warning("Could not decode reference_image_base64")
+    if req.mask_image_base64:
+        try:
+            mask_bytes = base64.b64decode(req.mask_image_base64)
+        except Exception:
+            logger.warning("Could not decode mask_image_base64")
+    if req.pose_image_base64:
+        try:
+            pose_bytes = base64.b64decode(req.pose_image_base64)
+        except Exception:
+            logger.warning("Could not decode pose_image_base64")
+    if req.style_image_base64:
+        try:
+            style_bytes = base64.b64decode(req.style_image_base64)
+        except Exception:
+            logger.warning("Could not decode style_image_base64")
 
     try:
         route_result = await _get_router().route(clean_prompt, reference_image=reference_bytes)
@@ -321,6 +339,20 @@ async def generate_image(req: GenerateRequest):
         prompt_warnings.append(route_result["_compatibility_warning"])
 
     intent = route_result.get("intent", "chat")
+
+    # ---- Step 2b: ComfyUI mode routing (Phase 7) ----
+    from ..services.comfyui_router import route_image_request as _comfy_route
+    comfy_decision = _comfy_route(
+        prompt=clean_prompt,
+        reference_image=req.reference_image_base64,
+        mask_image=req.mask_image_base64,
+        pose_image=req.pose_image_base64,
+        style_image=req.style_image_base64,
+    )
+    logger.info(
+        "ComfyUI route: mode=%s target_tab=%s reason=%s",
+        comfy_decision.mode, comfy_decision.target_tab, comfy_decision.reason,
+    )
 
     # ---- Step 3: Non-image intents ----
     if intent in ("chat", "planning"):
@@ -436,16 +468,60 @@ async def generate_image(req: GenerateRequest):
 
     # ---- Step 6: ComfyUI generation (with timeout + cancellation) ----
     comfyui = _get_comfyui()
-    workflow = comfyui.build_standard_workflow(
-        checkpoint=checkpoint_file,
-        positive_prompt=positive_prompt,
-        negative_prompt=negative_prompt,
-        width=width,
-        height=height,
-        steps=steps,
-        cfg=cfg,
-        seed=seed,
-    )
+
+    # ---- Step 6a: Build workflow based on ComfyUI routing mode ----
+    from ..services.comfyui_router import WORKFLOW_GENERATE
+    if comfy_decision.workflow == WORKFLOW_GENERATE or not any([reference_bytes, mask_bytes, pose_bytes, style_bytes]):
+        # Standard text-to-image
+        workflow = comfyui.build_standard_workflow(
+            checkpoint=checkpoint_file,
+            positive_prompt=positive_prompt,
+            negative_prompt=negative_prompt,
+            width=width,
+            height=height,
+            steps=steps,
+            cfg=cfg,
+            seed=seed,
+        )
+    else:
+        # Reference-guided or edit/inpaint — load JSON workflow + upload images
+        try:
+            workflow = comfyui.load_workflow(comfy_decision.workflow)
+            # Inject text params first
+            workflow = comfyui.inject_params(workflow, {
+                "checkpoint":       checkpoint_file,
+                "positive_prompt":  positive_prompt,
+                "negative_prompt":  negative_prompt,
+                "steps":            steps,
+                "cfg":              cfg,
+                "seed":             seed if seed is not None else __import__("random").randint(0, 2**32 - 1),
+                "denoise":          req.denoise_strength if req.denoise_strength is not None else 0.75,
+            })
+
+            # Upload images and inject filenames into LoadImage nodes
+            # Primary reference image (reference mode) or init image (edit mode)
+            primary_img = reference_bytes or pose_bytes or style_bytes
+            if primary_img:
+                stored_name = await comfyui.upload_image(primary_img, "reference_input.png")
+                workflow = comfyui.inject_params(workflow, {"init_image_filename": stored_name})
+
+            # Mask image (edit/inpaint mode)
+            if mask_bytes:
+                mask_name = await comfyui.upload_image(mask_bytes, "mask_input.png")
+                workflow = comfyui.inject_params(workflow, {"mask_image_filename": mask_name})
+
+        except Exception as exc:
+            logger.error("Workflow load/inject failed (%s) — falling back to standard workflow", exc)
+            workflow = comfyui.build_standard_workflow(
+                checkpoint=checkpoint_file,
+                positive_prompt=positive_prompt,
+                negative_prompt=negative_prompt,
+                width=width,
+                height=height,
+                steps=steps,
+                cfg=cfg,
+                seed=seed,
+            )
 
     image_bytes: Optional[bytes] = None
     review: Optional[dict] = None
@@ -578,7 +654,7 @@ async def generate_image(req: GenerateRequest):
 
     return GenerateResponse(
         image_base64=image_b64,
-        route_result=route_result,
+        route_result={**route_result, "comfyui_mode": comfy_decision.mode, "target_tab": comfy_decision.target_tab},
         review=review,
         retry_used=retry_used,
         critic_result=critic_result,
@@ -635,16 +711,28 @@ async def chat(req: ChatRequest):
     if not is_valid:
         raise HTTPException(status_code=400, detail=f"Message rejected: {safety_error}")
 
+    # Decode user-attached image (Phase 5)
+    attached_image_bytes: Optional[bytes] = None
+    if req.image_base64:
+        try:
+            attached_image_bytes = base64.b64decode(req.image_base64)
+        except Exception:
+            logger.warning("Could not decode attached image_base64 — ignoring.")
+
     # ── Phase 1 Step 1: Command Parser ─────────────────────────────────────────
-    phase1_plan      = None
-    phase1_critic    = None
-    parsed_cmd       = None
-    effective_msg    = clean_message
-    ceo_posture      = None
-    manager_packet   = None
-    supervisor_result= None
-    skill_match      = None
-    reflection_record= None
+    phase1_plan        = None
+    phase1_critic      = None
+    parsed_cmd         = None
+    effective_msg      = clean_message
+    ceo_posture        = None
+    manager_packet     = None
+    supervisor_result  = None
+    skill_match        = None
+    reflection_record  = None
+    parallel_result    = None
+    mission_result     = None
+    engineering_ctx    = None   # Phase 6
+    memory_facts_stored = []    # Phase 6
 
     try:
         from mini_assistant.phase1.command_parser import parse as cmd_parse
@@ -658,6 +746,20 @@ async def chat(req: ChatRequest):
         effective_msg = parsed_cmd.args if parsed_cmd.is_slash else clean_message
 
         # ── Phase 1 Step 2: Planner (ALWAYS RUNS FIRST) ────────────────────────
+        # If an image is attached, force image_analysis intent regardless of text
+        from mini_assistant.phase1.command_parser import ParsedCommand as _PC, SLASH_COMMANDS as _SC
+        if attached_image_bytes and not (parsed_cmd and parsed_cmd.is_slash):
+            # Synthesise a /analyze slash command so Planner locks to image_analysis
+            parsed_cmd = _PC(
+                raw=effective_msg,
+                command="analyze",
+                args=effective_msg,
+                intent_override="image_analysis",
+                is_slash=True,
+                is_known=True,
+                help_requested=False,
+            )
+
         phase1_plan = make_plan(
             message        = effective_msg,
             parsed_command = parsed_cmd,
@@ -734,7 +836,7 @@ async def chat(req: ChatRequest):
             logger.warning("SkillSelector failed (%s) — continuing without skill.", _ss_err)
             skill_match = None
 
-        # ── Phase 2 Step 3: Supervisor — task state tracking ───────────────────
+        # ── Phase 2 Step 3: Supervisor — sequential task state tracking ────────
         try:
             from mini_assistant.phase2.supervisor import Supervisor
             if manager_packet:
@@ -758,6 +860,24 @@ async def chat(req: ChatRequest):
         except Exception as _sup_err:
             logger.warning("Supervisor failed (%s) — continuing without task tracking.", _sup_err)
             supervisor_result = None
+
+        # ── Phase 4 Step 1: Parallel Supervisor — wave-based async execution ───
+        try:
+            from mini_assistant.phase4.parallel_supervisor import ParallelSupervisor
+            parallel_tasks = phase1_plan.parallel_tasks or []
+            if parallel_tasks:
+                par_sup = ParallelSupervisor()
+                parallel_result = await par_sup.run(parallel_tasks)
+                logger.info(
+                    "ParallelSupervisor → %d tasks in %d waves, %.1f ms (gain=%.1fms)",
+                    parallel_result.tasks_total,
+                    len(parallel_result.waves),
+                    parallel_result.total_ms,
+                    parallel_result.parallel_gain,
+                )
+        except Exception as _par_err:
+            logger.warning("ParallelSupervisor failed (%s) — non-fatal.", _par_err)
+            parallel_result = None
 
     except Exception as _p1_err:
         logger.warning("Phase 1/2 pipeline failed (%s) — falling back to legacy routing.", _p1_err)
@@ -789,8 +909,29 @@ async def chat(req: ChatRequest):
             route_result     = {"intent": "chat"}
             execution_intent = execution_intent or "chat"
 
+    # ── Phase 6 Step 1: Engineering Assistant context assembly ──────────────────
+    try:
+        from mini_assistant.phase6.engineering_assistant import get_engineering_assistant
+        engineering_ctx = get_engineering_assistant().build(
+            intent     = phase1_plan.intent if phase1_plan else "normal_chat",
+            message    = effective_msg,
+            session_id = session_id,
+        )
+        if engineering_ctx.sources_used:
+            logger.info(
+                "EngineeringAssistant: %s (%.1f ms)",
+                engineering_ctx.sources_used, engineering_ctx.assembly_ms,
+            )
+    except Exception as _eng_err:
+        logger.debug("EngineeringAssistant failed (non-fatal): %s", _eng_err)
+        engineering_ctx = None
+
     # ── Phase 1 Step 4: Brain Execution ────────────────────────────────────────
     reply = ""
+
+    # Model override from request (Phase 6 model selector)
+    from ..services.ollama_client import _model_name as _reg_model_name
+    _active_model = req.preferred_model or _reg_model_name("router")
 
     if execution_intent in ("image_generation", "image_edit"):
         gen_req = GenerateRequest(prompt=effective_msg, session_id=session_id)
@@ -802,26 +943,35 @@ async def chat(req: ChatRequest):
             image_response["slash_command"]= parsed_cmd.command if parsed_cmd and parsed_cmd.is_slash else None
         return image_response
 
+    elif execution_intent == "image_analysis" or (execution_intent == "chat" and attached_image_bytes):
+        # User attached an image — route to vision brain
+        try:
+            vision = _get_vision()
+            question = effective_msg or "Describe this image in detail."
+            reply = await vision.analyze(attached_image_bytes, question)
+        except Exception as exc:
+            reply = f"Vision brain error: {exc}"
+
     elif execution_intent == "coding":
         try:
-            reply = await _get_coding().run(effective_msg)
+            # Inject engineering context prefix if available
+            eng_prefix = (engineering_ctx.system_prefix if engineering_ctx else "")
+            reply = await _get_coding().run(eng_prefix + effective_msg if eng_prefix else effective_msg)
         except Exception as exc:
             reply = f"Coding brain error: {exc}"
 
     else:
         # General chat / research / planning / file_analysis / web_search
-        # All use the Ollama run_chat with conversation history
         try:
             ollama_client = _get_ollama()
-            from ..services.ollama_client import _model_name
 
-            # Inject project context summary for file_analysis requests
-            system_prefix = ""
-            if phase1_plan and phase1_plan.intent == "file_analysis":
+            # Engineering context covers file_analysis + app_builder + code_runner
+            # Fall back to legacy project context for plain file_analysis without engineering ctx
+            system_prefix = engineering_ctx.system_prefix if engineering_ctx and engineering_ctx.system_prefix else ""
+            if not system_prefix and phase1_plan and phase1_plan.intent == "file_analysis":
                 try:
                     from mini_assistant.scanner import get_context
                     ctx = get_context()
-                    # Compact summary for context injection
                     feat_names = [f["feature"] for f in ctx.to_dict().get("feature_map", [])]
                     warnings   = ctx.to_dict().get("warnings", [])[:3]
                     system_prefix = (
@@ -840,7 +990,7 @@ async def chat(req: ChatRequest):
             history_msgs.append({"role": "user", "content": user_content})
 
             reply = await ollama_client.run_chat(
-                model       = _model_name("router"),
+                model       = _active_model,
                 messages    = history_msgs,
                 temperature = 0.7,
             )
@@ -874,6 +1024,44 @@ async def chat(req: ChatRequest):
                 logger.warning("Reflection failed (non-fatal): %s", _ref_err)
                 reflection_record = None
 
+            # ── Phase 6 Step 2: Session Memory extraction (after reply known) ───
+            try:
+                from mini_assistant.phase6.session_memory import get_memory
+                memory_facts_stored = get_memory().extract_and_store(
+                    message    = effective_msg,
+                    reply      = reply,
+                    session_id = session_id,
+                    intent     = phase1_plan.intent if phase1_plan else "normal_chat",
+                )
+                if memory_facts_stored:
+                    logger.info(
+                        "SessionMemory: stored %d facts for session %s",
+                        len(memory_facts_stored), session_id[:8],
+                    )
+            except Exception as _mem_err:
+                logger.debug("SessionMemory extraction failed (non-fatal): %s", _mem_err)
+                memory_facts_stored = []
+
+            # ── Phase 4 Step 2: Mission Manager (after Reflection) ─────────────
+            try:
+                from mini_assistant.phase4.mission_manager import get_mission_manager
+                mission_result = get_mission_manager().process(
+                    message    = effective_msg,
+                    plan       = phase1_plan,
+                    critic     = critic_result,
+                    session_id = session_id,
+                )
+                if mission_result.action != "none":
+                    logger.info(
+                        "MissionManager → action=%s mission=%s continuation=%s",
+                        mission_result.action,
+                        mission_result.mission.id[:8] if mission_result.mission else "—",
+                        mission_result.is_continuation,
+                    )
+            except Exception as _mis_err:
+                logger.warning("MissionManager failed (non-fatal): %s", _mis_err)
+                mission_result = None
+
             response = phase1_compose(
                 reply        = reply,
                 plan         = phase1_plan,
@@ -892,6 +1080,18 @@ async def chat(req: ChatRequest):
                 response["skill"] = skill_match.to_dict()
             if reflection_record:
                 response["reflection"] = reflection_record.to_dict()
+            if parallel_result:
+                response["parallel"] = parallel_result.to_dict()
+            if mission_result and mission_result.action != "none":
+                response["mission"] = mission_result.to_dict()
+            if engineering_ctx and engineering_ctx.sources_used:
+                response["engineering"] = engineering_ctx.to_dict()
+            if memory_facts_stored:
+                response["memory_stored"] = [
+                    {"key": f.key, "value": f.value, "confidence": f.confidence}
+                    for f in memory_facts_stored
+                ]
+            response["model_used"] = _active_model
             return response
         except Exception as _c_err:
             logger.warning("Phase 1+2 Critic/Composer failed (%s) — returning raw reply.", _c_err)

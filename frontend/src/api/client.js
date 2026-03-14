@@ -25,15 +25,17 @@ async function request(url, options = {}, timeoutMs = 30000) {
 
   const authHeaders = API_KEY ? { 'X-API-Key': API_KEY } : {};
 
+  // If caller passed headers: {} (empty), skip Content-Type so browser sets it (multipart)
+  const callerHeaders = options.headers;
+  const baseHeaders = callerHeaders && Object.keys(callerHeaders).length === 0
+    ? { ...authHeaders }
+    : { 'Content-Type': 'application/json', ...authHeaders, ...callerHeaders };
+
   try {
     const res = await fetch(url, {
       ...options,
       signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        ...authHeaders,
-        ...(options.headers || {}),
-      },
+      headers: baseHeaders,
     });
 
     clearTimeout(timer);
@@ -77,14 +79,51 @@ function del(url, timeoutMs) {
 }
 
 export const api = {
-  /** Send a chat message with optional conversation history */
-  chat(message, sessionId, history = []) {
-    // Only send last 10 turns to keep payload small
+  /** Send a chat message with optional conversation history, attached image, and model override */
+  chat(message, sessionId, history = [], imageBase64 = null, preferredModel = null) {
     const trimmedHistory = history.slice(-10).map(m => ({ role: m.role, content: m.content }));
-    return post(`${IMAGE_API}/chat`, { message, session_id: sessionId, history: trimmedHistory }, 120000);
+    const body = { message, session_id: sessionId, history: trimmedHistory };
+    if (imageBase64)     body.image_base64     = imageBase64;
+    if (preferredModel)  body.preferred_model  = preferredModel;
+    return post(`${IMAGE_API}/chat`, body, 120000);
   },
 
-  /** Generate an image */
+  /** Get session memory facts */
+  getMemory(sessionId) {
+    return get(`${MAIN_API}/memory/${sessionId}`, 10000);
+  },
+
+  /** Manually store a memory fact */
+  storeFact(sessionId, key, value, confidence = 0.9) {
+    return post(`${MAIN_API}/memory/${sessionId}/fact`, { key, value, confidence }, 10000);
+  },
+
+  /** Clear all session memory */
+  clearMemory(sessionId) {
+    return del(`${MAIN_API}/memory/${sessionId}`, 10000);
+  },
+
+  /** Transcribe audio via Whisper STT */
+  transcribeAudio(audioBlob) {
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'recording.wav');
+    return request(`${MAIN_API}/voice/stt`, {
+      method: 'POST',
+      body: formData,
+      headers: {},  // let browser set multipart boundary
+    }, 30000);
+  },
+
+  /**
+   * Generate an image — Phase 7: smart ComfyUI routing.
+   * params may include: prompt, quality, session_id,
+   *   reference_image_base64, mask_image_base64,
+   *   pose_image_base64, style_image_base64,
+   *   init_image_base64, denoise_strength,
+   *   dry_run, override_checkpoint, override_workflow,
+   *   override_width, override_height, override_steps,
+   *   override_cfg, override_seed
+   */
   generateImage(params) {
     return post(`${IMAGE_API}/image/generate`, params, 360000);
   },

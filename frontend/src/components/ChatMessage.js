@@ -125,15 +125,52 @@ function RouteInfo({ route_result, generation_time_ms }) {
 // ---------------------------------------------------------------------------
 // ChatMessage
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Model + memory metadata bar
+// ---------------------------------------------------------------------------
+function MetaBar({ model_used, memory_stored }) {
+  const hasModel  = !!model_used;
+  const memCount  = memory_stored ? memory_stored.length : 0;
+  if (!hasModel && memCount === 0) return null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1 mt-2 pt-2 border-t border-white/5">
+      {hasModel && (
+        <span className="text-[10px] font-mono rounded px-1.5 py-0.5 border text-cyan-400/60 bg-cyan-500/5 border-cyan-500/15 truncate max-w-[140px]"
+          title={model_used}>
+          {model_used}
+        </span>
+      )}
+      {memCount > 0 && (
+        <span className="text-[10px] font-mono rounded px-1.5 py-0.5 border text-emerald-400/60 bg-emerald-500/5 border-emerald-500/15"
+          title={memory_stored.map(f => `${f.key}: ${f.value}`).join(', ')}>
+          +{memCount} mem
+        </span>
+      )}
+    </div>
+  );
+}
+
 function ChatMessage({ message, onRetry }) {
   const { settings } = useApp();
-  const { role, type, content, image_base64, prompt, route_result, generation_time_ms, retry_used, prompt_warnings } = message;
+  const { role, type, content, image_base64, prompt, route_result, generation_time_ms, retry_used, prompt_warnings, model_used, memory_stored } = message;
 
   if (role === 'user') {
     return (
       <div className="flex justify-end msg-enter">
-        <div className="max-w-[75%] px-5 py-3 rounded-2xl rounded-tr-sm bg-[#1e2a3a] border border-cyan-500/20 text-slate-200 text-sm leading-relaxed">
-          {renderText(content)}
+        <div className="max-w-[75%] flex flex-col items-end gap-2">
+          {type === 'image_input' && image_base64 && (
+            <img
+              src={`data:image/jpeg;base64,${image_base64}`}
+              alt="Attached"
+              className="max-h-48 max-w-xs rounded-xl border border-cyan-500/20 object-contain bg-black/30"
+            />
+          )}
+          {content && (
+            <div className="px-5 py-3 rounded-2xl rounded-tr-sm bg-[#1e2a3a] border border-cyan-500/20 text-slate-200 text-sm leading-relaxed">
+              {renderText(content)}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -191,6 +228,11 @@ function ChatMessage({ message, onRetry }) {
               <span key={i} className="text-[10px] text-amber-500/60 font-mono">{w}</span>
             ))}
           </div>
+        )}
+
+        {/* Model used + memory facts stored */}
+        {!isError && (
+          <MetaBar model_used={model_used} memory_stored={memory_stored} />
         )}
 
         {/* Retry button for errors */}

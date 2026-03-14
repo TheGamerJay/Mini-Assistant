@@ -4112,14 +4112,20 @@ async def session_summary(session_id: str):
 async def executive_health():
     """Check which Phase 1+2 modules are available."""
     modules = {
-        "phase1.command_parser": False,
-        "phase1.intent_planner": False,
-        "phase1.critic":         False,
-        "phase1.composer":       False,
-        "phase2.ceo":            False,
-        "phase2.manager":        False,
-        "phase2.supervisor":     False,
-        "scanner":               False,
+        "phase1.command_parser":           False,
+        "phase1.intent_planner":           False,
+        "phase1.critic":                   False,
+        "phase1.composer":                 False,
+        "phase2.ceo":                      False,
+        "phase2.manager":                  False,
+        "phase2.supervisor":               False,
+        "phase3.skill_selector":           False,
+        "phase3.reflection_layer":         False,
+        "phase4.parallel_supervisor":      False,
+        "phase4.mission_manager":          False,
+        "phase6.session_memory":           False,
+        "phase6.engineering_assistant":    False,
+        "scanner":                         False,
     }
     for mod_key in list(modules.keys()):
         try:
@@ -4150,6 +4156,161 @@ async def project_context():
     except Exception as exc:
         logging.exception("Project context scanner failed")
         raise HTTPException(status_code=500, detail=f"Scanner error: {exc}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Phase 6 — Session Memory  (/api/memory/*)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class _MemoryFactRequest(BaseModel):
+    key:        str
+    value:      str
+    confidence: float = 0.90
+    source:     str   = "explicit"
+
+@app.get("/api/memory/{session_id}", tags=["memory"])
+async def get_session_memory(session_id: str):
+    """Return all stored memory facts for a session."""
+    try:
+        from mini_assistant.phase6.session_memory import get_memory
+        facts = get_memory().get_facts(session_id)
+        return {"session_id": session_id, "facts": [f.to_dict() for f in facts], "total": len(facts)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/memory/{session_id}/fact", tags=["memory"])
+async def store_memory_fact(session_id: str, req: _MemoryFactRequest):
+    """Manually store a fact in session memory."""
+    try:
+        from mini_assistant.phase6.session_memory import get_memory
+        fact = get_memory().store(
+            session_id=session_id, key=req.key, value=req.value,
+            confidence=req.confidence, source=req.source,
+        )
+        return {"stored": True, "fact": fact.to_dict()}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.delete("/api/memory/{session_id}", tags=["memory"])
+async def clear_session_memory(session_id: str):
+    """Clear all memory facts for a session."""
+    try:
+        from mini_assistant.phase6.session_memory import get_memory
+        count = get_memory().clear_session(session_id)
+        return {"cleared": True, "facts_removed": count}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.delete("/api/memory/{session_id}/fact/{fact_id}", tags=["memory"])
+async def delete_memory_fact(session_id: str, fact_id: str):
+    """Delete a specific memory fact by ID."""
+    try:
+        from mini_assistant.phase6.session_memory import get_memory
+        ok = get_memory().delete_fact(session_id, fact_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Fact not found")
+        return {"deleted": True, "fact_id": fact_id}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Phase 3 — Skill Library  (/api/skills)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/skills", tags=["skills"])
+async def list_skills(category: Optional[str] = None, status: Optional[str] = None):
+    """Return all registered skills with optional category/status filters."""
+    try:
+        from mini_assistant.phase3.skill_registry import all_skills
+        skills = all_skills()
+        result = []
+        for s in skills:
+            if category and s.category != category:
+                continue
+            if status and s.status != status:
+                continue
+            result.append({
+                "name": s.name, "description": s.description,
+                "intents": s.intents, "category": s.category,
+                "status": s.status, "min_confidence": s.min_confidence,
+                "required_brains": s.required_brains,
+                "required_tools": s.required_tools,
+                "steps_count": len(s.steps),
+            })
+        return {"skills": result, "total": len(result)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Phase 4 — Mission Persistence  (/api/missions/*)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class _MissionCloseRequest(BaseModel):
+    status: str = "completed"  # completed | abandoned | paused
+
+@app.get("/api/missions", tags=["missions"])
+async def list_missions(
+    session_id: Optional[str] = None,
+    status:     Optional[str] = None,
+    limit:      int           = 20,
+):
+    """List missions with optional session_id and status filters."""
+    try:
+        from mini_assistant.phase4.mission_manager import get_mission_manager
+        missions = get_mission_manager().list_missions(
+            status=status, session_id=session_id, limit=limit,
+        )
+        return {"missions": [m.to_dict() for m in missions], "total": len(missions)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/missions/{mission_id}", tags=["missions"])
+async def get_mission(mission_id: str):
+    """Get a single mission by ID."""
+    try:
+        from mini_assistant.phase4.mission_store import MissionStore
+        store = MissionStore()
+        m = store.get(mission_id)
+        if not m:
+            raise HTTPException(status_code=404, detail=f"Mission '{mission_id}' not found")
+        return m.to_dict()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/missions/{mission_id}/close", tags=["missions"])
+async def close_mission(mission_id: str, req: _MissionCloseRequest):
+    """Close (complete/abandon/pause) a mission."""
+    try:
+        from mini_assistant.phase4.mission_manager import get_mission_manager
+        ok = get_mission_manager().close_mission(mission_id, req.status)
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"Mission '{mission_id}' not found")
+        return {"closed": True, "mission_id": mission_id, "status": req.status}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/missions/session/{session_id}/active", tags=["missions"])
+async def active_mission_for_session(session_id: str):
+    """Return the active mission for a session, if any."""
+    try:
+        from mini_assistant.phase4.mission_manager import get_mission_manager
+        m = get_mission_manager().get_active_mission(session_id)
+        if not m:
+            return {"active": False, "mission": None}
+        return {"active": True, "mission": m.to_dict()}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ══════════════════════════════════════════════════════════════════════════════

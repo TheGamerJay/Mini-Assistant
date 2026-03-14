@@ -9,19 +9,19 @@ import { api } from '../api/client';
 /**
  * useChat()
  * Returns { send, cancel, loading }
- * send(text, sessionId) → API response data
+ * send(text, sessionId, history, imageBase64) → API response data
  * cancel(sessionId) → cancels in-flight request
  */
 export function useChat() {
   const [loading, setLoading] = useState(false);
   const abortControllerRef = useRef(null);
 
-  const send = useCallback(async (text, sessionId, history = []) => {
+  const send = useCallback(async (text, sessionId, history = [], imageBase64 = null, preferredModel = null) => {
     setLoading(true);
     abortControllerRef.current = new AbortController();
 
     try {
-      const data = await api.chat(text, sessionId, history);
+      const data = await api.chat(text, sessionId, history, imageBase64, preferredModel);
       return data;
     } finally {
       setLoading(false);

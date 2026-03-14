@@ -288,6 +288,11 @@ def _build_tasks(intent: str) -> tuple[list, list]:
             {"id": "t3", "task": "propose_minimal_fix",         "brain": "coding",    "depends_on": ["t2"]},
             {"id": "t4", "task": "critic_validate_fix",         "brain": "critic",    "depends_on": ["t3"]},
         ]
+        # identify_error + scan_for_similar_errors run in parallel first
+        par = [
+            {"id": "p1", "task": "identify_error_type",         "brain": "coding",    "depends_on": []},
+            {"id": "p2", "task": "scan_reflection_log",         "tool": "scanner",    "depends_on": []},
+        ]
 
     elif intent == "code_runner":
         seq = [
@@ -302,6 +307,11 @@ def _build_tasks(intent: str) -> tuple[list, list]:
             {"id": "t2", "task": "plan_app_structure",          "brain": "research",  "depends_on": ["t1"]},
             {"id": "t3", "task": "generate_app_files",          "brain": "coding",    "depends_on": ["t2"]},
             {"id": "t4", "task": "critic_validate_output",      "brain": "critic",    "depends_on": ["t3"]},
+        ]
+        # t2 + scanner can run concurrently after t1 (parallel wave)
+        par = [
+            {"id": "p1", "task": "plan_app_structure",          "brain": "research",  "depends_on": []},
+            {"id": "p2", "task": "scan_project_context",        "tool": "scanner",    "depends_on": []},
         ]
 
     elif intent == "web_search":
@@ -329,6 +339,11 @@ def _build_tasks(intent: str) -> tuple[list, list]:
             {"id": "t2", "task": "3d_generation",               "brain": "3d_gen",    "depends_on": ["t1"]},
             {"id": "t3", "task": "mesh_cleanup",                "brain": "3d_cleanup","depends_on": ["t2"]},
             {"id": "t4", "task": "validate_asset",              "brain": "critic",    "depends_on": ["t3"]},
+        ]
+        # concept_design + ref_image_search run in parallel
+        par = [
+            {"id": "p1", "task": "concept_design",              "brain": "research",  "depends_on": []},
+            {"id": "p2", "task": "reference_image_search",      "tool": "search",     "depends_on": []},
         ]
 
     else:  # normal_chat
