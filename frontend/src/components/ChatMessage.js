@@ -373,6 +373,7 @@ function ChatMessage({ message, onRetry, onRate, onFork }) {
 
   if (role === 'user') {
     const initial = user?.name ? user.name[0].toUpperCase() : 'U';
+    const avatar = user?.avatar;
     return (
       <div className="flex justify-end items-start gap-2 msg-enter">
         <div className="max-w-[75%] flex flex-col items-end gap-2">
@@ -386,8 +387,8 @@ function ChatMessage({ message, onRetry, onRate, onFork }) {
             </div>
           )}
         </div>
-        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-blue-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-1 select-none">
-          {initial}
+        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-blue-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-1 select-none overflow-hidden">
+          {avatar ? <img src={avatar} alt="avatar" className="w-full h-full object-cover" /> : initial}
         </div>
       </div>
     );
