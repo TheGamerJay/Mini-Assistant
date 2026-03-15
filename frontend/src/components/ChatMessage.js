@@ -751,8 +751,8 @@ function ChatMessage({ message, onRetry, onRate, onFork, onPin, onSendToBuilder,
           />
         )}
 
-        {/* Interactive multiple-choice for numbered Q&A */}
-        {!isError && !isImage && role === 'assistant' && onSuggest && (
+        {/* Interactive multiple-choice for numbered Q&A — only for real responses */}
+        {!isError && !isImage && role === 'assistant' && onSuggest && content && content.length > 80 && (
           <InteractiveChoices text={content} onSuggest={onSuggest} />
         )}
 

@@ -401,7 +401,14 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         submittingRef.current = false;
 
         // Background: fetch follow-up suggestions (non-blocking)
-        if (meta.reply && text) {
+        // Skip if the reply is an error message — suggestions would be irrelevant
+        const _isErrorReply = meta.reply && (
+          meta.reply.startsWith('Mini Assistant ran into') ||
+          meta.reply.startsWith('Mini Assistant may be offline') ||
+          meta.reply.startsWith('Mini Assistant is taking longer') ||
+          meta.reply.startsWith('The AI model isn')
+        );
+        if (meta.reply && text && !_isErrorReply) {
           api.getSuggestions(text, meta.reply).then(data => {
             if (data?.suggestions?.length) {
               setMessages(prev => prev.map(m => m._id === _msgId ? { ...m, suggestions: data.suggestions } : m));

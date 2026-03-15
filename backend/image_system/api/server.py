@@ -47,15 +47,27 @@ logger = logging.getLogger(__name__)
 
 def _friendly_error(exc) -> str:
     """Convert a raw exception into a user-facing Mini Assistant error message."""
+    logger.error("chat_stream error: %s: %s", type(exc).__name__, exc)
     s = str(exc).lower()
+    t = type(exc).__name__.lower()
     if any(kw in s for kw in ("cannot connect to host", "connection refused", "connect call failed",
-                               "connectionrefused", "clientconnectorerror", "nodename nor servname")):
+                               "connectionrefused", "clientconnectorerror", "nodename nor servname",
+                               "name or service not known", "getaddrinfo")):
         return "Mini Assistant may be offline — try again in a moment."
-    if any(kw in s for kw in ("timed out", "timeout", "524", "read timeout")):
+    if any(kw in s for kw in ("timed out", "timeout", "524", "read timeout", "gateway")):
         return "Mini Assistant is taking longer than expected. Please try again."
     if any(kw in s for kw in ("not found", "pull", "no such", "unknown model", "404")):
         return "The AI model isn't available yet — try pulling it in Ollama, or switch models in the selector."
-    return "Mini Assistant ran into an issue. Please try again."
+    if any(kw in s or kw in t for kw in ("cancelled", "cancel")):
+        return "Request cancelled."
+    if "serverdisconnected" in t or "disconnect" in s:
+        return "Mini Assistant disconnected mid-response — try again."
+    if "clientpayload" in t or "payload" in s:
+        return "Mini Assistant had a network hiccup — try again."
+    # Log full traceback for unknown errors so Railway logs show the real cause
+    import traceback as _tb
+    logger.error("Unhandled streaming error:\n%s", _tb.format_exc())
+    return f"Mini Assistant ran into an issue ({type(exc).__name__}). Please try again."
 
 
 # ---------------------------------------------------------------------------
