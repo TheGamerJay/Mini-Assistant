@@ -90,7 +90,7 @@ except Exception as _p10_err:
 # to avoid Cloudflare tunnel timeouts on large payloads.
 # ---------------------------------------------------------------------------
 
-def _compress_image_b64(b64: str, max_px: int = 768, quality: int = 72) -> str:
+def _compress_image_b64(b64: str, max_px: int = 512, quality: int = 65) -> str:
     """Resize + JPEG-compress a base64 image. Returns original string if PIL unavailable."""
     if not _PIL_AVAILABLE or not b64:
         return b64
@@ -1712,18 +1712,30 @@ async def chat_stream(req: ChatRequest):
         history_msgs.append(user_msg)
 
         # ── Stream tokens from Ollama ─────────────────────────────────────────
+        # Interleave keepalive SSE comments with tokens so Cloudflare doesn't
+        # drop the frontend connection during long image processing pauses.
         reply_text = ""
         try:
             ollama_client = _get_ollama()
+            last_yield_time = asyncio.get_event_loop().time()
             async for token in ollama_client.run_chat_stream(
                 model=_active_model,
                 messages=history_msgs,
                 temperature=0.7,
             ):
+                now = asyncio.get_event_loop().time()
+                if now - last_yield_time > 15:
+                    yield ": keepalive\n\n"
+                    last_yield_time = now
                 reply_text += token
                 yield f"data: {_json.dumps({'t': token})}\n\n"
+                last_yield_time = asyncio.get_event_loop().time()
         except Exception as exc:
-            err = f"I'm having trouble responding right now: {exc}"
+            exc_str = str(exc)
+            if "524" in exc_str:
+                err = "Image analysis is taking too long through the connection — please try with a smaller image or try again in a moment."
+            else:
+                err = f"I'm having trouble responding right now: {exc_str}"
             yield f"data: {_json.dumps({'t': err})}\n\n"
             reply_text = err
 
