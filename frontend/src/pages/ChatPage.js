@@ -295,32 +295,6 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
       return;
     }
 
-    // ── TEXT path: try local Ollama first when images are attached ────────
-    // Bypasses the Railway→Cloudflare→Ollama tunnel for image analysis,
-    // which avoids 524 timeouts. Falls back to SSE stream if local fails.
-    if (imgs.length > 0) {
-      setStreamingText('');
-      try {
-        const localReply = await api.tryLocalOllamaChat(text, imgs[0]);
-        const localMsg = {
-          role: 'assistant', type: 'text',
-          content: localReply,
-          model_used: 'gemma3:4b (local)',
-          timestamp: Date.now(),
-        };
-        const withLocal = [...nextMessages, localMsg];
-        responseCountRef.current += 1;
-        setMessages(withLocal);
-        updateChatMessages(chatId, withLocal);
-        setStreamingText(null);
-        submittingRef.current = false;
-        return;
-      } catch {
-        // Local Ollama unavailable — fall through to SSE stream below
-        setStreamingText(null);
-      }
-    }
-
     // ── TEXT path: streaming ───────────────────────────────────────────────
     // Show a live-updating streaming bubble immediately
     setStreamingText('');
