@@ -22,22 +22,18 @@ _MAX_FIX_LOOPS = 2  # Reviewer → Builder fix cycles before accepting best vers
 
 # ── Prompts ─────────────────────────────────────────────────────────────────
 
-_VISION_PROMPT = """\
-You are analyzing a UI screenshot so a developer can recreate it as HTML/CSS/JS.
-Describe every detail you see, technically and precisely:
+# Two short focused prompts — moondream is tiny (1.8B) and works better with simple questions
+_VISION_COLORS_PROMPT = (
+    "What colors do you see in this UI? "
+    "List: background color, text color, button color, input field color, any accent colors. "
+    "Use hex codes if you can read them."
+)
 
-- Overall layout: sections, columns, grid or flex structure
-- Color scheme: background, text, buttons, accents — use hex codes if you can read them
-- Typography: font sizes, weights, hierarchy (headings, body, labels)
-- Every interactive element: buttons (text + style), text inputs, dropdowns, checkboxes, toggles, sliders
-- Spacing: padding, margins, gaps between elements
-- Borders, border-radius, box shadows
-- All visible text: labels, placeholders, headings, body copy
-- Navigation bar / sidebar / tabs if present
-- Any icons, images, or illustrations (describe shape/purpose)
-- Responsive behavior if apparent
-
-Output ONLY the description — no commentary, no code."""
+_VISION_LAYOUT_PROMPT = (
+    "Describe the layout of this UI screenshot. "
+    "What elements are visible? (logo, form fields, buttons, navigation, etc.) "
+    "Where are they positioned on the page?"
+)
 
 _BUILD_SYSTEM = """\
 You are an expert frontend developer. Your job is to build complete, pixel-faithful web UIs.
@@ -114,37 +110,75 @@ async def image_to_code_pipeline(
         └─ if issues → Builder Brain fix (stream) → Reviewer Brain  (× _MAX_FIX_LOOPS)
     """
 
-    # ── STEP 1: Vision Brain ─────────────────────────────────────────────────
+    # ── STEP 1: Vision Brain (two focused queries — moondream handles short prompts best) ──
     yield _tok("👁 **Vision Brain** is analyzing your image...\n\n")
 
-    _v_task = asyncio.ensure_future(
+    colors_task = asyncio.ensure_future(
         ollama_client.run_chat(
             vision_model,
-            [{"role": "user", "content": _VISION_PROMPT, "images": images}],
-            timeout=120,
+            [{"role": "user", "content": _VISION_COLORS_PROMPT, "images": images}],
+            timeout=90,
         )
     )
-    ui_description: str = ""
-    while not _v_task.done():
+    colors_desc = ""
+    while not colors_task.done():
         try:
-            ui_description = await asyncio.wait_for(asyncio.shield(_v_task), timeout=3.0)
+            colors_desc = await asyncio.wait_for(asyncio.shield(colors_task), timeout=3.0)
         except asyncio.TimeoutError:
             yield ": keepalive\n\n"
-    if not ui_description:
+    if not colors_desc:
         try:
-            ui_description = _v_task.result()
-        except Exception as _ve:
-            logger.warning("Vision brain failed: %s", _ve)
-            ui_description = f"Build a web UI matching this request: {user_request}"
+            colors_desc = colors_task.result()
+        except Exception as _e:
+            logger.warning("Vision colors query failed: %s", _e)
+            colors_desc = ""
+
+    layout_task = asyncio.ensure_future(
+        ollama_client.run_chat(
+            vision_model,
+            [{"role": "user", "content": _VISION_LAYOUT_PROMPT, "images": images}],
+            timeout=90,
+        )
+    )
+    layout_desc = ""
+    while not layout_task.done():
+        try:
+            layout_desc = await asyncio.wait_for(asyncio.shield(layout_task), timeout=3.0)
+        except asyncio.TimeoutError:
+            yield ": keepalive\n\n"
+    if not layout_desc:
+        try:
+            layout_desc = layout_task.result()
+        except Exception as _e:
+            logger.warning("Vision layout query failed: %s", _e)
+            layout_desc = ""
+
+    # Discard garbage responses (single char, "?", etc.)
+    def _valid(s: str) -> bool:
+        return bool(s) and len(s.strip()) > 5 and s.strip() not in ("?", "...", "N/A")
+
+    ui_description = ""
+    if _valid(colors_desc):
+        ui_description += f"COLORS: {colors_desc.strip()}\n"
+    if _valid(layout_desc):
+        ui_description += f"LAYOUT: {layout_desc.strip()}\n"
+    if not ui_description:
+        ui_description = "Could not extract details from image."
+        logger.warning("Vision Brain returned no useful data")
 
     logger.info("Vision Brain OK — %d chars", len(ui_description))
     yield _tok("✅ **Vision Brain** done.\n\n🔨 **Builder Brain** generating code...\n\n")
 
     # ── STEP 2: Builder Brain (streaming) ────────────────────────────────────
+    # User's own words come FIRST — they take priority over vision analysis.
+    # If they said "cyan and pink cotton candy style", that overrides everything.
     _build_user = (
-        f"[UI DESCRIPTION FROM SCREENSHOT]\n{ui_description}\n\n"
-        f"[USER REQUEST]\n{user_request or 'Build this UI as a complete working web app.'}\n\n"
-        "Build the complete HTML/CSS/JS app now. Start your response with ```html"
+        f"[USER'S EXACT REQUIREMENTS — HIGHEST PRIORITY, FOLLOW THESE PRECISELY]\n"
+        f"{user_request}\n\n"
+        f"[VISUAL STYLE FROM SCREENSHOT]\n{ui_description}\n\n"
+        "Build the complete HTML/CSS/JS app now. "
+        "USER REQUIREMENTS above override the screenshot analysis — if the user specified exact colors, use those exact colors. "
+        "Start your response with ```html"
     )
 
     built_code_raw = ""
@@ -182,7 +216,8 @@ async def image_to_code_pipeline(
         yield _tok(f"\n\n🔍 **Reviewer Brain** checking the build...\n\n")
 
         _review_user = (
-            f"[UI DESCRIPTION]\n{ui_description}\n\n"
+            f"[USER REQUIREMENTS — TOP PRIORITY]\n{user_request}\n\n"
+            f"[VISUAL STYLE FROM SCREENSHOT]\n{ui_description}\n\n"
             f"[GENERATED CODE]\n```html\n{built_code}\n```"
         )
         _r_task = asyncio.ensure_future(
@@ -229,11 +264,12 @@ async def image_to_code_pipeline(
         logger.info("Review issues:\n%s", review_result)
 
         _fix_user = (
-            f"[ORIGINAL UI DESCRIPTION]\n{ui_description}\n\n"
+            f"[USER REQUIREMENTS — TOP PRIORITY]\n{user_request}\n\n"
+            f"[VISUAL STYLE FROM SCREENSHOT]\n{ui_description}\n\n"
             f"[YOUR PREVIOUS CODE]\n```html\n{built_code}\n```\n\n"
             f"[REVIEWER ISSUES — FIX ALL OF THESE]\n{review_result}\n\n"
-            "Fix every issue listed above. Output the COMPLETE updated HTML file. "
-            "Start with ```html"
+            "Fix every issue. User requirements above take highest priority — make sure their exact colors and style are correct. "
+            "Output the COMPLETE updated HTML file. Start with ```html"
         )
         fixed_code_raw = ""
         try:
