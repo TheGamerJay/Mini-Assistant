@@ -733,6 +733,23 @@ async def startup_event():
     except Exception as exc:
         logger.warning("Startup check failed: %s", exc)
 
+    # Pre-warm the two primary models so the first user request is fast.
+    # Runs in the background — does not block startup.
+    async def _warmup():
+        import asyncio as _asyncio
+        from ..services.ollama_client import OllamaClient as _OC, _model_name as _mn
+        _client = _OC()
+        for _role in ("router", "vision"):
+            _model = _mn(_role)
+            try:
+                await _client.run_prompt(_model, "hi", timeout=300)
+                logger.info("Warm-up OK: %s", _model)
+            except Exception as _e:
+                logger.warning("Warm-up failed for %s: %s", _model, _e)
+
+    import asyncio as _asyncio
+    _asyncio.ensure_future(_warmup())
+
 
 # ---------------------------------------------------------------------------
 # Endpoints
