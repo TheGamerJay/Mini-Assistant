@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { XCircle, PanelRight, Download, ChevronDown } from 'lucide-react';
+import { PanelRight, Download, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp, makeThumbnail } from '../context/AppContext';
 import { useChat } from '../hooks/useChat';
@@ -688,15 +688,6 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
               loading={loading}
               placeholder={rightPanelOpen ? 'Describe changes or chat…' : 'Message Mini Assistant, or say /build to create an app…'}
             />
-            {loading && (
-              <button
-                onClick={handleCancel}
-                title="Stop generating"
-                className="absolute right-[-44px] bottom-2 p-2 rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-              >
-                <XCircle size={18} />
-              </button>
-            )}
           </div>
           <div className="flex items-center justify-between mt-2">
             {loading && (
