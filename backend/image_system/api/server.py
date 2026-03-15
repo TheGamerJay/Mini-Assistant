@@ -1846,12 +1846,14 @@ async def chat_stream(req: ChatRequest):
         # Detect if the user pasted code (``` in their message or coding intent from router)
         _has_code_in_msg = "```" in effective_msg or execution_intent == "coding"
         # Also check if their message looks like a code question even without fences
-        _CODE_Q = _re.compile(
-            r"\b(debug|fix|refactor|explain|review|what does|how does|why (is|does|doesn't)|"
-            r"error in|bug in|broken|not working|TypeError|SyntaxError|ImportError|exception)\b",
+        # Only treat as code if there are very explicit code signals — NOT broad phrases
+        # that would match normal conversation ("how does", "why does", etc.)
+        _CODE_ERRORS = _re.compile(
+            r"\b(TypeError|SyntaxError|ImportError|NameError|AttributeError|KeyError|"
+            r"IndexError|ValueError|RuntimeError|ModuleNotFoundError|stacktrace|traceback)\b",
             _re.I,
         )
-        _is_code_intent = _has_code_in_msg or bool(_CODE_Q.search(effective_msg))
+        _is_code_intent = _has_code_in_msg or execution_intent == "coding" or bool(_CODE_ERRORS.search(effective_msg))
 
         if _is_build_intent:
             # Always use the coder model for building, even when a preferred_model is set
