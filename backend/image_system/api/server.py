@@ -1925,9 +1925,14 @@ async def chat_stream(req: ChatRequest):
         _build_history_turns = sum(1 for h in (req.history or []) if h.role == "assistant") if _is_build_intent else 0
 
         _has_images = bool(req.image_base64 or req.images_base64)
+        # True if pipeline has already generated HTML code in a previous turn
+        _has_prior_code = any(
+            h.role == "assistant" and "```html" in (h.content or "")
+            for h in (req.history or [])
+        )
         if _is_build_intent:
-            if _build_history_turns == 0 and not _has_images:
-                # First contact, no image — ask 3 questions then stop
+            if not _has_images and not _has_prior_code and _build_history_turns == 0:
+                # First contact, no image, no prior code — ask 3 questions then stop
                 _build_mode_addendum = (
                     "\n\n## APP BUILDER — TURN 1\n"
                     "This is the FIRST message about building. Ask exactly 3 short, focused questions as a numbered list.\n"
@@ -1936,7 +1941,7 @@ async def chat_stream(req: ChatRequest):
                     "End with: 'Ready to build once you answer!'\n"
                     "Do NOT produce any code yet.\n"
                 )
-            elif _build_history_turns == 0 and _has_images:
+            elif _has_images and not _has_prior_code:
                 # Image provided — build immediately from the visual reference, no questions
                 _build_mode_addendum = (
                     _APP_BUILDER_CODING_STANDARDS +
@@ -1954,8 +1959,8 @@ async def chat_stream(req: ChatRequest):
                     "- Make all design decisions yourself based on what you see in the image.\n"
                     "- NEVER ask clarifying questions when an image is provided. Just build it.\n"
                 )
-            elif _build_history_turns % 2 == 1:
-                # User just answered questions — now BUILD
+            elif not _has_prior_code:
+                # User answered questions (no code yet) — now BUILD
                 _build_mode_addendum = (
                     _APP_BUILDER_CODING_STANDARDS +
                     "\n\n## APP BUILDER — BUILD TURN (MANDATORY CODE OUTPUT)\n"
@@ -2059,7 +2064,7 @@ async def chat_stream(req: ChatRequest):
             all_images.insert(0, req.image_base64)
         all_images = [_compress_image_b64(b64) for b64 in all_images]
         user_msg: dict = {"role": "user", "content": user_content}
-        if all_images and not (_is_build_intent and _build_history_turns == 0):
+        if all_images and not (_is_build_intent and not _has_prior_code):
             # Normal image analysis (not the image-to-code pipeline)
             user_msg["images"] = all_images
             if not req.preferred_model:
@@ -2067,12 +2072,12 @@ async def chat_stream(req: ChatRequest):
         history_msgs.append(user_msg)
 
         # ── Image-to-Code pipeline (Vision → Builder → Reviewer loop) ─────────
-        # When user sends an image on the first build turn, hand off to the
-        # three-brain orchestrator instead of the normal single-model stream.
+        # Trigger when: build intent + images attached + no HTML already generated.
+        # This covers first-time image builds AND retries mid-conversation.
         reply_text = ""
         ollama_client = _get_ollama()
 
-        if _is_build_intent and _build_history_turns == 0 and all_images:
+        if _is_build_intent and all_images and not _has_prior_code:
             from .pipeline import image_to_code_pipeline
             async for _sse in image_to_code_pipeline(
                 images=all_images,
