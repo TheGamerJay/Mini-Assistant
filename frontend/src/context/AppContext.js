@@ -127,12 +127,16 @@ const AppContext = createContext(null);
 
 export function AppProvider({ children }) {
   // ---- Navigation ----
-  const [page, _setPage] = useState('chat');
+  const [page, _setPage] = useState(() => {
+    const saved = localStorage.getItem('ma_active_page');
+    return (saved && saved !== 'settings') ? saved : 'chat';
+  });
   const prevPageRef = useRef('chat');
 
   const setPage = useCallback((p) => {
     _setPage((prev) => {
       if (prev !== 'settings') prevPageRef.current = prev;
+      try { localStorage.setItem('ma_active_page', p); } catch {}
       return p;
     });
   }, []);
@@ -155,7 +159,9 @@ export function AppProvider({ children }) {
 
   // ---- Chats ----
   const [chats, setChats] = useState(() => migrateLS('ma_v2_chats', getSessionId(), []));
-  const [activeChatId, setActiveChatId] = useState(null);
+  const [activeChatId, setActiveChatId] = useState(() => {
+    return localStorage.getItem('ma_active_chat_id') || null;
+  });
 
   const newChat = useCallback(() => {
     const id = crypto.randomUUID();
@@ -350,6 +356,21 @@ export function AppProvider({ children }) {
   useEffect(() => { saveLS(uk('ma_v2_projects', user?.id), projects); }, [projects, user?.id]);
   useEffect(() => { saveLS(uk('ma_v2_images',   user?.id), images);   }, [images,   user?.id]);
   useEffect(() => { saveLS(uk('ma_v2_settings', user?.id), settings); }, [settings, user?.id]);
+
+  // Persist active chat + page so refresh restores the same view
+  useEffect(() => {
+    try {
+      if (activeChatId) localStorage.setItem('ma_active_chat_id', activeChatId);
+      else localStorage.removeItem('ma_active_chat_id');
+    } catch {}
+  }, [activeChatId]);
+
+  // On mount: validate restored activeChatId — clear it if the chat no longer exists
+  useEffect(() => {
+    if (activeChatId && chats.length > 0 && !chats.find(c => c.id === activeChatId)) {
+      setActiveChatId(null);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Debounced sync of chats to backend
   const _chatSyncTimer = useRef(null);
