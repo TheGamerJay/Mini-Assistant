@@ -87,15 +87,10 @@ export function useChat() {
     }
   }, []);
 
-  const cancel = useCallback(async (sessionId) => {
+  const cancel = useCallback(() => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
-    }
-    if (sessionId) {
-      try {
-        await api.cancelGeneration(sessionId);
-      } catch { /* ignore */ }
     }
     setLoading(false);
   }, []);
