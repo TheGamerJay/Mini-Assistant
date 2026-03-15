@@ -2021,6 +2021,9 @@ async def chat_stream(req: ChatRequest):
         user_msg: dict = {"role": "user", "content": user_content}
         if all_images:
             user_msg["images"] = all_images
+            # Switch to vision model when images are attached — text models can't see images
+            if not req.preferred_model:
+                _active_model = _reg_model_name("vision")
         history_msgs.append(user_msg)
 
         # ── Stream tokens from Ollama ─────────────────────────────────────────
