@@ -374,12 +374,18 @@ function ChatMessage({ message, onRetry, onRate, onFork }) {
   if (role === 'user') {
     const initial = user?.name ? user.name[0].toUpperCase() : 'U';
     const avatar = user?.avatar;
+    const { images_base64 } = message;
+    const allImages = images_base64 && images_base64.length > 1 ? images_base64 : (image_base64 ? [image_base64] : []);
     return (
       <div className="flex justify-end items-start gap-2 msg-enter">
         <div className="max-w-[75%] flex flex-col items-end gap-2">
-          {type === 'image_input' && image_base64 && (
-            <img src={`data:image/jpeg;base64,${image_base64}`} alt="Attached"
-              className="max-h-48 max-w-xs rounded-xl border border-cyan-500/20 object-contain bg-black/30" />
+          {type === 'image_input' && allImages.length > 0 && (
+            <div className="flex flex-wrap gap-2 justify-end">
+              {allImages.map((b64, i) => (
+                <img key={i} src={`data:image/jpeg;base64,${b64}`} alt={`Attached ${i + 1}`}
+                  className="max-h-40 max-w-[180px] rounded-xl border border-cyan-500/20 object-contain bg-black/30" />
+              ))}
+            </div>
           )}
           {content && (
             <div className="px-5 py-3 rounded-2xl rounded-tr-sm bg-[#1e2a3a] border border-cyan-500/20 text-slate-200 text-sm leading-relaxed">

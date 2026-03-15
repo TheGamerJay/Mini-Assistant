@@ -148,6 +148,7 @@ function ChatPage() {
       type: imgs.length ? 'image_input' : 'text',
       content: text,
       image_base64: imgs[0] || null,
+      images_base64: imgs.length > 1 ? imgs : null,
       timestamp: Date.now(),
     };
     const nextMessages = [...messages, userMsg];
