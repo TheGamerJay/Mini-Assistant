@@ -140,6 +140,79 @@ _comfyui_client = None
 _ollama_client = None
 
 # ---------------------------------------------------------------------------
+# App Builder coding standards — injected into every build/update turn
+# ---------------------------------------------------------------------------
+_APP_BUILDER_CODING_STANDARDS = """
+## CODING STANDARDS (follow these exactly when building apps)
+
+### File structure
+- Always output ONE self-contained HTML file. All CSS in <style>, all JS in <script>.
+- No external CDN links, no npm packages, no imports. Everything inline.
+- Order: <!DOCTYPE html> → <html> → <head> (meta + style) → <body> (markup + script).
+
+### HTML
+- Use semantic elements: <header>, <main>, <section>, <article>, <nav>, <footer>, <button>, <form>, <input>.
+- Every interactive element needs an id or data attribute if JS references it.
+- Never use divs as buttons. Use <button type="button">.
+- Forms must have proper labels (htmlFor or wrapping <label>).
+
+### CSS — write CSS like a senior frontend engineer
+- Always define CSS custom properties (variables) at :root for colors, spacing, radii.
+  Example: --color-bg: #0d0d12; --color-surface: #161622; --color-accent: #7c3aed; --radius: 8px;
+- Use flexbox or grid for ALL layouts — never use float, never use absolute positioning for layout.
+- Mobile-first, responsive by default. Use clamp() for fluid type. Max-width containers.
+- Dark-mode-first design. Background #0d0d12 or similar deep dark. Text #e2e8f0 or similar.
+- Every interactive element must have :hover, :focus-visible, and :active states.
+- Use transitions: transition: all 0.15s ease for micro-interactions.
+- Buttons: padding 0.5em 1.25em, border-radius var(--radius), cursor: pointer, no outline on click (outline on focus-visible only).
+- Inputs: same radius, background slightly lighter than bg, border 1px solid rgba(255,255,255,0.12), color: inherit.
+- Scrollbars: style them. ::-webkit-scrollbar { width: 6px } ::-webkit-scrollbar-track { background: transparent } ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 99px }
+- Cards/surfaces: background var(--color-surface), border: 1px solid rgba(255,255,255,0.07), border-radius var(--radius), padding 1rem.
+
+### JavaScript — write JS like a senior engineer, not a beginner
+- Use const/let — never var.
+- State is a plain object at the top of the script. Mutate it directly, then call a render function.
+  Example pattern:
+    const state = { items: [], filter: 'all', darkMode: true };
+    function render() { /* read state, update DOM */ }
+- Never innerHTML += — always build a string or array then set innerHTML once.
+- Use event delegation for lists: one listener on the container, check e.target.closest('[data-action]').
+- Use template literals for all HTML generation.
+- LocalStorage persistence: on state change, localStorage.setItem('app_state', JSON.stringify(state)).
+  On load: try { Object.assign(state, JSON.parse(localStorage.getItem('app_state') || '{}')); } catch {}
+- Animations: use CSS classes + requestAnimationFrame, not setTimeout chains.
+- Error handling: wrap async operations in try/catch. Show inline error messages, not console.error only.
+- Functions should be short and do one thing. Split large functions.
+
+### UX patterns to always include
+- Empty states: when a list is empty, show a helpful illustrated placeholder with a call-to-action.
+- Loading states: show a spinner or skeleton when fetching/processing.
+- Success/error feedback: brief toast notification or inline message after actions.
+- Keyboard accessible: Enter submits forms, Escape closes modals/dialogs.
+- Smooth page feel: add a subtle entrance animation (opacity 0 → 1, translateY 8px → 0) on mount.
+
+### Design defaults (use these unless the user specified otherwise)
+- Font: system-ui, -apple-system, sans-serif
+- Background: #0d0d12
+- Surface: #161622
+- Border: rgba(255,255,255,0.07)
+- Accent: #7c3aed (purple) or #06b6d4 (cyan) — pick one and use it consistently
+- Text primary: #e2e8f0
+- Text muted: #64748b
+- Danger: #ef4444
+- Success: #22c55e
+- Border radius: 8px default, 4px for small, 12px for cards, 999px for pills/badges
+- Spacing: 4px base unit. Use 4, 8, 12, 16, 24, 32, 48px.
+
+### What "complete and working" means
+- EVERY button does something. No "coming soon", no alert("TODO").
+- EVERY form validates and gives feedback.
+- EVERY list renders correctly with 0, 1, and many items.
+- EVERY modal/dialog can be opened AND closed.
+- The app could be shipped to a real user right now.
+"""
+
+# ---------------------------------------------------------------------------
 # Mini Assistant identity system prompt
 # ---------------------------------------------------------------------------
 
@@ -1751,12 +1824,14 @@ async def chat_stream(req: ChatRequest):
             elif _build_history_turns % 2 == 1:
                 # User just answered questions — now BUILD
                 _build_mode_addendum = (
+                    _APP_BUILDER_CODING_STANDARDS +
                     "\n\n## APP BUILDER — BUILD TURN (MANDATORY CODE OUTPUT)\n"
                     "CRITICAL: You MUST output a complete, working code block RIGHT NOW. No exceptions.\n"
                     "The user answered your questions. Your ONLY job in this response is:\n"
                     "  1. Output the FULL working app as a single ```html code block (HTML + CSS + JS all inline).\n"
-                    "  2. The code block MUST come FIRST before any other text.\n"
-                    "  3. After the closing ``` of the code block, write exactly:\n"
+                    "  2. Apply the CODING STANDARDS above — CSS variables, flexbox layouts, real JS state, transitions, empty states, etc.\n"
+                    "  3. The code block MUST come FIRST before any other text.\n"
+                    "  4. After the closing ``` of the code block, write exactly:\n"
                     "     'Here\\'s what I built! What would you like next?\\n1. ...\\n2. ...\\n3. ...'\n\n"
                     "RULES:\n"
                     "- Output format: ```html\\n<!DOCTYPE html>\\n...\\n```  (mandatory)\n"
@@ -1768,11 +1843,13 @@ async def chat_stream(req: ChatRequest):
             else:
                 # User responded to follow-ups — update code then ask 3 more
                 _build_mode_addendum = (
+                    _APP_BUILDER_CODING_STANDARDS +
                     "\n\n## APP BUILDER — UPDATE TURN (MANDATORY CODE OUTPUT)\n"
                     "CRITICAL: Output the COMPLETE updated code block FIRST. No exceptions.\n"
                     "  1. Output the full updated app as a single ```html code block.\n"
-                    "  2. The code block MUST come FIRST before any other text.\n"
-                    "  3. After the closing ```, write: 'Updated! What would you like next?\\n1. ...\\n2. ...\\n3. ...'\n\n"
+                    "  2. Maintain the CODING STANDARDS — preserve CSS variables, clean state management, all working interactions.\n"
+                    "  3. The code block MUST come FIRST before any other text.\n"
+                    "  4. After the closing ```, write: 'Updated! What would you like next?\\n1. ...\\n2. ...\\n3. ...'\n\n"
                     "RULES:\n"
                     "- Always output the ENTIRE file — never partial diffs or snippets.\n"
                     "- Every button and control must remain fully functional. No TODOs, no stubs.\n"

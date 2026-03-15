@@ -674,6 +674,7 @@ function ChatPage() {
       {/* ── Right panel ── */}
       <RightPanel
         messages={messages}
+        streamingText={streamingText}
         open={rightPanelOpen}
         onClose={() => setRightPanelOpen(false)}
       />

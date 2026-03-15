@@ -34,8 +34,14 @@ function extractCodeBlocks(content) {
   return blocks;
 }
 
-/** Find the last assistant message that contains code */
-function getLatestCode(messages) {
+/** Find the latest code — live stream first, then last completed assistant message */
+function getLatestCode(messages, streamingText) {
+  // Live stream takes priority — extract as tokens arrive
+  if (streamingText) {
+    const liveBlocks = extractCodeBlocks(streamingText);
+    if (liveBlocks.length > 0) return liveBlocks;
+  }
+  // Fall back to last completed assistant message with code
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg.role !== 'assistant') continue;
@@ -243,9 +249,9 @@ const TABS = [
   { id: 'files',   label: 'Files',   icon: FolderOpen },
 ];
 
-function RightPanel({ messages = [], open, onClose }) {
+function RightPanel({ messages = [], streamingText = null, open, onClose }) {
   const [tab, setTab] = useState('preview');
-  const codeBlocks = useMemo(() => getLatestCode(messages), [messages]);
+  const codeBlocks = useMemo(() => getLatestCode(messages, streamingText), [messages, streamingText]);
 
   if (!open) return null;
 
