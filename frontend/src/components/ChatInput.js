@@ -38,15 +38,36 @@ const MAX_DOC_SIZE_MB = 20;
 
 // ── Image helpers ─────────────────────────────────────────────────────────────
 
-function readFileAsBase64(file) {
+/**
+ * Resize + JPEG-compress an image file using a canvas.
+ * Returns { base64, preview } — both are compressed JPEG data URIs/strings.
+ * Max dimension: 800px. Quality: 0.75.
+ */
+function compressImageFile(file, maxPx = 800, quality = 0.75) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => {
-      // Strip data:image/...;base64, prefix — backend expects raw base64
-      const base64 = reader.result.split(',')[1];
-      resolve(base64);
-    };
     reader.onerror = reject;
+    reader.onload = (e) => {
+      const img = new window.Image();
+      img.onerror = reject;
+      img.onload = () => {
+        const { naturalWidth: w, naturalHeight: h } = img;
+        const scale = Math.min(1, maxPx / Math.max(w, h));
+        const cw = Math.round(w * scale);
+        const ch = Math.round(h * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = cw;
+        canvas.height = ch;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, cw, ch);
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve({
+          base64: dataUrl.split(',')[1],
+          preview: dataUrl,
+        });
+      };
+      img.src = e.target.result;
+    };
     reader.readAsDataURL(file);
   });
 }
@@ -158,10 +179,9 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder })
       return null;
     }
     try {
-      const [base64, preview] = await Promise.all([
-        readFileAsBase64(file),
-        readFileAsDataUrl(file),
-      ]);
+      // Compress + resize to max 800px JPEG before sending to backend.
+      // This reduces upload size dramatically and prevents Cloudflare tunnel timeouts.
+      const { base64, preview } = await compressImageFile(file);
       return { base64, preview, name: file.name };
     } catch {
       toast.error('Could not read image file.');
