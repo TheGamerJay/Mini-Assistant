@@ -289,9 +289,9 @@ _ollama_headers = {"Authorization": f"Bearer {_ollama_api_key}"} if _ollama_api_
 
 try:
     ollama_client = Client(host=_ollama_host, headers=_ollama_headers)
-    print(f"✓ Ollama client initialised (host={_ollama_host})")
+    print(f"[OK] Ollama client initialised (host={_ollama_host})")
 except Exception as e:
-    print(f"✗ Failed to initialise Ollama client: {e}")
+    print(f"[ERR] Failed to initialise Ollama client: {e}")
     ollama_client = None
 
 # Initialize Whisper model for STT (lazy loading)
@@ -4093,11 +4093,12 @@ app.include_router(api_router)
 
 # ── Auth + DB-sync routes ─────────────────────────────────────────────────────
 try:
-    from auth_routes import auth_router, db_router, admin_router
+    from auth_routes import auth_router, db_router, admin_router, tasks_router
     app.include_router(auth_router)
     app.include_router(db_router)
     app.include_router(admin_router)
-    logging.info("✓ Auth routes registered (/api/auth/*, /api/db/*, /api/admin/*)")
+    app.include_router(tasks_router)
+    logging.info("✓ Auth routes registered (/api/auth/*, /api/db/*, /api/admin/*, /api/tasks/*)")
 except Exception as _auth_err:
     logging.warning("Auth routes unavailable: %s", _auth_err)
 

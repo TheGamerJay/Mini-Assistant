@@ -53,6 +53,8 @@ def _friendly_error(exc) -> str:
         return "Mini Assistant may be offline — try again in a moment."
     if any(kw in s for kw in ("timed out", "timeout", "524", "read timeout")):
         return "Mini Assistant is taking longer than expected. Please try again."
+    if any(kw in s for kw in ("not found", "pull", "no such", "unknown model", "404")):
+        return "The AI model isn't available yet — try pulling it in Ollama, or switch models in the selector."
     return "Mini Assistant ran into an issue. Please try again."
 
 
@@ -1950,21 +1952,51 @@ async def chat_stream(req: ChatRequest):
         # ── Web search injection — fetch live results when intent is web_search ─
         if phase1_plan and phase1_plan.intent == "web_search" and not req.image_base64 and not req.images_base64:
             try:
-                from mini_assistant.tools.search import web_search as _ddg_search
-                _ws_results = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: _ddg_search(effective_msg, max_results=5)
-                )
-                if _ws_results:
-                    _snippets = "\n".join(
-                        f"[{i+1}] {r.get('title', '')}\n{r.get('body', '')}"
-                        for i, r in enumerate(_ws_results[:5])
+                from mini_assistant.tools.docs_retriever import doc_aware_search, is_tech_query
+                _is_tech = is_tech_query(effective_msg)
+                if _is_tech:
+                    # Tech query: local index → live official docs → web fallback
+                    _doc_result = await asyncio.get_event_loop().run_in_executor(
+                        None, lambda: doc_aware_search(effective_msg, max_results=5)
                     )
-                    user_content = (
-                        f"[WEB SEARCH RESULTS for: {effective_msg}]\n{_snippets}\n\n"
-                        "Use the search results above to answer the user's question accurately. "
-                        "Do not say you lack internet access.\n\n"
-                        f"{effective_msg}"
+                    _context = _doc_result.get("context_snippet", "")
+                    _source  = _doc_result.get("source", "web_fallback")
+                    _citations = _doc_result.get("citations", [])
+                    if _context:
+                        _cite_lines = "\n".join(
+                            f"  [{i+1}] {c.get('title','')} — {c.get('url','')}"
+                            for i, c in enumerate(_citations[:3]) if c.get("url")
+                        )
+                        _source_label = {
+                            "local_index": "[LOCAL DOCS INDEX]",
+                            "live_docs":   "[OFFICIAL DOCS]",
+                            "web_fallback":"[WEB SEARCH]",
+                        }.get(_source, "[WEB SEARCH]")
+                        user_content = (
+                            f"{_source_label} for: {effective_msg}\n\n"
+                            f"{_context}\n\n"
+                            + (f"Sources:\n{_cite_lines}\n\n" if _cite_lines else "")
+                            + "Use ONLY the documentation above to answer accurately. "
+                            "Cite the source when helpful. Do not say you lack internet access.\n\n"
+                            f"{effective_msg}"
+                        )
+                else:
+                    # Non-tech query: plain web search
+                    from mini_assistant.tools.search import web_search as _plain_search
+                    _ws_results = await asyncio.get_event_loop().run_in_executor(
+                        None, lambda: _plain_search(effective_msg, max_results=5)
                     )
+                    if _ws_results:
+                        _snippets = "\n".join(
+                            f"[{i+1}] {r.get('title', '')}\n{r.get('body', '')}"
+                            for i, r in enumerate(_ws_results[:5])
+                        )
+                        user_content = (
+                            f"[WEB SEARCH RESULTS for: {effective_msg}]\n{_snippets}\n\n"
+                            "Use the search results above to answer the user's question accurately. "
+                            "Do not say you lack internet access.\n\n"
+                            f"{effective_msg}"
+                        )
             except Exception as _ws_err:
                 logger.warning("Web search failed (non-fatal): %s", _ws_err)
 
@@ -1985,34 +2017,44 @@ async def chat_stream(req: ChatRequest):
         # (e.g. deepseek-coder swapping in from disk).  Cloudflare drops
         # connections with no data after ~100 s; 3 s keepalives prevent that.
         reply_text = ""
-        try:
-            ollama_client = _get_ollama()
-            _stream = ollama_client.run_chat_stream(
-                model=_active_model,
-                messages=history_msgs,
-                temperature=0.7,
-            )
-            _aiter = _stream.__aiter__()
-            # asyncio.shield prevents wait_for from cancelling the __anext__ coroutine
-            # when the 3s keepalive timeout fires.  Without shield, the generator's
-            # internal network read gets cancelled and StopAsyncIteration fires on the
-            # very next call — producing a blank reply.
-            _next_coro = _aiter.__anext__()
-            while True:
-                try:
-                    token = await asyncio.wait_for(asyncio.shield(_next_coro), timeout=3.0)
-                    reply_text += token
-                    yield f"data: {_json.dumps({'t': token})}\n\n"
-                    _next_coro = _aiter.__anext__()  # advance only after a successful token
-                except asyncio.TimeoutError:
-                    # No token yet — keep the SSE connection alive, reuse same _next_coro
-                    yield ": keepalive\n\n"
-                except StopAsyncIteration:
-                    break
-        except Exception as exc:
-            err = _friendly_error(exc)
-            yield f"data: {_json.dumps({'t': err})}\n\n"
-            reply_text = err
+        ollama_client = _get_ollama()
+        _fallback_model = _reg_model_name("router")
+        _model_to_try = _active_model
+        for _attempt in range(2):  # Try primary model first, fall back to router on model error
+            try:
+                _stream = ollama_client.run_chat_stream(
+                    model=_model_to_try,
+                    messages=history_msgs,
+                    temperature=0.7,
+                )
+                _aiter = _stream.__aiter__()
+                # asyncio.shield prevents wait_for from cancelling the __anext__ coroutine
+                # when the 3s keepalive timeout fires.  Without shield, the generator's
+                # internal network read gets cancelled and StopAsyncIteration fires on the
+                # very next call — producing a blank reply.
+                _next_coro = _aiter.__anext__()
+                while True:
+                    try:
+                        token = await asyncio.wait_for(asyncio.shield(_next_coro), timeout=3.0)
+                        reply_text += token
+                        yield f"data: {_json.dumps({'t': token})}\n\n"
+                        _next_coro = _aiter.__anext__()  # advance only after a successful token
+                    except asyncio.TimeoutError:
+                        # No token yet — keep the SSE connection alive, reuse same _next_coro
+                        yield ": keepalive\n\n"
+                    except StopAsyncIteration:
+                        break
+                break  # success — don't retry
+            except Exception as exc:
+                _exc_s = str(exc).lower()
+                _is_model_err = any(kw in _exc_s for kw in ("not found", "pull", "404", "no such", "unknown model"))
+                if _attempt == 0 and _is_model_err and _model_to_try != _fallback_model:
+                    logger.warning("Model %s unavailable, falling back to %s: %s", _model_to_try, _fallback_model, exc)
+                    _model_to_try = _fallback_model
+                    continue  # retry with fallback router model
+                err = _friendly_error(exc)
+                yield f"data: {_json.dumps({'t': err})}\n\n"
+                reply_text = err
 
         # ── Post-processing: session memory (non-fatal) ───────────────────────
         memory_facts_stored = []
@@ -2188,3 +2230,130 @@ async def pull_models(req: PullModelsRequest):
         except Exception as exc:
             results[model] = f"error: {exc}"
     return {"results": results}
+
+
+# ---------------------------------------------------------------------------
+# Document text extraction
+# ---------------------------------------------------------------------------
+
+@app.post("/api/extract-text")
+async def extract_text(file: UploadFile = File(...)):
+    """
+    Extract plain text from an uploaded document (PDF, TXT, MD, CSV).
+    Returns { text, chars, truncated }.
+    """
+    MAX_CHARS = 50_000
+    content = await file.read()
+    filename = (file.filename or "").lower()
+
+    if filename.endswith(".pdf"):
+        try:
+            import fitz  # PyMuPDF
+            doc = fitz.open(stream=content, filetype="pdf")
+            text = "\n".join(page.get_text() for page in doc)
+        except ImportError:
+            try:
+                from pdfminer.high_level import extract_text as _pdf_extract
+                import io as _io
+                text = _pdf_extract(_io.BytesIO(content))
+            except ImportError:
+                raise HTTPException(status_code=422, detail="PDF extraction unavailable — install PyMuPDF or pdfminer.six on the server.")
+    else:
+        text = content.decode("utf-8", errors="replace")
+
+    truncated = len(text) > MAX_CHARS
+    text = text[:MAX_CHARS]
+    return {"text": text, "chars": len(text), "truncated": truncated}
+
+
+# ---------------------------------------------------------------------------
+# Code execution
+# ---------------------------------------------------------------------------
+
+class ExecuteRequest(BaseModel):
+    code: str
+    language: str = "python"
+
+
+@app.post("/api/execute")
+async def execute_code(req: ExecuteRequest):
+    """
+    Execute Python code in a sandboxed subprocess (10-second timeout).
+    Returns { output, error, exit_code }.
+    """
+    import subprocess
+    import sys as _sys
+
+    if req.language.lower() not in ("python", "python3"):
+        raise HTTPException(status_code=400, detail="Only Python execution is currently supported.")
+
+    if not req.code.strip():
+        return {"output": "", "error": "", "exit_code": 0}
+
+    def _run():
+        try:
+            return subprocess.run(
+                [_sys.executable, "-c", req.code],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except subprocess.TimeoutExpired:
+            return None
+
+    try:
+        result = await asyncio.wait_for(
+            asyncio.get_event_loop().run_in_executor(None, _run),
+            timeout=12.0,
+        )
+    except asyncio.TimeoutError:
+        return {"output": "", "error": "Execution timed out (10s limit).", "exit_code": -1}
+
+    if result is None:
+        return {"output": "", "error": "Execution timed out (10s limit).", "exit_code": -1}
+
+    return {
+        "output": result.stdout,
+        "error": result.stderr,
+        "exit_code": result.returncode,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Follow-up suggestions
+# ---------------------------------------------------------------------------
+
+class SuggestionsRequest(BaseModel):
+    message: str
+    reply: str
+
+
+@app.post("/api/chat/suggestions")
+async def chat_suggestions(req: SuggestionsRequest):
+    """
+    Generate 3 short follow-up questions based on the last exchange.
+    Returns { suggestions: ["...", "...", "..."] }.
+    """
+    from ..services.ollama_client import _model_name as _reg_model_name
+    ollama_client = _get_ollama()
+
+    prompt = (
+        f"User asked: {req.message[:400]}\n\n"
+        f"Assistant replied: {req.reply[:400]}\n\n"
+        "Write exactly 3 short follow-up questions the user might ask next. "
+        "One per line, no numbers, no bullets, no punctuation at end, under 60 chars each."
+    )
+
+    try:
+        raw = await ollama_client.run_prompt(
+            model=_reg_model_name("router_fallback"),
+            prompt=prompt,
+            temperature=0.8,
+            timeout=25,
+        )
+        lines = [l.strip().lstrip("0123456789.-) ") for l in raw.strip().split("\n") if l.strip()]
+        suggestions = [l for l in lines if 5 < len(l) < 120][:3]
+        return {"suggestions": suggestions}
+    except Exception as exc:
+        logger.warning("Suggestions failed: %s", exc)
+        return {"suggestions": []}

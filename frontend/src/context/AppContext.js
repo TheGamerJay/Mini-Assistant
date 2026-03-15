@@ -696,6 +696,32 @@ export function AppProvider({ children }) {
     return id;
   }, [chats, setPage]);
 
+  // ---- Tasks ----
+  const [tasks, setTasks] = useState([]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    api.getTasks().then(data => { if (data?.tasks) setTasks(data.tasks); }).catch(() => {});
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const addTask = useCallback(async (text) => {
+    try {
+      const data = await api.addTask(text);
+      if (data?.task) setTasks(prev => [...prev, data.task]);
+    } catch { /* non-fatal */ }
+  }, []);
+
+  const toggleTask = useCallback(async (id) => {
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, done: !t.done } : t));
+    const task = tasks.find(t => t.id === id);
+    if (task) api.updateTask(id, { done: !task.done }).catch(() => {});
+  }, [tasks]);
+
+  const deleteTask = useCallback(async (id) => {
+    setTasks(prev => prev.filter(t => t.id !== id));
+    api.deleteTask(id).catch(() => {});
+  }, []);
+
   // Pending template — Sidebar fires it, ChatInput consumes it
   const [pendingTemplate, _setPendingTemplate] = useState(null);
   const firePendingTemplate = useCallback((text) => _setPendingTemplate(text), []);
@@ -765,6 +791,11 @@ export function AppProvider({ children }) {
     deletePromptTemplate,
     // conversation forking
     forkChat,
+    // tasks
+    tasks,
+    addTask,
+    toggleTask,
+    deleteTask,
     // pending template bridge
     pendingTemplate,
     firePendingTemplate,

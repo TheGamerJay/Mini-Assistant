@@ -8,12 +8,13 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   RotateCcw, Copy, Check, Volume2, VolumeX,
   ThumbsUp, ThumbsDown, GitFork, Share2, MoreHorizontal, Clock, X, ChevronLeft, ChevronRight,
-  Bookmark, PanelRight,
+  Bookmark, PanelRight, Play, Loader2, Terminal,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp } from '../context/AppContext';
 import ImageCard from './ImageCard';
 import IntelligencePanel from './IntelligencePanel';
+import api from '../api/client';
 
 // ---------------------------------------------------------------------------
 // Lightweight syntax tokenizer (no external deps)
@@ -78,21 +79,54 @@ function tokenize(code, lang) {
 // ---------------------------------------------------------------------------
 // CodeBlock
 // ---------------------------------------------------------------------------
+const RUNNABLE_LANGS = new Set(['python', 'py', 'javascript', 'js']);
+
 function CodeBlock({ lang, code }) {
   const [copied, setCopied] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [execResult, setExecResult] = useState(null); // { output, error, exit_code }
+
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(code).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1800); }).catch(() => {});
   }, [code]);
+
+  const normalizedLang = (lang || '').toLowerCase() === 'py' ? 'python' : (lang || '').toLowerCase();
+  const canRun = RUNNABLE_LANGS.has((lang || '').toLowerCase());
+
+  const handleRun = useCallback(async () => {
+    setRunning(true);
+    setExecResult(null);
+    try {
+      const res = await api.executeCode(code, normalizedLang);
+      setExecResult(res);
+    } catch (err) {
+      setExecResult({ output: '', error: String(err), exit_code: 1 });
+    } finally {
+      setRunning(false);
+    }
+  }, [code, normalizedLang]);
 
   const lines = tokenize(code, lang);
   return (
     <div className="my-3 rounded-xl overflow-hidden border border-white/10 bg-[#0d0f1a]">
       <div className="flex items-center justify-between px-4 py-2 bg-white/[0.04] border-b border-white/[0.06]">
         <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest">{lang || 'code'}</span>
-        <button onClick={handleCopy} className="flex items-center gap-1.5 text-[10px] font-mono text-slate-500 hover:text-slate-300 transition-colors">
-          {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
-          {copied ? 'Copied' : 'Copy'}
-        </button>
+        <div className="flex items-center gap-2">
+          {canRun && (
+            <button
+              onClick={handleRun}
+              disabled={running}
+              className="flex items-center gap-1 text-[10px] font-mono text-emerald-500 hover:text-emerald-300 disabled:opacity-50 transition-colors"
+            >
+              {running ? <Loader2 size={10} className="animate-spin" /> : <Play size={10} />}
+              {running ? 'Running…' : 'Run'}
+            </button>
+          )}
+          <button onClick={handleCopy} className="flex items-center gap-1.5 text-[10px] font-mono text-slate-500 hover:text-slate-300 transition-colors">
+            {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        </div>
       </div>
       <pre className="overflow-x-auto px-4 py-3 text-[12px] leading-[1.7]">
         {lines.map(({ idx, tokens }) => (
@@ -102,6 +136,24 @@ function CodeBlock({ lang, code }) {
           </div>
         ))}
       </pre>
+      {execResult && (
+        <div className="border-t border-white/[0.06] bg-black/30">
+          <div className="flex items-center gap-1.5 px-4 py-1.5 border-b border-white/[0.04]">
+            <Terminal size={10} className={execResult.exit_code === 0 ? 'text-emerald-500' : 'text-red-500'} />
+            <span className={`text-[10px] font-mono ${execResult.exit_code === 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+              {execResult.exit_code === 0 ? 'Output' : `Error (exit ${execResult.exit_code})`}
+            </span>
+            <button onClick={() => setExecResult(null)} className="ml-auto text-slate-600 hover:text-slate-400 transition-colors">
+              <X size={10} />
+            </button>
+          </div>
+          <pre className="px-4 py-3 text-[11px] font-mono overflow-x-auto whitespace-pre-wrap">
+            {execResult.output && <span className="text-slate-300">{execResult.output}</span>}
+            {execResult.error && <span className="text-red-400">{execResult.error}</span>}
+            {!execResult.output && !execResult.error && <span className="text-slate-600">(no output)</span>}
+          </pre>
+        </div>
+      )}
     </div>
   );
 }
@@ -373,7 +425,7 @@ function MetaBar({ model_used, memory_stored }) {
   if (!hasModel && memCount === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-1 mt-2">
-      {hasModel && <span className="text-[10px] font-mono rounded px-1.5 py-0.5 border text-cyan-400/60 bg-cyan-500/5 border-cyan-500/15" title={model_used}>mini</span>}
+      {hasModel && <span className="text-[10px] font-mono rounded px-1.5 py-0.5 border text-cyan-400/60 bg-cyan-500/5 border-cyan-500/15" title={model_used}>{model_used.split('/').pop().split(':')[0]}</span>}
       {memCount > 0 && <span className="text-[10px] font-mono rounded px-1.5 py-0.5 border text-emerald-400/60 bg-emerald-500/5 border-emerald-500/15" title={memory_stored.map(f => `${f.key}: ${f.value}`).join(', ')}>+{memCount} mem</span>}
     </div>
   );
@@ -449,11 +501,31 @@ function ImageLightbox({ images, startIndex, onClose }) {
 }
 
 // ---------------------------------------------------------------------------
+// Suggestion pills
+// ---------------------------------------------------------------------------
+function SuggestionPills({ suggestions, onSuggest }) {
+  if (!suggestions || suggestions.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5 mt-3">
+      {suggestions.map((s, i) => (
+        <button
+          key={i}
+          onClick={() => onSuggest && onSuggest(s)}
+          className="text-[11px] px-3 py-1 rounded-full border border-cyan-500/20 bg-cyan-500/5 text-cyan-400/80 hover:bg-cyan-500/15 hover:text-cyan-300 hover:border-cyan-500/40 transition-colors text-left"
+        >
+          {s}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // ChatMessage
 // ---------------------------------------------------------------------------
-function ChatMessage({ message, onRetry, onRate, onFork, onPin, onSendToBuilder }) {
+function ChatMessage({ message, onRetry, onRate, onFork, onPin, onSendToBuilder, onSuggest }) {
   const { settings, user, avatar } = useApp();
-  const { role, type, content, image_base64, prompt, route_result, generation_time_ms, retry_used, prompt_warnings, model_used, memory_stored, rating, pinned, timestamp } = message;
+  const { role, type, content, image_base64, prompt, route_result, generation_time_ms, retry_used, prompt_warnings, model_used, memory_stored, rating, pinned, timestamp, suggestions } = message;
   const { images_base64 } = message;
   const allImages = images_base64 && images_base64.length > 1 ? images_base64 : (image_base64 ? [image_base64] : []);
   const [lightboxIdx, setLightboxIdx] = useState(null);
@@ -578,6 +650,11 @@ function ChatMessage({ message, onRetry, onRate, onFork, onPin, onSendToBuilder 
             pinned={pinned}
             timestamp={timestamp}
           />
+        )}
+
+        {/* Follow-up suggestion pills */}
+        {!isError && !isImage && (
+          <SuggestionPills suggestions={suggestions} onSuggest={onSuggest} />
         )}
 
         {/* Error retry button */}

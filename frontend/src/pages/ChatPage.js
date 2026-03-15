@@ -383,6 +383,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         responseCountRef.current += 1;
         const isCompareRound = responseCountRef.current % 10 === 0;
 
+        const _msgId = crypto.randomUUID();
         const finalMsg = {
           role: 'assistant', type: 'text',
           content: meta.reply || '',
@@ -390,12 +391,23 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
           model_used: meta.model_used || null,
           memory_stored: meta.memory_stored || [],
           timestamp: Date.now(),
+          _id: _msgId,
+          suggestions: [],
         };
         const withFinal = [...nextMessages, finalMsg];
         setMessages(withFinal);
         updateChatMessages(chatIdRef_local, withFinal);
         setStreamingText(null);
         submittingRef.current = false;
+
+        // Background: fetch follow-up suggestions (non-blocking)
+        if (meta.reply && text) {
+          api.getSuggestions(text, meta.reply).then(data => {
+            if (data?.suggestions?.length) {
+              setMessages(prev => prev.map(m => m._id === _msgId ? { ...m, suggestions: data.suggestions } : m));
+            }
+          }).catch(() => {});
+        }
 
         // Auto-title: on first response, rename 'New Chat' to truncated user message
         if (responseCountRef.current === 1 && text) {
@@ -606,6 +618,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
               onFork={msg.role === 'assistant' && activeChatId ? () => forkChat(activeChatId, idx) : undefined}
               onSendToBuilder={msg.role === 'assistant' && msg.content?.includes('```') ? () => setRightPanelOpen(true) : undefined}
               onPin={activeChatId ? () => pinMessage(activeChatId, idx) : undefined}
+              onSuggest={msg.role === 'assistant' ? (text) => handleSubmit(text) : undefined}
             />
           ))}
 

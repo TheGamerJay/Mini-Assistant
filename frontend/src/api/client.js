@@ -425,6 +425,45 @@ export const api = {
   dbSaveTemplates(templates) {
     return post(`${MAIN_API}/db/templates`, { templates }, 10000);
   },
+
+  // ── Document text extraction ─────────────────────────────────────────────
+
+  /** Upload a file (PDF, TXT, MD, CSV) and extract its text. */
+  extractTextFromFile(file) {
+    const form = new FormData();
+    form.append('file', file);
+    return request(`${IMAGE_API}/extract-text`, { method: 'POST', body: form }, 30000);
+  },
+
+  // ── Code execution ──────────────────────────────────────────────────────
+
+  /** Execute Python code on the server. Returns { output, error, exit_code }. */
+  executeCode(code, language = 'python') {
+    return post(`${IMAGE_API}/execute`, { code, language }, 15000);
+  },
+
+  // ── Follow-up suggestions ───────────────────────────────────────────────
+
+  /** Get 3 follow-up suggestions for the last exchange. */
+  getSuggestions(message, reply) {
+    return post(`${IMAGE_API}/chat/suggestions`, { message, reply }, 20000);
+  },
+
+  // ── Tasks ───────────────────────────────────────────────────────────────
+
+  /** Fetch all tasks for the current user. */
+  getTasks() { return get(`${MAIN_API}/tasks`, 10000); },
+
+  /** Add a new task. */
+  addTask(text) { return post(`${MAIN_API}/tasks`, { text }, 10000); },
+
+  /** Update a task (toggle done, edit text). */
+  updateTask(id, updates) {
+    return request(`${MAIN_API}/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(updates) }, 10000);
+  },
+
+  /** Delete a task. */
+  deleteTask(id) { return request(`${MAIN_API}/tasks/${id}`, { method: 'DELETE' }, 10000); },
 };
 
 export default api;

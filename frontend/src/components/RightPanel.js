@@ -11,9 +11,10 @@
 
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import {
-  Monitor, Code2, FolderOpen, FileText, X, RefreshCw,
-  Maximize2, ChevronRight, File, Download,
+  Monitor, Code2, FolderOpen, X, RefreshCw,
+  ChevronRight, File, Download, ListTodo, Diff, Plus, Trash2, CheckSquare, Square,
 } from 'lucide-react';
+import { useApp } from '../context/AppContext';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -260,12 +261,184 @@ function FilesPane({ blocks }) {
 }
 
 // ---------------------------------------------------------------------------
+// Tasks pane
+// ---------------------------------------------------------------------------
+function TasksPane() {
+  const { tasks, addTask, toggleTask, deleteTask } = useApp();
+  const [input, setInput] = useState('');
+
+  const handleAdd = useCallback(() => {
+    const text = input.trim();
+    if (!text) return;
+    addTask(text);
+    setInput('');
+  }, [input, addTask]);
+
+  const handleKey = useCallback((e) => {
+    if (e.key === 'Enter') handleAdd();
+  }, [handleAdd]);
+
+  const done = tasks.filter(t => t.done);
+  const pending = tasks.filter(t => !t.done);
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Input */}
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5">
+        <input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={handleKey}
+          placeholder="Add a task…"
+          className="flex-1 text-xs bg-transparent text-slate-300 placeholder:text-slate-600 outline-none"
+        />
+        <button
+          onClick={handleAdd}
+          disabled={!input.trim()}
+          className="p-1 rounded hover:bg-white/5 text-slate-600 hover:text-cyan-400 disabled:opacity-30 transition-colors"
+        >
+          <Plus size={13} />
+        </button>
+      </div>
+
+      {/* List */}
+      <div className="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
+        {tasks.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-full text-slate-600 gap-3 py-8">
+            <ListTodo size={28} strokeWidth={1} />
+            <p className="text-xs text-center">No tasks yet.</p>
+          </div>
+        )}
+        {pending.map(t => (
+          <div key={t.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5 group">
+            <button onClick={() => toggleTask(t.id)} className="flex-shrink-0 text-slate-600 hover:text-cyan-400 transition-colors">
+              <Square size={13} />
+            </button>
+            <span className="flex-1 text-xs text-slate-300 leading-snug">{t.text}</span>
+            <button onClick={() => deleteTask(t.id)} className="opacity-0 group-hover:opacity-100 flex-shrink-0 text-slate-700 hover:text-red-400 transition-colors">
+              <Trash2 size={11} />
+            </button>
+          </div>
+        ))}
+        {done.length > 0 && (
+          <>
+            <div className="px-2 py-1 mt-2">
+              <span className="text-[10px] font-mono text-slate-600 uppercase tracking-widest">Done ({done.length})</span>
+            </div>
+            {done.map(t => (
+              <div key={t.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5 group opacity-50">
+                <button onClick={() => toggleTask(t.id)} className="flex-shrink-0 text-emerald-500/60 hover:text-emerald-400 transition-colors">
+                  <CheckSquare size={13} />
+                </button>
+                <span className="flex-1 text-xs text-slate-500 line-through leading-snug">{t.text}</span>
+                <button onClick={() => deleteTask(t.id)} className="opacity-0 group-hover:opacity-100 flex-shrink-0 text-slate-700 hover:text-red-400 transition-colors">
+                  <Trash2 size={11} />
+                </button>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Diff pane — LCS-based line diff between previous and current code blocks
+// ---------------------------------------------------------------------------
+function computeDiff(oldLines, newLines) {
+  // Build LCS table
+  const m = oldLines.length, n = newLines.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = m - 1; i >= 0; i--)
+    for (let j = n - 1; j >= 0; j--)
+      dp[i][j] = oldLines[i] === newLines[j] ? 1 + dp[i + 1][j + 1] : Math.max(dp[i + 1][j], dp[i][j + 1]);
+
+  // Backtrack
+  const diff = []; let i = 0, j = 0;
+  while (i < m || j < n) {
+    if (i < m && j < n && oldLines[i] === newLines[j]) {
+      diff.push({ type: 'same', line: oldLines[i] }); i++; j++;
+    } else if (j < n && (i >= m || dp[i][j + 1] >= dp[i + 1][j])) {
+      diff.push({ type: 'add', line: newLines[j] }); j++;
+    } else {
+      diff.push({ type: 'remove', line: oldLines[i] }); i++;
+    }
+  }
+  return diff;
+}
+
+function DiffPane({ messages }) {
+  // Find last two assistant messages with code blocks
+  const [blockA, blockB] = useMemo(() => {
+    const withCode = [];
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      if (msg.role !== 'assistant') continue;
+      const blocks = msg.content ? (() => {
+        const re = /```([a-zA-Z0-9_+-]*)[ \t]*\r?\n([\s\S]*?)```/g;
+        const b = []; let m;
+        while ((m = re.exec(msg.content)) !== null) { const code = m[2].trim(); if (code) b.push(code); }
+        return b;
+      })() : [];
+      if (blocks.length > 0) withCode.push(blocks[0]);
+    }
+    if (withCode.length >= 2) return [withCode[withCode.length - 2], withCode[withCode.length - 1]];
+    if (withCode.length === 1) return ['', withCode[0]];
+    return ['', ''];
+  }, [messages]);
+
+  if (!blockB) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-slate-600 gap-3">
+        <Diff size={32} strokeWidth={1} />
+        <p className="text-xs text-center">No code versions to diff yet.</p>
+      </div>
+    );
+  }
+
+  const diff = computeDiff(blockA.split('\n'), blockB.split('\n'));
+  const hasChanges = diff.some(d => d.type !== 'same');
+
+  if (!hasChanges) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-slate-600 gap-3">
+        <Diff size={32} strokeWidth={1} />
+        <p className="text-xs text-center">No changes between versions.</p>
+      </div>
+    );
+  }
+
+  return (
+    <pre className="h-full overflow-auto p-3 text-[11px] font-mono leading-5">
+      {diff.map((d, i) => (
+        <div
+          key={i}
+          className={
+            d.type === 'add'    ? 'bg-emerald-500/10 text-emerald-400' :
+            d.type === 'remove' ? 'bg-red-500/10 text-red-400' :
+            'text-slate-600'
+          }
+        >
+          <span className="select-none mr-2 w-4 inline-block text-right">
+            {d.type === 'add' ? '+' : d.type === 'remove' ? '−' : ' '}
+          </span>
+          {d.line}
+        </div>
+      ))}
+    </pre>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 const TABS = [
   { id: 'preview', label: 'Preview', icon: Monitor },
   { id: 'code',    label: 'Code',    icon: Code2 },
   { id: 'files',   label: 'Files',   icon: FolderOpen },
+  { id: 'diff',    label: 'Diff',    icon: Diff },
+  { id: 'tasks',   label: 'Tasks',   icon: ListTodo },
 ];
 
 function RightPanel({ messages = [], streamingText = null, open, onClose }) {
@@ -297,6 +470,8 @@ function RightPanel({ messages = [], streamingText = null, open, onClose }) {
         {tab === 'preview' && <PreviewPane blocks={codeBlocks} />}
         {tab === 'code'    && <CodeViewer  blocks={codeBlocks} />}
         {tab === 'files'   && <FilesPane   blocks={codeBlocks} />}
+        {tab === 'diff'    && <DiffPane    messages={messages} />}
+        {tab === 'tasks'   && <TasksPane />}
       </div>
     </div>
   );
