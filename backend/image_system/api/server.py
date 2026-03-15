@@ -1993,13 +1993,19 @@ async def chat_stream(req: ChatRequest):
                 temperature=0.7,
             )
             _aiter = _stream.__aiter__()
+            # asyncio.shield prevents wait_for from cancelling the __anext__ coroutine
+            # when the 3s keepalive timeout fires.  Without shield, the generator's
+            # internal network read gets cancelled and StopAsyncIteration fires on the
+            # very next call — producing a blank reply.
+            _next_coro = _aiter.__anext__()
             while True:
                 try:
-                    token = await asyncio.wait_for(_aiter.__anext__(), timeout=3.0)
+                    token = await asyncio.wait_for(asyncio.shield(_next_coro), timeout=3.0)
                     reply_text += token
                     yield f"data: {_json.dumps({'t': token})}\n\n"
+                    _next_coro = _aiter.__anext__()  # advance only after a successful token
                 except asyncio.TimeoutError:
-                    # No token yet — keep the SSE connection alive
+                    # No token yet — keep the SSE connection alive, reuse same _next_coro
                     yield ": keepalive\n\n"
                 except StopAsyncIteration:
                     break
