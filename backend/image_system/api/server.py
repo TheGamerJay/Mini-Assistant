@@ -1776,6 +1776,68 @@ async def chat_stream(req: ChatRequest):
     )
 
 
+@app.post("/api/chat/compare")
+async def chat_compare(req: ChatRequest):
+    """
+    Run the same message through two models in parallel and return both replies.
+    Used by the frontend every 10 responses to let the user pick their preferred model output.
+    """
+    import json as _json
+
+    session_id = req.session_id or str(uuid.uuid4())
+
+    from ..utils.prompt_safety import validate as ps_validate
+    is_valid, clean_message, safety_error = ps_validate(req.message)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=f"Message rejected: {safety_error}")
+
+    from ..services.ollama_client import _model_name as _reg_model_name
+    model_a = _reg_model_name("router")           # qwen3:14b  — primary
+    model_b = _reg_model_name("router_fallback")  # qwen2.5:7b — faster fallback
+
+    # ── Build shared message list ─────────────────────────────────────────────
+    from mini_assistant.phase1.command_parser import parse as cmd_parse
+    try:
+        parsed_cmd = cmd_parse(clean_message)
+        effective_msg = parsed_cmd.args if parsed_cmd.is_slash else clean_message
+    except Exception:
+        effective_msg = clean_message
+
+    _sys_prompt = _MINI_SYSTEM_PROMPT
+    if _LYRICS_INTENT.search(effective_msg):
+        _sys_prompt = _MINI_SYSTEM_PROMPT + "\n\n" + _LYRICS_SYSTEM_PROMPT
+
+    history_msgs: list[dict] = [{"role": "system", "content": _sys_prompt}]
+    if req.history:
+        for h in req.history[-10:]:
+            history_msgs.append({"role": h.role, "content": h.content})
+    history_msgs.append({"role": "user", "content": effective_msg})
+
+    # ── Run both models concurrently ──────────────────────────────────────────
+    async def _collect(model_name: str) -> str:
+        reply = ""
+        try:
+            ollama_client = _get_ollama()
+            async for token in ollama_client.run_chat_stream(
+                model=model_name,
+                messages=history_msgs,
+                temperature=0.7,
+            ):
+                reply += token
+        except Exception as exc:
+            reply = f"[{model_name} error: {exc}]"
+        return reply
+
+    reply_a, reply_b = await asyncio.gather(_collect(model_a), _collect(model_b))
+
+    return {
+        "reply_a": reply_a,
+        "model_a": model_a,
+        "reply_b": reply_b,
+        "model_b": model_b,
+    }
+
+
 @app.get("/api/models/status")
 async def models_status():
     """Check which Ollama models are available locally."""

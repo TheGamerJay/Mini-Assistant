@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { XCircle, PanelRight, Download } from 'lucide-react';
+import { XCircle, PanelRight, Download, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp, makeThumbnail } from '../context/AppContext';
 import { useChat } from '../hooks/useChat';
@@ -15,6 +15,7 @@ import MiniOrb from '../components/MiniOrb';
 import CognitiveStream from '../components/CognitiveStream';
 import ApprovalModal from '../components/ApprovalModal';
 import RightPanel from '../components/RightPanel';
+import ComparisonBubble from '../components/ComparisonBubble';
 import api from '../api/client';
 
 /** Detect if a message looks like an image generation request */
@@ -105,9 +106,19 @@ function ChatPage() {
 
   const sessionIdRef      = useRef(crypto.randomUUID());
   const bottomRef         = useRef(null);
+  const scrollContainerRef = useRef(null);
   const currentChatIdRef  = useRef(null);
   const submittingRef     = useRef(false);
   const lastUserTextRef   = useRef('');
+  const responseCountRef  = useRef(0); // increments per assistant response; compare triggers at multiples of 10
+  const pendingMsgRef     = useRef(null); // queued message while a response is in-flight
+
+  // Comparison state — set when it's time for a showdown
+  const [compareData, setCompareData]     = useState(null); // {replyA, modelA, replyB, modelB, nextMessages, chatId}
+  const [compareLoading, setCompareLoading] = useState(false);
+
+  // Scroll-to-bottom button — visible when user scrolls > 200px from bottom
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
 
   // Load messages when active chat changes
   useEffect(() => {
@@ -120,16 +131,47 @@ function ChatPage() {
         setMessages([]);
       }
       sessionIdRef.current = crypto.randomUUID();
+      responseCountRef.current = 0;
+      setCompareData(null);
+      setCompareLoading(false);
     }
   }, [activeChatId, chats]);
 
   // Auto-scroll to bottom on new message, loading change, or streaming text
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading, streamActive, streamingText]);
+    if (!showScrollBtn) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, loading, streamActive, streamingText, showScrollBtn]);
+
+  // Show/hide scroll-to-bottom button based on distance from bottom
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      setShowScrollBtn(distFromBottom > 200);
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // Auto-fire queued message once loading finishes
+  useEffect(() => {
+    if (!loading && !submittingRef.current && pendingMsgRef.current) {
+      const pending = pendingMsgRef.current;
+      pendingMsgRef.current = null;
+      handleSubmit(pending.text, pending.imagesBase64, pending.preferredModel);
+    }
+  }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSubmit = useCallback(async (text, imagesBase64 = null, preferredModel = null) => {
-    if (submittingRef.current || loading) return;
+    if (submittingRef.current || loading) {
+      // Queue the message — auto-sent when current response finishes
+      pendingMsgRef.current = { text, imagesBase64, preferredModel };
+      toast.info('Queued — will send when Mini finishes responding.', { duration: 2000 });
+      return;
+    }
     const imgs = Array.isArray(imagesBase64) ? imagesBase64.filter(Boolean) : (imagesBase64 ? [imagesBase64] : []);
     if (!text && !imgs.length) return;
     submittingRef.current = true;
@@ -213,6 +255,32 @@ function ChatPage() {
       return;
     }
 
+    // ── TEXT path: try local Ollama first when images are attached ────────
+    // Bypasses the Railway→Cloudflare→Ollama tunnel for image analysis,
+    // which avoids 524 timeouts. Falls back to SSE stream if local fails.
+    if (imgs.length > 0) {
+      setStreamingText('');
+      try {
+        const localReply = await api.tryLocalOllamaChat(text, imgs[0]);
+        const localMsg = {
+          role: 'assistant', type: 'text',
+          content: localReply,
+          model_used: 'gemma3:4b (local)',
+          timestamp: Date.now(),
+        };
+        const withLocal = [...nextMessages, localMsg];
+        responseCountRef.current += 1;
+        setMessages(withLocal);
+        updateChatMessages(chatId, withLocal);
+        setStreamingText(null);
+        submittingRef.current = false;
+        return;
+      } catch {
+        // Local Ollama unavailable — fall through to SSE stream below
+        setStreamingText(null);
+      }
+    }
+
     // ── TEXT path: streaming ───────────────────────────────────────────────
     // Show a live-updating streaming bubble immediately
     setStreamingText('');
@@ -269,6 +337,9 @@ function ChatPage() {
         }
 
         // Normal text done — finalise message with metadata
+        responseCountRef.current += 1;
+        const isCompareRound = responseCountRef.current % 10 === 0;
+
         const finalMsg = {
           role: 'assistant', type: 'text',
           content: meta.reply || '',
@@ -282,6 +353,25 @@ function ChatPage() {
         updateChatMessages(chatIdRef_local, withFinal);
         setStreamingText(null);
         submittingRef.current = false;
+
+        // Every 10th response: kick off a model showdown in the background
+        if (isCompareRound) {
+          setCompareLoading(true);
+          setCompareData(null);
+          api.chatCompare(text, sessionIdRef.current, history)
+            .then(data => {
+              setCompareData({
+                replyA: data.reply_a,
+                modelA: data.model_a,
+                replyB: data.reply_b,
+                modelB: data.model_b,
+                nextMessages: withFinal,
+                chatId: chatIdRef_local,
+              });
+            })
+            .catch(() => { /* non-fatal — skip compare quietly */ })
+            .finally(() => setCompareLoading(false));
+        }
 
         // Check for tool approval
         const approvalIdMatch = meta.reply && meta.reply.match(/Approval ID: `([^`]+)`/);
@@ -345,6 +435,22 @@ function ChatPage() {
     } catch (_) { /* non-fatal */ }
   }, []);
 
+  // Called when user picks a preferred response in the comparison bubble
+  const handleComparePick = useCallback((reply, modelUsed) => {
+    if (!compareData) return;
+    const pickedMsg = {
+      role: 'assistant', type: 'text',
+      content: reply,
+      model_used: modelUsed,
+      timestamp: Date.now(),
+      _from_compare: true,
+    };
+    const withPicked = [...compareData.nextMessages, pickedMsg];
+    setMessages(withPicked);
+    updateChatMessages(compareData.chatId, withPicked);
+    setCompareData(null);
+  }, [compareData, updateChatMessages]);
+
   // Called by CognitiveStream after its auto-collapse animation finishes
   const handleStreamDone = useCallback(() => {
     setStreamActive(false);
@@ -395,12 +501,19 @@ function ChatPage() {
         )}
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 md:px-10 lg:px-16 py-6 space-y-6">
+        <div className="relative flex-1 overflow-hidden">
+        <div ref={scrollContainerRef} className="h-full overflow-y-auto px-4 md:px-10 lg:px-16 py-6 space-y-6">
           {messages.map((msg, idx) => (
             <ChatMessage
               key={idx}
               message={msg}
-              onRetry={msg.type === 'error' ? () => handleSubmit(lastUserTextRef.current) : undefined}
+              onRetry={msg.role === 'assistant' ? () => {
+                const prevUser = messages.slice(0, idx).reverse().find(m => m.role === 'user');
+                if (prevUser) handleSubmit(
+                  prevUser.content,
+                  prevUser.images_base64 || (prevUser.image_base64 ? [prevUser.image_base64] : null)
+                );
+              } : undefined}
               onRate={msg.role === 'assistant' ? (rating) => rateMessage(activeChatId, idx, rating) : undefined}
               onFork={msg.role === 'assistant' && activeChatId ? () => forkChat(activeChatId, idx) : undefined}
             />
@@ -424,7 +537,36 @@ function ChatPage() {
             </div>
           )}
 
+          {/* Model comparison bubble — shown every 10 responses */}
+          {(compareData || compareLoading) && (
+            <ComparisonBubble
+              replyA={compareData?.replyA || ''}
+              modelA={compareData?.modelA || 'Model A'}
+              replyB={compareData?.replyB || ''}
+              modelB={compareData?.modelB || 'Model B'}
+              loading={compareLoading}
+              onPick={handleComparePick}
+            />
+          )}
+
           <div ref={bottomRef} />
+        </div>
+
+        {/* Scroll-to-bottom floating button */}
+        {showScrollBtn && (
+          <button
+            onClick={() => {
+              setShowScrollBtn(false);
+              bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+            }}
+            className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-3 py-1.5 rounded-full
+              bg-[#1a1a2e] border border-white/10 text-slate-400 hover:text-slate-200 hover:border-cyan-500/30
+              text-xs shadow-lg transition-all hover:bg-[#1e1e35] z-10"
+          >
+            <ChevronDown size={13} />
+            Scroll to bottom
+          </button>
+        )}
         </div>
 
         {/* Input footer */}
