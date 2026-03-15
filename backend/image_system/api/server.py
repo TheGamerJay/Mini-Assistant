@@ -36,12 +36,25 @@ from .models import (
     RouteRequest,
     AnalyzeRequest,
     ChatRequest,
+    SummarizeRequest,
     PullModelsRequest,
     ModelStatusResponse,
     ErrorResponse,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _friendly_error(exc) -> str:
+    """Convert a raw exception into a user-facing Mini Assistant error message."""
+    s = str(exc).lower()
+    if any(kw in s for kw in ("cannot connect to host", "connection refused", "connect call failed",
+                               "connectionrefused", "clientconnectorerror", "nodename nor servname")):
+        return "Mini Assistant may be offline — try again in a moment."
+    if any(kw in s for kw in ("timed out", "timeout", "524", "read timeout")):
+        return "Mini Assistant is taking longer than expected. Please try again."
+    return "Mini Assistant ran into an issue. Please try again."
+
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -802,7 +815,7 @@ async def generate_image(req: GenerateRequest):
                 temperature=0.7,
             )
         except Exception as exc:
-            reply = f"I'm having trouble responding right now: {exc}"
+            reply = _friendly_error(exc)
 
         elapsed = (time.perf_counter() - start_time) * 1000
         return GenerateResponse(
@@ -1522,7 +1535,7 @@ async def chat(req: ChatRequest):
                 temperature = 0.7,
             )
         except Exception as exc:
-            reply = f"I'm having trouble responding right now: {exc}"
+            reply = _friendly_error(exc)
 
     # ── Phase 1+2 Step 5: Critic + Composer ────────────────────────────────────
     if phase1_plan is not None:
@@ -1765,6 +1778,28 @@ async def chat_stream(req: ChatRequest):
             for h in req.history[-10:]:
                 history_msgs.append({"role": h.role, "content": h.content})
         user_content = (rt_context + effective_msg) if rt_context else effective_msg
+
+        # ── Web search injection — fetch live results when intent is web_search ─
+        if phase1_plan and phase1_plan.intent == "web_search" and not req.image_base64 and not req.images_base64:
+            try:
+                from mini_assistant.tools.search import web_search as _ddg_search
+                _ws_results = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: _ddg_search(effective_msg, max_results=5)
+                )
+                if _ws_results:
+                    _snippets = "\n".join(
+                        f"[{i+1}] {r.get('title', '')}\n{r.get('body', '')}"
+                        for i, r in enumerate(_ws_results[:5])
+                    )
+                    user_content = (
+                        f"[WEB SEARCH RESULTS for: {effective_msg}]\n{_snippets}\n\n"
+                        "Use the search results above to answer the user's question accurately. "
+                        "Do not say you lack internet access.\n\n"
+                        f"{effective_msg}"
+                    )
+            except Exception as _ws_err:
+                logger.warning("Web search failed (non-fatal): %s", _ws_err)
+
         # Collect all attached images (multi-image support)
         # Compress each image to reduce payload size through Cloudflare tunnel.
         all_images = list(req.images_base64 or [])
@@ -1796,11 +1831,7 @@ async def chat_stream(req: ChatRequest):
                 yield f"data: {_json.dumps({'t': token})}\n\n"
                 last_yield_time = asyncio.get_event_loop().time()
         except Exception as exc:
-            exc_str = str(exc)
-            if "524" in exc_str:
-                err = "Image analysis is taking too long through the connection — please try with a smaller image or try again in a moment."
-            else:
-                err = f"I'm having trouble responding right now: {exc_str}"
+            err = _friendly_error(exc)
             yield f"data: {_json.dumps({'t': err})}\n\n"
             reply_text = err
 
@@ -1901,6 +1932,42 @@ async def chat_compare(req: ChatRequest):
         "reply_b": reply_b,
         "model_b": model_b,
     }
+
+
+@app.post("/api/chat/summarize")
+async def chat_summarize(req: SummarizeRequest):
+    """
+    Summarize a list of messages into a concise bullet-point recap.
+    Called automatically by the frontend when a conversation exceeds the compact threshold.
+    Returns { summary: "..." }
+    """
+    if not req.messages:
+        return {"summary": ""}
+
+    from ..services.ollama_client import _model_name as _reg_model_name
+    ollama_client = _get_ollama()
+
+    history_text = "\n".join(
+        f"{m.role.upper()}: {m.content}" for m in req.messages if m.content
+    )
+    prompt = (
+        "Summarize the following conversation in 4-6 concise bullet points. "
+        "Capture: key topics discussed, decisions made, code written, user preferences, and any important context. "
+        "Preserve specific technical details like filenames, variable names, or URLs. "
+        "Write the summary so another AI can pick up the conversation seamlessly.\n\n"
+        f"{history_text}"
+    )
+
+    try:
+        summary = await ollama_client.run_prompt(
+            model=_reg_model_name("router"),
+            prompt=prompt,
+            temperature=0.3,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return {"summary": summary}
 
 
 @app.get("/api/models/status")

@@ -121,6 +121,14 @@ export const api = {
     });
   },
 
+  /** Summarize a list of messages into bullet points for context compaction */
+  summarizeMessages(messages) {
+    const msgs = messages
+      .filter(m => (m.role === 'user' || m.role === 'assistant') && m.content)
+      .map(m => ({ role: m.role, content: m.content }));
+    return post(`${IMAGE_API}/chat/summarize`, { messages: msgs }, 60000);
+  },
+
   /** Run the same message through two models in parallel; returns {reply_a, model_a, reply_b, model_b} */
   chatCompare(message, sessionId, history = []) {
     const trimmedHistory = history.slice(-10).map(m => ({ role: m.role, content: m.content }));

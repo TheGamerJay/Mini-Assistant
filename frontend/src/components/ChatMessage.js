@@ -443,6 +443,21 @@ function ChatMessage({ message, onRetry, onRate, onFork }) {
   const allImages = images_base64 && images_base64.length > 1 ? images_base64 : (image_base64 ? [image_base64] : []);
   const [lightboxIdx, setLightboxIdx] = useState(null);
 
+  // Compaction summary divider — rendered before user/assistant bubbles
+  if (type === 'summary' || message._is_summary) {
+    return (
+      <div className="flex items-center gap-3 my-4 msg-enter">
+        <div className="flex-1 h-px bg-white/5" />
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#151520] border border-white/8 text-[11px] text-slate-500 font-mono">
+          <span className="w-1.5 h-1.5 rounded-full bg-violet-500/60 flex-shrink-0" />
+          <span className="text-violet-400/70 font-semibold mr-1">Compacted</span>
+          <span className="max-w-[320px] truncate" title={content}>{content}</span>
+        </div>
+        <div className="flex-1 h-px bg-white/5" />
+      </div>
+    );
+  }
+
   if (role === 'user') {
     const initial = user?.name ? user.name[0].toUpperCase() : 'U';
     const avatar = user?.avatar;

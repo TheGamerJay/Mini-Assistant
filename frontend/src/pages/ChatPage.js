@@ -67,6 +67,7 @@ function ChatPage() {
     activeChatId,
     chats,
     newChat,
+    renameChat,
     updateChatMessages,
     addImage,
     setPage,
@@ -112,6 +113,7 @@ function ChatPage() {
   const lastUserTextRef   = useRef('');
   const responseCountRef  = useRef(0); // increments per assistant response; compare triggers at multiples of 10
   const pendingMsgRef     = useRef(null); // queued message while a response is in-flight
+  const compactingRef     = useRef(false); // prevents double-compaction while summarize is in-flight
 
   // Comparison state — set when it's time for a showdown
   const [compareData, setCompareData]     = useState(null); // {replyA, modelA, replyB, modelB, nextMessages, chatId}
@@ -155,6 +157,24 @@ function ChatPage() {
     el.addEventListener('scroll', onScroll, { passive: true });
     return () => el.removeEventListener('scroll', onScroll);
   }, []);
+
+  // Keyboard shortcuts: Ctrl+K = new chat, Esc = cancel generation
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape' && loading) {
+        cancel(sessionIdRef.current);
+        setStreamActive(false);
+        setStreamingText(null);
+        submittingRef.current = false;
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        newChat();
+        setPage('chat');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [loading, cancel, newChat, setPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-fire queued message once loading finishes
   useEffect(() => {
@@ -286,7 +306,10 @@ function ChatPage() {
     setStreamingText('');
 
     const chatIdRef_local = chatId; // capture for callbacks
-    const history = nextMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
+    const history = nextMessages.slice(0, -1).map(m => {
+      if (m._is_summary) return { role: 'user', content: `[EARLIER CONVERSATION SUMMARY]\n${m.content}` };
+      return { role: m.role, content: m.content };
+    });
 
     await sendStream(text, sessionIdRef.current, history, imgs.length ? imgs : null, {
       onToken(token) {
@@ -354,6 +377,41 @@ function ChatPage() {
         setStreamingText(null);
         submittingRef.current = false;
 
+        // Auto-title: on first response, rename 'New Chat' to truncated user message
+        if (responseCountRef.current === 1 && text) {
+          const currentChat = chats.find(c => c.id === chatIdRef_local);
+          if (currentChat && currentChat.title === 'New Chat') {
+            const autoTitle = text.trim().slice(0, 45) + (text.trim().length > 45 ? '…' : '');
+            renameChat(chatIdRef_local, autoTitle);
+          }
+        }
+
+        // Auto-compact: when conversation hits 30 messages, summarize old ones
+        const COMPACT_THRESHOLD = 30;
+        const KEEP_RECENT = 8;
+        if (withFinal.length >= COMPACT_THRESHOLD && !compactingRef.current) {
+          compactingRef.current = true;
+          const toSummarize = withFinal.slice(0, withFinal.length - KEEP_RECENT);
+          const toKeep = withFinal.slice(withFinal.length - KEEP_RECENT);
+          api.summarizeMessages(toSummarize)
+            .then(data => {
+              if (!data.summary) return;
+              const summaryMsg = {
+                role: 'system',
+                type: 'summary',
+                content: data.summary,
+                timestamp: Date.now(),
+                _is_summary: true,
+              };
+              const compacted = [summaryMsg, ...toKeep];
+              setMessages(compacted);
+              updateChatMessages(chatIdRef_local, compacted);
+              toast.info('Conversation compacted — older messages summarized.', { duration: 3500 });
+            })
+            .catch(() => { /* non-fatal */ })
+            .finally(() => { compactingRef.current = false; });
+        }
+
         // Every 10th response: kick off a model showdown in the background
         if (isCompareRound) {
           setCompareLoading(true);
@@ -396,7 +454,7 @@ function ChatPage() {
         submittingRef.current = false;
       },
     });
-  }, [activeChatId, loading, messages, newChat, send, sendStream, updateChatMessages, addImage, setPage]);
+  }, [activeChatId, chats, loading, messages, newChat, renameChat, send, sendStream, updateChatMessages, addImage, setPage]);
 
   const handleCancel = useCallback(() => {
     cancel(sessionIdRef.current);

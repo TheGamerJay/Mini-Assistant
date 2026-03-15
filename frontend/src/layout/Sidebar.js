@@ -375,9 +375,12 @@ function Sidebar() {
     addPromptTemplate(title, text);
   }, [addPromptTemplate]);
 
-  const filteredChats = chats.filter((c) =>
-    c.title.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredChats = chats.filter((c) => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    if (c.title.toLowerCase().includes(q)) return true;
+    return (c.messages || []).some(m => m.content?.toLowerCase().includes(q));
+  });
 
   const pinnedChats = filteredChats.filter((c) => c.pinned)
     .sort((a, b) => b.updatedAt - a.updatedAt);

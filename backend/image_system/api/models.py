@@ -66,6 +66,10 @@ class PullModelsRequest(BaseModel):
     models: List[str]
 
 
+class SummarizeRequest(BaseModel):
+    messages: List[ChatHistoryMessage]
+
+
 # ---------------------------------------------------------------------------
 # Response models
 # ---------------------------------------------------------------------------
