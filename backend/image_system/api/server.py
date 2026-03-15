@@ -1856,10 +1856,9 @@ async def chat_stream(req: ChatRequest):
         _is_code_intent = _has_code_in_msg or execution_intent == "coding" or bool(_CODE_ERRORS.search(effective_msg))
 
         if _is_build_intent:
-            # App building: use the router model (qwen3:14b) — already warm in memory.
-            # Swapping to deepseek-coder causes model-load timeouts. The detailed
-            # coding standards + build-turn prompts are sufficient for qwen3:14b.
-            _active_model = req.preferred_model or os.environ.get("FAST_MODEL") or _reg_model_name("router")
+            # App building: use deepseek-coder. Keepalive loop above handles
+            # the model-load wait so Cloudflare won't drop the connection.
+            _active_model = _reg_model_name("coder")
         elif _is_code_intent and not req.preferred_model:
             # Explicit code paste or error: use deepseek-coder.
             # User initiated this intentionally so the load wait is acceptable.
@@ -1979,24 +1978,29 @@ async def chat_stream(req: ChatRequest):
         history_msgs.append(user_msg)
 
         # ── Stream tokens from Ollama ─────────────────────────────────────────
-        # Interleave keepalive SSE comments with tokens so Cloudflare doesn't
-        # drop the frontend connection during long image processing pauses.
+        # Use wait_for(3s) on every token pull so we can send keepalives while
+        # Ollama loads a model — critical for models not already in memory
+        # (e.g. deepseek-coder swapping in from disk).  Cloudflare drops
+        # connections with no data after ~100 s; 3 s keepalives prevent that.
         reply_text = ""
         try:
             ollama_client = _get_ollama()
-            last_yield_time = asyncio.get_event_loop().time()
-            async for token in ollama_client.run_chat_stream(
+            _stream = ollama_client.run_chat_stream(
                 model=_active_model,
                 messages=history_msgs,
                 temperature=0.7,
-            ):
-                now = asyncio.get_event_loop().time()
-                if now - last_yield_time > 15:
+            )
+            _aiter = _stream.__aiter__()
+            while True:
+                try:
+                    token = await asyncio.wait_for(_aiter.__anext__(), timeout=3.0)
+                    reply_text += token
+                    yield f"data: {_json.dumps({'t': token})}\n\n"
+                except asyncio.TimeoutError:
+                    # No token yet — keep the SSE connection alive
                     yield ": keepalive\n\n"
-                    last_yield_time = now
-                reply_text += token
-                yield f"data: {_json.dumps({'t': token})}\n\n"
-                last_yield_time = asyncio.get_event_loop().time()
+                except StopAsyncIteration:
+                    break
         except Exception as exc:
             err = _friendly_error(exc)
             yield f"data: {_json.dumps({'t': err})}\n\n"
