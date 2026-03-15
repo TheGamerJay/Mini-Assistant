@@ -1681,7 +1681,12 @@ async def chat_stream(req: ChatRequest):
 
         # ── Model selection ───────────────────────────────────────────────────
         from ..services.ollama_client import _model_name as _reg_model_name
-        _active_model = req.preferred_model or os.environ.get("FAST_MODEL") or _reg_model_name("router")
+        _is_build_intent = execution_intent == "app_builder"
+        if _is_build_intent and not req.preferred_model:
+            # Use the coder model for app building — it produces actual working code
+            _active_model = _reg_model_name("coder")
+        else:
+            _active_model = req.preferred_model or os.environ.get("FAST_MODEL") or _reg_model_name("router")
 
         # ── Real-time weather injection ───────────────────────────────────────
         rt_context = ""
@@ -1701,9 +1706,22 @@ async def chat_stream(req: ChatRequest):
                 )
 
         # ── Build message list ────────────────────────────────────────────────
-        _sys_prompt_stream = _MINI_SYSTEM_PROMPT
-        if _LYRICS_INTENT.search(effective_msg):
+        if _is_build_intent:
+            _sys_prompt_stream = (
+                _MINI_SYSTEM_PROMPT + "\n\n"
+                "## YOU ARE NOW IN APP BUILDER MODE\n"
+                "The user wants you to BUILD something. Produce real, complete, working code RIGHT NOW.\n"
+                "- Output a complete self-contained HTML file (CSS + JS inline) OR full React component(s) as appropriate\n"
+                "- Do NOT discuss. Do NOT ask questions. Do NOT explain what you're going to do — just DO it.\n"
+                "- Make every design decision yourself: colors, layout, fonts, sizes, max file sizes, etc.\n"
+                "- Every button, input, and control must be functional. No stubs, no TODOs, no placeholders.\n"
+                "- After the code, write ONE short sentence: 'Here's what I built — let me know what to change!'\n"
+                "- On follow-up messages, update the existing code in-place. Never start from scratch unless asked.\n"
+            )
+        elif _LYRICS_INTENT.search(effective_msg):
             _sys_prompt_stream = _MINI_SYSTEM_PROMPT + "\n\n" + _LYRICS_SYSTEM_PROMPT
+        else:
+            _sys_prompt_stream = _MINI_SYSTEM_PROMPT
         history_msgs: list[dict] = [{"role": "system", "content": _sys_prompt_stream}]
         if req.history:
             for h in req.history[-10:]:
