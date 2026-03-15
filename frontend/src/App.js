@@ -179,7 +179,7 @@ function AppShell() {
 // Auth gate — shown inside AppProvider so hooks work
 // ---------------------------------------------------------------------------
 function AuthGate() {
-  const { user } = useApp();
+  const { user, page, setPage } = useApp();
   const toasterProps = {
     position: 'top-right',
     theme: 'dark',
@@ -193,6 +193,23 @@ function AuthGate() {
       },
     },
   };
+
+  // Detect /admin URL path on mount → navigate to admin page
+  useEffect(() => {
+    if (window.location.pathname === '/admin' && page !== 'admin') {
+      setPage('admin');
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Admin page handles its own auth — render standalone outside of AppShell
+  if (page === 'admin') {
+    return (
+      <>
+        <AdminPage />
+        <Toaster {...toasterProps} />
+      </>
+    );
+  }
 
   if (!user) {
     return (

@@ -368,6 +368,22 @@ export const api = {
     }, 15000);
   },
 
+  // ── Admin endpoints (/api/admin/*) ─────────────────────────────────────────
+
+  /** List all users — admin only */
+  adminGetUsers() { return get(`${MAIN_API}/admin/users`, 15000); },
+
+  /** Get platform-wide stats — admin only */
+  adminGetStats() { return get(`${MAIN_API}/admin/stats`, 15000); },
+
+  /** Change a user's role — admin only */
+  adminSetRole(userId, role) {
+    return request(`${MAIN_API}/admin/users/${userId}/role`, { method: 'PATCH', body: JSON.stringify({ role }) }, 10000);
+  },
+
+  /** Delete a user and all their data — admin only */
+  adminDeleteUser(userId) { return del(`${MAIN_API}/admin/users/${userId}`, 10000); },
+
   // ── DB sync endpoints ───────────────────────────────────────────────────────
 
   /** Fetch all chats for the current user from MongoDB. */

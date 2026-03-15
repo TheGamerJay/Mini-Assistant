@@ -11,7 +11,7 @@ import uuid
 import time
 import logging
 
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional, List, Any
 
@@ -337,4 +337,108 @@ async def save_images(body: ImagesBody, authorization: str = Header(None)):
         {"user_id": user["id"], "images": body.images, "updated_at": time.time()},
         upsert=True,
     )
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Admin router  (/api/admin/*)
+# ---------------------------------------------------------------------------
+admin_router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+async def _require_admin(authorization: str = Header(None)) -> dict:
+    """Dependency: decode token and assert admin role."""
+    user = await get_current_user(authorization)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return user
+
+
+class SetRoleBody(BaseModel):
+    role: str  # "admin" | "user"
+
+
+@admin_router.get("/users")
+async def admin_list_users(admin: dict = Depends(_require_admin)):
+    """Return all registered users (without password hashes)."""
+    db = _get_db()
+    users = await db["users"].find({}).to_list(5000)
+    return {
+        "users": [
+            {
+                "id": u["id"],
+                "name": u["name"],
+                "email": u["email"],
+                "role": u.get("role", "user"),
+                "avatar": u.get("avatar"),
+                "created_at": u.get("created_at"),
+            }
+            for u in users
+        ]
+    }
+
+
+@admin_router.get("/stats")
+async def admin_stats(admin: dict = Depends(_require_admin)):
+    """Aggregate platform-wide stats from MongoDB."""
+    db = _get_db()
+    total_users = await db["users"].count_documents({})
+    total_admins = await db["users"].count_documents({"role": "admin"})
+
+    total_chats = 0
+    total_messages = 0
+    thumbs_up = 0
+    thumbs_down = 0
+
+    async for doc in db["chats"].find({}):
+        chats = doc.get("chats", [])
+        total_chats += len(chats)
+        for chat in chats:
+            msgs = chat.get("messages", [])
+            total_messages += len(msgs)
+            for m in msgs:
+                if m.get("rating") == 1:
+                    thumbs_up += 1
+                elif m.get("rating") == -1:
+                    thumbs_down += 1
+
+    total_image_docs = await db["images"].count_documents({})
+
+    return {
+        "total_users": total_users,
+        "total_admins": total_admins,
+        "total_chats": total_chats,
+        "total_messages": total_messages,
+        "thumbs_up": thumbs_up,
+        "thumbs_down": thumbs_down,
+        "total_image_docs": total_image_docs,
+        "server_time": time.time(),
+    }
+
+
+@admin_router.patch("/users/{user_id}/role")
+async def admin_set_role(user_id: str, body: SetRoleBody, admin: dict = Depends(_require_admin)):
+    if body.role not in ("admin", "user"):
+        raise HTTPException(status_code=400, detail="Role must be 'admin' or 'user'.")
+    if user_id == admin["id"]:
+        raise HTTPException(status_code=400, detail="You cannot change your own role.")
+    db = _get_db()
+    result = await db["users"].update_one({"id": user_id}, {"$set": {"role": body.role}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return {"ok": True}
+
+
+@admin_router.delete("/users/{user_id}")
+async def admin_delete_user(user_id: str, admin: dict = Depends(_require_admin)):
+    if user_id == admin["id"]:
+        raise HTTPException(status_code=400, detail="You cannot delete your own account here.")
+    db = _get_db()
+    result = await db["users"].delete_one({"id": user_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="User not found.")
+    # Cascade-delete all user data
+    await db["chats"].delete_many({"user_id": user_id})
+    await db["projects"].delete_many({"user_id": user_id})
+    await db["images"].delete_many({"user_id": user_id})
     return {"ok": True}
