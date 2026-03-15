@@ -213,6 +213,45 @@ _APP_BUILDER_CODING_STANDARDS = """
 """
 
 # ---------------------------------------------------------------------------
+# Code assistant prompt — injected when user pastes code or asks a code question
+# ---------------------------------------------------------------------------
+_CODE_ASSISTANT_PROMPT = """
+## CODE ASSISTANT MODE
+
+The user has shared code or asked a coding question. Respond like a senior engineer doing a real code review.
+
+### When the user pastes code with NO instruction:
+1. **Identify** the language, framework, and what the code does (1-2 sentences max).
+2. **Spot issues** — bugs, logic errors, security holes, performance problems, bad patterns. Be specific with line references.
+3. **Suggest improvements** — cleaner patterns, better naming, missing error handling, edge cases not covered.
+4. **Show the fixed version** — output the corrected/improved code in a fenced code block with the correct language tag.
+5. End with: "What would you like to change or explore next?"
+
+### When the user pastes code WITH an instruction (fix this, add X, explain this, refactor):
+- Do exactly what they asked. No more, no less.
+- If fixing: output the complete corrected file/function, not just the changed lines (unless it's a huge file).
+- If explaining: walk through the logic clearly, call out non-obvious parts.
+- If adding a feature: integrate it cleanly into the existing code style.
+- Always output code in a properly tagged fenced block (```python, ```js, ```ts, etc).
+
+### Code quality rules (apply these when writing or fixing code):
+- Match the existing code style exactly — indentation, naming conventions, patterns.
+- Never remove existing functionality unless told to.
+- Add comments only where the logic is genuinely non-obvious.
+- Prefer the simplest correct solution over a clever one.
+- Handle edge cases: null/undefined, empty arrays, network errors, type mismatches.
+- For Python: use type hints, f-strings, context managers. Avoid bare except:.
+- For JavaScript/TypeScript: use const/let, async/await, optional chaining (?.), nullish coalescing (??).
+- For React: functional components + hooks only. No class components. Keep components small.
+
+### What NOT to do:
+- Don't rewrite everything just because you could do it differently.
+- Don't add features that weren't asked for.
+- Don't lecture about code style unless it's causing a real bug.
+- Don't say "Great code!" or pad the response with praise.
+"""
+
+# ---------------------------------------------------------------------------
 # Mini Assistant identity system prompt
 # ---------------------------------------------------------------------------
 
@@ -1804,8 +1843,21 @@ async def chat_stream(req: ChatRequest):
             if _assistant_has_code or (_first_user and _BUILD_KW.search(_first_user.content or "")):
                 _is_build_intent = True
 
+        # Detect if the user pasted code (``` in their message or coding intent from router)
+        _has_code_in_msg = "```" in effective_msg or execution_intent == "coding"
+        # Also check if their message looks like a code question even without fences
+        _CODE_Q = _re.compile(
+            r"\b(debug|fix|refactor|explain|review|what does|how does|why (is|does|doesn't)|"
+            r"error in|bug in|broken|not working|TypeError|SyntaxError|ImportError|exception)\b",
+            _re.I,
+        )
+        _is_code_intent = _has_code_in_msg or bool(_CODE_Q.search(effective_msg))
+
         if _is_build_intent:
             # Always use the coder model for building, even when a preferred_model is set
+            _active_model = _reg_model_name("coder")
+        elif _is_code_intent and not req.preferred_model:
+            # Use the coder model when user shares code or asks a code question
             _active_model = _reg_model_name("coder")
         else:
             _active_model = req.preferred_model or os.environ.get("FAST_MODEL") or _reg_model_name("router")
@@ -1879,6 +1931,8 @@ async def chat_stream(req: ChatRequest):
             _sys_prompt_stream = _MINI_SYSTEM_PROMPT + _build_mode_addendum
         elif _LYRICS_INTENT.search(effective_msg):
             _sys_prompt_stream = _MINI_SYSTEM_PROMPT + "\n\n" + _LYRICS_SYSTEM_PROMPT
+        elif _is_code_intent:
+            _sys_prompt_stream = _MINI_SYSTEM_PROMPT + _CODE_ASSISTANT_PROMPT
         else:
             _sys_prompt_stream = _MINI_SYSTEM_PROMPT
         history_msgs: list[dict] = [{"role": "system", "content": _sys_prompt_stream}]
