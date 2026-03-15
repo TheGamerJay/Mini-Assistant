@@ -1856,10 +1856,13 @@ async def chat_stream(req: ChatRequest):
         _is_code_intent = _has_code_in_msg or execution_intent == "coding" or bool(_CODE_ERRORS.search(effective_msg))
 
         if _is_build_intent:
-            # Always use the coder model for building, even when a preferred_model is set
-            _active_model = _reg_model_name("coder")
+            # App building: use the router model (qwen3:14b) — already warm in memory.
+            # Swapping to deepseek-coder causes model-load timeouts. The detailed
+            # coding standards + build-turn prompts are sufficient for qwen3:14b.
+            _active_model = req.preferred_model or os.environ.get("FAST_MODEL") or _reg_model_name("router")
         elif _is_code_intent and not req.preferred_model:
-            # Use the coder model when user shares code or asks a code question
+            # Explicit code paste or error: use deepseek-coder.
+            # User initiated this intentionally so the load wait is acceptable.
             _active_model = _reg_model_name("coder")
         else:
             _active_model = req.preferred_model or os.environ.get("FAST_MODEL") or _reg_model_name("router")
