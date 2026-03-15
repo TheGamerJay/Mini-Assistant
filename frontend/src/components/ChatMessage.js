@@ -7,7 +7,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   RotateCcw, Copy, Check, Volume2, VolumeX,
-  ThumbsUp, ThumbsDown, GitFork, Share2, MoreHorizontal, Clock,
+  ThumbsUp, ThumbsDown, GitFork, Share2, MoreHorizontal, Clock, X, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp } from '../context/AppContext';
@@ -365,25 +365,99 @@ function MetaBar({ model_used, memory_stored }) {
 }
 
 // ---------------------------------------------------------------------------
+// Image Lightbox
+// ---------------------------------------------------------------------------
+function ImageLightbox({ images, startIndex, onClose }) {
+  const [idx, setIdx] = useState(startIndex);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === 'Escape') onClose();
+      if (e.key === 'ArrowLeft') setIdx(i => Math.max(0, i - 1));
+      if (e.key === 'ArrowRight') setIdx(i => Math.min(images.length - 1, i + 1));
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [images.length, onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[999] bg-black/90 flex items-center justify-center"
+      onClick={onClose}
+    >
+      <button
+        onClick={onClose}
+        className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+      >
+        <X size={20} />
+      </button>
+
+      {images.length > 1 && (
+        <>
+          <button
+            onClick={(e) => { e.stopPropagation(); setIdx(i => Math.max(0, i - 1)); }}
+            disabled={idx === 0}
+            className="absolute left-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors disabled:opacity-30"
+          >
+            <ChevronLeft size={24} />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); setIdx(i => Math.min(images.length - 1, i + 1)); }}
+            disabled={idx === images.length - 1}
+            className="absolute right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors disabled:opacity-30"
+          >
+            <ChevronRight size={24} />
+          </button>
+        </>
+      )}
+
+      <img
+        src={`data:image/jpeg;base64,${images[idx]}`}
+        alt={`Image ${idx + 1}`}
+        className="max-w-[90vw] max-h-[90vh] object-contain rounded-xl"
+        onClick={(e) => e.stopPropagation()}
+      />
+
+      {images.length > 1 && (
+        <div className="absolute bottom-4 flex gap-1.5">
+          {images.map((_, i) => (
+            <button
+              key={i}
+              onClick={(e) => { e.stopPropagation(); setIdx(i); }}
+              className={`w-2 h-2 rounded-full transition-colors ${i === idx ? 'bg-white' : 'bg-white/30'}`}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // ChatMessage
 // ---------------------------------------------------------------------------
 function ChatMessage({ message, onRetry, onRate, onFork }) {
   const { settings, user } = useApp();
   const { role, type, content, image_base64, prompt, route_result, generation_time_ms, retry_used, prompt_warnings, model_used, memory_stored, rating, timestamp } = message;
+  const { images_base64 } = message;
+  const allImages = images_base64 && images_base64.length > 1 ? images_base64 : (image_base64 ? [image_base64] : []);
+  const [lightboxIdx, setLightboxIdx] = useState(null);
 
   if (role === 'user') {
     const initial = user?.name ? user.name[0].toUpperCase() : 'U';
     const avatar = user?.avatar;
-    const { images_base64 } = message;
-    const allImages = images_base64 && images_base64.length > 1 ? images_base64 : (image_base64 ? [image_base64] : []);
     return (
       <div className="flex justify-end items-start gap-2 msg-enter">
+        {lightboxIdx !== null && (
+          <ImageLightbox images={allImages} startIndex={lightboxIdx} onClose={() => setLightboxIdx(null)} />
+        )}
         <div className="max-w-[75%] flex flex-col items-end gap-2">
           {type === 'image_input' && allImages.length > 0 && (
             <div className="flex flex-wrap gap-2 justify-end">
               {allImages.map((b64, i) => (
                 <img key={i} src={`data:image/jpeg;base64,${b64}`} alt={`Attached ${i + 1}`}
-                  className="max-h-40 max-w-[180px] rounded-xl border border-cyan-500/20 object-contain bg-black/30" />
+                  onClick={() => setLightboxIdx(i)}
+                  className="max-h-40 max-w-[180px] rounded-xl border border-cyan-500/20 object-contain bg-black/30 cursor-zoom-in hover:border-cyan-400/50 transition-colors" />
               ))}
             </div>
           )}
