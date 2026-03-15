@@ -311,12 +311,24 @@ export function AppProvider({ children }) {
         _setUser((prev) => ({ ...prev, ...profile }));
         if (profile.avatar !== undefined) {
           _setAvatar(profile.avatar || null);
+          // Cache avatar locally so it survives backend restarts
+          const uid = profile.id || getSessionId();
+          if (uid) {
+            if (profile.avatar) {
+              try { localStorage.setItem(`ma_avatar_${uid}`, profile.avatar); } catch {}
+            } else {
+              localStorage.removeItem(`ma_avatar_${uid}`);
+            }
+          }
         }
       })
-      .catch(() => {
-        // Token invalid / expired — clear it
-        clearToken();
-        _setUser(null);
+      .catch((err) => {
+        // Only log out on explicit 401 (invalid/expired token).
+        // Server errors (503, 405, network) keep the cached user alive.
+        if (err?.status === 401) {
+          clearToken();
+          _setUser(null);
+        }
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -535,22 +547,16 @@ export function AppProvider({ children }) {
   const updateAvatar = useCallback(async (dataUrl) => {
     if (!user?.id) return;
     _setAvatar(dataUrl);
-    try {
-      await api.authUpdateAvatar(dataUrl);
-    } catch {
-      // Fallback: localStorage
-      try { localStorage.setItem(`ma_avatar_${user.id}`, dataUrl); } catch {}
-    }
+    // Always cache locally so avatar survives backend restarts
+    try { localStorage.setItem(`ma_avatar_${user.id}`, dataUrl); } catch {}
+    try { await api.authUpdateAvatar(dataUrl); } catch {}
   }, [user?.id]);
 
   const removeAvatar = useCallback(async () => {
     if (!user?.id) return;
     _setAvatar(null);
-    try {
-      await api.authUpdateAvatar(null);
-    } catch {
-      localStorage.removeItem(`ma_avatar_${user.id}`);
-    }
+    localStorage.removeItem(`ma_avatar_${user.id}`);
+    try { await api.authUpdateAvatar(null); } catch {}
   }, [user?.id]);
 
   // ---- Profile mutations ----
