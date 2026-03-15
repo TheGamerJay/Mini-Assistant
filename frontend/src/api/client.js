@@ -405,6 +405,26 @@ export const api = {
   dbSaveProjects(projects) {
     return post(`${MAIN_API}/db/projects`, { projects }, 20000);
   },
+
+  /** Fetch user settings from MongoDB. */
+  dbGetSettings() {
+    return get(`${MAIN_API}/db/settings`, 10000);
+  },
+
+  /** Replace user settings in MongoDB. */
+  dbSaveSettings(settings) {
+    return post(`${MAIN_API}/db/settings`, { settings }, 10000);
+  },
+
+  /** Fetch prompt templates from MongoDB. */
+  dbGetTemplates() {
+    return get(`${MAIN_API}/db/templates`, 10000);
+  },
+
+  /** Replace prompt templates in MongoDB. */
+  dbSaveTemplates(templates) {
+    return post(`${MAIN_API}/db/templates`, { templates }, 10000);
+  },
 };
 
 export default api;

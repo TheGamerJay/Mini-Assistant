@@ -334,7 +334,7 @@ export function AppProvider({ children }) {
     setActiveChatId(null);
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // After login, load chats & projects from backend (backend is source of truth)
+  // After login, load all user data from backend (backend is source of truth)
   const _backendLoadedRef = useRef(false);
   useEffect(() => {
     if (!user?.id) {
@@ -348,6 +348,12 @@ export function AppProvider({ children }) {
       .catch(() => {});
     api.dbGetProjects()
       .then((data) => { if (data?.projects?.length) setProjects(data.projects); })
+      .catch(() => {});
+    api.dbGetSettings()
+      .then((data) => { if (data?.settings && Object.keys(data.settings).length) setSettings((prev) => ({ ...prev, ...data.settings })); })
+      .catch(() => {});
+    api.dbGetTemplates()
+      .then((data) => { if (data?.templates?.length) setPromptTemplates(data.templates); })
       .catch(() => {});
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -398,6 +404,32 @@ export function AppProvider({ children }) {
     return () => clearTimeout(_projectSyncTimer.current);
   }, [projects, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Debounced sync of settings to backend
+  const _settingsSyncTimer = useRef(null);
+  const _initialSettingsRef = useRef(true);
+  useEffect(() => {
+    if (!user?.id) return;
+    if (_initialSettingsRef.current) { _initialSettingsRef.current = false; return; }
+    clearTimeout(_settingsSyncTimer.current);
+    _settingsSyncTimer.current = setTimeout(() => {
+      api.dbSaveSettings(settings).catch(() => {});
+    }, 3000);
+    return () => clearTimeout(_settingsSyncTimer.current);
+  }, [settings, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Debounced sync of prompt templates to backend
+  const _templatesSyncTimer = useRef(null);
+  const _initialTemplatesRef = useRef(true);
+  useEffect(() => {
+    if (!user?.id) return;
+    if (_initialTemplatesRef.current) { _initialTemplatesRef.current = false; return; }
+    clearTimeout(_templatesSyncTimer.current);
+    _templatesSyncTimer.current = setTimeout(() => {
+      api.dbSaveTemplates(promptTemplates).catch(() => {});
+    }, 3000);
+    return () => clearTimeout(_templatesSyncTimer.current);
+  }, [promptTemplates, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const logout = useCallback(() => {
     clearToken();
     _setUser(null);
@@ -405,6 +437,8 @@ export function AppProvider({ children }) {
     _backendLoadedRef.current = false;
     _initialChatsRef.current = true;
     _initialProjectsRef.current = true;
+    _initialSettingsRef.current = true;
+    _initialTemplatesRef.current = true;
   }, []);
 
   const loginWithCredentials = useCallback(async (email, password) => {
@@ -586,6 +620,8 @@ export function AppProvider({ children }) {
     _backendLoadedRef.current = false;
     _initialChatsRef.current = true;
     _initialProjectsRef.current = true;
+    _initialSettingsRef.current = true;
+    _initialTemplatesRef.current = true;
   }, [user]);
 
   // ---- Server Status ----

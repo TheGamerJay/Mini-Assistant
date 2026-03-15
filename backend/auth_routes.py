@@ -144,6 +144,14 @@ class ImagesBody(BaseModel):
     images: List[Any] = []
 
 
+class SettingsBody(BaseModel):
+    settings: dict = {}
+
+
+class TemplatesBody(BaseModel):
+    templates: List[Any] = []
+
+
 # ---------------------------------------------------------------------------
 # Auth router  (/api/auth/*)
 # ---------------------------------------------------------------------------
@@ -242,6 +250,8 @@ async def delete_account(authorization: str = Header(None)):
     await db["chats"].delete_many({"user_id": uid})
     await db["projects"].delete_many({"user_id": uid})
     await db["images"].delete_many({"user_id": uid})
+    await db["settings"].delete_many({"user_id": uid})
+    await db["templates"].delete_many({"user_id": uid})
     return {"ok": True}
 
 
@@ -335,6 +345,46 @@ async def save_images(body: ImagesBody, authorization: str = Header(None)):
     await db["images"].replace_one(
         {"user_id": user["id"]},
         {"user_id": user["id"], "images": body.images, "updated_at": time.time()},
+        upsert=True,
+    )
+    return {"ok": True}
+
+
+@db_router.get("/settings")
+async def get_settings(authorization: str = Header(None)):
+    user = await get_current_user(authorization)
+    db = _get_db()
+    doc = await db["settings"].find_one({"user_id": user["id"]})
+    return {"settings": doc["settings"] if doc else {}}
+
+
+@db_router.post("/settings")
+async def save_settings(body: SettingsBody, authorization: str = Header(None)):
+    user = await get_current_user(authorization)
+    db = _get_db()
+    await db["settings"].replace_one(
+        {"user_id": user["id"]},
+        {"user_id": user["id"], "settings": body.settings, "updated_at": time.time()},
+        upsert=True,
+    )
+    return {"ok": True}
+
+
+@db_router.get("/templates")
+async def get_templates(authorization: str = Header(None)):
+    user = await get_current_user(authorization)
+    db = _get_db()
+    doc = await db["templates"].find_one({"user_id": user["id"]})
+    return {"templates": doc["templates"] if doc else []}
+
+
+@db_router.post("/templates")
+async def save_templates(body: TemplatesBody, authorization: str = Header(None)):
+    user = await get_current_user(authorization)
+    db = _get_db()
+    await db["templates"].replace_one(
+        {"user_id": user["id"]},
+        {"user_id": user["id"], "templates": body.templates, "updated_at": time.time()},
         upsert=True,
     )
     return {"ok": True}
@@ -441,4 +491,6 @@ async def admin_delete_user(user_id: str, admin: dict = Depends(_require_admin))
     await db["chats"].delete_many({"user_id": user_id})
     await db["projects"].delete_many({"user_id": user_id})
     await db["images"].delete_many({"user_id": user_id})
+    await db["settings"].delete_many({"user_id": user_id})
+    await db["templates"].delete_many({"user_id": user_id})
     return {"ok": True}
