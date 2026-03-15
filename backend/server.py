@@ -4550,6 +4550,13 @@ try:
     _logging.getLogger("image_system").info("Image system mounted at /image-api")
 except Exception as _img_err:
     _logging.getLogger("image_system").warning(f"Image system not available: {_img_err}")
+    # Register stub routes so POSTs don't hit the GET-only SPA catch-all → 405
+    from fastapi import Request as _Req
+    from fastapi.responses import JSONResponse as _JR
+    _unavail = {"error": "Image system unavailable", "detail": str(_img_err)}
+    @app.api_route("/image-api/{rest_path:path}", methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"])
+    async def _image_api_stub(rest_path: str, request: _Req):
+        return _JR(_unavail, status_code=503)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

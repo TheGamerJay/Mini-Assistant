@@ -2269,6 +2269,7 @@ async def extract_text(file: UploadFile = File(...)):
 # ---------------------------------------------------------------------------
 # Code execution
 # ---------------------------------------------------------------------------
+from pydantic import BaseModel
 
 class ExecuteRequest(BaseModel):
     code: str
