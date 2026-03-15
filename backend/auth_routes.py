@@ -15,8 +15,14 @@ from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional, List, Any
 
-from jose import jwt, JWTError
-from passlib.context import CryptContext
+try:
+    from jose import jwt, JWTError
+    from passlib.context import CryptContext
+    _AUTH_AVAILABLE = True
+except ImportError as _auth_import_err:
+    logging.warning("JWT/passlib not available (%s) — auth endpoints disabled, db-sync still works", _auth_import_err)
+    jwt = JWTError = CryptContext = None  # type: ignore
+    _AUTH_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
 # Shared db handle — imported from server.py at module level.
@@ -37,7 +43,7 @@ JWT_SECRET = os.environ.get("JWT_SECRET", "mini_assistant_jwt_secret_2025")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_DAYS = 30
 
-pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto") if _AUTH_AVAILABLE else None
 
 log = logging.getLogger(__name__)
 
@@ -47,14 +53,17 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _hash_password(plain: str) -> str:
+    if not _AUTH_AVAILABLE: raise HTTPException(status_code=503, detail="Auth not available")
     return pwd_ctx.hash(plain)
 
 
 def _verify_password(plain: str, hashed: str) -> bool:
+    if not _AUTH_AVAILABLE: raise HTTPException(status_code=503, detail="Auth not available")
     return pwd_ctx.verify(plain, hashed)
 
 
 def _make_token(user: dict) -> str:
+    if not _AUTH_AVAILABLE: raise HTTPException(status_code=503, detail="Auth not available")
     payload = {
         "sub": user["id"],
         "email": user["email"],
@@ -66,6 +75,7 @@ def _make_token(user: dict) -> str:
 
 
 def _decode_token(token: str) -> dict:
+    if not _AUTH_AVAILABLE: raise HTTPException(status_code=503, detail="Auth not available")
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         return payload
@@ -252,6 +262,7 @@ async def delete_account(authorization: str = Header(None)):
     await db["images"].delete_many({"user_id": uid})
     await db["settings"].delete_many({"user_id": uid})
     await db["templates"].delete_many({"user_id": uid})
+    await db["tasks"].delete_many({"user_id": uid})
     return {"ok": True}
 
 
@@ -391,6 +402,76 @@ async def save_templates(body: TemplatesBody, authorization: str = Header(None))
 
 
 # ---------------------------------------------------------------------------
+# Tasks router  (/api/tasks/*)
+# ---------------------------------------------------------------------------
+
+tasks_router = APIRouter(prefix="/api/tasks", tags=["tasks"])
+
+
+class TaskBody(BaseModel):
+    text: str
+
+
+class TaskUpdateBody(BaseModel):
+    text: Optional[str] = None
+    done: Optional[bool] = None
+
+
+@tasks_router.get("")
+async def get_tasks(authorization: str = Header(None)):
+    user = await get_current_user(authorization)
+    db = _get_db()
+    doc = await db["tasks"].find_one({"user_id": user["id"]})
+    return {"tasks": doc.get("tasks", []) if doc else []}
+
+
+@tasks_router.post("")
+async def add_task(body: TaskBody, authorization: str = Header(None)):
+    user = await get_current_user(authorization)
+    db = _get_db()
+    task = {
+        "id": str(uuid.uuid4()),
+        "text": body.text.strip(),
+        "done": False,
+        "created_at": time.time(),
+    }
+    await db["tasks"].update_one(
+        {"user_id": user["id"]},
+        {"$push": {"tasks": task}},
+        upsert=True,
+    )
+    return {"task": task}
+
+
+@tasks_router.patch("/{task_id}")
+async def update_task(task_id: str, body: TaskUpdateBody, authorization: str = Header(None)):
+    user = await get_current_user(authorization)
+    db = _get_db()
+    doc = await db["tasks"].find_one({"user_id": user["id"]})
+    tasks = doc.get("tasks", []) if doc else []
+    for t in tasks:
+        if t["id"] == task_id:
+            if body.text is not None:
+                t["text"] = body.text.strip()
+            if body.done is not None:
+                t["done"] = body.done
+            break
+    await db["tasks"].update_one({"user_id": user["id"]}, {"$set": {"tasks": tasks}})
+    return {"ok": True}
+
+
+@tasks_router.delete("/{task_id}")
+async def delete_task(task_id: str, authorization: str = Header(None)):
+    user = await get_current_user(authorization)
+    db = _get_db()
+    await db["tasks"].update_one(
+        {"user_id": user["id"]},
+        {"$pull": {"tasks": {"id": task_id}}},
+    )
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
 # Admin router  (/api/admin/*)
 # ---------------------------------------------------------------------------
 admin_router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -493,4 +574,5 @@ async def admin_delete_user(user_id: str, admin: dict = Depends(_require_admin))
     await db["images"].delete_many({"user_id": user_id})
     await db["settings"].delete_many({"user_id": user_id})
     await db["templates"].delete_many({"user_id": user_id})
+    await db["tasks"].delete_many({"user_id": user_id})
     return {"ok": True}
