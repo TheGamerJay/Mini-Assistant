@@ -158,8 +158,8 @@ function ChatPage() {
 
     const imageIntentDetected = isImageIntent(text);
 
-    // ── IMAGE path: use non-streaming endpoint + shimmer ──────────────────
-    if (imageIntentDetected || imgs.length) {
+    // ── IMAGE path: non-streaming endpoint (generation only, not analysis) ──
+    if (imageIntentDetected && !imgs.length) {
       if (imageIntentDetected) {
         setMessages([...nextMessages, {
           role: 'assistant', type: 'image_generating',
