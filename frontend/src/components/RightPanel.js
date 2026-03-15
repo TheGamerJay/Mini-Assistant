@@ -23,10 +23,13 @@ import {
 function extractCodeBlocks(content) {
   if (!content) return [];
   const blocks = [];
-  const re = /```(\w+)?\n?([\s\S]*?)```/g;
+  // Match ``` with optional language tag and optional whitespace before content
+  const re = /```([a-zA-Z0-9_+-]*)[ \t]*\r?\n([\s\S]*?)```/g;
   let m;
   while ((m = re.exec(content)) !== null) {
-    blocks.push({ lang: m[1] || 'text', code: m[2].trim() });
+    const lang = (m[1] || 'text').toLowerCase();
+    const code = m[2].trim();
+    if (code) blocks.push({ lang, code });
   }
   return blocks;
 }
@@ -44,14 +47,15 @@ function getLatestCode(messages) {
 
 /** Try to build a renderable HTML doc from code blocks */
 function buildPreviewHtml(blocks) {
-  // Look for explicit HTML block first
-  const htmlBlock = blocks.find(b => b.lang === 'html' || b.lang === 'htm');
+  // Look for explicit HTML block first (covers html, htm, markup)
+  const htmlBlock = blocks.find(b => ['html', 'htm', 'markup', 'xhtml'].includes(b.lang));
   if (htmlBlock) return htmlBlock.code;
 
   // Assemble from parts
   const css  = blocks.filter(b => b.lang === 'css').map(b => b.code).join('\n');
-  const js   = blocks.filter(b => b.lang === 'javascript' || b.lang === 'js').map(b => b.code).join('\n');
-  const html = blocks.filter(b => b.lang !== 'css' && b.lang !== 'javascript' && b.lang !== 'js' && b.lang !== 'python').map(b => b.code).join('\n');
+  const js   = blocks.filter(b => ['javascript', 'js', 'jsx', 'ts', 'tsx'].includes(b.lang)).map(b => b.code).join('\n');
+  const skipLangs = new Set(['css', 'javascript', 'js', 'jsx', 'ts', 'tsx', 'python', 'py', 'bash', 'sh', 'json', 'yaml', 'yml', 'text', 'txt']);
+  const html = blocks.filter(b => !skipLangs.has(b.lang)).map(b => b.code).join('\n');
 
   if (!html && !css && !js) return null;
 

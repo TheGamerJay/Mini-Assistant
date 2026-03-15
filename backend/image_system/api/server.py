@@ -1751,22 +1751,32 @@ async def chat_stream(req: ChatRequest):
             elif _build_history_turns % 2 == 1:
                 # User just answered questions — now BUILD
                 _build_mode_addendum = (
-                    "\n\n## APP BUILDER — BUILD TURN\n"
-                    "The user answered your questions. BUILD NOW. Output the complete working app immediately.\n"
-                    "- Self-contained HTML (CSS + JS inline) or full React components as appropriate.\n"
-                    "- Every button and control must be functional. No TODOs, no stubs, no placeholders.\n"
-                    "- Make all remaining design decisions yourself with sensible defaults.\n"
-                    "- After the code, ask exactly 3 follow-up questions about what to improve/add/change next.\n"
-                    "  Format: 'Here's what I built! What would you like next?\\n1. ...\\n2. ...\\n3. ...'\n"
+                    "\n\n## APP BUILDER — BUILD TURN (MANDATORY CODE OUTPUT)\n"
+                    "CRITICAL: You MUST output a complete, working code block RIGHT NOW. No exceptions.\n"
+                    "The user answered your questions. Your ONLY job in this response is:\n"
+                    "  1. Output the FULL working app as a single ```html code block (HTML + CSS + JS all inline).\n"
+                    "  2. The code block MUST come FIRST before any other text.\n"
+                    "  3. After the closing ``` of the code block, write exactly:\n"
+                    "     'Here\\'s what I built! What would you like next?\\n1. ...\\n2. ...\\n3. ...'\n\n"
+                    "RULES:\n"
+                    "- Output format: ```html\\n<!DOCTYPE html>\\n...\\n```  (mandatory)\n"
+                    "- Every button, input, and control must be fully functional JavaScript — no stubs, no TODOs.\n"
+                    "- Include ALL CSS inline in <style> tags, ALL JS inline in <script> tags.\n"
+                    "- Make all design decisions yourself — do NOT ask more questions before writing code.\n"
+                    "- If you write anything except code first, you have FAILED. Start your response with ```html\n"
                 )
             else:
                 # User responded to follow-ups — update code then ask 3 more
                 _build_mode_addendum = (
-                    "\n\n## APP BUILDER — UPDATE TURN\n"
-                    "Update the existing code based on the user's feedback. Modify in-place, never restart.\n"
-                    "Every button and control must remain functional. No TODOs, no stubs.\n"
-                    "After the updated code, ask exactly 3 new follow-up questions about what to improve/add/change.\n"
-                    "  Format: 'Updated! What would you like next?\\n1. ...\\n2. ...\\n3. ...'\n"
+                    "\n\n## APP BUILDER — UPDATE TURN (MANDATORY CODE OUTPUT)\n"
+                    "CRITICAL: Output the COMPLETE updated code block FIRST. No exceptions.\n"
+                    "  1. Output the full updated app as a single ```html code block.\n"
+                    "  2. The code block MUST come FIRST before any other text.\n"
+                    "  3. After the closing ```, write: 'Updated! What would you like next?\\n1. ...\\n2. ...\\n3. ...'\n\n"
+                    "RULES:\n"
+                    "- Always output the ENTIRE file — never partial diffs or snippets.\n"
+                    "- Every button and control must remain fully functional. No TODOs, no stubs.\n"
+                    "- Start your response with ```html — not with words.\n"
                 )
             _sys_prompt_stream = _MINI_SYSTEM_PROMPT + _build_mode_addendum
         elif _LYRICS_INTENT.search(effective_msg):
@@ -1964,8 +1974,9 @@ async def chat_summarize(req: SummarizeRequest):
             prompt=prompt,
             temperature=0.3,
         )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception:
+        # Non-fatal — return empty so the frontend silently skips compaction
+        return {"summary": ""}
 
     return {"summary": summary}
 
