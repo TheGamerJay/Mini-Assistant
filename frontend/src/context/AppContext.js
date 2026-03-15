@@ -417,18 +417,8 @@ export function AppProvider({ children }) {
     return () => clearTimeout(_settingsSyncTimer.current);
   }, [settings, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Debounced sync of prompt templates to backend
   const _templatesSyncTimer = useRef(null);
   const _initialTemplatesRef = useRef(true);
-  useEffect(() => {
-    if (!user?.id) return;
-    if (_initialTemplatesRef.current) { _initialTemplatesRef.current = false; return; }
-    clearTimeout(_templatesSyncTimer.current);
-    _templatesSyncTimer.current = setTimeout(() => {
-      api.dbSaveTemplates(promptTemplates).catch(() => {});
-    }, 3000);
-    return () => clearTimeout(_templatesSyncTimer.current);
-  }, [promptTemplates, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const logout = useCallback(() => {
     clearToken();
@@ -655,6 +645,17 @@ export function AppProvider({ children }) {
     migrateLS('ma_v2_templates', getSessionId(), [])
   );
   useEffect(() => { saveLS(uk('ma_v2_templates', user?.id), promptTemplates); }, [promptTemplates, user?.id]); // eslint-disable-line
+
+  // Debounced sync of prompt templates to backend
+  useEffect(() => {
+    if (!user?.id) return;
+    if (_initialTemplatesRef.current) { _initialTemplatesRef.current = false; return; }
+    clearTimeout(_templatesSyncTimer.current);
+    _templatesSyncTimer.current = setTimeout(() => {
+      api.dbSaveTemplates(promptTemplates).catch(() => {});
+    }, 3000);
+    return () => clearTimeout(_templatesSyncTimer.current);
+  }, [promptTemplates, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addPromptTemplate = useCallback((title, text) => {
     const t = { id: crypto.randomUUID(), title: title.trim(), text: text.trim(), createdAt: Date.now() };
