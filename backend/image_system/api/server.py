@@ -1783,8 +1783,29 @@ async def chat_stream(req: ChatRequest):
         # ── Model selection ───────────────────────────────────────────────────
         from ..services.ollama_client import _model_name as _reg_model_name
         _is_build_intent = execution_intent == "app_builder"
-        if _is_build_intent and not req.preferred_model:
-            # Use the coder model for app building — it produces actual working code
+
+        # Also detect build intent from history — follow-up messages in a build
+        # conversation are often classified as "chat" by the router (e.g. "make it
+        # a video uploader"), but they still need the coder model + build prompt.
+        if not _is_build_intent and req.history:
+            _hist_contents = " ".join(h.content or "" for h in req.history)
+            # If any previous assistant turn contains a code fence, we're in a build session
+            _assistant_has_code = any(
+                h.role == "assistant" and "```" in (h.content or "")
+                for h in req.history
+            )
+            # Or if the first user message was a build request
+            _BUILD_KW = _re.compile(
+                r"/build|build me|create (a|an|the) (app|website|page|ui|component|dashboard)|"
+                r"make (a|an) (web|html|react)|generate (a|an) (app|website|page)",
+                _re.I,
+            )
+            _first_user = next((h for h in req.history if h.role == "user"), None)
+            if _assistant_has_code or (_first_user and _BUILD_KW.search(_first_user.content or "")):
+                _is_build_intent = True
+
+        if _is_build_intent:
+            # Always use the coder model for building, even when a preferred_model is set
             _active_model = _reg_model_name("coder")
         else:
             _active_model = req.preferred_model or os.environ.get("FAST_MODEL") or _reg_model_name("router")

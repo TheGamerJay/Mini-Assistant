@@ -437,7 +437,7 @@ function ImageLightbox({ images, startIndex, onClose }) {
 // ChatMessage
 // ---------------------------------------------------------------------------
 function ChatMessage({ message, onRetry, onRate, onFork }) {
-  const { settings, user } = useApp();
+  const { settings, user, avatar } = useApp();
   const { role, type, content, image_base64, prompt, route_result, generation_time_ms, retry_used, prompt_warnings, model_used, memory_stored, rating, timestamp } = message;
   const { images_base64 } = message;
   const allImages = images_base64 && images_base64.length > 1 ? images_base64 : (image_base64 ? [image_base64] : []);
@@ -460,7 +460,6 @@ function ChatMessage({ message, onRetry, onRate, onFork }) {
 
   if (role === 'user') {
     const initial = user?.name ? user.name[0].toUpperCase() : 'U';
-    const avatar = user?.avatar;
     return (
       <div className="flex justify-end items-start gap-2 msg-enter">
         {lightboxIdx !== null && (
