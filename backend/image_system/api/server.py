@@ -288,11 +288,15 @@ You are Mini Assistant — a smart, capable AI workspace assistant built for dev
 ## App / UI building — 3-question cycle (CRITICAL — follow exactly):
 Building follows a strict cycle. Never deviate from it.
 
-TURN 1 — FIRST BUILD REQUEST:
+TURN 1 — FIRST BUILD REQUEST (text only, no image):
   Ask exactly 3 short, focused questions as a numbered list. No more, no less.
   Good: visual style/colors, must-have features, HTML vs React preference.
   Bad: file sizes, fonts, pixel dimensions — decide those yourself.
   End with: "Ready to build once you answer!"
+
+TURN 1 — FIRST BUILD REQUEST WITH IMAGE:
+  The user provided a screenshot or mockup. DO NOT ask questions. Build immediately.
+  Replicate the UI from the image as a working HTML/CSS/JS app. Start with ```html.
 
 TURN 2 — USER ANSWERS TURN 1:
   Build the complete working app immediately. Zero questions before the code.
@@ -1920,9 +1924,10 @@ async def chat_stream(req: ChatRequest):
         # Determine whether history already has a build-turn so we know where we are in the cycle.
         _build_history_turns = sum(1 for h in (req.history or []) if h.role == "assistant") if _is_build_intent else 0
 
+        _has_images = bool(req.image_base64 or req.images_base64)
         if _is_build_intent:
-            if _build_history_turns == 0:
-                # First contact — ask 3 questions then stop
+            if _build_history_turns == 0 and not _has_images:
+                # First contact, no image — ask 3 questions then stop
                 _build_mode_addendum = (
                     "\n\n## APP BUILDER — TURN 1\n"
                     "This is the FIRST message about building. Ask exactly 3 short, focused questions as a numbered list.\n"
@@ -1930,6 +1935,24 @@ async def chat_stream(req: ChatRequest):
                     "Bad questions: file sizes, fonts, pixel dimensions — you decide those.\n"
                     "End with: 'Ready to build once you answer!'\n"
                     "Do NOT produce any code yet.\n"
+                )
+            elif _build_history_turns == 0 and _has_images:
+                # Image provided — build immediately from the visual reference, no questions
+                _build_mode_addendum = (
+                    _APP_BUILDER_CODING_STANDARDS +
+                    "\n\n## APP BUILDER — IMAGE-TO-CODE (MANDATORY IMMEDIATE BUILD)\n"
+                    "The user has provided an image of the UI they want built. DO NOT ask any questions.\n"
+                    "Your ONLY job is to replicate what you see in the image as a working app:\n"
+                    "  1. Analyze the image — identify layout, colors, components, and interactions.\n"
+                    "  2. Output the FULL working app as a single ```html code block (HTML + CSS + JS all inline).\n"
+                    "  3. Match the visual design from the image as closely as possible.\n"
+                    "  4. Apply the CODING STANDARDS above — CSS variables, real JS state, all interactions working.\n"
+                    "  5. After the closing ```, write: 'Here\\'s what I built from your image! What would you like to change?\\n1. ...\\n2. ...\\n3. ...'\n\n"
+                    "RULES:\n"
+                    "- START your response with ```html — not with any words or questions.\n"
+                    "- Every button, input, and control must be fully functional — no stubs, no TODOs.\n"
+                    "- Make all design decisions yourself based on what you see in the image.\n"
+                    "- NEVER ask clarifying questions when an image is provided. Just build it.\n"
                 )
             elif _build_history_turns % 2 == 1:
                 # User just answered questions — now BUILD
@@ -2036,54 +2059,78 @@ async def chat_stream(req: ChatRequest):
             all_images.insert(0, req.image_base64)
         all_images = [_compress_image_b64(b64) for b64 in all_images]
         user_msg: dict = {"role": "user", "content": user_content}
-        if all_images:
+        if all_images and not (_is_build_intent and _build_history_turns == 0):
+            # Normal image analysis (not the image-to-code pipeline)
             user_msg["images"] = all_images
-            # Switch to vision model when images are attached — text models can't see images
             if not req.preferred_model:
                 _active_model = _reg_model_name("vision")
         history_msgs.append(user_msg)
 
-        # ── Stream tokens from Ollama ─────────────────────────────────────────
-        # Use wait_for(3s) on every token pull so we can send keepalives while
-        # Ollama loads a model — critical for models not already in memory
-        # (e.g. deepseek-coder swapping in from disk).  Cloudflare drops
-        # connections with no data after ~100 s; 3 s keepalives prevent that.
+        # ── Image-to-Code pipeline (Vision → Builder → Reviewer loop) ─────────
+        # When user sends an image on the first build turn, hand off to the
+        # three-brain orchestrator instead of the normal single-model stream.
         reply_text = ""
         ollama_client = _get_ollama()
-        _fallback_model = _reg_model_name("router")
-        _model_to_try = _active_model
-        for _attempt in range(2):  # Try primary model first, fall back to router on model error
-            try:
-                _stream = ollama_client.run_chat_stream(
-                    model=_model_to_try,
-                    messages=history_msgs,
-                    temperature=0.7,
-                )
-                _aiter = _stream.__aiter__()
-                # Use ensure_future to wrap the coroutine in a Task, then shield the Task.
-                # A Task can be shielded multiple times across keepalive timeouts;
-                # a raw coroutine cannot — re-shielding it raises RuntimeError.
-                _next_task = asyncio.ensure_future(_aiter.__anext__())
-                while True:
+
+        if _is_build_intent and _build_history_turns == 0 and all_images:
+            from .pipeline import image_to_code_pipeline
+            async for _sse in image_to_code_pipeline(
+                images=all_images,
+                user_request=effective_msg,
+                ollama_client=ollama_client,
+                vision_model=_reg_model_name("vision"),
+                builder_model=_reg_model_name("coder"),
+                reviewer_model=_reg_model_name("router"),
+            ):
+                yield _sse
+                # Accumulate reply text for session memory
+                if _sse.startswith("data: "):
                     try:
-                        token = await asyncio.wait_for(asyncio.shield(_next_task), timeout=3.0)
-                        reply_text += token
-                        yield f"data: {_json.dumps({'t': token})}\n\n"
-                        _next_task = asyncio.ensure_future(_aiter.__anext__())
-                    except asyncio.TimeoutError:
-                        # No token yet — keepalive ping, same Task still running
-                        yield ": keepalive\n\n"
-                    except StopAsyncIteration:
-                        break
-                break  # success — don't retry
-            except Exception as exc:
-                _exc_s = str(exc).lower()
-                _is_model_err = any(kw in _exc_s for kw in ("not found", "pull", "404", "no such", "unknown model"))
-                if _attempt == 0 and _is_model_err and _model_to_try != _fallback_model:
-                    logger.warning("Model %s unavailable, falling back to %s: %s", _model_to_try, _fallback_model, exc)
-                    _model_to_try = _fallback_model
-                    continue  # retry with fallback router model
-                err = _friendly_error(exc)
+                        _d = _json.loads(_sse[6:].split("\n")[0])
+                        if "t" in _d:
+                            reply_text += _d["t"]
+                    except Exception:
+                        pass
+
+        else:
+            # ── Normal Ollama stream ──────────────────────────────────────────
+            # Use wait_for(3s) on every token pull so we can send keepalives while
+            # Ollama loads a model — critical for models not already in memory.
+            # Cloudflare drops connections with no data after ~100s.
+            _fallback_model = _reg_model_name("router")
+            _model_to_try = _active_model
+            for _attempt in range(2):  # Try primary model first, fall back to router on model error
+                try:
+                    _stream = ollama_client.run_chat_stream(
+                        model=_model_to_try,
+                        messages=history_msgs,
+                        temperature=0.7,
+                    )
+                    _aiter = _stream.__aiter__()
+                    # Use ensure_future to wrap the coroutine in a Task, then shield the Task.
+                    # A Task can be shielded multiple times across keepalive timeouts;
+                    # a raw coroutine cannot — re-shielding it raises RuntimeError.
+                    _next_task = asyncio.ensure_future(_aiter.__anext__())
+                    while True:
+                        try:
+                            token = await asyncio.wait_for(asyncio.shield(_next_task), timeout=3.0)
+                            reply_text += token
+                            yield f"data: {_json.dumps({'t': token})}\n\n"
+                            _next_task = asyncio.ensure_future(_aiter.__anext__())
+                        except asyncio.TimeoutError:
+                            # No token yet — keepalive ping, same Task still running
+                            yield ": keepalive\n\n"
+                        except StopAsyncIteration:
+                            break
+                    break  # success — don't retry
+                except Exception as exc:
+                    _exc_s = str(exc).lower()
+                    _is_model_err = any(kw in _exc_s for kw in ("not found", "pull", "404", "no such", "unknown model"))
+                    if _attempt == 0 and _is_model_err and _model_to_try != _fallback_model:
+                        logger.warning("Model %s unavailable, falling back to %s: %s", _model_to_try, _fallback_model, exc)
+                        _model_to_try = _fallback_model
+                        continue  # retry with fallback router model
+                    err = _friendly_error(exc)
                 yield f"data: {_json.dumps({'t': err})}\n\n"
                 reply_text = err
 
