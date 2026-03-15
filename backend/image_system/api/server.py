@@ -18,6 +18,11 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import io
+try:
+    from PIL import Image as _PILImage
+    _PIL_AVAILABLE = True
+except ImportError:
+    _PIL_AVAILABLE = False
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -79,6 +84,28 @@ try:
     logger.info("✓ Phase 10 middleware stack attached (image_system)")
 except Exception as _p10_err:
     logger.warning("Phase 10 middleware unavailable (image_system): %s", _p10_err)
+
+# ---------------------------------------------------------------------------
+# Image compression helper — shrinks base64 images before sending to Ollama
+# to avoid Cloudflare tunnel timeouts on large payloads.
+# ---------------------------------------------------------------------------
+
+def _compress_image_b64(b64: str, max_px: int = 768, quality: int = 72) -> str:
+    """Resize + JPEG-compress a base64 image. Returns original string if PIL unavailable."""
+    if not _PIL_AVAILABLE or not b64:
+        return b64
+    try:
+        raw = base64.b64decode(b64)
+        img = _PILImage.open(io.BytesIO(raw)).convert("RGB")
+        w, h = img.size
+        if max(w, h) > max_px:
+            scale = max_px / max(w, h)
+            img = img.resize((int(w * scale), int(h * scale)), _PILImage.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        return base64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        return b64
 
 # ---------------------------------------------------------------------------
 # Active generation tracking (for cancellation)
@@ -1615,6 +1642,10 @@ async def chat_stream(req: ChatRequest):
         raise HTTPException(status_code=400, detail=f"Message rejected: {safety_error}")
 
     async def generate():
+        # Yield an SSE keepalive immediately so Cloudflare doesn't timeout
+        # the frontend connection while we wait for routing + Ollama.
+        yield ": keepalive\n\n"
+
         effective_msg = clean_message
         phase1_plan = None
         execution_intent = "chat"
@@ -1670,9 +1701,11 @@ async def chat_stream(req: ChatRequest):
                 history_msgs.append({"role": h.role, "content": h.content})
         user_content = (rt_context + effective_msg) if rt_context else effective_msg
         # Collect all attached images (multi-image support)
+        # Compress each image to reduce payload size through Cloudflare tunnel.
         all_images = list(req.images_base64 or [])
         if req.image_base64 and req.image_base64 not in all_images:
             all_images.insert(0, req.image_base64)
+        all_images = [_compress_image_b64(b64) for b64 in all_images]
         user_msg: dict = {"role": "user", "content": user_content}
         if all_images:
             user_msg["images"] = all_images
