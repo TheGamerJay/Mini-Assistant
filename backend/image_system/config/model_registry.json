@@ -1,9 +1,9 @@
 {
   "ollama_models": {
     "router": { "model": "qwen3:14b", "role": "routing and classification" },
-    "router_fallback": { "model": "qwen2.5:7b", "role": "fast classifier fallback" },
+    "router_fallback": { "model": "llama3.1:8b", "role": "fast classifier fallback" },
     "coder": { "model": "deepseek-coder:6.7b", "role": "coding and integration" },
-    "vision": { "model": "gemma3:4b", "role": "vision and image review" },
+    "vision": { "model": "llava:7b", "role": "vision and image review" },
     "embeddings": { "model": "nomic-embed-text", "role": "embeddings and memory" }
   },
   "image_checkpoints": {
