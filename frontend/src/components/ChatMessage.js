@@ -501,6 +501,105 @@ function ImageLightbox({ images, startIndex, onClose }) {
 }
 
 // ---------------------------------------------------------------------------
+// Interactive multi-choice questions
+// Detects numbered questions with "(e.g., opt1, opt2)" or "a) b) c)" options
+// ---------------------------------------------------------------------------
+function parseQuestions(text) {
+  if (!text) return null;
+  // Match: "1. Question text (e.g., opt1, opt2, opt3)" or "1. **Question**"
+  const lines = text.split('\n');
+  const questions = [];
+  const egRe = /\(e\.g\.[,.]?\s*([^)]+)\)/i;
+  const abcRe = /^\s*[a-dA-D][).]\s+(.+)/;
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const numMatch = line.match(/^(\d+)\.\s+\*?\*?(.+?)\*?\*?(\s*\(e\.g\.[,.]?\s*[^)]+\))?$/);
+    if (numMatch) {
+      const questionText = numMatch[2].trim();
+      let options = [];
+      // Extract from "(e.g., ...)" inline
+      const egMatch = line.match(egRe);
+      if (egMatch) {
+        options = egMatch[1].split(',').map(o => o.trim().replace(/^["']|["']$/g, '')).filter(o => o.length > 1);
+      }
+      // Also look for a) b) c) on next lines
+      let j = i + 1;
+      while (j < lines.length && abcRe.test(lines[j])) {
+        const m = lines[j].match(abcRe);
+        if (m) options.push(m[1].trim());
+        j++;
+      }
+      questions.push({ num: parseInt(numMatch[1]), text: questionText, options });
+      i = j;
+    } else {
+      i++;
+    }
+  }
+  return questions.length >= 2 ? questions : null;
+}
+
+function InteractiveChoices({ text, onSuggest }) {
+  const questions = parseQuestions(text);
+  const [selected, setSelected] = useState({});
+  if (!questions) return null;
+
+  const toggle = (qi, opt) =>
+    setSelected(prev => ({ ...prev, [qi]: prev[qi] === opt ? null : opt }));
+
+  const handleSubmit = () => {
+    const answers = questions
+      .map((q, i) => selected[i] ? `${q.num}. ${selected[i]}` : null)
+      .filter(Boolean)
+      .join('  |  ');
+    if (answers && onSuggest) onSuggest(answers);
+  };
+
+  const anySelected = Object.values(selected).some(Boolean);
+
+  return (
+    <div className="mt-3 space-y-3 border-t border-white/5 pt-3">
+      {questions.map((q, qi) => (
+        <div key={qi}>
+          <p className="text-[11px] text-slate-400 font-medium mb-1.5">
+            {q.num}. {q.text}
+          </p>
+          {q.options.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {q.options.map((opt, oi) => (
+                <button
+                  key={oi}
+                  onClick={() => toggle(qi, opt)}
+                  className={`text-[11px] px-3 py-1 rounded-full border transition-all text-left ${
+                    selected[qi] === opt
+                      ? 'border-violet-500/70 bg-violet-500/20 text-violet-300 shadow-sm shadow-violet-500/20'
+                      : 'border-slate-600/40 bg-slate-800/50 text-slate-400 hover:border-violet-400/40 hover:text-violet-400'
+                  }`}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          )}
+          {q.options.length === 0 && (
+            <p className="text-[10px] text-slate-600 italic">Type your answer below</p>
+          )}
+        </div>
+      ))}
+      {anySelected && (
+        <button
+          onClick={handleSubmit}
+          className="text-[11px] px-4 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white transition-colors font-medium"
+        >
+          Send my answers ↵
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Suggestion pills
 // ---------------------------------------------------------------------------
 function SuggestionPills({ suggestions, onSuggest }) {
@@ -650,6 +749,11 @@ function ChatMessage({ message, onRetry, onRate, onFork, onPin, onSendToBuilder,
             pinned={pinned}
             timestamp={timestamp}
           />
+        )}
+
+        {/* Interactive multiple-choice for numbered Q&A */}
+        {!isError && !isImage && role === 'assistant' && onSuggest && (
+          <InteractiveChoices text={content} onSuggest={onSuggest} />
         )}
 
         {/* Follow-up suggestion pills */}
