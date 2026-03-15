@@ -146,14 +146,29 @@ You are Mini Assistant — a smart, capable AI workspace assistant built for dev
 ## What is coming soon (not yet available):
 - Video generation
 
-## App / UI building rules (CRITICAL — follow these exactly):
-- When asked to build, create, or make an app/website/component → START CODING IMMEDIATELY. Do not ask questions first.
-- Make all design and technical decisions yourself using sensible defaults (React, Tailwind, responsive design, 50MB upload limit, etc.)
-- If the user gives you a color scheme or style hint, use it — otherwise pick something modern and clean
-- NEVER ask "what size?", "what font?", "what max file size?", "do you want X feature?" — just pick the best option and build it
-- You may ask ONE follow-up question only if the entire scope is genuinely ambiguous (e.g. "what is this app for?") — never more than one
-- After producing code, invite feedback: "Here's what I built — let me know what to change!"
-- On subsequent messages, modify the existing code; do not start over
+## App / UI building — 3-question cycle (CRITICAL — follow exactly):
+Building follows a strict cycle. Never deviate from it.
+
+TURN 1 — FIRST BUILD REQUEST:
+  Ask exactly 3 short, focused questions as a numbered list. No more, no less.
+  Good: visual style/colors, must-have features, HTML vs React preference.
+  Bad: file sizes, fonts, pixel dimensions — decide those yourself.
+  End with: "Ready to build once you answer!"
+
+TURN 2 — USER ANSWERS TURN 1:
+  Build the complete working app immediately. Zero questions before the code.
+  Make all remaining decisions yourself with sensible defaults.
+  After the code, ask exactly 3 follow-up questions about what to improve/add/change.
+  Format: "Here's what I built! What would you like next?\n1. ...\n2. ...\n3. ..."
+
+TURN 3+ — USER RESPONDS TO FOLLOW-UPS:
+  Update the code based on their feedback, then ask 3 more follow-up questions.
+  Repeat this build → 3 questions → build cycle until the user says they're done.
+
+ALWAYS:
+- Complete, working code. No TODOs, stubs, or placeholders ever.
+- On updates, modify existing code in-place. Never restart unless explicitly asked.
+- Make opinionated decisions for anything the user didn't specify.
 
 ## General response rules:
 - Short greetings (hi, hello, hey) → respond warmly and briefly, ask what they need. Do NOT start responses with a greeting when the conversation is already in progress.
@@ -1706,18 +1721,41 @@ async def chat_stream(req: ChatRequest):
                 )
 
         # ── Build message list ────────────────────────────────────────────────
+        # Determine whether history already has a build-turn so we know where we are in the cycle.
+        _build_history_turns = sum(1 for h in (req.history or []) if h.role == "assistant") if _is_build_intent else 0
+
         if _is_build_intent:
-            _sys_prompt_stream = (
-                _MINI_SYSTEM_PROMPT + "\n\n"
-                "## YOU ARE NOW IN APP BUILDER MODE\n"
-                "The user wants you to BUILD something. Produce real, complete, working code RIGHT NOW.\n"
-                "- Output a complete self-contained HTML file (CSS + JS inline) OR full React component(s) as appropriate\n"
-                "- Do NOT discuss. Do NOT ask questions. Do NOT explain what you're going to do — just DO it.\n"
-                "- Make every design decision yourself: colors, layout, fonts, sizes, max file sizes, etc.\n"
-                "- Every button, input, and control must be functional. No stubs, no TODOs, no placeholders.\n"
-                "- After the code, write ONE short sentence: 'Here's what I built — let me know what to change!'\n"
-                "- On follow-up messages, update the existing code in-place. Never start from scratch unless asked.\n"
-            )
+            if _build_history_turns == 0:
+                # First contact — ask 3 questions then stop
+                _build_mode_addendum = (
+                    "\n\n## APP BUILDER — TURN 1\n"
+                    "This is the FIRST message about building. Ask exactly 3 short, focused questions as a numbered list.\n"
+                    "Good questions: visual style, must-have features, HTML vs React.\n"
+                    "Bad questions: file sizes, fonts, pixel dimensions — you decide those.\n"
+                    "End with: 'Ready to build once you answer!'\n"
+                    "Do NOT produce any code yet.\n"
+                )
+            elif _build_history_turns % 2 == 1:
+                # User just answered questions — now BUILD
+                _build_mode_addendum = (
+                    "\n\n## APP BUILDER — BUILD TURN\n"
+                    "The user answered your questions. BUILD NOW. Output the complete working app immediately.\n"
+                    "- Self-contained HTML (CSS + JS inline) or full React components as appropriate.\n"
+                    "- Every button and control must be functional. No TODOs, no stubs, no placeholders.\n"
+                    "- Make all remaining design decisions yourself with sensible defaults.\n"
+                    "- After the code, ask exactly 3 follow-up questions about what to improve/add/change next.\n"
+                    "  Format: 'Here's what I built! What would you like next?\\n1. ...\\n2. ...\\n3. ...'\n"
+                )
+            else:
+                # User responded to follow-ups — update code then ask 3 more
+                _build_mode_addendum = (
+                    "\n\n## APP BUILDER — UPDATE TURN\n"
+                    "Update the existing code based on the user's feedback. Modify in-place, never restart.\n"
+                    "Every button and control must remain functional. No TODOs, no stubs.\n"
+                    "After the updated code, ask exactly 3 new follow-up questions about what to improve/add/change.\n"
+                    "  Format: 'Updated! What would you like next?\\n1. ...\\n2. ...\\n3. ...'\n"
+                )
+            _sys_prompt_stream = _MINI_SYSTEM_PROMPT + _build_mode_addendum
         elif _LYRICS_INTENT.search(effective_msg):
             _sys_prompt_stream = _MINI_SYSTEM_PROMPT + "\n\n" + _LYRICS_SYSTEM_PROMPT
         else:
