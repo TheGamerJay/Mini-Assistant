@@ -9,7 +9,7 @@
  *   onClose    — callback to close
  */
 
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import {
   Monitor, Code2, FolderOpen, FileText, X, RefreshCw,
   Maximize2, ChevronRight, File, Download,
@@ -206,11 +206,24 @@ function FilesPane({ blocks }) {
     return blocks.map((b, i) => ({
       name: exts[b.lang] || `file_${i + 1}.${b.lang}`,
       lang: b.lang,
+      code: b.code,
       size: b.code.length,
     }));
   }, [blocks]);
 
   const langColor = { html: 'text-orange-400', css: 'text-blue-400', javascript: 'text-yellow-400', js: 'text-yellow-400', python: 'text-green-400', typescript: 'text-cyan-400', ts: 'text-cyan-400' };
+
+  const handleDownload = useCallback((f) => {
+    const mimeMap = { html: 'text/html', css: 'text/css', javascript: 'text/javascript', js: 'text/javascript', python: 'text/x-python', typescript: 'text/typescript', ts: 'text/typescript' };
+    const mime = mimeMap[f.lang] || 'text/plain';
+    const blob = new Blob([f.code], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = f.name;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
 
   if (files.length === 0) {
     return (
@@ -229,11 +242,17 @@ function FilesPane({ blocks }) {
         <span className="text-[11px] text-slate-500">project</span>
       </div>
       {files.map((f, i) => (
-        <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-white/5 cursor-pointer transition-colors group">
+        <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-white/5 transition-colors group">
           <File size={12} className={langColor[f.lang] || 'text-slate-500'} />
           <span className="flex-1 text-xs text-slate-400 truncate">{f.name}</span>
           <span className="text-[10px] text-slate-600">{(f.size / 1024).toFixed(1)}k</span>
-          <Download size={10} className="text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+          <button
+            onClick={() => handleDownload(f)}
+            title={`Download ${f.name}`}
+            className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:text-slate-300 text-slate-600"
+          >
+            <Download size={10} />
+          </button>
         </div>
       ))}
     </div>

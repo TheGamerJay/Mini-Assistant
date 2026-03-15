@@ -28,7 +28,7 @@ function isImageIntent(text) {
 function isBuildIntent(text, routeResult) {
   if (routeResult === 'app_builder') return true;
   if (!text) return false;
-  return /\/build|build me|create (a|an|the) (app|website|page|ui|component|form|dashboard)|make (a|an) (web|react|html)|generate (a|an) (app|website|page)/i.test(text);
+  return /\/build|build me|build it|create (a|an|the) (app|website|page|ui|component|form|dashboard)|make (a|an) (web|react|html)|make it|do it|generate (a|an) (app|website|page)|update it|add (a|an|the) (button|section|feature|page|component|form)|can you (build|make|create|add|update)/i.test(text);
 }
 
 function LoadingBubble() {
@@ -72,24 +72,44 @@ function ChatPage() {
     addImage,
     setPage,
     rateMessage,
+    pinMessage,
     forkChat,
   } = useApp();
 
-  const handleExport = useCallback(() => {
+  const handleExport = useCallback((format = 'md') => {
     const chat = chats.find(c => c.id === activeChatId);
     if (!chat) return;
-    const lines = [`# ${chat.title}`, ''];
-    chat.messages.forEach(m => {
-      if (m.role === 'user') lines.push(`**You:** ${m.content || ''}`, '');
-      else if (m.role === 'assistant' && m.type !== 'image_generating') lines.push(`**Mini:** ${m.content || ''}`, '');
-    });
-    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${chat.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const slug = chat.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    if (format === 'html') {
+      const rows = chat.messages
+        .filter(m => (m.role === 'user' || m.role === 'assistant') && m.type !== 'image_generating')
+        .map(m => {
+          const who = m.role === 'user' ? 'You' : 'Mini';
+          const cls = m.role === 'user' ? 'user' : 'assistant';
+          const body = (m.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+          return `<div class="msg ${cls}"><strong>${who}:</strong><div>${body}</div></div>`;
+        }).join('\n');
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${chat.title}</title><style>
+body{font-family:system-ui,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;background:#0d0d12;color:#ccc}
+h1{color:#fff;margin-bottom:24px}.msg{margin-bottom:20px;padding:12px 16px;border-radius:12px;line-height:1.6}
+.user{background:#1e2a3a;border:1px solid #1e4a7a}.assistant{background:#151520;border:1px solid #1e1e30}
+strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
+</style></head><body><h1>${chat.title}</h1>${rows}</body></html>`;
+      const blob = new Blob([html], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `${slug}.html`; a.click();
+      URL.revokeObjectURL(url);
+    } else {
+      const lines = [`# ${chat.title}`, ''];
+      chat.messages.forEach(m => {
+        if (m.role === 'user') lines.push(`**You:** ${m.content || ''}`, '');
+        else if (m.role === 'assistant' && m.type !== 'image_generating') lines.push(`**Mini:** ${m.content || ''}`, '');
+      });
+      const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `${slug}.md`; a.click();
+      URL.revokeObjectURL(url);
+    }
   }, [chats, activeChatId]);
 
   const { send, sendStream, cancel, loading } = useChat();
@@ -547,14 +567,24 @@ function ChatPage() {
             <span className="text-[11px] font-mono text-slate-600 truncate">
               {chats.find(c => c.id === activeChatId)?.title || 'Chat'}
             </span>
-            <button
-              onClick={handleExport}
-              title="Export chat as Markdown"
-              className="flex items-center gap-1.5 text-[11px] text-slate-600 hover:text-slate-300 transition-colors px-2 py-1 rounded hover:bg-white/5"
-            >
-              <Download size={12} />
-              Export
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => handleExport('md')}
+                title="Export as Markdown"
+                className="flex items-center gap-1 text-[11px] text-slate-600 hover:text-slate-300 transition-colors px-2 py-1 rounded hover:bg-white/5"
+              >
+                <Download size={12} />
+                MD
+              </button>
+              <button
+                onClick={() => handleExport('html')}
+                title="Export as HTML"
+                className="flex items-center gap-1 text-[11px] text-slate-600 hover:text-slate-300 transition-colors px-2 py-1 rounded hover:bg-white/5"
+              >
+                <Download size={12} />
+                HTML
+              </button>
+            </div>
           </div>
         )}
 
@@ -574,6 +604,8 @@ function ChatPage() {
               } : undefined}
               onRate={msg.role === 'assistant' ? (rating) => rateMessage(activeChatId, idx, rating) : undefined}
               onFork={msg.role === 'assistant' && activeChatId ? () => forkChat(activeChatId, idx) : undefined}
+              onSendToBuilder={msg.role === 'assistant' && msg.content?.includes('```') ? () => setRightPanelOpen(true) : undefined}
+              onPin={activeChatId ? () => pinMessage(activeChatId, idx) : undefined}
             />
           ))}
 

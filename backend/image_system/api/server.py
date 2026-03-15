@@ -1835,8 +1835,10 @@ async def chat_stream(req: ChatRequest):
             )
             # Or if the first user message was a build request
             _BUILD_KW = _re.compile(
-                r"/build|build me|create (a|an|the) (app|website|page|ui|component|dashboard)|"
-                r"make (a|an) (web|html|react)|generate (a|an) (app|website|page)",
+                r"/build|build me|build it|create (a|an|the) (app|website|page|ui|component|dashboard)|"
+                r"make (a|an) (web|html|react)|make it|do it|generate (a|an) (app|website|page)|"
+                r"update it|add (a|an|the) (button|section|feature|page|component|form)|"
+                r"can you (build|make|create|add|update)",
                 _re.I,
             )
             _first_user = next((h for h in req.history if h.role == "user"), None)

@@ -8,6 +8,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   RotateCcw, Copy, Check, Volume2, VolumeX,
   ThumbsUp, ThumbsDown, GitFork, Share2, MoreHorizontal, Clock, X, ChevronLeft, ChevronRight,
+  Bookmark, PanelRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp } from '../context/AppContext';
@@ -195,7 +196,7 @@ function ActionBtn({ onClick, title, active, activeClass, children }) {
 // ---------------------------------------------------------------------------
 // Bottom message action bar  (copy · thumbs · speaker · share · ⋯)
 // ---------------------------------------------------------------------------
-function MessageActions({ content, rating, onRate, onRetry, onFork, timestamp }) {
+function MessageActions({ content, rating, onRate, onRetry, onFork, onPin, onSendToBuilder, pinned, timestamp }) {
   const [speaking, setSpeaking]   = useState(false);
   const [copied, setCopied]       = useState(false);
   const [menuOpen, setMenuOpen]   = useState(false);
@@ -277,6 +278,20 @@ function MessageActions({ content, rating, onRate, onRetry, onFork, timestamp })
       <ActionBtn onClick={handleShare} title="Copy as shareable text">
         <Share2 size={12} />
       </ActionBtn>
+
+      {/* Pin message */}
+      {onPin && (
+        <ActionBtn onClick={onPin} title={pinned ? 'Unpin message' : 'Pin message'} active={pinned} activeClass="text-amber-400">
+          <Bookmark size={12} className={pinned ? 'text-amber-400 fill-amber-400' : ''} />
+        </ActionBtn>
+      )}
+
+      {/* Send to Builder */}
+      {onSendToBuilder && (
+        <ActionBtn onClick={onSendToBuilder} title="Open in Preview panel">
+          <PanelRight size={12} />
+        </ActionBtn>
+      )}
 
       {/* Spacer */}
       <div className="flex-1" />
@@ -436,9 +451,9 @@ function ImageLightbox({ images, startIndex, onClose }) {
 // ---------------------------------------------------------------------------
 // ChatMessage
 // ---------------------------------------------------------------------------
-function ChatMessage({ message, onRetry, onRate, onFork }) {
+function ChatMessage({ message, onRetry, onRate, onFork, onPin, onSendToBuilder }) {
   const { settings, user, avatar } = useApp();
-  const { role, type, content, image_base64, prompt, route_result, generation_time_ms, retry_used, prompt_warnings, model_used, memory_stored, rating, timestamp } = message;
+  const { role, type, content, image_base64, prompt, route_result, generation_time_ms, retry_used, prompt_warnings, model_used, memory_stored, rating, pinned, timestamp } = message;
   const { images_base64 } = message;
   const allImages = images_base64 && images_base64.length > 1 ? images_base64 : (image_base64 ? [image_base64] : []);
   const [lightboxIdx, setLightboxIdx] = useState(null);
@@ -517,8 +532,13 @@ function ChatMessage({ message, onRetry, onRate, onFork }) {
       </div>
 
       <div className={`relative group max-w-[80%] px-5 py-4 rounded-2xl rounded-tl-sm border text-sm leading-relaxed
-        ${isError ? 'bg-red-900/20 border-red-500/20 text-red-300' : 'bg-[#151520] border-white/5 text-slate-200'}`}
+        ${isError ? 'bg-red-900/20 border-red-500/20 text-red-300' : pinned ? 'bg-[#151520] border-amber-500/20 text-slate-200' : 'bg-[#151520] border-white/5 text-slate-200'}`}
       >
+        {pinned && (
+          <div className="absolute top-2 right-2">
+            <Bookmark size={10} className="text-amber-400 fill-amber-400" />
+          </div>
+        )}
         {role === 'assistant' && route_result && route_result.intent !== 'chat' && (
           <IntelligencePanel route_result={route_result} generation_time_ms={generation_time_ms} />
         )}
@@ -553,6 +573,9 @@ function ChatMessage({ message, onRetry, onRate, onFork }) {
             onRate={onRate}
             onRetry={onRetry}
             onFork={onFork}
+            onPin={onPin}
+            onSendToBuilder={onSendToBuilder}
+            pinned={pinned}
             timestamp={timestamp}
           />
         )}

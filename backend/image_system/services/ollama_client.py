@@ -109,6 +109,7 @@ class OllamaClient:
             "model": model,
             "prompt": prompt,
             "stream": False,
+            "keep_alive": 600,
             "options": {"temperature": temperature},
         }
         if system:
@@ -147,6 +148,7 @@ class OllamaClient:
             "model": model,
             "messages": messages,
             "stream": False,
+            "keep_alive": 600,
             "options": {"temperature": temperature},
         }
         if json_mode:
@@ -175,6 +177,7 @@ class OllamaClient:
             "model": model,
             "messages": messages,
             "stream": True,
+            "keep_alive": 600,
             "options": {"temperature": temperature},
         }
         async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=300)) as resp:

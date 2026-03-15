@@ -640,6 +640,16 @@ export function AppProvider({ children }) {
     }));
   }, []);
 
+  // ---- Message pinning ----
+  const pinMessage = useCallback((chatId, msgIdx) => {
+    setChats((prev) => prev.map((c) => {
+      if (c.id !== chatId) return c;
+      const msgs = [...c.messages];
+      msgs[msgIdx] = { ...msgs[msgIdx], pinned: !msgs[msgIdx].pinned };
+      return { ...c, messages: msgs };
+    }));
+  }, []);
+
   // ---- Prompt templates ----
   const [promptTemplates, setPromptTemplates] = useState(() =>
     migrateLS('ma_v2_templates', getSessionId(), [])
@@ -748,6 +758,7 @@ export function AppProvider({ children }) {
     togglePinChat,
     // message ratings
     rateMessage,
+    pinMessage,
     // prompt templates
     promptTemplates,
     addPromptTemplate,
