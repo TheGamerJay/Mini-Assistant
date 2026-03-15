@@ -3,7 +3,7 @@
     "router": { "model": "gemma3:4b", "role": "routing and classification" },
     "router_fallback": { "model": "gemma3:4b", "role": "fast classifier fallback" },
     "coder": { "model": "qwen2.5-coder:7b", "role": "coding and integration" },
-    "vision": { "model": "llava:7b", "role": "vision and image review" },
+    "vision": { "model": "moondream:latest", "role": "vision and image review" },
     "embeddings": { "model": "nomic-embed-text", "role": "embeddings and memory" }
   },
   "image_checkpoints": {
