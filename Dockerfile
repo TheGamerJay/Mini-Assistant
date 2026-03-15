@@ -7,7 +7,7 @@ RUN npm ci --legacy-peer-deps
 
 COPY frontend/ ./
 # Bake the Railway backend URL at build time
-ARG REACT_APP_BACKEND_URL=https://mini-assistant-production.up.railway.app
+ARG REACT_APP_BACKEND_URL=https://ai.miniassistantai.com
 ENV REACT_APP_BACKEND_URL=$REACT_APP_BACKEND_URL
 RUN npm run build
 
