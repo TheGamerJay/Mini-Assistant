@@ -198,6 +198,12 @@ _APP_BUILDER_CODING_STANDARDS = """
 - Error handling: wrap async operations in try/catch. Show inline error messages, not console.error only.
 - Functions should be short and do one thing. Split large functions.
 
+### Images and logos
+- NEVER use via.placeholder.com, picsum.photos, lorempixel, or any external image URL — they are dead/blocked.
+- For app logos: create an inline SVG using the app name and brand colors.
+  Example: <svg viewBox="0 0 120 40"><rect .../><text ...>AppName</text></svg>
+- For placeholder images: use a <div> with a CSS gradient background, or an inline SVG rectangle with text.
+
 ### UX patterns to always include
 - Empty states: when a list is empty, show a helpful illustrated placeholder with a call-to-action.
 - Loading states: show a spinner or skeleton when fetching/processing.
@@ -2172,6 +2178,10 @@ async def chat_stream(req: ChatRequest):
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
             "Connection": "keep-alive",
+            # Tell Chrome not to upgrade this SSE endpoint to QUIC/HTTP3.
+            # Railway uses HTTP/3 by default which drops long-lived SSE connections
+            # with ERR_QUIC_PROTOCOL_ERROR. Alt-Svc: clear disables QUIC for this origin.
+            "Alt-Svc": "clear",
         },
     )
 
