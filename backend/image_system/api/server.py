@@ -1864,6 +1864,11 @@ async def chat_stream(req: ChatRequest):
         from ..services.ollama_client import _model_name as _reg_model_name
         _is_build_intent = execution_intent == "app_builder"
 
+        # Vibe Code mode — user toggled ⚡ in the UI, skip all Q&A, build immediately
+        if req.vibe_mode and not _is_build_intent:
+            _is_build_intent = True
+            execution_intent = "app_builder"  # so done-event intent is correct → auto-opens preview
+
         # Also detect build intent from history — follow-up messages in a build
         # conversation are often classified as "chat" by the router (e.g. "make it
         # a video uploader"), but they still need the coder model + build prompt.

@@ -60,6 +60,7 @@ class ChatRequest(BaseModel):
     image_base64: Optional[str] = None               # single attached image (legacy)
     images_base64: Optional[List[str]] = None        # multiple attached images (Phase 5+)
     preferred_model: Optional[str] = None            # Ollama model override (Phase 6)
+    vibe_mode: bool = False                          # Vibe Code mode: skip Q&A, build immediately
 
 
 class PullModelsRequest(BaseModel):

@@ -116,6 +116,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
   const [messages, setMessages]       = useState([]);
   const [pendingApproval, setPendingApproval] = useState(null);
   const [rightPanelOpen, setRightPanelOpen]   = useState(false);
+  const [vibeMode, setVibeMode]               = useState(false);
 
   // Streaming text state (non-image responses)
   const [streamingText, setStreamingText] = useState(null); // null = not streaming
@@ -306,6 +307,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     });
 
     await sendStream(text, sessionIdRef.current, history, imgs.length ? imgs : null, {
+      vibeMode,
       onToken(token) {
         setStreamingText(prev => (prev === null ? token : prev + token));
       },
@@ -660,7 +662,9 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
               variant="chat"
               onSubmit={handleSubmit}
               loading={loading}
-              placeholder={rightPanelOpen ? 'Describe changes or chat…' : 'Message Mini Assistant, or say /build to create an app…'}
+              placeholder={vibeMode ? '⚡ Vibe Code ON — describe or show what you want built…' : rightPanelOpen ? 'Describe changes or chat…' : 'Message Mini Assistant, or say /build to create an app…'}
+              vibeMode={vibeMode}
+              onVibeModeToggle={() => setVibeMode(v => !v)}
             />
           </div>
           <div className="flex items-center justify-between mt-2">

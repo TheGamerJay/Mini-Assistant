@@ -41,14 +41,14 @@ export function useChat() {
     sessionId,
     history = [],
     imagesBase64 = null,
-    { onToken, onDone, onError } = {}
+    { onToken, onDone, onError, vibeMode = false } = {}
   ) => {
     setLoading(true);
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
     try {
-      const res = await api.chatStream(text, sessionId, history, imagesBase64, controller.signal);
+      const res = await api.chatStream(text, sessionId, history, imagesBase64, controller.signal, vibeMode);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const reader = res.body.getReader();

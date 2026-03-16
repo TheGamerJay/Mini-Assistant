@@ -102,12 +102,13 @@ export const api = {
   },
 
   /** Open a streaming chat connection. Returns a raw fetch Response (SSE). */
-  chatStream(message, sessionId, history = [], imagesBase64 = null, signal = null) {
+  chatStream(message, sessionId, history = [], imagesBase64 = null, signal = null, vibeMode = false) {
     const trimmedHistory = history.slice(-10).map(m => ({ role: m.role, content: m.content }));
     const body = { message, session_id: sessionId, history: trimmedHistory };
     const imgs = Array.isArray(imagesBase64) ? imagesBase64.filter(Boolean) : (imagesBase64 ? [imagesBase64] : []);
     if (imgs.length === 1) body.image_base64 = imgs[0];
     else if (imgs.length > 1) body.images_base64 = imgs;
+    if (vibeMode) body.vibe_mode = true;
     const _streamToken = getToken();
     const authHeaders = {
       ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
