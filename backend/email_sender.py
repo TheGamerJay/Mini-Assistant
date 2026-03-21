@@ -268,17 +268,45 @@ def _topup_html(name: str, credits_added: int, new_balance: int) -> tuple[str, s
 # Low-level Resend send
 # ---------------------------------------------------------------------------
 
-async def _send(to_email: str, to_name: str, subject: str, html_body: str) -> bool:
+async def _send(
+    to_email: str,
+    to_name: str,
+    subject: str,
+    html_body: str,
+    *,
+    user_id: str = "",
+    email_type: str = "upgrade",
+    db=None,
+) -> bool:
     if not resend.api_key:
         log.warning("email_sender: RESEND_API_KEY not set — skipping (to=%s)", to_email)
         return False
+
+    params: resend.Emails.SendParams = {
+        "from":    SENDER,
+        "to":      [to_email],
+        "subject": subject,
+        "html":    html_body,
+    }
+
+    # Use shared logger with retry when DB is available
+    if db is not None:
+        try:
+            from email_logger import send_with_log   # noqa: PLC0415
+            return await send_with_log(
+                db=db,
+                user_id=user_id or to_email,
+                email=to_email,
+                email_type=email_type,
+                send_fn=resend.Emails.send,
+                params=params,
+                subject=subject,
+            )
+        except Exception as exc:
+            log.warning("email_logger unavailable, sending directly: %s", exc)
+
+    # Fallback: direct send, no logging
     try:
-        params: resend.Emails.SendParams = {
-            "from":    SENDER,
-            "to":      [to_email],
-            "subject": subject,
-            "html":    html_body,
-        }
         resp = resend.Emails.send(params)
         log.info("Email sent via Resend: to=%s subject=%s id=%s",
                  to_email, subject, resp.get("id"))
@@ -297,11 +325,19 @@ async def send_welcome_email(
     to_name: str,
     plan: str,
     credits: int,
+    *,
+    user_id: str = "",
+    db=None,
 ) -> bool:
     """Send a plan upgrade welcome email. Non-fatal."""
     try:
         subject, html = _welcome_html(to_name, plan, credits)
-        return await _send(to_email, to_name, subject, html)
+        return await _send(
+            to_email, to_name, subject, html,
+            user_id=user_id or to_email,
+            email_type="upgrade",
+            db=db,
+        )
     except Exception as exc:
         log.error("send_welcome_email failed: %s", exc)
         return False
@@ -312,11 +348,19 @@ async def send_topup_email(
     to_name: str,
     credits_added: int,
     new_balance: int,
+    *,
+    user_id: str = "",
+    db=None,
 ) -> bool:
     """Send a top-up confirmation email. Non-fatal."""
     try:
         subject, html = _topup_html(to_name, credits_added, new_balance)
-        return await _send(to_email, to_name, subject, html)
+        return await _send(
+            to_email, to_name, subject, html,
+            user_id=user_id or to_email,
+            email_type="topup",
+            db=db,
+        )
     except Exception as exc:
         log.error("send_topup_email failed: %s", exc)
         return False

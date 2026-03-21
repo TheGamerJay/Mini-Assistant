@@ -281,6 +281,75 @@ async def _get_pg():
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
+
+# ── Startup: ensure indexes + launch safety background tasks ──────────────────
+@app.on_event("startup")
+async def _on_startup():
+    # MongoDB indexes for correctness + performance
+    if db is not None:
+        try:
+            # stripe_events: unique index prevents duplicate webhook processing
+            await db["stripe_events"].create_index(
+                [("event_id", 1)], unique=True, background=True, name="unique_stripe_event_id"
+            )
+            # activity_logs: cover the most common query patterns
+            await db["activity_logs"].create_index(
+                [("user_id", 1), ("timestamp", -1)], background=True, name="user_activity"
+            )
+            await db["activity_logs"].create_index(
+                [("user_id", 1), ("month_key", 1)], background=True, name="user_month_rollup"
+            )
+            await db["activity_logs"].create_index(
+                [("timestamp", -1)], background=True, name="global_timestamp"
+            )
+            # users: fast plan/billing lookups
+            await db["users"].create_index(
+                [("stripe_customer_id", 1)], sparse=True, background=True, name="stripe_customer"
+            )
+            # abuse_flags: fast per-user lookup
+            await db["abuse_flags"].create_index(
+                [("user_id", 1), ("reason", 1)], background=True, name="user_abuse_reason"
+            )
+            logging.info("✓ MongoDB indexes ensured")
+        except Exception as _idx_err:
+            logging.warning("Index creation warning (non-fatal): %s", _idx_err)
+
+    # MongoDB indexes for enforcement + alerts collections
+    if db is not None:
+        try:
+            await db["user_enforcement"].create_index(
+                [("user_id", 1)], unique=True, background=True, name="user_enforcement_uid"
+            )
+            await db["system_alerts"].create_index(
+                [("timestamp", -1)], background=True, name="system_alerts_ts"
+            )
+        except Exception as _idx2_err:
+            logging.warning("Secondary index warning (non-fatal): %s", _idx2_err)
+
+    # MongoDB indexes for email_logs collection
+    if db is not None:
+        try:
+            await db["email_logs"].create_index(
+                [("user_id", 1), ("timestamp", -1)], background=True, name="email_user_ts"
+            )
+            await db["email_logs"].create_index(
+                [("email_type", 1), ("timestamp", -1)], background=True, name="email_type_ts"
+            )
+            await db["email_logs"].create_index(
+                [("status", 1), ("timestamp", -1)], background=True, name="email_status_ts"
+            )
+        except Exception as _idx3_err:
+            logging.warning("email_logs index warning (non-fatal): %s", _idx3_err)
+
+    # Start safety background maintenance tasks + run startup security checks
+    try:
+        import safety as _safety   # noqa: PLC0415
+        _safety.run_startup_security_checks()
+        await _safety.start_background_tasks()
+        logging.info("✓ Safety background tasks started")
+    except Exception as _safety_err:
+        logging.warning("Safety module startup failed (non-fatal): %s", _safety_err)
+
 # Default model for basic endpoints (override with FAST_MODEL env var)
 _default_model = os.environ.get('FAST_MODEL', 'glm-4.7:cloud')
 
@@ -899,10 +968,23 @@ class AppBuilderRequest(BaseModel):
     project_type: str = "app"      # app | game | dashboard | landing | tool | creative
     build_mode: str = "polished"   # quick | polished | production | game_jam | mobile
 
+_security_logger = logging.getLogger("security")
+
 @api_router.post("/app-builder/generate")
-async def generate_app(request: AppBuilderRequest):
+async def generate_app(request: AppBuilderRequest, authorization: str = Header(None)):
     if not ollama_client:
         raise HTTPException(status_code=503, detail="Ollama service not available")
+
+    # ── Credit gate ────────────────────────────────────────────────────────
+    try:
+        from mini_credits import check_and_deduct as _deduct
+        _ok, _remaining = await _deduct(authorization, action_type="app_build")
+        if not _ok:
+            raise HTTPException(status_code=402, detail="out_of_credits")
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # credit module unavailable — allow through
 
     _mode_addendum = {
         "quick":      "\nBUILD MODE: Quick prototype. Core features only. Prioritize working logic over polish.",
@@ -1052,6 +1134,28 @@ OUTPUT FORMAT:
             except Exception:
                 pass
 
+        # ── Plan gating: truncate code for free users ──────────────────────────
+        plan = await _get_user_plan(authorization)
+        is_paid = plan != "free"
+
+        if not is_paid:
+            _security_logger.info(
+                "FREE_TRUNCATION build_id=%s plan=%s desc=%.60s",
+                build_id, plan, request.description,
+            )
+            content = _truncate_code(content)
+            project = {
+                **project,
+                "index_html":  _truncate_code(project.get("index_html")),
+                "style_css":   _truncate_code(project.get("style_css")),
+                "script_js":   _truncate_code(project.get("script_js")),
+                "readme_md":   project.get("readme_md"),
+                "extra_files": [
+                    {**f, "content": _truncate_code(f.get("content"))}
+                    for f in (project.get("extra_files") or [])
+                ],
+            }
+
         return {
             "name": app_name,
             "description": request.description,
@@ -1061,7 +1165,10 @@ OUTPUT FORMAT:
             "preview_url": f"/api/preview/{build_id}",
             "project_type": request.project_type,
             "build_mode": request.build_mode,
+            "plan": plan,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Generation error: {str(e)}")
 
@@ -1207,6 +1314,31 @@ class AppBuilderExportRequest(BaseModel):
     description: str = ""
     assets: List[dict] = []         # [{name, type, dataUrl}]
     extra_files: List[dict] = []    # [{name, content}]
+
+
+_FREE_PREVIEW_LINES = 18
+_FREE_LOCK_COMMENT  = "\n// 🔒 Upgrade to a paid plan to view and export the full code."
+
+async def _get_user_plan(authorization: str | None) -> str:
+    """Return the user's plan string, or 'free' if unauthenticated / token invalid."""
+    if not authorization:
+        return "free"
+    try:
+        from auth_routes import get_current_user
+        user = await get_current_user(authorization)
+        return user.get("plan", "free") or "free"
+    except Exception:
+        return "free"
+
+
+def _truncate_code(code: str | None) -> str | None:
+    """Return a free-tier preview: first N lines + lock comment."""
+    if not code:
+        return code
+    lines = code.split("\n")
+    if len(lines) <= _FREE_PREVIEW_LINES:
+        return code
+    return "\n".join(lines[:_FREE_PREVIEW_LINES]) + _FREE_LOCK_COMMENT
 
 
 async def _require_paid(authorization: str) -> dict:
@@ -4126,6 +4258,14 @@ try:
     logging.info("✓ Auth routes registered (/api/auth/*, /api/db/*, /api/admin/*, /api/tasks/*)")
 except Exception as _auth_err:
     logging.warning("Auth routes unavailable: %s", _auth_err)
+
+# ── Stripe billing routes ──────────────────────────────────────────────────────
+try:
+    from stripe_handler import stripe_router
+    app.include_router(stripe_router)
+    logging.info("✓ Stripe routes registered (/api/stripe/*)")
+except Exception as _stripe_err:
+    logging.warning("Stripe routes unavailable: %s", _stripe_err)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

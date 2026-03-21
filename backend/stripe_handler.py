@@ -537,9 +537,10 @@ async def _handle_checkout_completed(db, session: dict) -> None:
             "stripe_session_id": session.get("id"),
         })
 
-        # Send top-up confirmation email
+        # Send top-up confirmation email + track conversion
         try:
             from email_sender import send_topup_email   # noqa: PLC0415
+            from email_logger import mark_conversion    # noqa: PLC0415
             user_doc = await db["users"].find_one(
                 {"id": user_id},
                 {"email": 1, "name": 1, "topup_credits": 1, "subscription_credits": 1},
@@ -554,7 +555,10 @@ async def _handle_checkout_completed(db, session: dict) -> None:
                     to_name=user_doc.get("name", ""),
                     credits_added=credits_to_add,
                     new_balance=new_balance,
+                    user_id=user_id,
+                    db=db,
                 )
+                await mark_conversion(db, user_id, "topup", window_hours=24)
         except Exception as _email_exc:
             log.warning("Top-up email failed (non-fatal): %s", _email_exc)
 
@@ -621,9 +625,10 @@ async def _handle_invoice_paid(db, invoice: dict) -> None:
         user_id, plan, plan_credits,
     )
 
-    # Send welcome / renewal email (non-fatal)
+    # Send welcome / renewal email + track conversion (non-fatal)
     try:
         from email_sender import send_welcome_email   # noqa: PLC0415
+        from email_logger import mark_conversion      # noqa: PLC0415
         user_doc = await db["users"].find_one({"id": user_id}, {"email": 1, "name": 1})
         if user_doc and user_doc.get("email") and plan != "free":
             await send_welcome_email(
@@ -631,7 +636,10 @@ async def _handle_invoice_paid(db, invoice: dict) -> None:
                 to_name=user_doc.get("name", ""),
                 plan=plan,
                 credits=plan_credits,
+                user_id=user_id,
+                db=db,
             )
+            await mark_conversion(db, user_id, "upgrade", window_hours=48)
     except Exception as _email_exc:
         log.warning("Welcome email failed (non-fatal): %s", _email_exc)
 

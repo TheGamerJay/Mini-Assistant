@@ -1417,3 +1417,139 @@ async def test_email():
         daemon=True,
     ).start()
     return {"status": "sent", "note": "Check your inbox in a few seconds."}
+
+
+# ---------------------------------------------------------------------------
+# Admin: email analytics — GET /api/admin/email-analytics
+# ---------------------------------------------------------------------------
+
+@admin_router.get("/email-analytics")
+async def email_analytics(admin: dict = Depends(_require_admin)):
+    """
+    Returns aggregate email send stats for admins.
+    Includes totals, per-type breakdown, conversion counts and rates.
+    """
+    db = _get_db()
+
+    try:
+        # --- Totals ---
+        pipeline_totals = [
+            {"$group": {
+                "_id":       "$status",
+                "count":     {"$sum": 1},
+            }}
+        ]
+        totals_raw = await db["email_logs"].aggregate(pipeline_totals).to_list(None)
+        totals = {row["_id"]: row["count"] for row in totals_raw}
+
+        total_sent   = totals.get("sent", 0)
+        total_failed = totals.get("failed", 0)
+        total_all    = total_sent + total_failed
+
+        # --- Per-type breakdown ---
+        pipeline_by_type = [
+            {"$group": {
+                "_id": {
+                    "type":   "$email_type",
+                    "status": "$status",
+                },
+                "count": {"$sum": 1},
+            }}
+        ]
+        by_type_raw = await db["email_logs"].aggregate(pipeline_by_type).to_list(None)
+
+        by_type: dict = {}
+        for row in by_type_raw:
+            t = row["_id"]["type"]
+            s = row["_id"]["status"]
+            if t not in by_type:
+                by_type[t] = {"sent": 0, "failed": 0}
+            by_type[t][s] = row["count"]
+
+        # --- Conversions ---
+        total_converted = await db["email_logs"].count_documents({"converted": True})
+        by_conversion_type_raw = await db["email_logs"].aggregate([
+            {"$match": {"converted": True}},
+            {"$group": {"_id": "$conversion_type", "count": {"$sum": 1}}},
+        ]).to_list(None)
+        conversions_by_type = {r["_id"]: r["count"] for r in by_conversion_type_raw}
+
+        conversion_rate = round(total_converted / total_sent * 100, 1) if total_sent else 0
+
+        # --- 7-day daily stats ---
+        seven_days_ago = __import__("time").time() - (7 * 86400)
+        daily_pipeline = [
+            {"$match": {"timestamp": {"$gte": seven_days_ago}}},
+            {"$addFields": {
+                "day": {"$dateToString": {
+                    "format": "%Y-%m-%d",
+                    "date":   {"$toDate": {"$multiply": ["$timestamp", 1000]}},
+                }}
+            }},
+            {"$group": {
+                "_id":    "$day",
+                "sent":   {"$sum": {"$cond": [{"$eq": ["$status", "sent"]},   1, 0]}},
+                "failed": {"$sum": {"$cond": [{"$eq": ["$status", "failed"]}, 1, 0]}},
+            }},
+            {"$sort": {"_id": 1}},
+        ]
+        daily_raw = await db["email_logs"].aggregate(daily_pipeline).to_list(None)
+        daily_stats = [{"date": r["_id"], "sent": r["sent"], "failed": r["failed"]} for r in daily_raw]
+
+        return {
+            "total_sent":         total_sent,
+            "total_failed":       total_failed,
+            "total_emails":       total_all,
+            "total_converted":    total_converted,
+            "conversion_rate_pct": conversion_rate,
+            "conversions_by_type": conversions_by_type,
+            "by_type":            by_type,
+            "daily_stats_7d":     daily_stats,
+        }
+
+    except Exception as exc:
+        log.error("email-analytics error: %s", exc)
+        return {
+            "total_sent": 0, "total_failed": 0, "total_emails": 0,
+            "total_converted": 0, "conversion_rate_pct": 0,
+            "conversions_by_type": {}, "by_type": {}, "daily_stats_7d": [],
+        }
+
+
+# ---------------------------------------------------------------------------
+# Admin: email logs — GET /api/admin/email-logs
+# ---------------------------------------------------------------------------
+
+@admin_router.get("/email-logs")
+async def email_logs_list(
+    type: str = None,
+    status: str = None,
+    user_id: str = None,
+    admin: dict = Depends(_require_admin),
+):
+    """
+    Returns the latest 100 email log entries, newest first.
+    Optional query params: type, status, user_id
+    """
+    db = _get_db()
+
+    query: dict = {}
+    if type:
+        query["email_type"] = type
+    if status:
+        query["status"] = status
+    if user_id:
+        query["user_id"] = user_id
+
+    try:
+        cursor = db["email_logs"].find(
+            query,
+            {"_id": 0},
+        ).sort("timestamp", -1).limit(100)
+
+        logs = await cursor.to_list(None)
+        return {"logs": logs, "count": len(logs)}
+
+    except Exception as exc:
+        log.error("email-logs error: %s", exc)
+        return {"logs": [], "count": 0, "error": str(exc)}

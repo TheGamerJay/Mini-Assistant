@@ -1,8 +1,10 @@
 """
 email_service.py
-Resend-based transactional email for Mini Assistant AI.
+Resend-based signup welcome email for Mini Assistant AI.
+Called on register / Google OAuth — runs in a daemon thread (sync wrapper).
 """
 
+import asyncio
 import logging
 import os
 
@@ -176,23 +178,55 @@ def _build_html(name: str) -> str:
 # Public function
 # ---------------------------------------------------------------------------
 
-def send_welcome_email(user_email: str, name: str) -> None:
+def send_welcome_email(user_email: str, name: str, user_id: str = "") -> None:
     """
-    Send a welcome email via Resend.
+    Send a signup welcome email via Resend.
     Designed to be called in a background thread — never raises.
+    Logs the send attempt to email_logs via email_logger.
     """
     if not resend.api_key:
         log.warning("send_welcome_email: RESEND_API_KEY not set — skipping")
         return
 
+    subject = "Welcome to Mini Assistant AI 🚀"
+    params: resend.Emails.SendParams = {
+        "from":    SENDER,
+        "to":      [user_email],
+        "subject": subject,
+        "html":    _build_html(name),
+    }
+
+    # Try to get DB and use the shared logger with retry
     try:
-        params: resend.Emails.SendParams = {
-            "from":    SENDER,
-            "to":      [user_email],
-            "subject": "Welcome to Mini Assistant AI 🚀",
-            "html":    _build_html(name),
-        }
-        response = resend.Emails.send(params)
-        log.info("Welcome email sent to %s (id=%s)", user_email, response.get("id"))
+        import server as _srv  # noqa: PLC0415
+        from email_logger import send_with_log  # noqa: PLC0415
+
+        async def _async_send():
+            return await send_with_log(
+                db=_srv.db,
+                user_id=user_id or user_email,
+                email=user_email,
+                email_type="welcome",
+                send_fn=resend.Emails.send,
+                params=params,
+                subject=subject,
+            )
+
+        # Run in the current thread's event loop or create a new one
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.run_coroutine_threadsafe(_async_send(), loop)
+            else:
+                loop.run_until_complete(_async_send())
+        except RuntimeError:
+            asyncio.run(_async_send())
+
     except Exception as exc:
-        log.error("send_welcome_email failed for %s: %s", user_email, exc)
+        # Fallback: send directly without logging
+        log.warning("email_logger unavailable, sending directly: %s", exc)
+        try:
+            response = resend.Emails.send(params)
+            log.info("Welcome email sent to %s (id=%s)", user_email, response.get("id"))
+        except Exception as send_exc:
+            log.error("send_welcome_email failed for %s: %s", user_email, send_exc)
