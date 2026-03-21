@@ -453,19 +453,42 @@ export default function UserDashboard() {
             <Gift size={14} className="text-emerald-400" /> Refer a Friend
           </h2>
           <p className="text-xs text-slate-500 mb-4">
-            Share your link. When a friend subscribes, you both get <span className="text-emerald-400 font-medium">+50 credits</span>. Max 3 referrals.
+            Share your link. When a friend subscribes, you both get <span className="text-emerald-400 font-medium">+50 credits</span>. Max 3 referrals = 150 bonus credits.
           </p>
           {referral ? (
             <div className="space-y-3">
-              {/* Progress dots */}
+              {/* Progress bar with completed + pending segments */}
               <div className="flex items-center gap-2">
-                {Array.from({ length: referral.max_rewards }).map((_, i) => (
-                  <div key={i} className={`h-2 flex-1 rounded-full transition-colors ${i < referral.referrals_rewarded_count ? 'bg-emerald-500' : 'bg-white/10'}`} />
-                ))}
-                <span className="text-xs text-slate-500 ml-1 flex-shrink-0">
-                  {referral.referrals_rewarded_count}/{referral.max_rewards}
+                {Array.from({ length: referral.max_rewards }).map((_, i) => {
+                  const isCompleted = i < referral.referrals_rewarded_count;
+                  const isPending   = !isCompleted && i < (referral.referrals_rewarded_count + (referral.referrals_pending_count || 0));
+                  return (
+                    <div
+                      key={i}
+                      className={`h-2 flex-1 rounded-full transition-colors ${
+                        isCompleted ? 'bg-emerald-500' : isPending ? 'bg-amber-400/60' : 'bg-white/10'
+                      }`}
+                    />
+                  );
+                })}
+                <span className="text-xs text-slate-500 ml-1 flex-shrink-0 whitespace-nowrap">
+                  {referral.referrals_rewarded_count}/{referral.max_rewards} done
+                  {referral.referrals_pending_count > 0 && (
+                    <span className="text-amber-400 ml-1">· {referral.referrals_pending_count} pending</span>
+                  )}
                 </span>
               </div>
+
+              {/* Urgency text */}
+              {referral.referrals_rewarded_count < referral.max_rewards && (
+                <p className="text-[11px] text-slate-500 text-center">
+                  {referral.slots_remaining === referral.max_rewards
+                    ? <>Invite <span className="text-emerald-400 font-semibold">3 friends</span> who subscribe to unlock your full <span className="text-emerald-400 font-semibold">150 credit bonus</span> 🚀</>
+                    : <>Just <span className="text-emerald-400 font-semibold">{referral.slots_remaining} more</span> friend{referral.slots_remaining > 1 ? 's' : ''} to unlock your full bonus!</>
+                  }
+                </p>
+              )}
+
               {/* Copy link button */}
               <button
                 onClick={copyReferralLink}
@@ -478,12 +501,13 @@ export default function UserDashboard() {
                   {copied ? <><Check size={12} /> Copied!</> : <><Copy size={12} /> Copy</>}
                 </span>
               </button>
+
               {referral.referrals_rewarded_count >= referral.max_rewards && (
-                <p className="text-xs text-amber-400/80 text-center">You've reached the referral cap — nice work!</p>
+                <p className="text-xs text-amber-400/80 text-center">🎉 You've maxed out your referral rewards — nice work!</p>
               )}
             </div>
           ) : (
-            <div className="h-8 bg-white/5 rounded-xl animate-pulse" />
+            <div className="h-16 bg-white/5 rounded-xl animate-pulse" />
           )}
         </div>
 

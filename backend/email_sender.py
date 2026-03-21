@@ -364,3 +364,67 @@ async def send_topup_email(
     except Exception as exc:
         log.error("send_topup_email failed: %s", exc)
         return False
+
+
+def _referral_signup_html(referrer_name: str, sub_bonus: int) -> tuple[str, str]:
+    subject = "🔥 Someone joined using your referral link!"
+    content = f"""
+      <h1 style="margin:0 0 8px;font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.5px;">
+        Someone joined with your link!
+      </h1>
+      <p style="margin:0 0 24px;font-size:15px;color:#94a3b8;line-height:1.6;">
+        Hey {referrer_name}, a new user just signed up using your referral link.
+      </p>
+
+      <div style="background:#0d1117;border:1px solid rgba(16,185,129,0.25);border-radius:14px;padding:20px 24px;margin-bottom:24px;">
+        <p style="margin:0 0 10px;font-size:13px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">
+          What happens next
+        </p>
+        <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:12px;">
+          <span style="font-size:18px;">⏳</span>
+          <div>
+            <p style="margin:0;font-size:14px;font-weight:600;color:#e2e8f0;">Pending reward</p>
+            <p style="margin:4px 0 0;font-size:13px;color:#64748b;line-height:1.5;">
+              Your friend just signed up. Once they subscribe to a paid plan, you'll both earn <strong style="color:#10b981;">+{sub_bonus} credits</strong>.
+            </p>
+          </div>
+        </div>
+        <div style="display:flex;align-items:flex-start;gap:12px;">
+          <span style="font-size:18px;">🎁</span>
+          <div>
+            <p style="margin:0;font-size:14px;font-weight:600;color:#e2e8f0;">Max reward: 150 credits</p>
+            <p style="margin:4px 0 0;font-size:13px;color:#64748b;line-height:1.5;">
+              Refer up to 3 friends who subscribe and earn up to 150 bonus credits total.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <p style="margin:0 0 24px;font-size:14px;color:#94a3b8;line-height:1.6;text-align:center;">
+        Keep sharing your referral link to maximise your rewards! 🚀
+      </p>
+    """
+    html = _shell(content, FRONTEND_URL, "View my dashboard")
+    return subject, html
+
+
+async def send_referral_signup_email(
+    to_email: str,
+    to_name: str,
+    sub_bonus: int = 50,
+    *,
+    user_id: str = "",
+    db=None,
+) -> bool:
+    """Notify referrer that someone signed up with their link. Non-fatal."""
+    try:
+        subject, html = _referral_signup_html(to_name, sub_bonus)
+        return await _send(
+            to_email, to_name, subject, html,
+            user_id=user_id or to_email,
+            email_type="referral_signup",
+            db=db,
+        )
+    except Exception as exc:
+        log.error("send_referral_signup_email failed: %s", exc)
+        return False

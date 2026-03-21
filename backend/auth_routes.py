@@ -249,9 +249,25 @@ async def register(body: RegisterBody):
     }
     await db["users"].insert_one(user_doc)
 
-    if referred_by_code:
+    if referred_by_code and referrer:
         log.info("referral.signup: new user=%s referred_by=%s +%d signup credits",
                  user_doc["id"], referred_by_code, REFERRAL_SIGNUP_BONUS)
+        # Email the referrer to let them know someone joined with their link
+        async def _notify_referrer():
+            try:
+                from email_sender import send_referral_signup_email  # noqa: PLC0415
+                db2 = _get_db()
+                await send_referral_signup_email(
+                    to_email=referrer["email"],
+                    to_name=referrer.get("name", "there"),
+                    sub_bonus=REFERRAL_SUB_BONUS,
+                    user_id=referrer["id"],
+                    db=db2,
+                )
+            except Exception as _e:
+                log.warning("referral signup email failed (non-fatal): %s", _e)
+        import asyncio as _asyncio
+        _asyncio.create_task(_notify_referrer())
 
     # Fire welcome email in background — never blocks the response
     try:
@@ -440,7 +456,7 @@ async def change_password(body: ChangePasswordBody, authorization: str = Header(
 
 @auth_router.get("/referral")
 async def get_referral_info(authorization: str = Header(None)):
-    """Return current user's referral code, link, and stats."""
+    """Return current user's referral code, link, and stats (completed + pending)."""
     user = await get_current_user(authorization)
     db = _get_db()
     # Backfill referral_code for pre-existing accounts
@@ -452,12 +468,22 @@ async def get_referral_info(authorization: str = Header(None)):
             "referral_reward_given": False,
         }})
         user["referral_code"] = code
-    count = user.get("referrals_rewarded_count", 0)
+
+    code = user["referral_code"]
+    completed = user.get("referrals_rewarded_count", 0)
+
+    # Count signups using this code that haven't subscribed yet (pending)
+    pending = await db["users"].count_documents({
+        "referred_by": code,
+        "referral_reward_given": {"$ne": True},
+    })
+
     return {
-        "referral_code": user["referral_code"],
-        "referrals_rewarded_count": count,
+        "referral_code": code,
+        "referrals_rewarded_count": completed,
+        "referrals_pending_count": pending,
         "max_rewards": REFERRAL_MAX_REWARDS,
-        "slots_remaining": max(0, REFERRAL_MAX_REWARDS - count),
+        "slots_remaining": max(0, REFERRAL_MAX_REWARDS - completed),
         "signup_bonus": REFERRAL_SIGNUP_BONUS,
         "sub_bonus": REFERRAL_SUB_BONUS,
     }
