@@ -28,6 +28,7 @@ import SettingsModal from './pages/SettingsModal';
 import AuthPage from './pages/AuthPage';
 import ProfilePage from './pages/ProfilePage';
 import AdminPage from './pages/AdminPage';
+import PurchaseCreditsModal from './components/PurchaseCreditsModal';
 
 // Legal pages
 import TermsPage from './pages/legal/TermsPage';
@@ -131,7 +132,7 @@ function pageTitle(page) {
 // AppShell — rendered inside AppProvider so it can use useApp()
 // ---------------------------------------------------------------------------
 function AppShell() {
-  const { page, setPage, getPrevPage, serverStatus, setServerStatus } = useApp();
+  const { page, setPage, getPrevPage, serverStatus, setServerStatus, purchaseModalOpen, setPurchaseModalOpen } = useApp();
 
   // Poll server status every 60 s
   useEffect(() => {
@@ -194,6 +195,11 @@ function AppShell() {
       {/* Settings modal overlays the whole shell */}
       {page === 'settings' && (
         <SettingsModal onClose={() => setPage(getPrevPage())} />
+      )}
+
+      {/* Purchase Credits modal — accessible from anywhere */}
+      {purchaseModalOpen && (
+        <PurchaseCreditsModal onClose={() => setPurchaseModalOpen(false)} />
       )}
     </div>
   );

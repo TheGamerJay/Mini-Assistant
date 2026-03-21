@@ -306,6 +306,7 @@ export function AppProvider({ children }) {
   const [credits, setCredits] = useState(null); // null = loading
   const [plan, setPlan]       = useState('free');
   const isSubscribed = plan !== 'free';
+  const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
 
   const refreshCredits = useCallback(() => {
     api.authCredits().then(({ credits: c, plan: p }) => {
@@ -805,6 +806,8 @@ export function AppProvider({ children }) {
     plan,
     isSubscribed,
     refreshCredits,
+    purchaseModalOpen,
+    setPurchaseModalOpen,
     getUserSecurityQuestion,
     resetPasswordWithSecurityAnswer,
     // profile

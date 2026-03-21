@@ -361,6 +361,7 @@ function Sidebar() {
     credits,
     plan,
     isSubscribed,
+    setPurchaseModalOpen,
   } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -610,15 +611,15 @@ function Sidebar() {
             {!sidebarCollapsed && (
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between mb-0.5">
-                  <span className="text-[11px] font-mono text-slate-400">{credits} Mini Credits</span>
-                  {credits === 0 && (
-                    <button
-                      onClick={() => setPage('settings')}
-                      className="text-[10px] text-amber-400 font-medium bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 px-1.5 py-0.5 rounded transition-colors"
-                    >
-                      Upgrade
-                    </button>
-                  )}
+                  <span className={`text-[11px] font-mono ${credits === 0 ? 'text-red-400' : credits <= 3 ? 'text-amber-400' : 'text-slate-400'}`}>
+                    {credits} Mini Credits
+                  </span>
+                  <button
+                    onClick={() => setPurchaseModalOpen(true)}
+                    className="text-[10px] text-cyan-400 font-medium bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/20 px-1.5 py-0.5 rounded transition-colors"
+                  >
+                    + Get Credits
+                  </button>
                 </div>
                 <div className="h-1 rounded-full bg-white/10 overflow-hidden">
                   <div
@@ -627,6 +628,13 @@ function Sidebar() {
                   />
                 </div>
               </div>
+            )}
+            {sidebarCollapsed && (
+              <button
+                onClick={() => setPurchaseModalOpen(true)}
+                className="sr-only"
+                title="Get Credits"
+              />
             )}
           </div>
         )}

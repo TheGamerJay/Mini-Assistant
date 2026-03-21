@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { PanelRight, Download, ChevronDown } from 'lucide-react';
+import { PanelRight, Download, ChevronDown, Zap, Star } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp, makeThumbnail } from '../context/AppContext';
 import { useChat } from '../hooks/useChat';
@@ -62,6 +62,36 @@ function StreamingBubble({ text }) {
   );
 }
 
+function OutOfCreditsCard({ onBuy, onUpgrade }) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center flex-shrink-0 mt-1">
+        <Zap size={15} className="text-black" />
+      </div>
+      <div className="flex-1 max-w-lg rounded-2xl rounded-tl-sm border border-amber-500/20 bg-amber-500/5 p-4">
+        <p className="text-sm font-semibold text-amber-300 mb-0.5">You've used all your Mini Credits</p>
+        <p className="text-xs text-slate-400 mb-3">
+          Get more credits to keep building, or subscribe for unlimited access.
+        </p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={onBuy}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold transition-all"
+          >
+            <Zap size={11} /> + Get Credits
+          </button>
+          <button
+            onClick={onUpgrade}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-xs font-medium transition-all"
+          >
+            <Star size={11} /> View Plans
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ChatPage() {
   const {
     activeChatId,
@@ -74,6 +104,7 @@ function ChatPage() {
     rateMessage,
     pinMessage,
     forkChat,
+    setPurchaseModalOpen,
   } = useApp();
 
   const handleExport = useCallback((format = 'md') => {
@@ -591,24 +622,35 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         {/* Messages */}
         <div className="relative flex-1 overflow-hidden">
         <div ref={scrollContainerRef} className="h-full overflow-y-auto px-4 md:px-10 lg:px-16 py-6 space-y-6">
-          {messages.map((msg, idx) => (
-            <ChatMessage
-              key={idx}
-              message={msg}
-              onRetry={msg.role === 'assistant' ? () => {
-                const prevUser = messages.slice(0, idx).reverse().find(m => m.role === 'user');
-                if (prevUser) handleSubmit(
-                  prevUser.content,
-                  prevUser.images_base64 || (prevUser.image_base64 ? [prevUser.image_base64] : null)
-                );
-              } : undefined}
-              onRate={msg.role === 'assistant' ? (rating) => rateMessage(activeChatId, idx, rating) : undefined}
-              onFork={msg.role === 'assistant' && activeChatId ? () => forkChat(activeChatId, idx) : undefined}
-              onSendToBuilder={msg.role === 'assistant' && msg.content?.includes('```') ? () => setRightPanelOpen(true) : undefined}
-              onPin={activeChatId ? () => pinMessage(activeChatId, idx) : undefined}
-              onSuggest={msg.role === 'assistant' ? (text) => handleSubmit(text) : undefined}
-            />
-          ))}
+          {messages.map((msg, idx) => {
+            if (msg._outOfCredits) {
+              return (
+                <OutOfCreditsCard
+                  key={idx}
+                  onBuy={() => setPurchaseModalOpen(true)}
+                  onUpgrade={() => setPage('settings')}
+                />
+              );
+            }
+            return (
+              <ChatMessage
+                key={idx}
+                message={msg}
+                onRetry={msg.role === 'assistant' ? () => {
+                  const prevUser = messages.slice(0, idx).reverse().find(m => m.role === 'user');
+                  if (prevUser) handleSubmit(
+                    prevUser.content,
+                    prevUser.images_base64 || (prevUser.image_base64 ? [prevUser.image_base64] : null)
+                  );
+                } : undefined}
+                onRate={msg.role === 'assistant' ? (rating) => rateMessage(activeChatId, idx, rating) : undefined}
+                onFork={msg.role === 'assistant' && activeChatId ? () => forkChat(activeChatId, idx) : undefined}
+                onSendToBuilder={msg.role === 'assistant' && msg.content?.includes('```') ? () => setRightPanelOpen(true) : undefined}
+                onPin={activeChatId ? () => pinMessage(activeChatId, idx) : undefined}
+                onSuggest={msg.role === 'assistant' ? (text) => handleSubmit(text) : undefined}
+              />
+            );
+          })}
 
           {/* Live streaming text bubble */}
           {streamingText !== null && (
