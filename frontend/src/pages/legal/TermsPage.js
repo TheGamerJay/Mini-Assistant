@@ -15,11 +15,17 @@ export default function TermsPage() {
       <h2>1. Electronic Agreement &amp; Digital Consent</h2>
       <p>
         <strong>By accessing or using the Service in any manner — including registering an account, clicking
-        "I Agree," completing a purchase, or continuing to use the Service after notice of updated Terms —
-        you affirmatively consent to and agree to be bound by these Terms in their entirety.</strong> This
-        consent constitutes a valid, binding electronic signature under the Electronic Signatures in Global and
-        National Commerce Act (E-SIGN Act), 15 U.S.C. § 7001 et seq., and applicable state law. You waive any
-        right to claim that these Terms are unenforceable because they were not signed in physical writing.
+        "I Agree," completing a purchase, submitting a prompt, or continuing to use the Service after notice
+        of updated Terms — you affirmatively consent to and agree to be bound by these Terms in their
+        entirety.</strong> This consent constitutes a valid, binding electronic signature under the Electronic
+        Signatures in Global and National Commerce Act (E-SIGN Act), 15 U.S.C. § 7001 et seq., and applicable
+        state law. You waive any right to claim that these Terms are unenforceable because they were not signed
+        in physical writing.
+      </p>
+      <p>
+        We may record your IP address, browser fingerprint, timestamp, and session data at the time you accept
+        these Terms. This record constitutes prima facie evidence of your acceptance and may be used in any
+        dispute regarding whether you agreed to these Terms.
       </p>
       <p>
         If you are accepting these Terms on behalf of a company, organization, or other legal entity, you
@@ -48,16 +54,19 @@ export default function TermsPage() {
         for any loss or damage arising from your failure to protect your credentials.
       </p>
       <p>
-        We reserve the right to refuse registration, reclaim usernames, cancel accounts, or remove or edit
-        content at our sole discretion and without advance notice.
+        <strong>We are not obligated to provide the Service to any user and may refuse, suspend, or
+        terminate access to any person at any time, for any or no reason, at our sole and absolute
+        discretion, with or without notice.</strong> The right to use the Service is a revocable privilege,
+        not a right. We reserve the right to refuse registration, reclaim usernames, cancel accounts, or
+        remove or edit content without advance notice or liability.
       </p>
 
       <h2>3. Description of Service</h2>
       <p>
         Mini Assistant AI is an AI-powered developer assistant platform providing chat assistance, code
         generation, app-building workflows, image generation, and related AI capabilities. The Service relies
-        on third-party AI infrastructure providers including Anthropic and OpenAI, whose availability and
-        policies are outside our control.
+        on third-party AI infrastructure providers including Anthropic and OpenAI, whose availability,
+        performance, and policies are outside our control and may change without notice.
       </p>
       <p>
         The Service is provided on a credit-based model. We reserve the right to modify, suspend, or
@@ -117,6 +126,16 @@ export default function TermsPage() {
         <strong>4.8 Taxes.</strong> All fees are exclusive of applicable taxes. You are solely responsible
         for all sales, use, value-added, or similar taxes on your purchases, except taxes on our net income.
       </p>
+      <p>
+        <strong>4.9 Pricing Errors.</strong> In the event of a pricing error, typographical mistake,
+        system malfunction, unauthorized modification, or any other technical or administrative error that
+        causes a product or plan to be displayed or offered at an incorrect price — including a price of
+        $0.00 — we reserve the right to cancel, void, or refuse to honor any order or subscription placed
+        at that erroneous price, regardless of whether the order was confirmed or payment was processed.
+        If payment has already been collected for an erroneous-price transaction that we elect to cancel,
+        we will issue a full refund of the amount paid. We are not obligated to provide the Service at
+        an incorrect price and expressly reserve all rights to correct pricing errors at any time.
+      </p>
 
       <h2>5. Anti-Chargeback &amp; Payment Dispute Policy</h2>
       <p>
@@ -136,7 +155,7 @@ export default function TermsPage() {
         <li>Submit comprehensive evidence to dispute and reverse the chargeback, including transaction records, usage logs, and account history;</li>
         <li>Pursue recovery of the disputed amount plus all chargeback fees, processing costs, and administrative expenses;</li>
         <li>Report the account to fraud prevention databases and payment processors;</li>
-        <li>Permanently ban the email address, payment method, and associated IP addresses from the Service.</li>
+        <li>Permanently ban the email address, payment method, device fingerprint, and associated IP addresses from the Service.</li>
       </ul>
       <p>
         Repeated or bad-faith chargeback activity constitutes fraud and will be referred to appropriate
@@ -146,9 +165,10 @@ export default function TermsPage() {
       <h2>6. Acceptable Use</h2>
       <p>
         Your use of the Service must comply with our <strong>Prohibited Uses Policy</strong>, incorporated
-        into these Terms by reference. We determine, in our sole and absolute discretion, what constitutes
-        a violation. Violations may result in immediate account suspension or termination without notice or
-        refund. Without limiting that policy, you agree not to:
+        into these Terms by reference. <strong>We determine, in our sole and absolute discretion, what
+        constitutes a violation of these Terms or any policy.</strong> Our determination is final. Violations
+        may result in immediate account suspension or termination without notice or refund. Without limiting
+        that policy, you agree not to:
       </p>
       <ul>
         <li>Use the Service to generate, distribute, or facilitate illegal content;</li>
@@ -206,14 +226,25 @@ export default function TermsPage() {
         train our own AI models. Your prompts are transmitted to third-party AI providers and processed
         under their respective terms, as disclosed in our Privacy Policy.
       </p>
+      <p>
+        <strong>7.8 Experimental &amp; Unpredictable AI Features.</strong> Certain AI features and
+        models accessible through the Service are experimental in nature. AI systems are inherently
+        non-deterministic and may produce outputs that are unpredictable, unexpected, unsafe, offensive,
+        incorrect, or inconsistent across sessions, even in response to identical inputs. The behavior of
+        AI models may change without notice due to updates, fine-tuning, provider changes, or other
+        factors outside our control. <strong>You use all AI features at your own risk.</strong> We
+        expressly disclaim all liability for any harm, loss, or damage arising from unpredictable,
+        erratic, or unintended AI behavior.
+      </p>
 
       <h2>8. Monitoring &amp; Logging</h2>
       <p>
         We reserve the right to monitor, log, and review account activity, usage patterns, API requests,
-        prompt metadata, and any other Service interactions for the purposes of: enforcing these Terms and
-        our Prohibited Uses Policy; detecting and preventing fraud, abuse, security threats, and policy
-        violations; improving the Service; complying with legal obligations; and protecting the rights,
-        safety, and property of Mini Assistant AI, our users, and the public.
+        prompt metadata, device identifiers, IP addresses, and any other Service interactions for the
+        purposes of: enforcing these Terms and our Prohibited Uses Policy; detecting and preventing fraud,
+        abuse, ban evasion, security threats, and policy violations; improving the Service; complying with
+        legal obligations; and protecting the rights, safety, and property of Mini Assistant AI, our users,
+        and the public.
       </p>
       <p>
         By using the Service, you expressly consent to this monitoring and logging. Monitoring does not
@@ -244,16 +275,20 @@ export default function TermsPage() {
       <p>
         <strong>10.2 Termination by Us.</strong> We reserve the right to suspend, restrict, or
         permanently terminate your account at any time, with or without notice and for any or no reason,
-        including but not limited to: violation of these Terms or any policy; conduct we determine to be
-        harmful, abusive, fraudulent, or disruptive; prolonged inactivity; legal or regulatory
-        requirements; or discontinuation of the Service. Upon termination for cause, all Credits and
-        access are immediately and permanently forfeited without compensation or appeal.
+        including but not limited to: violation of these Terms or any policy; conduct we determine, in
+        our sole and absolute discretion, to be harmful, abusive, fraudulent, or disruptive; prolonged
+        inactivity; legal or regulatory requirements; or discontinuation of the Service. Upon termination
+        for cause, all Credits and access are immediately and permanently forfeited without compensation
+        or appeal.
       </p>
       <p>
         <strong>10.3 Ban Evasion.</strong> Creating a new account after being banned or suspended —
-        using a different email address, payment method, device, or identity — is a material violation
-        of these Terms. We may terminate such accounts immediately upon detection and may pursue all
-        available legal remedies. Any Credits purchased by a ban-evading account are forfeited.
+        using a different email address, payment method, device, IP address, or any other identity —
+        is a material violation of these Terms. We use technical methods including device fingerprinting,
+        payment method fingerprinting, and IP correlation to detect ban evasion. We may terminate such
+        accounts immediately upon detection and may pursue all available legal remedies. Any Credits
+        purchased by a ban-evading account are forfeited. The original ban and all associated
+        restrictions extend to any new account we determine to be operated by the same person.
       </p>
       <p>
         <strong>10.4 Effect of Termination.</strong> Upon termination: (a) your license to use the
@@ -266,6 +301,15 @@ export default function TermsPage() {
         cooperate with law enforcement. We may preserve and disclose account information as required
         by law or as we reasonably believe necessary for enforcement or safety purposes.
       </p>
+      <p>
+        <strong>10.6 Enforcement Finality.</strong> All enforcement decisions — including account
+        suspension, termination, Credit forfeiture, and refund denials — are made at our sole and
+        absolute discretion and are final. We are not obligated to provide explanations for enforcement
+        actions. Submitting repeated appeals, support tickets, or other communications contesting a
+        final enforcement decision may itself be treated as harassment and may result in additional
+        restrictions. We reserve the right to decline any further correspondence related to a closed
+        enforcement matter.
+      </p>
 
       <h2>11. Disclaimer of Warranties</h2>
       <p>
@@ -274,8 +318,8 @@ export default function TermsPage() {
         IMPLIED, STATUTORY, OR OTHERWISE, INCLUDING: ANY IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS
         FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT; ANY WARRANTY THAT THE SERVICE WILL BE
         UNINTERRUPTED, ERROR-FREE, SECURE, OR FREE FROM HARMFUL COMPONENTS; ANY WARRANTY REGARDING THE
-        ACCURACY, RELIABILITY, TIMELINESS, ORIGINALITY, OR COMPLETENESS OF ANY CONTENT OR AI OUTPUT;
-        AND ANY WARRANTY ARISING FROM COURSE OF DEALING OR USAGE OF TRADE.
+        ACCURACY, RELIABILITY, TIMELINESS, ORIGINALITY, PREDICTABILITY, OR COMPLETENESS OF ANY CONTENT
+        OR AI OUTPUT; AND ANY WARRANTY ARISING FROM COURSE OF DEALING OR USAGE OF TRADE.
       </p>
       <p>
         WE DO NOT WARRANT THAT THE SERVICE WILL MEET YOUR REQUIREMENTS. WE ASSUME NO LIABILITY FOR
@@ -346,16 +390,25 @@ export default function TermsPage() {
         cause of action accruing, or it is permanently barred.
       </p>
 
-      <h2>15. Service Availability &amp; Beta Features</h2>
+      <h2>15. Service Availability, Fair Use &amp; Beta Features</h2>
       <p>
         We provide no uptime guarantee. The Service may be suspended for maintenance, updates, or
         reasons outside our control without notice or liability. We may modify, restrict, discontinue,
         or permanently remove any feature or the Service itself at any time without refund obligation.
       </p>
       <p>
+        <strong>Rate Limiting &amp; Fair Use.</strong> To protect platform stability and ensure equitable
+        access for all users, we reserve the right to impose rate limits, usage throttles, request caps,
+        or other restrictions on any account — including accounts on paid plans — at any time and at our
+        sole discretion. Such restrictions do not constitute a breach of these Terms or entitle you to a
+        refund. Excessive, automated, or abusive usage patterns that degrade the Service for other users
+        may result in throttling, suspension, or termination regardless of plan tier.
+      </p>
+      <p>
         Features designated as "beta," "experimental," or "preview" are provided without warranties and
         may be discontinued or substantially altered at any time without notice. Beta features may cause
-        data loss or unexpected behavior.
+        data loss, unexpected behavior, or produce unpredictable AI outputs. Your use of beta features
+        is entirely at your own risk.
       </p>
 
       <h2>16. Changes to These Terms</h2>

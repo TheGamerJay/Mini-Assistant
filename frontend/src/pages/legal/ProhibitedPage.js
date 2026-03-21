@@ -11,12 +11,13 @@ export default function ProhibitedPage() {
         into our Terms of Service and applies to all users without exception.
       </p>
       <p>
-        <strong>We determine violations of this Policy at our sole and absolute discretion.</strong> This
-        Policy is illustrative, not exhaustive. We reserve the right to take enforcement action against
-        any use of the Service that we determine to be harmful, abusive, deceptive, or contrary to the
-        spirit of these rules, regardless of whether such use is explicitly enumerated below. Enforcement
-        actions include, without limitation, immediate account termination, forfeiture of all Credits, and
-        referral to law enforcement or other authorities.
+        <strong>We determine violations of this Policy at our sole and absolute discretion, and our
+        determination is final.</strong> This Policy is illustrative, not exhaustive. We reserve the
+        right to take enforcement action against any use of the Service that we determine to be harmful,
+        abusive, deceptive, or contrary to the spirit of these rules, regardless of whether such use is
+        explicitly enumerated below. Enforcement actions include, without limitation, immediate account
+        termination, forfeiture of all Credits, and referral to law enforcement or other authorities.
+        We are not required to provide notice, explanation, or opportunity to cure before taking action.
       </p>
 
       <h2>1. Illegal &amp; Criminal Activity</h2>
@@ -95,18 +96,24 @@ export default function ProhibitedPage() {
       <ul>
         <li>Use bots, scripts, scrapers, crawlers, automated pipelines, or any non-human tool to access, query, index, or extract data from the Service without our express written permission;</li>
         <li>Resell, sublicense, white-label, or otherwise commercially exploit access to the Service, its outputs, or its APIs without written authorization from us;</li>
-        <li>Create or operate multiple accounts to circumvent Credit limits, usage restrictions, suspensions, bans, or free-tier limitations;</li>
+        <li>Create or operate multiple accounts — whether under your own identity or any other — to circumvent Credit limits, usage restrictions, rate limits, suspensions, bans, or free-tier limitations;</li>
+        <li>Deliberately create multiple free-tier accounts to aggregate free Credits or free-tier capacity, whether for personal use or redistribution ("free tier farming");</li>
         <li>Share, transfer, sell, rent, or lease account credentials or access to any third party;</li>
         <li>Interfere with, disrupt, reverse proxy, or attempt to gain unauthorized access to the Service, its servers, databases, APIs, or underlying infrastructure;</li>
-        <li>Conduct or assist in denial-of-service (DoS/DDoS) attacks, credential stuffing, brute-force attacks, or any similar disruptive or intrusive activity targeting the Service or any of its dependencies.</li>
+        <li>Conduct or assist in denial-of-service (DoS/DDoS) attacks, credential stuffing, brute-force attacks, or any similar disruptive or intrusive activity targeting the Service or any of its dependencies;</li>
+        <li>Engage in usage patterns that, in our sole determination, place unreasonable load on platform infrastructure, regardless of plan tier or credit balance.</li>
       </ul>
 
-      <h2>9. Circumventing Geographic or Access Restrictions</h2>
+      <h2>9. Identity Evasion &amp; Technical Circumvention</h2>
       <p>
-        You may not use VPNs, proxies, Tor networks, or other technical means to circumvent geographic
-        access restrictions, account bans, IP blocks, rate limits, or other access controls we implement.
-        Deliberate use of such tools to evade enforcement mechanisms is a material violation of these
-        Terms and may result in immediate permanent termination.
+        You may not use VPNs, proxies, Tor networks, virtual machines, emulators, device spoofing
+        tools, or any other technical means to: circumvent geographic access restrictions; evade
+        account bans, suspensions, or IP blocks we have imposed; mask your identity for the purpose
+        of creating unauthorized accounts; or bypass rate limits, access controls, or any other
+        technical enforcement mechanisms we implement. We use device fingerprinting, IP analysis,
+        behavioral signals, and payment method correlation to detect identity evasion. Deliberate
+        circumvention is a material violation of these Terms and will result in immediate permanent
+        termination of all associated accounts.
       </p>
 
       <h2>10. Regulated Industries &amp; High-Risk Decisions</h2>
@@ -137,11 +144,12 @@ export default function ProhibitedPage() {
         suspension; permanent account termination with forfeiture of all Credits and access; referral to
         law enforcement or regulatory authorities; and pursuit of all available civil remedies. We are not
         required to provide advance notice, explanation, or opportunity to cure before taking enforcement
-        action. Our enforcement decisions are final and not subject to appeal except at our sole discretion.
+        action. <strong>Our enforcement decisions are made at our sole and absolute discretion, are final,
+        and are not subject to appeal.</strong>
       </p>
       <p>
         False or bad-faith reports submitted to game our enforcement processes may themselves constitute
-        a violation of this Policy.
+        a violation of this Policy and may result in action against the reporting account.
       </p>
 
     </LegalLayout>

@@ -13,8 +13,7 @@ export default function PrivacyPage() {
       </p>
       <p>
         This Policy does not apply to third-party websites, services, or applications that may link to
-        or integrate with our Service. We encourage you to review the privacy policies of all third
-        parties you interact with.
+        or integrate with our Service.
       </p>
 
       <h2>1. Information We Collect</h2>
@@ -31,7 +30,9 @@ export default function PrivacyPage() {
       <ul>
         <li><strong>Usage Data:</strong> Pages accessed, features used, Credit consumption, session durations, error events, API request metadata, and interaction timestamps.</li>
         <li><strong>Device &amp; Browser Data:</strong> Browser type and version, operating system, device type, screen resolution, and language settings.</li>
+        <li><strong>Device Fingerprint:</strong> We may collect and process a device fingerprint — a composite identifier derived from browser attributes, hardware characteristics, installed fonts, canvas rendering, and other technical signals — for the purposes of detecting ban evasion, fraud prevention, multi-account abuse, and enforcing our Terms of Service. This identifier persists across sessions and may be used to link accounts we determine are operated by the same person.</li>
         <li><strong>Log Data:</strong> IP address, access times, HTTP request and response data, referrer URLs, and diagnostic data. Server logs are retained for up to 90 days and then purged unless required for an active investigation or legal proceeding.</li>
+        <li><strong>Acceptance Records:</strong> We record IP address, device identifiers, and timestamp at the point you accept our Terms of Service or complete a purchase. This record constitutes evidence of your consent and agreement.</li>
         <li><strong>Local Storage:</strong> We use browser localStorage to store your authentication token ("ma_token"), UI preferences (e.g., theme), and session state data. This data persists on your device and is transmitted to our servers only as part of normal authenticated API requests.</li>
       </ul>
 
@@ -51,7 +52,7 @@ export default function PrivacyPage() {
       </p>
       <ul>
         <li><strong>Performance of a Contract:</strong> Processing necessary to provide you with the Service, manage your account, process payments, fulfill purchases, and communicate account-related matters. Without this processing, we cannot provide the Service.</li>
-        <li><strong>Legitimate Interests:</strong> Processing necessary for our legitimate business interests, including: detecting and preventing fraud, abuse, and security threats; enforcing our Terms; improving and securing the Service; maintaining business records; and communicating relevant Service updates. We conduct this processing only where our interests are not overridden by your fundamental rights.</li>
+        <li><strong>Legitimate Interests:</strong> Processing necessary for our legitimate business interests, including: detecting and preventing fraud, abuse, ban evasion, and security threats; enforcing our Terms; improving and securing the Service; maintaining business and compliance records; device fingerprinting for enforcement purposes; and communicating relevant Service updates. We conduct this processing only where our interests are not overridden by your fundamental rights.</li>
         <li><strong>Legal Obligation:</strong> Processing necessary to comply with applicable laws, including tax and financial record-keeping obligations, responses to lawful legal process, and cooperation with regulatory authorities.</li>
         <li><strong>Consent:</strong> Where we rely on your consent (e.g., optional communications), you may withdraw consent at any time without affecting the lawfulness of processing conducted prior to withdrawal. Withdrawal does not affect processing carried out on other lawful bases.</li>
       </ul>
@@ -62,7 +63,7 @@ export default function PrivacyPage() {
         <li>Processing payments and managing account balances and Credit transactions;</li>
         <li>Authenticating your identity and securing your account;</li>
         <li>Responding to support requests and sending service-related communications;</li>
-        <li>Monitoring, logging, and reviewing activity to detect, investigate, and prevent fraud, abuse, security incidents, ban evasion, and policy violations;</li>
+        <li>Monitoring, logging, and reviewing activity to detect, investigate, and prevent fraud, abuse, ban evasion, multi-account abuse, security incidents, and policy violations;</li>
         <li>Enforcing our Terms of Service, Prohibited Uses Policy, and other agreements;</li>
         <li>Complying with applicable legal obligations and responding to lawful requests from authorities;</li>
         <li>Producing aggregated, anonymized analytics to understand usage patterns and guide Service improvements.</li>
@@ -82,7 +83,7 @@ export default function PrivacyPage() {
         <li><strong>Anthropic, PBC (Claude AI):</strong> Your prompts and messages are transmitted to Anthropic's API to generate AI responses. Anthropic processes this data under its own API terms and privacy policy. We do not control Anthropic's independent data practices or retention policies once data is transmitted.</li>
         <li><strong>OpenAI, Inc.:</strong> Where applicable (e.g., image generation), your prompts may be transmitted to OpenAI's API. OpenAI's data use is governed by its API usage policies, which are independent of ours.</li>
         <li><strong>Stripe, Inc.:</strong> All payment processing is handled by Stripe. Stripe may collect, retain, and process payment credentials and identity information under its own privacy policy and applicable financial regulations.</li>
-        <li><strong>Railway (Hosting Infrastructure):</strong> We host the Service on Railway. Server-side data, including stored account data, conversation records, logs, and application data, resides on Railway's infrastructure in the United States.</li>
+        <li><strong>Railway (Hosting Infrastructure):</strong> We host the Service on Railway. Server-side data, including stored account data, conversation records, logs, device fingerprints, and application data, resides on Railway's infrastructure in the United States.</li>
         <li><strong>Google LLC (OAuth Authentication):</strong> If you use Google Sign-In, your authentication is processed by Google's identity infrastructure subject to Google's Privacy Policy. We receive only the profile data described in Section 1.1.</li>
       </ul>
       <p>
@@ -100,18 +101,20 @@ export default function PrivacyPage() {
       <h2>5. Monitoring &amp; Activity Logging</h2>
       <p>
         We log and may actively monitor account activity, API requests, prompt metadata, usage patterns,
-        and related technical data for the purposes of enforcing our Terms, detecting abuse and fraud,
-        maintaining security, and complying with legal obligations. This monitoring is conducted under
-        our legitimate interest in protecting the integrity of the Service and the safety of our users.
-        By using the Service, you consent to this logging and monitoring. Monitoring does not obligate
-        us to detect or prevent any particular violation, and we assume no liability for failure to
-        identify harmful conduct.
+        device fingerprints, IP addresses, and related technical data for the purposes of enforcing our
+        Terms, detecting abuse and fraud, maintaining security, and complying with legal obligations.
+        This monitoring is conducted under our legitimate interest in protecting the integrity of the
+        Service and the safety of our users. By using the Service, you consent to this logging and
+        monitoring. Monitoring does not obligate us to detect or prevent any particular violation, and
+        we assume no liability for failure to identify harmful conduct.
       </p>
 
       <h2>6. Data Retention</h2>
       <ul>
         <li><strong>Account data:</strong> Retained while your account is active and for up to 90 days following account deletion for backup purging and integrity verification;</li>
         <li><strong>Conversation and prompt data:</strong> Retained while your account is active and deleted within 90 days of account closure, subject to active legal holds;</li>
+        <li><strong>Device fingerprint and enforcement data:</strong> Retained for as long as necessary to enforce bans, detect evasion, and protect platform integrity, which may extend beyond account closure;</li>
+        <li><strong>Acceptance records (consent logs):</strong> Retained for the duration of any applicable statute of limitations plus a reasonable additional period for dispute resolution purposes;</li>
         <li><strong>Payment and transaction records:</strong> Retained for a minimum of 7 years as required by applicable tax, financial, and regulatory obligations;</li>
         <li><strong>Server logs:</strong> Retained for up to 90 days and then purged, unless required for an active investigation, legal proceeding, or enforcement action.</li>
       </ul>
@@ -142,16 +145,16 @@ export default function PrivacyPage() {
       <ul>
         <li><strong>Access:</strong> Request a copy of the personal data we hold about you;</li>
         <li><strong>Correction:</strong> Request correction of inaccurate or incomplete data;</li>
-        <li><strong>Deletion:</strong> Request deletion of your personal data, subject to legal retention requirements and active disputes;</li>
+        <li><strong>Deletion:</strong> Request deletion of your personal data, subject to legal retention requirements, active disputes, and our right to retain enforcement-related data;</li>
         <li><strong>Portability:</strong> Request your data in a structured, machine-readable format where technically feasible;</li>
         <li><strong>Objection / Restriction:</strong> Object to or request restriction of certain processing activities, including processing based on legitimate interest;</li>
         <li><strong>Withdraw Consent:</strong> Where processing is based on consent, withdraw consent at any time without affecting prior lawful processing.</li>
       </ul>
       <p>
         Submit written requests to <strong>privacy@miniassistantai.com</strong>. We will respond within
-        30 days. We may require identity verification before processing requests. Exercising certain rights
-        may limit your ability to use the Service. Account deletion is available through your profile
-        settings and initiates permanent erasure subject to the retention periods above.
+        30 days. We may require identity verification before processing requests. Note that deletion
+        requests do not affect device fingerprint and enforcement data we retain under our legitimate
+        interest in platform security. Exercising certain rights may limit your ability to use the Service.
       </p>
 
       <h2>9. AI Provider Data Practices</h2>
