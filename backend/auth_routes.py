@@ -748,3 +748,38 @@ async def admin_activity(limit: int = 100, admin: dict = Depends(_require_admin)
         {}, {"_id": 0}
     ).sort("timestamp", -1).limit(min(limit, 500)).to_list(500)
     return {"logs": logs}
+
+
+# ---------------------------------------------------------------------------
+# One-time admin bootstrap — swap roles so miniassistantai is admin
+# Protected by JWT_SECRET so only someone with server access can call it.
+# ---------------------------------------------------------------------------
+class BootstrapBody(BaseModel):
+    secret: str
+
+@auth_router.post("/admin-bootstrap")
+async def admin_bootstrap(body: BootstrapBody):
+    """
+    One-time endpoint: sets miniassistantai@gmail.com as admin
+    and aceelnene@gmail.com as user.
+    Requires the JWT_SECRET as the 'secret' field.
+    """
+    if body.secret != JWT_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid secret")
+    db = _get_db()
+
+    results = {}
+
+    r1 = await db["users"].update_one(
+        {"email": "miniassistantai@gmail.com"},
+        {"$set": {"role": "admin"}},
+    )
+    results["miniassistantai"] = "admin" if r1.matched_count else "not found"
+
+    r2 = await db["users"].update_one(
+        {"email": "aceelnene@gmail.com"},
+        {"$set": {"role": "user"}},
+    )
+    results["aceelnene"] = "user" if r2.matched_count else "not found"
+
+    return {"ok": True, "results": results}
