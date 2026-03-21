@@ -34,6 +34,7 @@ import UserDashboard from './pages/UserDashboard';
 import PurchaseCreditsModal from './components/PurchaseCreditsModal';
 import UpgradeModal from './components/UpgradeModal';
 import PricingPage from './pages/PricingPage';
+import CheckoutSuccessPage from './pages/CheckoutSuccessPage';
 
 // Legal pages
 import TermsPage from './pages/legal/TermsPage';
@@ -129,6 +130,7 @@ function pageTitle(page) {
   if (page === 'chat') return 'Chat';
   if (page === 'images') return 'Image Generation';
   if (page === 'settings') return 'Settings';
+  if (page === 'checkout-success') return 'Payment Confirmed';
   if (LEGAL_PAGES[page]) return LEGAL_PAGES[page].title;
   return TOOL_PAGES[page]?.title || 'Mini Assistant';
 }
@@ -137,14 +139,15 @@ function pageTitle(page) {
 // AppShell — rendered inside AppProvider so it can use useApp()
 // ---------------------------------------------------------------------------
 function AppShell() {
-  const { page, setPage, getPrevPage, serverStatus, setServerStatus, purchaseModalOpen, setPurchaseModalOpen, upgradeModalOpen, setUpgradeModalOpen } = useApp();
+  const { page, setPage, getPrevPage, serverStatus, setServerStatus, purchaseModalOpen, setPurchaseModalOpen, upgradeModalOpen, setUpgradeModalOpen, refreshCredits } = useApp();
 
   // Handle Stripe redirect params (?checkout=success|cancelled, ?portal=return)
   useEffect(() => {
     const result = handleCheckoutReturn();
     if (result === 'success') {
-      // Go to dashboard — plan + credits will refresh from API
-      setPage('dashboard');
+      // Refresh plan + credits from API immediately, then show success page
+      refreshCredits();
+      setPage('checkout-success');
     } else if (result === 'cancelled' || result === 'portal_return') {
       setPage('pricing');
     }
@@ -175,6 +178,7 @@ function AppShell() {
     if (page === 'chat') return <ChatPage />;
     // App Builder is unified into Chat workspace — redirect
     if (page === 'tool-appbuilder') { setPage('chat'); return <ChatPage />; }
+    if (page === 'checkout-success') return <CheckoutSuccessPage />;
     if (page === 'images') return <ImagePage />;
     if (page === 'profile') return <ProfilePage />;
     if (page === 'dashboard') return <UserDashboard />;

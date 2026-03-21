@@ -537,6 +537,27 @@ async def _handle_checkout_completed(db, session: dict) -> None:
             "stripe_session_id": session.get("id"),
         })
 
+        # Send top-up confirmation email
+        try:
+            from email_sender import send_topup_email   # noqa: PLC0415
+            user_doc = await db["users"].find_one(
+                {"id": user_id},
+                {"email": 1, "name": 1, "topup_credits": 1, "subscription_credits": 1},
+            )
+            if user_doc and user_doc.get("email"):
+                new_balance = (
+                    max(0, user_doc.get("subscription_credits", 0)) +
+                    max(0, user_doc.get("topup_credits", 0))
+                )
+                await send_topup_email(
+                    to_email=user_doc["email"],
+                    to_name=user_doc.get("name", ""),
+                    credits_added=credits_to_add,
+                    new_balance=new_balance,
+                )
+        except Exception as _email_exc:
+            log.warning("Top-up email failed (non-fatal): %s", _email_exc)
+
     elif mode == "subscription":
         # Subscription start — plan upgrade handled fully by invoice.paid
         # Just store subscription ID if available
@@ -599,6 +620,20 @@ async def _handle_invoice_paid(db, invoice: dict) -> None:
         "invoice.paid: user %s → plan=%s, subscription_credits reset to %d",
         user_id, plan, plan_credits,
     )
+
+    # Send welcome / renewal email (non-fatal)
+    try:
+        from email_sender import send_welcome_email   # noqa: PLC0415
+        user_doc = await db["users"].find_one({"id": user_id}, {"email": 1, "name": 1})
+        if user_doc and user_doc.get("email") and plan != "free":
+            await send_welcome_email(
+                to_email=user_doc["email"],
+                to_name=user_doc.get("name", ""),
+                plan=plan,
+                credits=plan_credits,
+            )
+    except Exception as _email_exc:
+        log.warning("Welcome email failed (non-fatal): %s", _email_exc)
 
     await db["activity_logs"].insert_one({
         "user_id":    user_id,
