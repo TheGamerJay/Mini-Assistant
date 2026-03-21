@@ -28,6 +28,14 @@ import AuthPage from './pages/AuthPage';
 import ProfilePage from './pages/ProfilePage';
 import AdminPage from './pages/AdminPage';
 
+// Legal pages
+import TermsPage from './pages/legal/TermsPage';
+import PrivacyPage from './pages/legal/PrivacyPage';
+import RefundPage from './pages/legal/RefundPage';
+import ProhibitedPage from './pages/legal/ProhibitedPage';
+import DmcaPage from './pages/legal/DmcaPage';
+import ContactPage from './pages/legal/ContactPage';
+
 // Existing tool components (kept for backward compat via 'tool-X' pages)
 import Dashboard from './pages/Dashboard';
 import ChatInterface from './components/Chat/ChatInterface';
@@ -101,10 +109,20 @@ const TOOL_PAGES = {
   'tool-chat': { component: ChatInterface, title: 'Chat (Legacy)' },
 };
 
+const LEGAL_PAGES = {
+  'legal-terms':     { component: TermsPage,     title: 'Terms of Service' },
+  'legal-privacy':   { component: PrivacyPage,   title: 'Privacy Policy' },
+  'legal-refund':    { component: RefundPage,     title: 'Refund Policy' },
+  'legal-prohibited':{ component: ProhibitedPage, title: 'Prohibited Items' },
+  'legal-dmca':      { component: DmcaPage,       title: 'DMCA & Copyright' },
+  'legal-contact':   { component: ContactPage,    title: 'Contact Us' },
+};
+
 function pageTitle(page) {
   if (page === 'chat') return 'Chat';
   if (page === 'images') return 'Image Generation';
   if (page === 'settings') return 'Settings';
+  if (LEGAL_PAGES[page]) return LEGAL_PAGES[page].title;
   return TOOL_PAGES[page]?.title || 'Mini Assistant';
 }
 
@@ -122,10 +140,10 @@ function AppShell() {
         setServerStatus({
           backend: true,
           ollama: data.ollama === 'connected',
-          comfyui: data.comfyui === 'connected',
+          openai: data.openai === 'connected',
         });
       } catch {
-        setServerStatus({ backend: false, ollama: false, comfyui: false });
+        setServerStatus({ backend: false, ollama: false, openai: false });
       }
     };
 
@@ -142,6 +160,12 @@ function AppShell() {
     if (page === 'images') return <ImagePage />;
     if (page === 'profile') return <ProfilePage />;
     if (page === 'admin') return <AdminPage />;
+
+    const legalEntry = LEGAL_PAGES[page];
+    if (legalEntry) {
+      const LegalComponent = legalEntry.component;
+      return <div className="h-full overflow-auto"><LegalComponent /></div>;
+    }
 
     const toolEntry = TOOL_PAGES[page];
     if (toolEntry) {

@@ -1,42 +1,26 @@
 /**
  * pages/ImagePage.js
- * Dedicated image generation page.
+ * Image generation page — powered by DALL-E 3 via OpenAI API.
  * Left panel: prompt + options. Right panel: results grid.
  */
 
 import React, { useState, useCallback, useRef } from 'react';
-import { Image, Loader2, ChevronDown, ChevronUp, Zap, BarChart2, Sparkles, XCircle } from 'lucide-react';
+import { Image, Loader2, Zap, Sparkles, XCircle, Square, RectangleVertical, RectangleHorizontal } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp, makeThumbnail } from '../context/AppContext';
 import { api } from '../api/client';
 import ImageCard from '../components/ImageCard';
 
 const QUALITY_OPTIONS = [
-  { value: 'fast', label: 'Fast', icon: Zap },
-  { value: 'balanced', label: 'Balanced', icon: BarChart2 },
-  { value: 'high', label: 'High', icon: Sparkles },
+  { value: 'balanced', label: 'Standard', icon: Zap,      desc: 'Fast & affordable' },
+  { value: 'high',     label: 'HD',       icon: Sparkles,  desc: 'Maximum detail' },
 ];
 
-function Toggle({ checked, onChange, label }) {
-  return (
-    <label className="flex items-center gap-3 cursor-pointer">
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        onClick={() => onChange(!checked)}
-        className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors focus:outline-none
-          ${checked ? 'bg-cyan-500' : 'bg-slate-700'}`}
-      >
-        <span
-          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-transform
-            ${checked ? 'translate-x-4' : 'translate-x-0'}`}
-        />
-      </button>
-      <span className="text-sm text-slate-300">{label}</span>
-    </label>
-  );
-}
+const SIZE_OPTIONS = [
+  { value: '1024x1024',  label: 'Square',    icon: Square,              hint: '1:1' },
+  { value: '1024x1792',  label: 'Portrait',  icon: RectangleVertical,   hint: '9:16' },
+  { value: '1792x1024',  label: 'Landscape', icon: RectangleHorizontal, hint: '16:9' },
+];
 
 function SkeletonCard() {
   return (
@@ -53,58 +37,33 @@ function SkeletonCard() {
 function ImagePage() {
   const { settings, updateSettings, addImage } = useApp();
 
-  const [prompt, setPrompt] = useState('');
-  const [quality, setQuality] = useState(settings.quality || 'balanced');
-  const [dryRun, setDryRun] = useState(settings.dryRun || false);
-  const [checkpoint, setCheckpoint] = useState('');
-  const [seed, setSeed] = useState('');
+  const [prompt, setPrompt]       = useState('');
+  const [quality, setQuality]     = useState(settings.quality || 'balanced');
+  const [size, setSize]           = useState('1024x1024');
   const [generating, setGenerating] = useState(false);
-  const [results, setResults] = useState([]);
-  const [routePreview, setRoutePreview] = useState(null);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [routeLoading, setRouteLoading] = useState(false);
+  const [results, setResults]     = useState([]);
   const sessionIdRef = useRef(crypto.randomUUID());
-
-  const handleRoutePreview = useCallback(async () => {
-    if (!prompt.trim()) return;
-    setRouteLoading(true);
-    try {
-      const data = await api.routePrompt(prompt.trim());
-      setRoutePreview(data);
-    } catch (err) {
-      toast.error('Route preview failed: ' + (err.message || 'Unknown error'));
-    } finally {
-      setRouteLoading(false);
-    }
-  }, [prompt]);
 
   const handleGenerate = useCallback(async (overridePrompt) => {
     const activePrompt = (overridePrompt || prompt).trim();
-    if (!activePrompt) {
-      toast.warning('Please enter a prompt first.');
-      return;
-    }
-    if (activePrompt.length < 3) {
-      toast.warning('Message too short (min 3 characters)');
-      return;
-    }
+    if (!activePrompt) { toast.warning('Please enter a prompt first.'); return; }
+    if (activePrompt.length < 3) { toast.warning('Prompt too short (min 3 characters)'); return; }
     if (generating) return;
 
     sessionIdRef.current = crypto.randomUUID();
     setGenerating(true);
     try {
-      const params = {
+      // Map size → override_width/height so the backend knows the aspect ratio
+      const [w, h] = size.split('x').map(Number);
+      const data = await api.generateImage({
         prompt: activePrompt,
         quality,
-        dry_run: dryRun,
         session_id: sessionIdRef.current,
-      };
-      if (checkpoint.trim()) params.override_checkpoint = checkpoint.trim();
-      if (seed.trim()) params.override_seed = seed.trim();
+        override_width: w,
+        override_height: h,
+      });
 
-      const data = await api.generateImage(params);
-
-      if (data.image_base64 && !dryRun) {
+      if (data.image_base64) {
         const thumb = await makeThumbnail(data.image_base64);
         await addImage(thumb, activePrompt, data.image_base64);
       }
@@ -123,12 +82,9 @@ function ImagePage() {
     } finally {
       setGenerating(false);
     }
-  }, [prompt, quality, dryRun, checkpoint, seed, addImage, generating]);
+  }, [prompt, quality, size, addImage, generating]);
 
-  const handleCancel = useCallback(async () => {
-    try {
-      await api.cancelGeneration(sessionIdRef.current);
-    } catch {}
+  const handleCancel = useCallback(() => {
     setGenerating(false);
     toast.info('Generation cancelled');
   }, []);
@@ -138,16 +94,12 @@ function ImagePage() {
     updateSettings({ quality: q });
   };
 
-  const handleDryRunChange = (v) => {
-    setDryRun(v);
-    updateSettings({ dryRun: v });
-  };
-
   return (
     <div className="flex h-full overflow-hidden">
       {/* ---- Left panel ---- */}
       <div className="w-80 flex-shrink-0 border-r border-white/5 flex flex-col overflow-y-auto p-6 gap-5">
         <h2 className="text-base font-semibold text-slate-100">Image Generation</h2>
+        <p className="text-xs text-slate-500 -mt-3">Powered by DALL·E 3</p>
 
         {/* Prompt */}
         <div className="space-y-1.5">
@@ -157,18 +109,21 @@ function ImagePage() {
             placeholder="Describe the image you want to generate…"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleGenerate(); }}
             rows={4}
           />
+          <p className="text-[10px] text-slate-600">Ctrl+Enter to generate</p>
         </div>
 
         {/* Quality selector */}
         <div className="space-y-1.5">
           <label className="text-xs text-slate-500 font-mono uppercase tracking-wide">Quality</label>
           <div className="flex gap-1.5">
-            {QUALITY_OPTIONS.map(({ value, label, icon: Icon }) => (
+            {QUALITY_OPTIONS.map(({ value, label, icon: Icon, desc }) => (
               <button
                 key={value}
                 onClick={() => handleQualityChange(value)}
+                title={desc}
                 className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium transition-colors border
                   ${quality === value
                     ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-400'
@@ -181,101 +136,56 @@ function ImagePage() {
           </div>
         </div>
 
-        {/* Advanced toggle */}
-        <button
-          className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
-          onClick={() => setShowAdvanced((v) => !v)}
-        >
-          {showAdvanced ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-          Advanced options
-        </button>
-
-        {showAdvanced && (
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <label className="text-xs text-slate-500 font-mono">Checkpoint override</label>
-              <input
-                type="text"
-                className="w-full bg-[#1a1a26] border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 outline-none focus:border-cyan-500/40 transition-colors"
-                placeholder="e.g. dreamshaper_8.safetensors"
-                value={checkpoint}
-                onChange={(e) => setCheckpoint(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs text-slate-500 font-mono">Seed</label>
-              <input
-                type="text"
-                className="w-full bg-[#1a1a26] border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 outline-none focus:border-cyan-500/40 transition-colors"
-                placeholder="Random if blank"
-                value={seed}
-                onChange={(e) => setSeed(e.target.value)}
-              />
-            </div>
+        {/* Size selector */}
+        <div className="space-y-1.5">
+          <label className="text-xs text-slate-500 font-mono uppercase tracking-wide">Size</label>
+          <div className="flex gap-1.5">
+            {SIZE_OPTIONS.map(({ value, label, icon: Icon, hint }) => (
+              <button
+                key={value}
+                onClick={() => setSize(value)}
+                title={hint}
+                className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg text-[11px] font-medium transition-colors border
+                  ${size === value
+                    ? 'bg-violet-500/15 border-violet-500/40 text-violet-400'
+                    : 'bg-white/5 border-white/10 text-slate-400 hover:text-slate-200 hover:bg-white/8'}`}
+              >
+                <Icon size={13} />
+                <span>{label}</span>
+              </button>
+            ))}
           </div>
-        )}
+        </div>
 
-        {/* Dry run toggle */}
-        <Toggle checked={dryRun} onChange={handleDryRunChange} label="Dry run (plan only)" />
-
-        {/* Route preview button */}
-        <button
-          onClick={handleRoutePreview}
-          disabled={!prompt.trim() || routeLoading}
-          className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-white/10 text-xs text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {routeLoading ? <Loader2 size={13} className="animate-spin" /> : null}
-          Preview Route
-        </button>
-
-        {/* Route preview card */}
-        {routePreview && (
-          <div className="p-3 rounded-lg bg-white/5 border border-white/10 space-y-1.5">
-            <p className="text-[10px] font-mono uppercase text-slate-500 tracking-wide">Route result</p>
-            {routePreview.intent && (
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-mono text-violet-400/80 bg-violet-500/10 border border-violet-500/20 px-1.5 py-0.5 rounded">{routePreview.intent}</span>
-              </div>
-            )}
-            {routePreview.checkpoint && (
-              <p className="text-[11px] font-mono text-cyan-400/70 truncate">{routePreview.checkpoint}</p>
-            )}
-            {routePreview.workflow && (
-              <p className="text-[11px] font-mono text-slate-500 truncate">{routePreview.workflow}</p>
-            )}
-            {routePreview.confidence != null && (
-              <p className="text-[11px] font-mono text-slate-400">
-                Confidence: {Math.round(routePreview.confidence * 100)}%
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* Generate / Cancel buttons */}
+        {/* Generate / Cancel */}
         <div className="flex gap-2">
           <button
             onClick={() => handleGenerate()}
             disabled={!prompt.trim() || generating}
             className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-br from-cyan-500 to-violet-600 text-white text-sm font-medium hover:from-cyan-400 hover:to-violet-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-cyan-500/20"
           >
-            {generating ? <Loader2 size={15} className="animate-spin" /> : null}
-            {dryRun ? 'Preview Plan' : 'Generate Image'}
+            {generating ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+            {generating ? 'Generating…' : 'Generate Image'}
           </button>
           {generating && (
             <button
               onClick={handleCancel}
-              title="Cancel generation"
+              title="Cancel"
               className="px-3 py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 transition-colors"
             >
               <XCircle size={16} />
             </button>
           )}
         </div>
+
+        {/* Cost hint */}
+        <p className="text-[10px] text-slate-600 text-center">
+          {quality === 'high' ? 'HD ~$0.08/image' : 'Standard ~$0.04/image'}
+        </p>
       </div>
 
       {/* ---- Right panel ---- */}
       <div className="flex-1 overflow-y-auto p-6">
-        {/* Header */}
         <div className="flex items-center gap-3 mb-6">
           <h2 className="text-base font-semibold text-slate-100">Results</h2>
           {results.length > 0 && (
@@ -285,7 +195,6 @@ function ImagePage() {
           )}
         </div>
 
-        {/* Empty state */}
         {results.length === 0 && !generating ? (
           <div className="flex flex-col items-center justify-center h-64 gap-4 text-slate-600">
             <Image size={40} strokeWidth={1} />
@@ -293,9 +202,7 @@ function ImagePage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            {/* Skeleton for in-progress generation */}
             {generating && <SkeletonCard />}
-            {/* Results (latest first — already prepended) */}
             {results.map((result) => {
               if (result._error) {
                 return (
@@ -318,12 +225,7 @@ function ImagePage() {
                   route_result={result.route_result}
                   generation_time_ms={result.generation_time_ms}
                   retry_used={result.retry_used}
-                  plan={result.plan}
-                  dry_run={result.dry_run || dryRun}
-                  onRerun={() => {
-                    setPrompt(result.prompt);
-                    handleGenerate(result.prompt);
-                  }}
+                  onRerun={() => { setPrompt(result.prompt); handleGenerate(result.prompt); }}
                 />
               );
             })}

@@ -820,40 +820,18 @@ async def observatory():
 
 @app.get("/api/health")
 async def health_check():
-    """Health check: reports ComfyUI connectivity and checkpoint availability."""
-    comfyui_url = os.environ.get("COMFYUI_URL", "http://localhost:8188")
-    comfyui_ok = False
-    try:
-        import httpx as _httpx
-        async with _httpx.AsyncClient() as _client:
-            r = await _client.get(f"{comfyui_url}/system_stats", timeout=3.0)
-            comfyui_ok = r.status_code == 200
-    except Exception:
-        pass
+    """Health check: reports DALL-E 3 / OpenAI API availability."""
+    from ..services.dalle_client import DalleClient
+    dalle_health = await DalleClient().health()
+    openai_ok = dalle_health.get("status") == "ok"
 
-    # Check for installed checkpoints
-    checkpoints_dir = Path(os.environ.get(
-        "COMFYUI_CHECKPOINTS_DIR",
-        "C:/Users/jaaye/ai-panels/ComfyUI/models/checkpoints"
-    ))
-    checkpoint_files = []
-    checkpoints_ok = False
-    if checkpoints_dir.exists():
-        checkpoint_files = [f.name for f in checkpoints_dir.iterdir()
-                            if f.suffix in (".safetensors", ".ckpt", ".pt")]
-        checkpoints_ok = len(checkpoint_files) > 0
-
-    status = {
+    return {
         "status": "ok",
         "service": "mini-assistant-image-system",
-        "comfyui": "connected" if comfyui_ok else "disconnected",
-        "checkpoints": {
-            "available": checkpoints_ok,
-            "count": len(checkpoint_files),
-            "message": None if checkpoints_ok else "No checkpoint models found. Place .safetensors files in ComfyUI/models/checkpoints/",
-        },
+        "image_provider": "dall-e-3",
+        "openai": "connected" if openai_ok else "disconnected",
+        "openai_detail": dalle_health.get("detail"),
     }
-    return status
 
 
 @app.post("/api/image/route")
@@ -887,21 +865,13 @@ async def cancel_generation(session_id: str):
 @app.post("/api/image/generate")
 async def generate_image(req: GenerateRequest):
     """
-    Full image generation pipeline:
+    Image generation via DALL-E 3 (OpenAI API).
     1. Prompt safety validation.
-    2. RouterBrain classifies the request (with routing_guard confidence + compatibility checks).
-    3. Apply any manual overrides.
-    4. If dry_run, return the plan without generating.
-    5. PromptBuilder crafts positive + negative prompts.
-    6. ComfyUIClient generates the image (with timeout + cancellation).
-    7. ImageReviewer scores the result (unless quality=='fast').
-    8. CriticBrain evaluates; retries once if warranted.
-    9. EmbedBrain stores successful routes for memory.
-    10. Metadata sidecar saved beside the output image.
+    2. Generate via DALL-E 3 (standard or hd quality).
+    3. Return image_base64 + metadata.
     """
     from ..utils.prompt_safety import validate as ps_validate
-    from ..utils.routing_guard import validate_route as guard_validate
-    from ..utils import image_logger, metadata_writer
+    from ..services.dalle_client import DalleClient
 
     session_id = req.session_id or str(uuid.uuid4())
     start_time = time.perf_counter()
@@ -912,127 +882,42 @@ async def generate_image(req: GenerateRequest):
         raise HTTPException(status_code=400, detail=f"Prompt rejected: {safety_error}")
     prompt_warnings = []
     if clean_prompt != req.prompt:
-        prompt_warnings.append("Prompt was sanitized (whitespace/control chars removed).")
+        prompt_warnings.append("Prompt was sanitized (whitespace/control chars removed.")
 
-    # ---- Step 2: Route ----
-    reference_bytes = None
-    mask_bytes      = None
-    pose_bytes      = None
-    style_bytes     = None
-    if req.reference_image_base64:
-        try:
-            reference_bytes = base64.b64decode(req.reference_image_base64)
-        except Exception:
-            logger.warning("Could not decode reference_image_base64")
-    if req.mask_image_base64:
-        try:
-            mask_bytes = base64.b64decode(req.mask_image_base64)
-        except Exception:
-            logger.warning("Could not decode mask_image_base64")
-    if req.pose_image_base64:
-        try:
-            pose_bytes = base64.b64decode(req.pose_image_base64)
-        except Exception:
-            logger.warning("Could not decode pose_image_base64")
-    if req.style_image_base64:
-        try:
-            style_bytes = base64.b64decode(req.style_image_base64)
-        except Exception:
-            logger.warning("Could not decode style_image_base64")
-
-    try:
-        route_result = await _get_router().route(clean_prompt, reference_image=reference_bytes)
-        route_result = guard_validate(route_result)
-    except Exception as exc:
-        logger.error("Routing failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Routing error: {exc}")
-
-    # Log routing decision
-    elapsed_route = (time.perf_counter() - start_time) * 1000
-    image_logger.log_router_decision(clean_prompt, route_result, elapsed_route, session_id)
-
-    if route_result.get("_low_confidence_warning"):
-        prompt_warnings.append(route_result["_low_confidence_warning"])
-    if route_result.get("_compatibility_warning"):
-        prompt_warnings.append(route_result["_compatibility_warning"])
-
-    intent = route_result.get("intent", "chat")
-
-    # ---- Step 2b: ComfyUI mode routing (Phase 7) ----
-    from ..services.comfyui_router import route_image_request as _comfy_route
-    comfy_decision = _comfy_route(
-        prompt=clean_prompt,
-        reference_image=req.reference_image_base64,
-        mask_image=req.mask_image_base64,
-        pose_image=req.pose_image_base64,
-        style_image=req.style_image_base64,
-    )
-    logger.info(
-        "ComfyUI route: mode=%s target_tab=%s reason=%s",
-        comfy_decision.mode, comfy_decision.target_tab, comfy_decision.reason,
-    )
-
-    # ---- Step 3: Non-image intents ----
-    if intent in ("chat", "planning"):
-        ollama = _get_ollama()
-        try:
-            from ..services.ollama_client import _model_name
-            reply = await ollama.run_prompt(
-                model=_model_name("router"),
-                prompt=clean_prompt,
-                temperature=0.7,
-            )
-        except Exception as exc:
-            reply = _friendly_error(exc)
-
-        elapsed = (time.perf_counter() - start_time) * 1000
-        return GenerateResponse(
-            image_base64=None,
-            route_result={**route_result, "text_reply": reply},
-            review=None,
-            retry_used=False,
-            critic_result=None,
-            session_id=session_id,
-            generation_time_ms=round(elapsed, 1),
-            prompt_warnings=prompt_warnings,
-        )
-
-    if intent == "coding":
-        coding = _get_coding()
-        try:
-            reply = await coding.run(clean_prompt)
-        except Exception as exc:
-            reply = f"Coding brain error: {exc}"
-
-        elapsed = (time.perf_counter() - start_time) * 1000
-        return GenerateResponse(
-            image_base64=None,
-            route_result={**route_result, "text_reply": reply},
-            review=None,
-            retry_used=False,
-            critic_result=None,
-            session_id=session_id,
-            generation_time_ms=round(elapsed, 1),
-            prompt_warnings=prompt_warnings,
-        )
-
-    # ---- Step 4: Image generation setup ----
-    # Apply checkpoint/workflow overrides
-    checkpoint_key = req.override_checkpoint or route_result.get("selected_checkpoint", "anime_general")
-    workflow_key = req.override_workflow or route_result.get("selected_workflow", "anime_general")
+    # ---- Step 2: DALL-E 3 generation ----
     quality = req.quality or "balanced"
+    # Size: default square; portrait/landscape can be passed via override_width/height hint
+    size = "1024x1024"
+    if req.override_width and req.override_height:
+        w, h = req.override_width, req.override_height
+        if h > w:
+            size = "1024x1792"
+        elif w > h:
+            size = "1792x1024"
 
-    # Load checkpoint file from registry
+    dalle = DalleClient()
     try:
-        registry = _load_registry()
-        checkpoint_info = registry["image_checkpoints"].get(checkpoint_key, {})
-        checkpoint_file = checkpoint_info.get("file", f"{checkpoint_key}.safetensors")
-        checkpoint_type = checkpoint_info.get("type", "SD1.5")
-    except Exception:
-        checkpoint_file = f"{checkpoint_key}.safetensors"
-        checkpoint_type = "SD1.5"
+        image_b64 = await dalle.generate(clean_prompt, quality=quality, size=size)
+    except RuntimeError as exc:
+        logger.error("DALL-E 3 generation failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc))
+    except Exception as exc:
+        logger.error("DALL-E 3 unexpected error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=502, detail=f"Image generation error: {exc}")
 
-    # Build prompts
+    elapsed = (time.perf_counter() - start_time) * 1000
+    return GenerateResponse(
+        image_base64=image_b64,
+        route_result={"provider": "dall-e-3", "quality": quality, "size": size},
+        review=None,
+        retry_used=False,
+        critic_result=None,
+        session_id=session_id,
+        generation_time_ms=round(elapsed, 1),
+        prompt_warnings=prompt_warnings,
+    )
+
+    # ---- dead code below kept for reference; remove after DALL-E is stable ----
     try:
         pb = _get_prompt_builder()
         prompts = await pb.build(clean_prompt, route_result)
