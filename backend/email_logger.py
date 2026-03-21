@@ -39,10 +39,11 @@ async def send_with_log(
     db,
     user_id: str,
     email: str,
-    email_type: str,           # "welcome" | "upgrade" | "topup"
+    email_type: str,           # "welcome" | "upgrade" | "topup" | "followup_upgrade" | "low_credits" | "payment_failed"
     send_fn: Callable,         # synchronous callable: send_fn(params) → dict
     params: dict,
     subject: str = "",
+    automated: bool = False,   # True for background-task triggered emails
 ) -> bool:
     """
     Call send_fn(params) with up to 2 retries.
@@ -70,6 +71,7 @@ async def send_with_log(
                 subject=subject,
                 status="sent",
                 resend_id=resend_id,
+                automated=automated,
             )
             return True
 
@@ -87,6 +89,7 @@ async def send_with_log(
         subject=subject,
         status="failed",
         error_message=last_error,
+        automated=automated,
     )
     return False
 
@@ -148,6 +151,7 @@ async def _write_log(
     status: str,
     resend_id: str | None = None,
     error_message: str | None = None,
+    automated: bool = False,
 ) -> None:
     """Insert one document into email_logs. Non-fatal."""
     if db is None:
@@ -160,6 +164,7 @@ async def _write_log(
             "subject":    subject,
             "status":     status,
             "provider":   "resend",
+            "automated":  automated,
             "timestamp":  time.time(),
             "created_at": datetime.now(timezone.utc).isoformat(),
         }

@@ -350,6 +350,14 @@ async def _on_startup():
     except Exception as _safety_err:
         logging.warning("Safety module startup failed (non-fatal): %s", _safety_err)
 
+    # Start smart email automation background task
+    try:
+        from email_automation import start_email_automation  # noqa: PLC0415
+        await start_email_automation(db)
+        logging.info("✓ Email automation task started")
+    except Exception as _auto_err:
+        logging.warning("Email automation startup failed (non-fatal): %s", _auto_err)
+
 # Default model for basic endpoints (override with FAST_MODEL env var)
 _default_model = os.environ.get('FAST_MODEL', 'glm-4.7:cloud')
 
