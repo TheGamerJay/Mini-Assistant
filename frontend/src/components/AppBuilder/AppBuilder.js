@@ -140,6 +140,46 @@ const loadSessionsLocal = () => {
   try { return JSON.parse(localStorage.getItem(SESSIONS_KEY) || '[]'); } catch { return []; }
 };
 
+// ---------------------------------------------------------------------------
+// LockedCodeView — shown to free-plan users instead of the editable textarea
+// ---------------------------------------------------------------------------
+function LockedCodeView({ code, onUpgrade }) {
+  const lines = (code || '').split('\n');
+  const preview = lines.slice(0, 18).join('\n');
+  return (
+    <div className="relative h-full bg-[#0d1117] overflow-hidden select-none cursor-default">
+      {/* Preview: first 18 lines, faded out */}
+      <pre className="text-[#e6edf3] font-mono text-xs p-3 whitespace-pre-wrap break-all leading-5 pointer-events-none opacity-60">
+        {preview}
+        {lines.length > 18 ? '\n...' : ''}
+      </pre>
+      {/* Gradient fade */}
+      <div className="absolute inset-x-0 top-0 h-full bg-gradient-to-b from-transparent via-[#0d1117]/70 to-[#0d1117] pointer-events-none" />
+      {/* Lock overlay */}
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-4">
+        <div className="flex items-center gap-2">
+          <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center flex-shrink-0">
+            <Lock className="w-4 h-4 text-amber-400" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-slate-200 leading-none">Full code locked</p>
+            <p className="text-[10px] text-slate-500 mt-0.5">Available on paid plans</p>
+          </div>
+        </div>
+        <p className="text-[11px] text-slate-500 text-center max-w-[220px] leading-relaxed">
+          Upgrade to view, edit, copy, and download your complete source code.
+        </p>
+        <button
+          onClick={onUpgrade}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-600 text-white text-xs font-semibold hover:from-cyan-400 hover:to-violet-500 transition-all shadow-lg shadow-violet-900/30"
+        >
+          <Lock className="w-3 h-3" /> Upgrade to Unlock Code
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const AppBuilder = () => {
   const { isSubscribed } = useApp();
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
@@ -1180,6 +1220,7 @@ const AppBuilder = () => {
   };
 
   const pushToGithub = async () => {
+    if (!isSubscribed) { setShowUpgradeModal(true); return; }
     if (!githubToken.trim() || !githubRepo.trim()) { toast.error('Enter token and repo name'); return; }
     setGithubLoading(true); setGithubResult(null);
     try {
@@ -1201,6 +1242,7 @@ const AppBuilder = () => {
   };
 
   const deployToVercel = async () => {
+    if (!isSubscribed) { setShowUpgradeModal(true); return; }
     if (!vercelToken.trim()) { toast.error('Enter your Vercel token'); return; }
     setVercelLoading(true); setVercelResult(null);
     try {
@@ -2512,13 +2554,16 @@ const AppBuilder = () => {
                       </button>
                       {isDirty('index.html') && <span className="text-[9px] font-mono text-amber-400">● Unsaved</span>}
                     </div>
-                    <textarea
-                      value={ptGetContent(generatedApp.project, 'index.html')}
-                      onChange={e => handleDirectEdit('html', e.target.value)}
-                      onBlur={() => pushUndo()}
-                      className="flex-1 bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
-                      spellCheck={false}
-                    />
+                    {isSubscribed
+                      ? <textarea
+                          value={ptGetContent(generatedApp.project, 'index.html')}
+                          onChange={e => handleDirectEdit('html', e.target.value)}
+                          onBlur={() => pushUndo()}
+                          className="flex-1 bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
+                          spellCheck={false}
+                        />
+                      : <LockedCodeView code={ptGetContent(generatedApp.project, 'index.html')} onUpgrade={() => setShowUpgradeModal(true)} />
+                    }
                   </div>
                 )}
                 {activeTab === 'css' && (
@@ -2539,13 +2584,16 @@ const AppBuilder = () => {
                       </button>
                       {isDirty('style.css') && <span className="text-[9px] font-mono text-amber-400">● Unsaved</span>}
                     </div>
-                    <textarea
-                      value={ptGetContent(generatedApp.project, 'style.css')}
-                      onChange={e => handleDirectEdit('css', e.target.value)}
-                      onBlur={() => pushUndo()}
-                      className="flex-1 bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
-                      spellCheck={false}
-                    />
+                    {isSubscribed
+                      ? <textarea
+                          value={ptGetContent(generatedApp.project, 'style.css')}
+                          onChange={e => handleDirectEdit('css', e.target.value)}
+                          onBlur={() => pushUndo()}
+                          className="flex-1 bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
+                          spellCheck={false}
+                        />
+                      : <LockedCodeView code={ptGetContent(generatedApp.project, 'style.css')} onUpgrade={() => setShowUpgradeModal(true)} />
+                    }
                   </div>
                 )}
                 {activeTab === 'js' && (
@@ -2566,13 +2614,16 @@ const AppBuilder = () => {
                       </button>
                       {isDirty('script.js') && <span className="text-[9px] font-mono text-amber-400">● Unsaved</span>}
                     </div>
-                    <textarea
-                      value={ptGetContent(generatedApp.project, 'script.js')}
-                      onChange={e => handleDirectEdit('js', e.target.value)}
-                      onBlur={() => pushUndo()}
-                      className="flex-1 bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
-                      spellCheck={false}
-                    />
+                    {isSubscribed
+                      ? <textarea
+                          value={ptGetContent(generatedApp.project, 'script.js')}
+                          onChange={e => handleDirectEdit('js', e.target.value)}
+                          onBlur={() => pushUndo()}
+                          className="flex-1 bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
+                          spellCheck={false}
+                        />
+                      : <LockedCodeView code={ptGetContent(generatedApp.project, 'script.js')} onUpgrade={() => setShowUpgradeModal(true)} />
+                    }
                   </div>
                 )}
                 {activeTab === 'readme' && (
@@ -2619,17 +2670,20 @@ const AppBuilder = () => {
                           <Trash2 className="w-2.5 h-2.5" /> Delete
                         </button>
                       </div>
-                      <textarea
-                        value={efContent}
-                        onChange={e => setGeneratedApp(prev => ({
-                          ...prev,
-                          project: ptSetContent(prev.project, efName, e.target.value),
-                        }))}
-                        onBlur={() => pushUndo()}
-                        className="flex-1 bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
-                        spellCheck={false}
-                        placeholder={`// ${efName}\n`}
-                      />
+                      {isSubscribed
+                        ? <textarea
+                            value={efContent}
+                            onChange={e => setGeneratedApp(prev => ({
+                              ...prev,
+                              project: ptSetContent(prev.project, efName, e.target.value),
+                            }))}
+                            onBlur={() => pushUndo()}
+                            className="flex-1 bg-[#0d1117] text-[#e6edf3] font-mono text-xs p-3 outline-none resize-none border-0"
+                            spellCheck={false}
+                            placeholder={`// ${efName}\n`}
+                          />
+                        : <LockedCodeView code={efContent} onUpgrade={() => setShowUpgradeModal(true)} />
+                      }
                     </div>
                   );
                 })()}
@@ -2805,19 +2859,22 @@ const AppBuilder = () => {
     {showUpgradeModal && (
       <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowUpgradeModal(false)}>
         <div className="bg-[#13131f] border border-white/10 rounded-2xl p-8 w-full max-w-sm shadow-2xl text-center" onClick={e => e.stopPropagation()}>
-          <div className="text-4xl mb-4">✦</div>
-          <h3 className="text-lg font-bold text-white mb-2">Subscribe to Download</h3>
+          <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-4">
+            <Lock className="w-5 h-5 text-amber-400" />
+          </div>
+          <h3 className="text-lg font-bold text-white mb-2">Unlock Full Code Access</h3>
           <p className="text-sm text-slate-400 mb-6 leading-relaxed">
-            Your free trial lets you build and preview apps. Subscribe to download your project code, export ZIPs, and deploy.
+            Free plan includes AI generation and live preview. Upgrade to access your complete source code, download, and deploy.
           </p>
           <div className="space-y-3">
             <div className="rounded-xl bg-white/5 border border-white/10 p-4 text-left">
-              <p className="text-xs font-medium text-cyan-400 mb-1">What you get with a subscription</p>
-              <ul className="text-xs text-slate-400 space-y-1">
-                <li>✓ Download HTML, ZIP, and project files</li>
-                <li>✓ Unlimited Mini Credits</li>
-                <li>✓ Push to GitHub &amp; deploy</li>
-                <li>✓ Priority model access</li>
+              <p className="text-xs font-medium text-cyan-400 mb-2">What you unlock with a paid plan</p>
+              <ul className="text-xs text-slate-400 space-y-1.5">
+                <li className="flex items-center gap-2"><span className="text-cyan-400">✓</span> View &amp; edit complete source code (HTML, CSS, JS)</li>
+                <li className="flex items-center gap-2"><span className="text-cyan-400">✓</span> Download HTML &amp; ZIP project files</li>
+                <li className="flex items-center gap-2"><span className="text-cyan-400">✓</span> Push to GitHub &amp; deploy to Vercel</li>
+                <li className="flex items-center gap-2"><span className="text-cyan-400">✓</span> Unlimited Mini Credits</li>
+                <li className="flex items-center gap-2"><span className="text-cyan-400">✓</span> Priority AI model access</li>
               </ul>
             </div>
             <button

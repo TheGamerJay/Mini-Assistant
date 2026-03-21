@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Header
 from agents import run_agent_pipeline
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -1208,8 +1208,27 @@ class AppBuilderExportRequest(BaseModel):
     assets: List[dict] = []         # [{name, type, dataUrl}]
     extra_files: List[dict] = []    # [{name, content}]
 
+
+async def _require_paid(authorization: str) -> dict:
+    """Verify JWT and assert the user has a paid plan. Raises 401/403 on failure."""
+    try:
+        from auth_routes import get_current_user
+        user = await get_current_user(authorization)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if user.get("plan", "free") == "free":
+        raise HTTPException(
+            status_code=403,
+            detail="This feature requires a paid plan. Upgrade to access full code export and deployment."
+        )
+    return user
+
+
 @api_router.post("/app-builder/export-zip")
-async def export_app_zip(request: AppBuilderExportRequest):
+async def export_app_zip(request: AppBuilderExportRequest, authorization: str = Header(None)):
+    await _require_paid(authorization)
     """Return a ZIP of the structured project files, assets, and extra files."""
     import io, zipfile, base64
     from fastapi.responses import Response
@@ -1405,8 +1424,9 @@ class GithubPushRequest(BaseModel):
     extra_files: List[dict] = []
 
 @api_router.post("/app-builder/github-push")
-async def github_push(req: GithubPushRequest):
+async def github_push(req: GithubPushRequest, authorization: str = Header(None)):
     """Create (or update) a GitHub repo and push all project files."""
+    await _require_paid(authorization)
     import base64, re
     import requests as _req
 
@@ -1482,8 +1502,9 @@ class VercelDeployRequest(BaseModel):
     extra_files: List[dict] = []
 
 @api_router.post("/app-builder/deploy-vercel")
-async def deploy_vercel(req: VercelDeployRequest):
+async def deploy_vercel(req: VercelDeployRequest, authorization: str = Header(None)):
     """Deploy project as a static site to Vercel."""
+    await _require_paid(authorization)
     import base64, re, hashlib
     import requests as _req
 
