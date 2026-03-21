@@ -508,6 +508,19 @@ export default function UserDashboard() {
                 </p>
               )}
 
+              {/* Credits earned stat — only show once at least 1 completed */}
+              {referral.referrals_rewarded_count > 0 && (
+                <div className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-emerald-500/5 border border-emerald-500/10">
+                  <Zap size={11} className="text-emerald-400" />
+                  <span className="text-[11px] text-slate-400">
+                    Credits earned from referrals:{' '}
+                    <span className="text-emerald-400 font-bold font-mono">
+                      +{referral.referrals_rewarded_count * referral.sub_bonus}
+                    </span>
+                  </span>
+                </div>
+              )}
+
               {/* Copy link button */}
               <button
                 onClick={copyReferralLink}

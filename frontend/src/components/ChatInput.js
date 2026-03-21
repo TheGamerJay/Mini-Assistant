@@ -84,7 +84,11 @@ function readFileAsDataUrl(file) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, vibeMode = false, onVibeModeToggle }) {
-  const { pendingTemplate, clearPendingTemplate } = useApp();
+  const { pendingTemplate, pendingAutoSubmit, clearPendingTemplate, clearPendingAutoSubmit } = useApp();
+
+  // Always-current ref so the auto-submit path doesn't need onSubmit as a dep
+  const onSubmitRef = useRef(onSubmit);
+  useEffect(() => { onSubmitRef.current = onSubmit; });
   const [value, setValue]           = useState('');
   const [slashHints, setSlashHints] = useState([]);
 
@@ -109,14 +113,20 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
       : 'Message Mini Assistant…';
   const resolvedPlaceholder = placeholder || defaultPlaceholder;
 
-  // Consume pending template from sidebar
+  // Consume pending template — fills input, or auto-submits for onboarding
   useEffect(() => {
-    if (pendingTemplate) {
+    if (!pendingTemplate) return;
+    if (pendingAutoSubmit) {
+      // Fire directly without going through state — instant, no extra render
+      onSubmitRef.current(pendingTemplate, null, null);
+      clearPendingTemplate();
+      clearPendingAutoSubmit();
+    } else {
       setValue(pendingTemplate);
       clearPendingTemplate();
       textareaRef.current?.focus();
     }
-  }, [pendingTemplate, clearPendingTemplate]);
+  }, [pendingTemplate, pendingAutoSubmit, clearPendingTemplate, clearPendingAutoSubmit]);
 
   // Auto-resize textarea
   useEffect(() => {

@@ -762,9 +762,15 @@ export function AppProvider({ children }) {
   }, []);
 
   // Pending template — Sidebar fires it, ChatInput consumes it
-  const [pendingTemplate, _setPendingTemplate] = useState(null);
-  const firePendingTemplate = useCallback((text) => _setPendingTemplate(text), []);
-  const clearPendingTemplate = useCallback(() => _setPendingTemplate(null), []);
+  // autoSubmit=true → ChatInput fires onSubmit immediately (used by onboarding)
+  const [pendingTemplate,    _setPendingTemplate]    = useState(null);
+  const [pendingAutoSubmit,  _setPendingAutoSubmit]  = useState(false);
+  const firePendingTemplate  = useCallback((text, autoSubmit = false) => {
+    _setPendingAutoSubmit(autoSubmit);
+    _setPendingTemplate(text);
+  }, []);
+  const clearPendingTemplate    = useCallback(() => _setPendingTemplate(null), []);
+  const clearPendingAutoSubmit  = useCallback(() => _setPendingAutoSubmit(false), []);
 
   // ---------------------------------------------------------------------------
   const value = {
@@ -850,8 +856,10 @@ export function AppProvider({ children }) {
     deleteTask,
     // pending template bridge
     pendingTemplate,
+    pendingAutoSubmit,
     firePendingTemplate,
     clearPendingTemplate,
+    clearPendingAutoSubmit,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

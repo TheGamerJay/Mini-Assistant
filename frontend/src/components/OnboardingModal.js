@@ -104,8 +104,9 @@ export default function OnboardingModal({ onDone }) {
   const handleCategory = (cat) => { setCategory(cat); setStep(2); };
 
   const handlePrompt = (prompt) => {
-    firePendingTemplate(prompt);
+    // Navigate first so ChatInput is mounted, then fire auto-submit
     setPage(category.id === 'image' ? 'images' : 'chat');
+    firePendingTemplate(prompt, true);   // true = auto-submit
     onDone();
   };
 
