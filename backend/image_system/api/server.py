@@ -2085,6 +2085,20 @@ async def chat_stream(req: ChatRequest):
         # ── Image-to-Code pipeline (Vision → Builder → Reviewer loop) ─────────
         # Trigger when: build intent + images attached + no HTML already generated.
         # This covers first-time image builds AND retries mid-conversation.
+
+        # Extra heuristic: images + build/style keywords upgrade intent even if phase1
+        # classified as image_analysis (e.g. user used /analyze but means "build like this").
+        _IMAGE_BUILD_KW = _re.compile(
+            r"\b(build|create|recreate|replicate|clone|design)\b"
+            r"|same.{0,15}(style|theme|color|look|design)"
+            r"|(style|theme|color|look|design).{0,15}(for|my)\b"
+            r"|i.{0,10}want.{0,10}(this|same)",
+            _re.I,
+        )
+        if all_images and not _is_build_intent and not _has_prior_code and _IMAGE_BUILD_KW.search(effective_msg):
+            _is_build_intent = True
+            execution_intent = "app_builder"
+
         reply_text = ""
         ollama_client = _get_ollama()
 
