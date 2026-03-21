@@ -50,6 +50,26 @@ You are a requirements gatherer, not a teacher. Stay in that role.
 
 Start by asking what they want to build.`;
 
+// ── Quick-answer chips for coach questions ─────────────────────────────────────
+const QUESTION_CHIPS = {
+  who:      ['Just for me', 'Small team', 'Public users', 'Business / clients'],
+  style:    ['Dark & minimal', 'Light & clean', 'Colorful & vibrant', 'Neon / cyberpunk', 'Professional'],
+  login:    ['No login needed', 'Email & password', 'Google / social login'],
+  data:     ['No data storage', 'Browser only', 'Cloud database'],
+  features: ['Simple & focused', 'Full-featured', 'Mobile-first', 'Dashboard / charts'],
+  pages:    ['Single page', 'Multi-page', 'Full web app with nav'],
+};
+
+const detectChips = (text) => {
+  if (/(who|target|audience|user|for whom|intended for)/i.test(text)) return QUESTION_CHIPS.who;
+  if (/(style|look|feel|design|theme|aesthetic|color|visual|appearance)/i.test(text)) return QUESTION_CHIPS.style;
+  if (/(login|sign.?in|auth|account|user account)/i.test(text)) return QUESTION_CHIPS.login;
+  if (/(data|stor|sav|persist|database|backend)/i.test(text)) return QUESTION_CHIPS.data;
+  if (/(feature|function|capability|must.have|key things)/i.test(text)) return QUESTION_CHIPS.features;
+  if (/(page|scope|scale|section|nav|size)/i.test(text)) return QUESTION_CHIPS.pages;
+  return [];
+};
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 const renderLinks = (text) => {
   const tokenRe = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|https?:\/\/[^\s<>"]+/g;
@@ -130,6 +150,9 @@ const AppBuilder = () => {
   const [spec, setSpec] = useState('');
   const messagesEndRef = useRef(null);
   const loadingIntervalRef = useRef(null);
+  const [designPrefs, setDesignPrefs] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('design_preferences') || '{}'); } catch { return {}; }
+  });
 
   // Build state
   const [description, setDescription] = useState('');
@@ -511,9 +534,19 @@ const AppBuilder = () => {
     }
   };
 
-  const sendCoachMessage = async () => {
-    if (!coachInput.trim() || coachLoading) return;
-    const userMsg = { role: 'user', content: coachInput };
+  const sendChip = (chip) => {
+    if (QUESTION_CHIPS.style.includes(chip)) {
+      const prefs = { ...designPrefs, style: chip };
+      setDesignPrefs(prefs);
+      try { localStorage.setItem('design_preferences', JSON.stringify(prefs)); } catch {}
+    }
+    sendCoachMessage(chip);
+  };
+
+  const sendCoachMessage = async (textOverride) => {
+    const text = (textOverride !== undefined ? textOverride : coachInput).trim();
+    if (!text || coachLoading) return;
+    const userMsg = { role: 'user', content: text };
     const updatedMsgs = [...coachMessages, userMsg];
     setCoachMessages(updatedMsgs);
     setCoachInput('');
@@ -521,7 +554,7 @@ const AppBuilder = () => {
     startLoadingCycle(CHAT_LOADING_MSGS, setLoadingMsg);
 
     // Check if user typed BUILD
-    if (coachInput.trim().toUpperCase() === 'BUILD') {
+    if (text.toUpperCase() === 'BUILD') {
       await compileAndBuild(updatedMsgs);
       return;
     }
@@ -570,7 +603,10 @@ const AppBuilder = () => {
           ...msgs,
           {
             role: 'user',
-            content: 'Please compile everything we discussed into a single detailed app description I can use to build it. Be specific about features, tech stack, and requirements. Output only the description, no extra commentary.'
+            content: [
+              'Please compile everything we discussed into a single detailed app description I can use to build it. Be specific about features, tech stack, and requirements. Output only the description, no extra commentary.',
+              designPrefs.style ? `User design preference (from previous sessions): style = "${designPrefs.style}". Incorporate this into the design requirements.` : '',
+            ].filter(Boolean).join('\n\n')
           }
         ],
         model: 'glm-5:cloud',
@@ -1504,6 +1540,27 @@ const AppBuilder = () => {
             )}
             <div ref={messagesEndRef} />
           </div>
+
+          {/* Quick-answer chips */}
+          {!coachLoading && coachMessages.length > 0 && (() => {
+            const last = coachMessages[coachMessages.length - 1];
+            if (last.role !== 'assistant') return null;
+            const chips = detectChips(last.content);
+            if (!chips.length) return null;
+            return (
+              <div className="px-4 pb-2 pt-1 flex flex-wrap gap-1.5 border-t border-cyan-900/20 bg-black/20">
+                {chips.map((chip, i) => (
+                  <button
+                    key={i}
+                    onClick={() => sendChip(chip)}
+                    className="px-3 py-1 bg-cyan-500/10 border border-cyan-500/25 hover:border-cyan-400/70 hover:bg-cyan-500/20 text-cyan-300 text-[11px] font-mono rounded-sm transition-all"
+                  >
+                    {chip}
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
 
           {/* Input */}
           <div className="p-4 border-t border-cyan-500/20 bg-black/30 flex gap-3 items-end">
