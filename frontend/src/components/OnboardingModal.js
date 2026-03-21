@@ -10,7 +10,7 @@
  * All Tailwind classes written as full static strings so JIT includes them.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Sparkles, Code2, Image, MessageSquare, ArrowRight, ChevronLeft, X } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -101,6 +101,13 @@ export default function OnboardingModal({ onDone }) {
   const [step, setStep]         = useState(1);
   const [category, setCategory] = useState(null);
 
+  // Lock background scroll while modal is open; restore on close
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
   const handleCategory = (cat) => { setCategory(cat); setStep(2); };
 
   const handlePrompt = (prompt) => {
@@ -118,12 +125,31 @@ export default function OnboardingModal({ onDone }) {
       className="fixed inset-0 z-50 flex flex-col justify-end sm:justify-center sm:items-center sm:p-4"
       onClick={handleSkip}
     >
+      {/* Spring keyframe — mobile slide-up with subtle bounce at end */}
+      <style>{`
+        @keyframes sheet-up {
+          0%   { transform: translateY(100%); }
+          70%  { transform: translateY(-6px); }
+          85%  { transform: translateY(3px); }
+          100% { transform: translateY(0); }
+        }
+        @keyframes modal-in {
+          0%   { opacity: 0; transform: scale(0.96) translateY(8px); }
+          100% { opacity: 1; transform: scale(1)    translateY(0); }
+        }
+        .onboarding-sheet  { animation: sheet-up  280ms cubic-bezier(0.34,1.56,0.64,1) both; }
+        .onboarding-modal  { animation: modal-in  220ms cubic-bezier(0.34,1.56,0.64,1) both; }
+        @media (min-width: 640px) {
+          .onboarding-sheet { animation-name: modal-in; }
+        }
+      `}</style>
+
       {/* Dimmed backdrop */}
       <div className="absolute inset-0 bg-black/75" />
 
       {/* Modal — bottom sheet on mobile, floating card on sm+ */}
       <div
-        className="relative bg-[#0f0f18] border-t border-l border-r sm:border border-white/10
+        className="onboarding-sheet relative bg-[#0f0f18] border-t border-l border-r sm:border border-white/10
                    rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md
                    shadow-2xl overflow-hidden flex flex-col"
         style={{ maxHeight: '88svh' }}
