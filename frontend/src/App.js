@@ -6,7 +6,8 @@
  * with existing tool components that import it directly from this file.
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useCallback } from 'react';
+import { handleCheckoutReturn } from './api/checkout';
 import axios from 'axios';
 import { Toaster } from 'sonner';
 import { GoogleOAuthProvider } from '@react-oauth/google';
@@ -20,6 +21,7 @@ import MainPanel from './layout/MainPanel';
 
 // Shared components
 import TopBar from './components/TopBar';
+import UsageLimitBanner from './components/UsageLimitBanner';
 
 // Pages
 import ChatPage from './pages/ChatPage';
@@ -30,6 +32,8 @@ import ProfilePage from './pages/ProfilePage';
 import AdminPage from './pages/AdminPage';
 import UserDashboard from './pages/UserDashboard';
 import PurchaseCreditsModal from './components/PurchaseCreditsModal';
+import UpgradeModal from './components/UpgradeModal';
+import PricingPage from './pages/PricingPage';
 
 // Legal pages
 import TermsPage from './pages/legal/TermsPage';
@@ -133,7 +137,19 @@ function pageTitle(page) {
 // AppShell — rendered inside AppProvider so it can use useApp()
 // ---------------------------------------------------------------------------
 function AppShell() {
-  const { page, setPage, getPrevPage, serverStatus, setServerStatus, purchaseModalOpen, setPurchaseModalOpen } = useApp();
+  const { page, setPage, getPrevPage, serverStatus, setServerStatus, purchaseModalOpen, setPurchaseModalOpen, upgradeModalOpen, setUpgradeModalOpen } = useApp();
+
+  // Handle Stripe redirect params (?checkout=success|cancelled, ?portal=return)
+  useEffect(() => {
+    const result = handleCheckoutReturn();
+    if (result === 'success') {
+      // Go to dashboard — plan + credits will refresh from API
+      setPage('dashboard');
+    } else if (result === 'cancelled' || result === 'portal_return') {
+      setPage('pricing');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Poll server status every 60 s
   useEffect(() => {
@@ -163,6 +179,7 @@ function AppShell() {
     if (page === 'profile') return <ProfilePage />;
     if (page === 'dashboard') return <UserDashboard />;
     if (page === 'admin') return <AdminPage />;
+    if (page === 'pricing') return <PricingPage />;
 
     const legalEntry = LEGAL_PAGES[page];
     if (legalEntry) {
@@ -189,6 +206,7 @@ function AppShell() {
       <Sidebar />
       <MainPanel>
         <TopBar title={pageTitle(page)} serverStatus={serverStatus} />
+        <UsageLimitBanner />
         <div className="flex-1 overflow-hidden">
           {renderContent()}
         </div>
@@ -203,6 +221,9 @@ function AppShell() {
       {purchaseModalOpen && (
         <PurchaseCreditsModal onClose={() => setPurchaseModalOpen(false)} />
       )}
+
+      {/* Global upgrade modal — triggered from anywhere via openUpgradeModal() */}
+      <UpgradeModal />
     </div>
   );
 }

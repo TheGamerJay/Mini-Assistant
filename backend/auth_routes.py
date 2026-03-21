@@ -743,53 +743,115 @@ async def admin_grant_credits(user_id: str, body: GrantCreditsBody, admin: dict 
 @auth_router.get("/dashboard")
 async def user_dashboard(authorization: str = Header(None)):
     """Return the authenticated user's personal usage stats and recent activity."""
+    from datetime import datetime, timezone as _tz
     user = await get_current_user(authorization)
     db = _get_db()
 
     uid = user["id"]
     plan = user.get("plan", "free")
-    credits = user.get("credits", 0)
 
-    # Auto-backfill missing credits
-    if "credits" not in user:
-        credits = 10
-        await db["users"].update_one({"id": uid}, {"$set": {"credits": 10, "plan": "free"}})
+    # Dual-credit support: subscription_credits + topup_credits
+    # Fall back to legacy single `credits` field for old accounts
+    sub_credits   = user.get("subscription_credits")
+    topup_credits = user.get("topup_credits", 0)
 
-    # Total activity counts for this user
-    total_chats_sent   = await db["activity_logs"].count_documents({"user_id": uid, "type": "chat_message"})
-    total_images_made  = await db["activity_logs"].count_documents({"user_id": uid, "type": "image_generated"})
-    total_credits_used = 0
-    pipeline = [
+    if sub_credits is not None:
+        credits = sub_credits + topup_credits
+    else:
+        credits = user.get("credits", 0)
+        # Auto-backfill missing credits
+        if "credits" not in user:
+            credits = 10
+            await db["users"].update_one({"id": uid}, {"$set": {"credits": 10, "plan": "free"}})
+
+    now = datetime.now(_tz.utc)
+    month_key = f"{now.year:04d}-{now.month:02d}"
+
+    # All-time counts
+    total_chats_sent  = await db["activity_logs"].count_documents({"user_id": uid, "type": "chat_message"})
+    total_images_made = await db["activity_logs"].count_documents({"user_id": uid, "type": "image_generated"})
+
+    # All-time credits used
+    agg_all = await db["activity_logs"].aggregate([
         {"$match": {"user_id": uid}},
         {"$group": {"_id": None, "total": {"$sum": "$credits_used"}}},
-    ]
-    agg = await db["activity_logs"].aggregate(pipeline).to_list(1)
-    if agg:
-        total_credits_used = agg[0].get("total", 0)
+    ]).to_list(1)
+    total_credits_used = agg_all[0].get("total", 0) if agg_all else 0
+
+    # This-month stats
+    agg_month = await db["activity_logs"].aggregate([
+        {"$match": {"user_id": uid, "month_key": month_key}},
+        {"$group": {
+            "_id": None,
+            "credits": {"$sum": "$credits_used"},
+            "requests": {"$sum": 1},
+        }},
+    ]).to_list(1)
+    credits_used_month  = agg_month[0].get("credits", 0) if agg_month else 0
+    requests_this_month = agg_month[0].get("requests", 0) if agg_month else 0
+
+    # Most used feature this month
+    feat_agg = await db["activity_logs"].aggregate([
+        {"$match": {"user_id": uid, "month_key": month_key}},
+        {"$group": {"_id": "$action_type", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 1},
+    ]).to_list(1)
+    most_used_feature = feat_agg[0]["_id"] if feat_agg else None
+
+    # Daily trend — last 7 days (credits + requests per day)
+    seven_days_ago = time.time() - 7 * 86400
+    daily_agg = await db["activity_logs"].aggregate([
+        {"$match": {"user_id": uid, "timestamp": {"$gte": seven_days_ago}}},
+        {"$group": {
+            "_id": {
+                "$dateToString": {
+                    "format": "%Y-%m-%d",
+                    "date": {"$toDate": {"$multiply": ["$timestamp", 1000]}},
+                }
+            },
+            "credits":  {"$sum": "$credits_used"},
+            "requests": {"$sum": 1},
+        }},
+        {"$sort": {"_id": 1}},
+    ]).to_list(7)
+    daily_trend = [{"date": d["_id"], "credits": d["credits"], "requests": d["requests"]} for d in daily_agg]
 
     # Recent activity (last 20)
     recent = await db["activity_logs"].find(
         {"user_id": uid}, {"_id": 0}
     ).sort("timestamp", -1).limit(20).to_list(20)
 
-    # Saved chats count
+    # Saved chats
     chats_doc = await db["chats"].find_one({"user_id": uid}, {"chats": 1})
     saved_chats = len(chats_doc["chats"]) if chats_doc else 0
 
-    # Images saved
+    # Saved images
     images_doc = await db["images"].find_one({"user_id": uid}, {"images": 1})
     saved_images = len(images_doc["images"]) if images_doc else 0
 
     return {
         "plan": plan,
         "credits": credits,
+        # Dual-credit breakdown
+        "subscription_credits": sub_credits,
+        "topup_credits":        topup_credits,
+        "billing_cycle_start":  user.get("billing_cycle_start"),
+        "stripe_customer_id":   user.get("stripe_customer_id"),
         "is_subscribed": plan in ("standard", "pro", "team"),
         "member_since": user.get("created_at"),
-        "total_chats_sent": total_chats_sent,
-        "total_images_made": total_images_made,
-        "total_credits_used": total_credits_used,
-        "saved_chats": saved_chats,
-        "saved_images": saved_images,
+        # All-time
+        "total_chats_sent":     total_chats_sent,
+        "total_images_made":    total_images_made,
+        "total_credits_used":   total_credits_used,
+        "saved_chats":          saved_chats,
+        "saved_images":         saved_images,
+        # This month
+        "credits_used_month":   credits_used_month,
+        "requests_this_month":  requests_this_month,
+        "most_used_feature":    most_used_feature,
+        "daily_trend":          daily_trend,
+        # Activity
         "recent_activity": recent,
     }
 
@@ -802,6 +864,483 @@ async def admin_activity(limit: int = 100, admin: dict = Depends(_require_admin)
         {}, {"_id": 0}
     ).sort("timestamp", -1).limit(min(limit, 500)).to_list(500)
     return {"logs": logs}
+
+
+@admin_router.get("/abuse-flags")
+async def admin_abuse_flags(actioned: bool = False, admin: dict = Depends(_require_admin)):
+    """
+    Return users flagged for potential abuse.
+    actioned=false (default) → only unreviewed flags
+    actioned=true            → all flags including actioned ones
+    """
+    db = _get_db()
+    flt = {} if actioned else {"actioned": False}
+    flags = await db["abuse_flags"].find(
+        flt, {"_id": 0}
+    ).sort("last_seen", -1).limit(500).to_list(500)
+    return {"flags": flags, "count": len(flags)}
+
+
+@admin_router.patch("/abuse-flags/{user_id}")
+async def admin_action_abuse_flag(user_id: str, body: dict, admin: dict = Depends(_require_admin)):
+    """Mark a user's abuse flags as actioned (reviewed)."""
+    db = _get_db()
+    result = await db["abuse_flags"].update_many(
+        {"user_id": user_id},
+        {"$set": {
+            "actioned":    True,
+            "actioned_by": admin.get("email", admin.get("id")),
+            "actioned_at": time.time(),
+            "action_note": body.get("note", ""),
+        }},
+    )
+    return {"updated": result.modified_count}
+
+
+@admin_router.get("/system-alerts")
+async def admin_system_alerts(limit: int = 50, admin: dict = Depends(_require_admin)):
+    """Return recent system-level alerts (margin drops, cost spikes)."""
+    db = _get_db()
+    alerts = await db["system_alerts"].find(
+        {}, {"_id": 0}
+    ).sort("timestamp", -1).limit(min(limit, 200)).to_list(200)
+    return {"alerts": alerts, "count": len(alerts)}
+
+
+@admin_router.get("/analytics")
+async def admin_analytics(admin: dict = Depends(_require_admin)):
+    """
+    Unified revenue, cost, and usage analytics for the admin dashboard.
+
+    Returns:
+      - users_by_plan        : breakdown of user count per plan
+      - mrr_estimate_usd     : estimated monthly recurring revenue
+      - ai_cost_this_month   : estimated AI API cost this month (from usage_logs)
+      - net_profit_estimate  : MRR minus AI cost estimate
+      - profit_margin_pct    : net profit / MRR * 100
+      - conversion_rate_pct  : paid users / total users * 100
+      - daily_usage          : last 30 days — credits, requests, estimated cost
+      - usage_by_action      : per action_type totals
+      - paying_users         : count of non-free users
+      - new_users_this_month : new registrations this month
+    """
+    from datetime import datetime, timezone as _tz
+    from mini_credits import PLAN_MONTHLY_PRICE_USD
+
+    db = _get_db()
+    now = datetime.now(_tz.utc)
+    month_key = f"{now.year:04d}-{now.month:02d}"
+
+    # ── Users per plan ──────────────────────────────────────────────────────
+    plan_agg = await db["users"].aggregate([
+        {"$group": {"_id": "$plan", "count": {"$sum": 1}}},
+    ]).to_list(10)
+    users_by_plan = {"free": 0, "standard": 0, "pro": 0, "team": 0}
+    for row in plan_agg:
+        p = row.get("_id") or "free"
+        users_by_plan[p] = row.get("count", 0)
+
+    total_users  = sum(users_by_plan.values())
+    paying_users = sum(v for k, v in users_by_plan.items() if k != "free")
+
+    # ── Revenue estimate ────────────────────────────────────────────────────
+    mrr_estimate = sum(
+        count * PLAN_MONTHLY_PRICE_USD.get(plan, 0)
+        for plan, count in users_by_plan.items()
+    )
+
+    # ── AI cost this month (from usage_logs) ────────────────────────────────
+    cost_agg = await db["activity_logs"].aggregate([
+        {"$match": {"month_key": month_key}},
+        {"$group": {"_id": None, "cost": {"$sum": "$estimated_cost_usd"}}},
+    ]).to_list(1)
+    ai_cost_this_month = round(cost_agg[0].get("cost", 0.0), 4) if cost_agg else 0.0
+
+    net_profit = round(mrr_estimate - ai_cost_this_month, 2)
+    profit_margin_pct = round((net_profit / mrr_estimate * 100) if mrr_estimate > 0 else 0.0, 1)
+    conversion_rate_pct = round((paying_users / total_users * 100) if total_users > 0 else 0.0, 1)
+
+    # ── Daily usage — last 30 days ──────────────────────────────────────────
+    thirty_days_ago = time.time() - 30 * 86400
+    daily_agg = await db["activity_logs"].aggregate([
+        {"$match": {"timestamp": {"$gte": thirty_days_ago}}},
+        {"$group": {
+            "_id": {
+                "$dateToString": {
+                    "format": "%Y-%m-%d",
+                    "date": {"$toDate": {"$multiply": ["$timestamp", 1000]}},
+                }
+            },
+            "credits":  {"$sum": "$credits_used"},
+            "requests": {"$sum": 1},
+            "cost_usd": {"$sum": "$estimated_cost_usd"},
+        }},
+        {"$sort": {"_id": 1}},
+    ]).to_list(30)
+    daily_usage = [
+        {
+            "date":     d["_id"],
+            "credits":  d["credits"],
+            "requests": d["requests"],
+            "cost_usd": round(d.get("cost_usd", 0), 4),
+        }
+        for d in daily_agg
+    ]
+
+    # ── Usage breakdown by action type (all time) ───────────────────────────
+    action_agg = await db["activity_logs"].aggregate([
+        {"$group": {
+            "_id":      "$action_type",
+            "credits":  {"$sum": "$credits_used"},
+            "requests": {"$sum": 1},
+            "cost_usd": {"$sum": "$estimated_cost_usd"},
+        }},
+        {"$sort": {"requests": -1}},
+    ]).to_list(20)
+    usage_by_action = [
+        {
+            "action":   r.get("_id") or "unknown",
+            "credits":  r.get("credits", 0),
+            "requests": r.get("requests", 0),
+            "cost_usd": round(r.get("cost_usd", 0), 4),
+        }
+        for r in action_agg
+    ]
+
+    # ── New users this month ────────────────────────────────────────────────
+    month_start_ts = datetime(now.year, now.month, 1, tzinfo=_tz.utc).timestamp()
+    new_users_this_month = await db["users"].count_documents(
+        {"created_at": {"$gte": month_start_ts}}
+    )
+
+    return {
+        "users_by_plan":         users_by_plan,
+        "total_users":           total_users,
+        "paying_users":          paying_users,
+        "new_users_this_month":  new_users_this_month,
+        "mrr_estimate_usd":      round(mrr_estimate, 2),
+        "ai_cost_this_month_usd": ai_cost_this_month,
+        "net_profit_estimate_usd": net_profit,
+        "profit_margin_pct":     profit_margin_pct,
+        "conversion_rate_pct":   conversion_rate_pct,
+        "daily_usage":           daily_usage,
+        "usage_by_action":       usage_by_action,
+    }
+
+
+@admin_router.get("/pricing-optimizer")
+async def admin_pricing_optimizer(admin: dict = Depends(_require_admin)):
+    """
+    Analyze credit pricing vs. actual AI cost to recommend profit-maximizing prices.
+
+    For each action type, calculates:
+      - Average AI cost per request
+      - Revenue per credit (based on cheapest paid plan)
+      - Current margin %
+      - Recommended credit cost to achieve target margin
+    """
+    from mini_credits import CREDIT_COSTS, AI_COST_USD, PLAN_MONTHLY_PRICE_USD, PLAN_CREDIT_LIMITS
+
+    db = _get_db()
+
+    # Revenue per credit = plan_price / plan_credits (cheapest paid plan = standard)
+    revenue_per_credit = PLAN_MONTHLY_PRICE_USD["standard"] / PLAN_CREDIT_LIMITS["standard"]  # $0.018/credit
+    TARGET_MARGIN = 0.40  # 40% target profit margin
+
+    # Actual avg cost per action from logs (last 30 days)
+    thirty_days_ago = time.time() - 30 * 86400
+    cost_agg = await db["activity_logs"].aggregate([
+        {"$match": {"timestamp": {"$gte": thirty_days_ago}, "action_type": {"$exists": True}}},
+        {"$group": {
+            "_id":         "$action_type",
+            "avg_cost":    {"$avg": "$estimated_cost_usd"},
+            "total_cost":  {"$sum": "$estimated_cost_usd"},
+            "total_requests": {"$sum": 1},
+        }},
+    ]).to_list(20)
+    actual_costs = {r["_id"]: r for r in cost_agg}
+
+    analysis = []
+    for action, credit_cost in CREDIT_COSTS.items():
+        avg_cost = (
+            actual_costs[action]["avg_cost"]
+            if action in actual_costs
+            else AI_COST_USD.get(action, 0.005)
+        )
+        revenue = credit_cost * revenue_per_credit
+        margin = ((revenue - avg_cost) / revenue * 100) if revenue > 0 else 0
+        # Credits needed to achieve TARGET_MARGIN at current avg cost
+        recommended_credits = (avg_cost / (revenue_per_credit * (1 - TARGET_MARGIN))) if revenue_per_credit > 0 else credit_cost
+        analysis.append({
+            "action":              action,
+            "credit_cost":         credit_cost,
+            "avg_ai_cost_usd":     round(avg_cost, 5),
+            "revenue_estimate_usd": round(revenue, 5),
+            "current_margin_pct":  round(margin, 1),
+            "recommended_credits": round(recommended_credits, 1),
+            "total_requests_30d":  actual_costs.get(action, {}).get("total_requests", 0),
+        })
+
+    # Platform-wide margin estimate
+    total_rev  = sum(r["revenue_estimate_usd"] for r in analysis)
+    total_cost = sum(r["avg_ai_cost_usd"] for r in analysis)
+    platform_margin = ((total_rev - total_cost) / total_rev * 100) if total_rev > 0 else 0
+
+    return {
+        "analysis":                   sorted(analysis, key=lambda x: x["total_requests_30d"], reverse=True),
+        "revenue_per_credit_usd":     round(revenue_per_credit, 5),
+        "target_margin_pct":          int(TARGET_MARGIN * 100),
+        "platform_profit_margin_pct": round(platform_margin, 1),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Admin Override System
+# POST /api/admin/users/{user_id}/unflag          — clear abuse flags
+# POST /api/admin/users/{user_id}/reset-enforcement — reset enforcement stage to 0
+# POST /api/admin/users/{user_id}/grant-credits    — manually grant credits
+# POST /api/admin/users/{user_id}/restore-access   — restore plan + clear block
+# ---------------------------------------------------------------------------
+
+class AdminNoteBody(BaseModel):
+    note: str = ""
+
+class GrantCreditsBody(BaseModel):
+    subscription_credits: Optional[int] = None
+    topup_credits: Optional[int] = None
+    note: str = ""
+
+class RestoreAccessBody(BaseModel):
+    plan: str = "free"
+    subscription_credits: Optional[int] = None
+    note: str = ""
+
+
+def _admin_require(authorization: Optional[str] = Header(default=None)):
+    """Dependency: require admin role. Raises 403 if not admin."""
+    db = _get_db()
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    token = authorization.split(" ", 1)[1]
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return payload
+
+
+@auth_router.post("/admin/users/{user_id}/unflag")
+async def admin_unflag_user(
+    user_id: str,
+    body: AdminNoteBody,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Clear all unactioned abuse flags for a user."""
+    db = _get_db()
+    caller = _admin_require(authorization)
+    caller_uid = caller.get("sub")
+    caller_doc = await db["users"].find_one({"id": caller_uid}, {"role": 1})
+    if not caller_doc or caller_doc.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    result = await db["abuse_flags"].update_many(
+        {"user_id": user_id, "actioned": {"$ne": True}},
+        {"$set": {
+            "actioned":    True,
+            "actioned_by": caller_uid,
+            "actioned_at": time.time(),
+            "admin_note":  body.note,
+        }},
+    )
+    log.info("Admin %s unflagged user %s (%d flags cleared)", caller_uid, user_id, result.modified_count)
+    return {"ok": True, "flags_cleared": result.modified_count, "user_id": user_id}
+
+
+@auth_router.post("/admin/users/{user_id}/reset-enforcement")
+async def admin_reset_enforcement(
+    user_id: str,
+    body: AdminNoteBody,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Reset enforcement stage to 0 (removes throttle/hard-block)."""
+    db = _get_db()
+    caller = _admin_require(authorization)
+    caller_uid = caller.get("sub")
+    caller_doc = await db["users"].find_one({"id": caller_uid}, {"role": 1})
+    if not caller_doc or caller_doc.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    await db["user_enforcement"].update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "stage":       0,
+            "reset_by":    caller_uid,
+            "reset_at":    time.time(),
+            "admin_note":  body.note,
+        }},
+        upsert=True,
+    )
+    log.info("Admin %s reset enforcement for user %s to stage 0", caller_uid, user_id)
+    return {"ok": True, "user_id": user_id, "stage": 0}
+
+
+@auth_router.post("/admin/users/{user_id}/grant-credits")
+async def admin_grant_credits(
+    user_id: str,
+    body: GrantCreditsBody,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Manually grant subscription_credits and/or topup_credits to a user."""
+    db = _get_db()
+    caller = _admin_require(authorization)
+    caller_uid = caller.get("sub")
+    caller_doc = await db["users"].find_one({"id": caller_uid}, {"role": 1})
+    if not caller_doc or caller_doc.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    if body.subscription_credits is None and body.topup_credits is None:
+        raise HTTPException(status_code=400, detail="Specify subscription_credits and/or topup_credits")
+
+    inc = {}
+    if body.subscription_credits is not None and body.subscription_credits > 0:
+        inc["subscription_credits"] = body.subscription_credits
+    if body.topup_credits is not None and body.topup_credits > 0:
+        inc["topup_credits"] = body.topup_credits
+
+    if not inc:
+        raise HTTPException(status_code=400, detail="Credit amounts must be positive integers")
+
+    result = await db["users"].find_one_and_update(
+        {"id": user_id},
+        {"$inc": inc, "$set": {"admin_credit_grant_at": time.time()}},
+        return_document=True,
+        projection={"subscription_credits": 1, "topup_credits": 1, "plan": 1},
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    await db["activity_logs"].insert_one({
+        "user_id":      user_id,
+        "type":         "admin_credit_grant",
+        "action_type":  "admin_credit_grant",
+        "credits_used": -(inc.get("subscription_credits", 0) + inc.get("topup_credits", 0)),
+        "month_key":    __import__("datetime").datetime.now(__import__("datetime").timezone.utc).strftime("%Y-%m"),
+        "timestamp":    time.time(),
+        "details": {
+            "granted_by":             caller_uid,
+            "subscription_credits":   inc.get("subscription_credits", 0),
+            "topup_credits":          inc.get("topup_credits", 0),
+            "note":                   body.note,
+        },
+    })
+
+    log.info(
+        "Admin %s granted credits to user %s: sub=%d topup=%d",
+        caller_uid, user_id,
+        inc.get("subscription_credits", 0), inc.get("topup_credits", 0),
+    )
+    return {
+        "ok":                   True,
+        "user_id":              user_id,
+        "subscription_credits": result.get("subscription_credits", 0),
+        "topup_credits":        result.get("topup_credits", 0),
+    }
+
+
+@auth_router.post("/admin/users/{user_id}/restore-access")
+async def admin_restore_access(
+    user_id: str,
+    body: RestoreAccessBody,
+    authorization: Optional[str] = Header(default=None),
+):
+    """
+    Restore a user's access after an enforcement block or auto-downgrade.
+    Sets plan, resets enforcement stage to 0, clears abuse flags, resets
+    payment_failure_count, and optionally sets subscription_credits.
+    """
+    db = _get_db()
+    caller = _admin_require(authorization)
+    caller_uid = caller.get("sub")
+    caller_doc = await db["users"].find_one({"id": caller_uid}, {"role": 1})
+    if not caller_doc or caller_doc.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    from mini_credits import PLAN_CREDIT_LIMITS   # noqa: PLC0415
+    valid_plans = set(PLAN_CREDIT_LIMITS.keys()) | {"max"}
+    if body.plan not in valid_plans:
+        raise HTTPException(status_code=400, detail=f"Invalid plan '{body.plan}'")
+
+    plan_credits = body.subscription_credits
+    if plan_credits is None:
+        plan_credits = PLAN_CREDIT_LIMITS.get(body.plan, 50)
+
+    # Update user document
+    user_update = {
+        "plan":                  body.plan,
+        "subscription_credits":  plan_credits,
+        "payment_failure_count": 0,
+        "admin_restored_by":     caller_uid,
+        "admin_restored_at":     time.time(),
+    }
+    result = await db["users"].find_one_and_update(
+        {"id": user_id},
+        {"$set": user_update},
+        return_document=True,
+        projection={"id": 1, "email": 1, "plan": 1},
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Reset enforcement stage
+    await db["user_enforcement"].update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "stage":      0,
+            "reset_by":   caller_uid,
+            "reset_at":   time.time(),
+            "admin_note": body.note or "restore-access",
+        }},
+        upsert=True,
+    )
+
+    # Clear all open abuse flags
+    cleared = await db["abuse_flags"].update_many(
+        {"user_id": user_id, "actioned": {"$ne": True}},
+        {"$set": {
+            "actioned":    True,
+            "actioned_by": caller_uid,
+            "actioned_at": time.time(),
+            "admin_note":  body.note or "restore-access",
+        }},
+    )
+
+    await db["activity_logs"].insert_one({
+        "user_id":      user_id,
+        "type":         "admin_restore_access",
+        "action_type":  "admin_restore_access",
+        "credits_used": 0,
+        "timestamp":    time.time(),
+        "details": {
+            "restored_by":   caller_uid,
+            "plan":          body.plan,
+            "credits":       plan_credits,
+            "flags_cleared": cleared.modified_count,
+            "note":          body.note,
+        },
+    })
+
+    log.info(
+        "Admin %s restored access for user %s → plan=%s credits=%d flags_cleared=%d",
+        caller_uid, user_id, body.plan, plan_credits, cleared.modified_count,
+    )
+    return {
+        "ok":                   True,
+        "user_id":              user_id,
+        "plan":                 body.plan,
+        "subscription_credits": plan_credits,
+        "enforcement_stage":    0,
+        "flags_cleared":        cleared.modified_count,
+    }
 
 
 # ---------------------------------------------------------------------------

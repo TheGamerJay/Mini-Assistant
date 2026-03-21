@@ -1,31 +1,46 @@
 /**
  * pages/UserDashboard.js
- * Personal usage dashboard — credits, plan, activity history, stats.
+ * Personal usage dashboard — credits, plan, usage analytics, activity history.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Zap, MessageSquare, Image, Star, Clock,
   BarChart2, RefreshCw, ChevronRight, Shield,
-  TrendingUp, Folder, Calendar,
+  TrendingUp, Folder, Calendar, Code2, Cpu,
+  Rocket, GitBranch, Download, Activity,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { api } from '../api/client';
+import api from '../api/client';
+
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+const PLAN_CONFIG = {
+  free:     { label: 'Free',     color: 'text-slate-400',  bg: 'bg-white/5 border-white/10',             dot: 'bg-slate-500',  limit: 50 },
+  standard: { label: 'Standard', color: 'text-cyan-400',   bg: 'bg-cyan-500/10 border-cyan-500/20',      dot: 'bg-cyan-400',   limit: 500 },
+  pro:      { label: 'Pro',      color: 'text-violet-400', bg: 'bg-violet-500/10 border-violet-500/20',  dot: 'bg-violet-400', limit: 2000 },
+  team:     { label: 'Team',     color: 'text-amber-400',  bg: 'bg-amber-500/10 border-amber-500/20',    dot: 'bg-amber-400',  limit: 10000 },
+  max:      { label: 'Max',      color: 'text-amber-400',  bg: 'bg-amber-500/10 border-amber-500/20',    dot: 'bg-amber-400',  limit: 10000 },
+};
+
+const ACTION_META = {
+  chat_message:    { label: 'Chat',       icon: MessageSquare, color: 'text-cyan-400',   bg: 'bg-cyan-500/10' },
+  chat_stream:     { label: 'Chat',       icon: MessageSquare, color: 'text-cyan-400',   bg: 'bg-cyan-500/10' },
+  image_generated: { label: 'Image Gen',  icon: Image,         color: 'text-violet-400', bg: 'bg-violet-500/10' },
+  app_build:       { label: 'App Build',  icon: Code2,         color: 'text-emerald-400',bg: 'bg-emerald-500/10' },
+  code_review:     { label: 'Code Review',icon: BarChart2,     color: 'text-amber-400',  bg: 'bg-amber-500/10' },
+  export_zip:      { label: 'Export',     icon: Download,      color: 'text-slate-400',  bg: 'bg-white/5' },
+  github_push:     { label: 'GitHub',     icon: GitBranch,     color: 'text-slate-400',  bg: 'bg-white/5' },
+  deploy_vercel:   { label: 'Deploy',     icon: Rocket,        color: 'text-slate-400',  bg: 'bg-white/5' },
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-const PLAN_CONFIG = {
-  free:     { label: 'Free',     color: 'text-slate-400',  bg: 'bg-white/5 border-white/10',             dot: 'bg-slate-500' },
-  standard: { label: 'Standard', color: 'text-cyan-400',   bg: 'bg-cyan-500/10 border-cyan-500/20',      dot: 'bg-cyan-400' },
-  pro:      { label: 'Pro',      color: 'text-violet-400', bg: 'bg-violet-500/10 border-violet-500/20',  dot: 'bg-violet-400' },
-  team:     { label: 'Team',     color: 'text-amber-400',  bg: 'bg-amber-500/10 border-amber-500/20',    dot: 'bg-amber-400' },
-};
-
 function timeStamp(ts) {
   if (!ts) return '—';
-  const d = new Date(ts * 1000);
-  return d.toLocaleString('en-US', {
+  return new Date(ts * 1000).toLocaleString('en-US', {
     month: 'short', day: 'numeric',
     hour: 'numeric', minute: '2-digit', hour12: true,
   });
@@ -44,7 +59,45 @@ function fmt(n) {
 }
 
 // ---------------------------------------------------------------------------
-// Stat card
+// MiniBar — tiny inline bar chart (CSS, no lib)
+// ---------------------------------------------------------------------------
+function MiniBarChart({ data }) {
+  if (!data?.length) return (
+    <div className="flex items-end gap-1 h-12">
+      {Array.from({ length: 7 }).map((_, i) => (
+        <div key={i} className="flex-1 bg-white/5 rounded-sm" style={{ height: '20%' }} />
+      ))}
+    </div>
+  );
+
+  const maxVal = Math.max(...data.map(d => d.requests), 1);
+
+  return (
+    <div className="flex items-end gap-1 h-12">
+      {data.map((d, i) => {
+        const pct = Math.max(6, (d.requests / maxVal) * 100);
+        return (
+          <div key={i} className="flex-1 flex flex-col items-center gap-0.5 group relative">
+            <div
+              className="w-full bg-gradient-to-t from-cyan-600 to-cyan-400 rounded-sm transition-all group-hover:from-violet-600 group-hover:to-violet-400"
+              style={{ height: `${pct}%` }}
+            />
+            {/* Tooltip */}
+            <div className="absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 hidden group-hover:flex flex-col items-center z-10 pointer-events-none">
+              <div className="bg-[#1a1a2e] border border-white/10 rounded-lg px-2 py-1 text-[9px] text-slate-300 whitespace-nowrap shadow-xl">
+                <p className="font-mono">{d.date?.slice(5)}</p>
+                <p className="text-cyan-400">{d.requests} req · {d.credits} cr</p>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// StatCard
 // ---------------------------------------------------------------------------
 function StatCard({ icon: Icon, label, value, sub, color = 'slate' }) {
   const colors = {
@@ -55,11 +108,11 @@ function StatCard({ icon: Icon, label, value, sub, color = 'slate' }) {
     slate:   'text-slate-400  bg-white/5       border-white/10',
   };
   return (
-    <div className={`rounded-2xl border p-5 flex items-center gap-4 ${colors[color]}`}>
-      <Icon size={20} className="flex-shrink-0" />
-      <div>
-        <p className="text-lg sm:text-xl font-bold text-white">{fmt(value)}</p>
-        <p className="text-xs text-slate-500 mt-0.5">{label}</p>
+    <div className={`rounded-2xl border p-4 flex items-center gap-3 ${colors[color]}`}>
+      <Icon size={18} className="flex-shrink-0" />
+      <div className="min-w-0">
+        <p className="text-lg font-bold text-white leading-none">{fmt(value)}</p>
+        <p className="text-[11px] text-slate-500 mt-0.5 leading-none">{label}</p>
         {sub && <p className="text-[10px] text-slate-600 mt-0.5">{sub}</p>}
       </div>
     </div>
@@ -67,37 +120,41 @@ function StatCard({ icon: Icon, label, value, sub, color = 'slate' }) {
 }
 
 // ---------------------------------------------------------------------------
-// Activity row
+// ActivityRow
 // ---------------------------------------------------------------------------
 function ActivityRow({ item }) {
-  const isImage = item.type === 'image_generated';
+  const meta = ACTION_META[item.action_type || item.type] || ACTION_META.chat_message;
+  const Icon = meta.icon;
   return (
     <div className="flex items-center gap-3 py-2.5 border-b border-white/[0.04] last:border-0">
-      <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${isImage ? 'bg-violet-500/10' : 'bg-cyan-500/10'}`}>
-        {isImage
-          ? <Image size={13} className="text-violet-400" />
-          : <MessageSquare size={13} className="text-cyan-400" />}
+      <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${meta.bg}`}>
+        <Icon size={13} className={meta.color} />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-xs text-slate-300 font-medium">
-          {isImage ? 'Image generated' : 'Chat message sent'}
-        </p>
+        <p className="text-xs text-slate-300 font-medium">{meta.label}</p>
         <p className="text-[11px] text-slate-600 font-mono">{timeStamp(item.timestamp)}</p>
       </div>
-      <span className="flex items-center gap-1 text-[11px] font-mono text-amber-400 flex-shrink-0">
-        <Zap size={10} /> {item.credits_used}
-      </span>
+      {item.credits_used > 0 && (
+        <span className="flex items-center gap-1 text-[11px] font-mono text-amber-400 flex-shrink-0">
+          <Zap size={10} /> {item.credits_used}
+        </span>
+      )}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Credit bar
+// CreditBar
 // ---------------------------------------------------------------------------
-function CreditBar({ credits, plan, isSubscribed, onBuyCredits, onUpgrade }) {
+function CreditBar({ credits, plan, isSubscribed, onBuyCredits, onTopUp, onUpgrade }) {
   const planCfg = PLAN_CONFIG[plan] || PLAN_CONFIG.free;
-  const pct = isSubscribed ? 100 : Math.min(100, (credits / 10) * 100);
-  const barColor = isSubscribed ? 'bg-cyan-500' : credits > 5 ? 'bg-cyan-500' : credits > 2 ? 'bg-amber-500' : 'bg-red-500';
+  const limit = planCfg.limit;
+  const pct = Math.min(100, (credits / limit) * 100);
+  const low = pct < 20;
+  const mid = pct >= 20 && pct < 50;
+  const barColor = isSubscribed
+    ? (low ? 'bg-amber-500' : 'bg-gradient-to-r from-cyan-500 to-violet-500')
+    : (low ? 'bg-red-500' : mid ? 'bg-amber-500' : 'bg-cyan-500');
 
   return (
     <div className="rounded-2xl border border-white/10 bg-[#13131f] p-6">
@@ -110,49 +167,108 @@ function CreditBar({ credits, plan, isSubscribed, onBuyCredits, onUpgrade }) {
         </span>
       </div>
 
-      {isSubscribed ? (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-slate-400">Credits remaining</span>
-            <span className="text-lg font-bold text-cyan-400 font-mono">Unlimited</span>
-          </div>
-          <div className="h-2 rounded-full bg-white/5 overflow-hidden">
-            <div className="h-full w-full bg-gradient-to-r from-cyan-500 to-violet-500 rounded-full" />
-          </div>
-          <p className="text-[11px] text-slate-600">
-            Your {planCfg.label} plan includes unlimited credits. Enjoy building!
-          </p>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-slate-400">Credits remaining</span>
+          <span className={`text-xl font-bold font-mono ${isSubscribed && !low ? 'text-cyan-400' : low ? 'text-amber-400' : mid ? 'text-amber-400' : 'text-white'}`}>
+            {fmt(credits)} <span className="text-slate-600 text-sm font-normal">/ {limit.toLocaleString()}</span>
+          </span>
         </div>
-      ) : (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-slate-400">Credits remaining</span>
-            <span className={`text-lg font-bold font-mono ${credits > 5 ? 'text-white' : credits > 2 ? 'text-amber-400' : 'text-red-400'}`}>
-              {fmt(credits)}
-            </span>
-          </div>
-          <div className="h-2 rounded-full bg-white/10 overflow-hidden">
-            <div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${pct}%` }} />
-          </div>
-          <p className="text-[11px] text-slate-600">
-            1 credit = 1 chat message · 3 credits = 1 image
-          </p>
-          <div className="flex flex-wrap gap-2 pt-1">
-            <button
-              onClick={onBuyCredits}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold transition-all"
-            >
-              <Zap size={12} /> Buy Credits
-            </button>
-            <button
-              onClick={onUpgrade}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-xs font-medium transition-all"
-            >
-              <Star size={12} /> Upgrade Plan
-            </button>
-          </div>
+        <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+          <div className={`h-full rounded-full transition-all duration-700 ${barColor}`} style={{ width: `${Math.max(2, pct)}%` }} />
         </div>
-      )}
+        <p className="text-[11px] text-slate-600">
+          1 credit = 1 chat · 3 credits = 1 image · 5 credits = 1 app build
+          {isSubscribed && ' · Credits reset monthly'}
+        </p>
+        <div className="flex flex-wrap gap-2 pt-1">
+          {isSubscribed ? (
+            <>
+              <button
+                onClick={onTopUp}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold transition-all"
+              >
+                <Zap size={12} /> Top-Up Credits
+              </button>
+              <button
+                onClick={onUpgrade}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-xs font-medium transition-all"
+              >
+                <TrendingUp size={12} /> Change Plan
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={onBuyCredits}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold transition-all"
+              >
+                <Zap size={12} /> Buy Credits
+              </button>
+              <button
+                onClick={onUpgrade}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-xs font-medium transition-all"
+              >
+                <TrendingUp size={12} /> Upgrade Plan
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Monthly Usage Panel
+// ---------------------------------------------------------------------------
+function MonthlyUsagePanel({ data }) {
+  const meta = data?.most_used_feature
+    ? (ACTION_META[data.most_used_feature] || ACTION_META.chat_message)
+    : null;
+  const MFIcon = meta?.icon || Activity;
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[#13131f] p-6">
+      <h2 className="text-sm font-semibold text-slate-200 mb-5 flex items-center gap-2">
+        <BarChart2 size={14} className="text-cyan-400" /> This Month
+      </h2>
+
+      {/* Stats row */}
+      <div className="grid grid-cols-3 gap-3 mb-6">
+        <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-3 text-center">
+          <p className="text-lg font-bold text-white">{fmt(data?.credits_used_month ?? 0)}</p>
+          <p className="text-[10px] text-slate-500 mt-0.5">Credits used</p>
+        </div>
+        <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-3 text-center">
+          <p className="text-lg font-bold text-white">{fmt(data?.requests_this_month ?? 0)}</p>
+          <p className="text-[10px] text-slate-500 mt-0.5">Requests</p>
+        </div>
+        <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-3 text-center">
+          {meta ? (
+            <>
+              <div className={`w-6 h-6 rounded-lg ${meta.bg} flex items-center justify-center mx-auto mb-1`}>
+                <MFIcon size={12} className={meta.color} />
+              </div>
+              <p className="text-[10px] text-slate-500">{meta.label}</p>
+            </>
+          ) : (
+            <p className="text-[10px] text-slate-600 mt-3">No data</p>
+          )}
+          <p className="text-[9px] text-slate-600 mt-0.5">Top feature</p>
+        </div>
+      </div>
+
+      {/* Daily bar chart */}
+      <div>
+        <p className="text-[10px] text-slate-500 mb-2 flex items-center gap-1.5">
+          <Activity size={10} /> Last 7 days
+        </p>
+        <MiniBarChart data={data?.daily_trend || []} />
+        {!data?.daily_trend?.length && (
+          <p className="text-[10px] text-slate-700 text-center mt-1">No activity yet this week</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -161,10 +277,23 @@ function CreditBar({ credits, plan, isSubscribed, onBuyCredits, onUpgrade }) {
 // Main component
 // ---------------------------------------------------------------------------
 export default function UserDashboard() {
-  const { user, avatar, credits, plan, isSubscribed, setPage, setPurchaseModalOpen } = useApp();
-  const [data, setData]       = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState(null);
+  const { user, avatar, credits, plan, isSubscribed, setPage, setPurchaseModalOpen, openUpgradeModal } = useApp();
+  const [data, setData]           = useState(null);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState(null);
+  const [billingLoading, setBillingLoading] = useState(false);
+
+  const handleManageBilling = useCallback(async () => {
+    setBillingLoading(true);
+    try {
+      const { portal_url } = await api.stripeOpenPortal();
+      window.open(portal_url, '_blank', 'noopener');
+    } catch {
+      setPage('pricing');
+    } finally {
+      setBillingLoading(false);
+    }
+  }, [setPage]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -185,7 +314,7 @@ export default function UserDashboard() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-3xl mx-auto px-4 md:px-8 py-8 space-y-6">
+      <div className="max-w-3xl mx-auto px-4 md:px-8 py-8 space-y-5">
 
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -203,6 +332,13 @@ export default function UserDashboard() {
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={isSubscribed ? handleManageBilling : () => setPage('pricing')}
+              disabled={billingLoading}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium text-violet-400 bg-violet-500/10 border border-violet-500/20 hover:bg-violet-500/20 transition-all disabled:opacity-60"
+            >
+              <TrendingUp size={11} /> {billingLoading ? 'Loading…' : isSubscribed ? 'Manage Billing' : 'Upgrade'}
+            </button>
+            <button
               onClick={load}
               disabled={loading}
               className="p-2 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all"
@@ -218,68 +354,79 @@ export default function UserDashboard() {
           credits={data?.credits ?? credits ?? 0}
           plan={data?.plan ?? plan}
           isSubscribed={data?.is_subscribed ?? isSubscribed}
-          onBuyCredits={() => setPurchaseModalOpen(true)}
-          onUpgrade={() => setPage('settings')}
+          onBuyCredits={() => openUpgradeModal('credits')}
+          onTopUp={() => setPurchaseModalOpen(true)}
+          onUpgrade={() => setPage('pricing')}
         />
 
-        {/* Stat cards */}
+        {/* Monthly usage panel */}
         {loading ? (
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="rounded-2xl border border-white/5 bg-white/[0.02] p-5 h-20 animate-pulse" />
+          <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-6 h-44 animate-pulse" />
+        ) : (
+          <MonthlyUsagePanel data={data} />
+        )}
+
+        {/* All-time stat cards */}
+        {loading ? (
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="rounded-2xl border border-white/5 bg-white/[0.02] p-4 h-16 animate-pulse" />
             ))}
           </div>
         ) : error ? (
           <div className="text-center text-red-400 text-sm py-4">{error}</div>
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            <StatCard icon={MessageSquare} label="Chats Sent"      value={data?.total_chats_sent}  color="cyan" />
-            <StatCard icon={Image}         label="Images Made"     value={data?.total_images_made} color="violet" />
-            <StatCard icon={Zap}           label="Credits Used"    value={data?.total_credits_used} sub="all time" color="amber" />
-            <StatCard icon={Folder}        label="Saved Chats"     value={data?.saved_chats}       color="slate" />
-            <StatCard icon={TrendingUp}    label="Saved Images"    value={data?.saved_images}      color="slate" />
-            <StatCard icon={Calendar}      label="Member Since"    value={memberSince(data?.member_since)} color="slate" />
+          <div>
+            <p className="text-[11px] text-slate-600 uppercase tracking-widest font-mono mb-3">All time</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <StatCard icon={MessageSquare} label="Chats Sent"      value={data?.total_chats_sent}   color="cyan" />
+              <StatCard icon={Image}         label="Images Made"     value={data?.total_images_made}  color="violet" />
+              <StatCard icon={Zap}           label="Credits Used"    value={data?.total_credits_used} color="amber" />
+              <StatCard icon={Folder}        label="Saved Chats"     value={data?.saved_chats}        color="slate" />
+              <StatCard icon={TrendingUp}    label="Saved Images"    value={data?.saved_images}       color="slate" />
+              <StatCard icon={Calendar}      label="Member Since"    value={memberSince(data?.member_since)} color="slate" />
+            </div>
           </div>
         )}
 
         {/* Account info card */}
         <div className="rounded-2xl border border-white/10 bg-[#13131f] p-6">
           <h2 className="text-sm font-semibold text-slate-200 mb-4 flex items-center gap-2">
-            <BarChart2 size={14} className="text-cyan-400" /> Account Info
+            <BarChart2 size={14} className="text-cyan-400" /> Account
           </h2>
-          <div className="space-y-3">
+          <div className="space-y-2">
             {[
-              { label: 'Plan',         value: planCfg.label,              color: planCfg.color },
+              { label: 'Plan',         value: planCfg.label,                          color: planCfg.color },
               { label: 'Role',         value: user?.role === 'admin' ? 'Admin' : 'User' },
               { label: 'Member Since', value: memberSince(data?.member_since) },
               { label: 'Email',        value: user?.email },
             ].map(({ label, value, color }) => (
               <div key={label} className="flex items-center justify-between py-1.5 border-b border-white/[0.04] last:border-0">
                 <span className="text-xs text-slate-500">{label}</span>
-                <span className={`text-xs font-medium font-mono ${color || 'text-slate-300'}`}>{value}</span>
+                <span className={`text-xs font-medium font-mono truncate max-w-[60%] text-right ${color || 'text-slate-300'}`}>{value}</span>
               </div>
             ))}
           </div>
 
           <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              onClick={() => setPage('profile')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:text-slate-200 bg-white/5 hover:bg-white/10 transition-all"
-            >
+            <button onClick={() => setPage('profile')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:text-slate-200 bg-white/5 hover:bg-white/10 transition-all">
               Edit Profile <ChevronRight size={11} />
             </button>
-            <button
-              onClick={() => setPage('settings')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:text-slate-200 bg-white/5 hover:bg-white/10 transition-all"
-            >
+            <button onClick={() => setPage('settings')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:text-slate-200 bg-white/5 hover:bg-white/10 transition-all">
               Settings <ChevronRight size={11} />
             </button>
+            <button
+              onClick={isSubscribed ? handleManageBilling : () => setPage('pricing')}
+              disabled={billingLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-violet-400 bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/20 transition-all disabled:opacity-60">
+              <TrendingUp size={11} /> {billingLoading ? 'Loading…' : isSubscribed ? 'Billing' : 'Plans'}
+            </button>
             {user?.role === 'admin' && (
-              <button
-                onClick={() => setPage('admin')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 transition-all"
-              >
-                <Shield size={11} /> Admin Dashboard
+              <button onClick={() => setPage('admin')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 transition-all">
+                <Shield size={11} /> Admin
               </button>
             )}
           </div>
@@ -294,7 +441,7 @@ export default function UserDashboard() {
             <div className="text-center text-slate-600 text-sm py-4">Loading…</div>
           ) : !data?.recent_activity?.length ? (
             <div className="text-center text-slate-600 text-sm py-4">
-              No activity yet. Start a chat or generate an image!
+              No activity yet. Start a chat or build an app!
             </div>
           ) : (
             <div>

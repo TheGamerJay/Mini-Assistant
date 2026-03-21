@@ -8,10 +8,66 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Settings, Github, User, LogOut, Moon, Sun,
   HelpCircle, ChevronDown, GitBranch, RefreshCw, ShieldCheck, BarChart2, Menu,
+  Zap, Plus, TrendingUp, CreditCard,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/client';
 
+
+// ---------------------------------------------------------------------------
+// CreditChip — shows remaining credits with color coding + upgrade nudge
+// ---------------------------------------------------------------------------
+const PLAN_LIMITS = { free: 50, standard: 500, pro: 2000, team: 10000, max: 10000 };
+
+function CreditChip() {
+  const { credits, plan, isSubscribed, setPurchaseModalOpen, openUpgradeModal, setPage } = useApp();
+
+  if (credits === null) return null; // loading
+
+  const limit = PLAN_LIMITS[plan] || 50;
+  const pct   = Math.max(0, Math.min(100, (credits / limit) * 100));
+  const low   = pct < 20;
+  const mid   = pct >= 20 && pct < 50;
+
+  const barColor  = low ? 'bg-red-500'   : mid ? 'bg-amber-400' : 'bg-emerald-400';
+  const textColor = low ? 'text-red-400' : mid ? 'text-amber-400' : 'text-emerald-400';
+
+  const handleClick = () => {
+    if (!isSubscribed) {
+      openUpgradeModal('credits');
+    } else {
+      setPurchaseModalOpen(true);
+    }
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      title={`${credits} credits remaining${!isSubscribed ? ' — click to upgrade' : ' — click to top up'}`}
+      className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] transition-all group"
+    >
+      <Zap className={`w-3 h-3 flex-shrink-0 ${textColor}`} />
+      <div className="flex flex-col items-start">
+        <span className={`text-[11px] font-bold leading-none ${textColor}`}>
+          {credits.toLocaleString()}
+          <span className="text-slate-600 font-normal"> / {limit.toLocaleString()}</span>
+        </span>
+        {/* Mini bar */}
+        <div className="w-16 h-0.5 bg-white/10 rounded-full mt-1 overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all ${barColor}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      </div>
+      {!isSubscribed ? (
+        <TrendingUp className="w-3 h-3 text-slate-600 group-hover:text-violet-400 transition-colors" />
+      ) : (
+        <Plus className="w-3 h-3 text-slate-600 group-hover:text-cyan-400 transition-colors" />
+      )}
+    </button>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Status dot
@@ -31,7 +87,7 @@ function StatusDot({ label, ok }) {
 // ---------------------------------------------------------------------------
 // Profile dropdown
 // ---------------------------------------------------------------------------
-function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme, user, logout, avatar }) {
+function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme, user, logout, avatar, isSubscribed, openUpgradeModal }) {
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -100,10 +156,25 @@ function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme, user,
         <MenuItem icon={BarChart2} label="My Dashboard" onClick={() => go('dashboard')} />
         <MenuItem icon={User} label="My Profile" onClick={() => go('profile')} />
         <MenuItem icon={Settings} label="Settings" onClick={() => go('settings')} />
+        <MenuItem icon={CreditCard} label="Plans & Pricing" onClick={() => go('pricing')} />
         {user?.role === 'admin' && (
           <MenuItem icon={ShieldCheck} label="Admin Dashboard" onClick={() => go('admin')} />
         )}
       </div>
+
+      {/* Upgrade nudge — only for free users */}
+      {!isSubscribed && (
+        <div className="mx-3 my-2 px-3 py-2.5 rounded-xl bg-gradient-to-r from-violet-500/10 to-cyan-500/10 border border-violet-500/20">
+          <p className="text-[10px] font-bold text-violet-300 mb-0.5">Free Plan</p>
+          <p className="text-[10px] text-slate-500 mb-2">Unlock code, export &amp; deploy</p>
+          <button
+            onClick={() => { openUpgradeModal('generic'); onClose(); }}
+            className="w-full py-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-cyan-600 text-white text-[10px] font-bold hover:opacity-90 transition-all"
+          >
+            Upgrade Now →
+          </button>
+        </div>
+      )}
 
       {/* Integrations */}
       <div className="py-1.5 border-b border-white/5">
@@ -161,7 +232,7 @@ function MenuItem({ icon: Icon, label, onClick, hint }) {
 // TopBar
 // ---------------------------------------------------------------------------
 function TopBar() {
-  const { setPage, serverStatus, setServerStatus, theme, toggleTheme, user, logout, avatar, setMobileSidebarOpen } = useApp();
+  const { setPage, serverStatus, setServerStatus, theme, toggleTheme, user, logout, avatar, setMobileSidebarOpen, isSubscribed, openUpgradeModal } = useApp();
   const [profileOpen, setProfileOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -223,6 +294,11 @@ function TopBar() {
 
       <div className="flex-1" />
 
+      {/* Credits chip */}
+      <div className="mr-3">
+        <CreditChip />
+      </div>
+
       {/* Profile button */}
       <div className="relative">
         <button
@@ -253,6 +329,8 @@ function TopBar() {
             user={user}
             logout={logout}
             avatar={avatar}
+            isSubscribed={isSubscribed}
+            openUpgradeModal={openUpgradeModal}
           />
         )}
       </div>

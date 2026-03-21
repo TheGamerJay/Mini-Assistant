@@ -408,6 +408,49 @@ export const api = {
   /** Get recent activity logs — admin only */
   adminGetActivity(limit = 100) { return get(`${MAIN_API}/admin/activity?limit=${limit}`, 15000); },
 
+  /** Unified revenue + cost + usage analytics — admin only */
+  adminGetAnalytics() { return get(`${MAIN_API}/admin/analytics`, 20000); },
+
+  /** Credit pricing optimizer analysis — admin only */
+  adminGetPricingOptimizer() { return get(`${MAIN_API}/admin/pricing-optimizer`, 15000); },
+
+  /** Set a user's plan — admin only */
+  adminSetPlan(userId, plan) {
+    return request(`${MAIN_API}/admin/users/${userId}/plan`, { method: 'PATCH', body: JSON.stringify({ plan }) }, 10000);
+  },
+
+  /** Get users flagged for potential abuse — admin only */
+  adminGetAbuseFlags(actioned = false) {
+    return get(`${MAIN_API}/admin/abuse-flags?actioned=${actioned}`, 10000);
+  },
+
+  /** Mark a user's abuse flags as reviewed — admin only */
+  adminActionAbuseFlag(userId, note = '') {
+    return request(`${MAIN_API}/admin/abuse-flags/${userId}`, { method: 'PATCH', body: JSON.stringify({ note }) }, 10000);
+  },
+
+  /** Get system-level alerts (margin drops, cost spikes) — admin only */
+  adminGetSystemAlerts(limit = 50) {
+    return get(`${MAIN_API}/admin/system-alerts?limit=${limit}`, 10000);
+  },
+
+  // ── Stripe billing endpoints ─────────────────────────────────────────────────
+
+  /** Create a Stripe Checkout session (subscription or top-up). Returns { checkout_url, session_id }. */
+  stripeCreateCheckout(priceId) {
+    return post(`${MAIN_API}/stripe/create-checkout-session`, { price_id: priceId }, 15000);
+  },
+
+  /** Open Stripe Billing Portal. Returns { portal_url }. */
+  stripeOpenPortal() {
+    return post(`${MAIN_API}/stripe/billing-portal`, {}, 10000);
+  },
+
+  /** Get full credit breakdown for a user. */
+  stripeGetCredits(userId) {
+    return get(`${MAIN_API}/stripe/credits/${userId}`, 10000);
+  },
+
   // ── DB sync endpoints ───────────────────────────────────────────────────────
 
   /** Fetch all chats for the current user from MongoDB. */
