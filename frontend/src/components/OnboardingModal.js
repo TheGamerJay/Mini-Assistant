@@ -10,7 +10,7 @@
  * All Tailwind classes written as full static strings so JIT includes them.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Sparkles, Code2, Image, MessageSquare, ArrowRight, ChevronLeft, X } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -100,24 +100,73 @@ export default function OnboardingModal({ onDone }) {
   const { firePendingTemplate, setPage } = useApp();
   const [step, setStep]         = useState(1);
   const [category, setCategory] = useState(null);
+  const modalRef  = useRef(null);
+  const firedRef  = useRef(false);   // Phase 4: single-fire guard
 
-  // Lock background scroll while modal is open; restore on close
+  // Phase 3 — iOS Safari scroll lock (position:fixed method prevents rubber-band scroll)
   useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prev; };
+    const scrollY       = window.scrollY;
+    const prevOverflow  = document.body.style.overflow;
+    const prevPosition  = document.body.style.position;
+    const prevWidth     = document.body.style.width;
+    const prevTop       = document.body.style.top;
+
+    document.body.style.overflow  = 'hidden';
+    document.body.style.position  = 'fixed';
+    document.body.style.width     = '100%';
+    document.body.style.top       = `-${scrollY}px`;
+
+    return () => {
+      document.body.style.overflow  = prevOverflow;
+      document.body.style.position  = prevPosition;
+      document.body.style.width     = prevWidth;
+      document.body.style.top       = prevTop;
+      window.scrollTo(0, scrollY);  // restore position without jump
+    };
+  }, []);
+
+  // Phase 2 — ESC to close
+  const handleSkip = useCallback(() => onDone(), [onDone]);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') handleSkip(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [handleSkip]);
+
+  // Phase 2 — Focus trap: Tab cycles only within modal
+  useEffect(() => {
+    const modal = modalRef.current;
+    if (!modal) return;
+    modal.focus();
+
+    const FOCUSABLE = 'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+    const onTab = (e) => {
+      if (e.key !== 'Tab') return;
+      const nodes   = Array.from(modal.querySelectorAll(FOCUSABLE));
+      const first   = nodes[0];
+      const last    = nodes[nodes.length - 1];
+      if (e.shiftKey) {
+        if (document.activeElement === first) { e.preventDefault(); last?.focus(); }
+      } else {
+        if (document.activeElement === last)  { e.preventDefault(); first?.focus(); }
+      }
+    };
+    document.addEventListener('keydown', onTab);
+    return () => document.removeEventListener('keydown', onTab);
   }, []);
 
   const handleCategory = (cat) => { setCategory(cat); setStep(2); };
 
+  // Phase 4 — guard against double-fire from rapid taps
   const handlePrompt = (prompt) => {
-    // Navigate first so ChatInput is mounted, then fire auto-submit
+    if (firedRef.current) return;
+    firedRef.current = true;
     setPage(category.id === 'image' ? 'images' : 'chat');
-    firePendingTemplate(prompt, true);   // true = auto-submit
+    firePendingTemplate(prompt, true);
     onDone();
   };
-
-  const handleSkip = () => onDone();
 
   return (
     /* Full-screen flex column — backdrop click to dismiss */
@@ -142,6 +191,9 @@ export default function OnboardingModal({ onDone }) {
         @media (min-width: 640px) {
           .onboarding-sheet { animation-name: modal-in; }
         }
+        @media (prefers-reduced-motion: reduce) {
+          .onboarding-sheet, .onboarding-modal { animation: none; }
+        }
       `}</style>
 
       {/* Dimmed backdrop */}
@@ -149,9 +201,14 @@ export default function OnboardingModal({ onDone }) {
 
       {/* Modal — bottom sheet on mobile, floating card on sm+ */}
       <div
+        ref={modalRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Get started"
         className="onboarding-sheet relative bg-[#0f0f18] border-t border-l border-r sm:border border-white/10
                    rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md
-                   shadow-2xl overflow-hidden flex flex-col"
+                   shadow-2xl overflow-hidden flex flex-col outline-none"
         style={{ maxHeight: '88svh' }}
         onClick={e => e.stopPropagation()}
       >
