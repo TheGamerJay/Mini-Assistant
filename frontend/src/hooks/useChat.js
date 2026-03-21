@@ -49,6 +49,7 @@ export function useChat() {
 
     try {
       const res = await api.chatStream(text, sessionId, history, imagesBase64, controller.signal, vibeMode);
+      if (res.status === 402) throw new Error('out_of_credits');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const reader = res.body.getReader();

@@ -459,9 +459,14 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
       },
 
       onError(err) {
+        const isOutOfCredits = err.message === 'out_of_credits';
         const withErr = [...nextMessages, {
           role: 'assistant', type: 'error',
-          content: err.message || 'Something went wrong.', timestamp: Date.now(),
+          content: isOutOfCredits
+            ? '⚡ You\'ve used all your Mini Credits. Subscribe to keep building.'
+            : (err.message || 'Something went wrong.'),
+          timestamp: Date.now(),
+          _outOfCredits: isOutOfCredits,
         }];
         setMessages(withErr);
         updateChatMessages(chatIdRef_local, withErr);

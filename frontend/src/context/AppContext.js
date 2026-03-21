@@ -302,6 +302,18 @@ export function AppProvider({ children }) {
     return { id: payload.sub, name: payload.name, email: payload.email, role: payload.role };
   });
 
+  // ---- Credits ----
+  const [credits, setCredits] = useState(null); // null = loading
+  const [plan, setPlan]       = useState('free');
+  const isSubscribed = plan !== 'free';
+
+  const refreshCredits = useCallback(() => {
+    api.authCredits().then(({ credits: c, plan: p }) => {
+      setCredits(c);
+      setPlan(p);
+    }).catch(() => {});
+  }, []);
+
   // On mount: verify token with backend and refresh user object (including avatar).
   useEffect(() => {
     const token = getToken();
@@ -309,6 +321,8 @@ export function AppProvider({ children }) {
     api.authMe()
       .then((profile) => {
         _setUser((prev) => ({ ...prev, ...profile }));
+        if (profile.credits !== undefined) setCredits(profile.credits);
+        if (profile.plan !== undefined) setPlan(profile.plan);
         if (profile.avatar !== undefined) {
           _setAvatar(profile.avatar || null);
           // Cache avatar locally so it survives backend restarts
@@ -787,6 +801,10 @@ export function AppProvider({ children }) {
     loginWithGoogle,
     loginWithCredentials,
     register,
+    credits,
+    plan,
+    isSubscribed,
+    refreshCredits,
     getUserSecurityQuestion,
     resetPasswordWithSecurityAnswer,
     // profile

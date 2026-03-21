@@ -865,13 +865,23 @@ async def cancel_generation(session_id: str):
 
 
 @app.post("/api/image/generate")
-async def generate_image(req: GenerateRequest):
+async def generate_image(req: GenerateRequest, request: Request):
     """
     Image generation via DALL-E 3 (OpenAI API).
     1. Prompt safety validation.
     2. Generate via DALL-E 3 (standard or hd quality).
     3. Return image_base64 + metadata.
     """
+    try:
+        from mini_credits import check_and_deduct as _deduct
+        _ok, _remaining = await _deduct(request.headers.get("authorization"), cost=3)
+        if not _ok:
+            raise HTTPException(status_code=402, detail="out_of_credits")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
     from ..utils.prompt_safety import validate as ps_validate
     from ..services.dalle_client import DalleClient
 
@@ -1191,7 +1201,7 @@ async def analyze_image(req: AnalyzeRequest):
 
 
 @app.post("/api/chat")
-async def chat(req: ChatRequest):
+async def chat(req: ChatRequest, request: Request):
     """
     Multi-purpose chat endpoint — Phase 2: Full Executive Hierarchy.
 
@@ -1209,6 +1219,15 @@ async def chat(req: ChatRequest):
     Phase 2 adds CEO posture, Manager session context, and Supervisor task tracking.
     """
     from ..utils.prompt_safety import validate as ps_validate
+    try:
+        from mini_credits import check_and_deduct as _deduct
+        _ok, _remaining = await _deduct(request.headers.get("authorization"), cost=1)
+        if not _ok:
+            raise HTTPException(status_code=402, detail="out_of_credits")
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # credit module unavailable — allow through
 
     session_id = req.session_id or str(uuid.uuid4())
 
@@ -1717,7 +1736,7 @@ async def chat(req: ChatRequest):
 
 
 @app.post("/api/chat/stream")
-async def chat_stream(req: ChatRequest):
+async def chat_stream(req: ChatRequest, request: Request):
     """
     Streaming chat endpoint — returns SSE tokens for general chat.
     Each event: data: {"t": "<token>"}
@@ -1725,6 +1744,16 @@ async def chat_stream(req: ChatRequest):
     Image-gen intents signal: data: {"done": true, "meta": {"type": "image_redirect"}}
     """
     import json as _json
+
+    try:
+        from mini_credits import check_and_deduct as _deduct
+        _ok, _remaining = await _deduct(request.headers.get("authorization"), cost=1)
+        if not _ok:
+            raise HTTPException(status_code=402, detail="out_of_credits")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
 
     session_id = req.session_id or str(uuid.uuid4())
 

@@ -331,6 +331,11 @@ export const api = {
     return get(`${MAIN_API}/auth/me`, 10000);
   },
 
+  /** Get current credit balance and plan. */
+  authCredits() {
+    return get(`${MAIN_API}/auth/credits`, 10000);
+  },
+
   /** Update display name. */
   authUpdateProfile(name) {
     return request(`${MAIN_API}/auth/profile`, {

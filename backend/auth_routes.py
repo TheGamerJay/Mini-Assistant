@@ -113,6 +113,8 @@ def _public_user(user: dict) -> dict:
         "email": user["email"],
         "role": user.get("role", "user"),
         "avatar": user.get("avatar"),
+        "credits": user.get("credits", 0),
+        "plan": user.get("plan", "free"),
     }
 
 
@@ -209,6 +211,8 @@ async def register(body: RegisterBody):
         "security_question": body.security_question or None,
         "security_answer_hash": sec_answer_hash,
         "avatar": None,
+        "credits": 10,
+        "plan": "free",
         "created_at": time.time(),
     }
     await db["users"].insert_one(user_doc)
@@ -298,6 +302,8 @@ async def google_login(body: GoogleAuthBody):
             "google_sub": google_sub,
             "role": role,
             "avatar": google_pic,
+            "credits": 10,
+            "plan": "free",
             "created_at": time.time(),
         }
         await db["users"].insert_one(user)
@@ -310,6 +316,13 @@ async def google_login(body: GoogleAuthBody):
 async def me(authorization: str = Header(None)):
     user = await get_current_user(authorization)
     return _public_user(user)
+
+
+@auth_router.get("/credits")
+async def get_credits(authorization: str = Header(None)):
+    """Return current credit balance and plan for the authenticated user."""
+    user = await get_current_user(authorization)
+    return {"credits": user.get("credits", 0), "plan": user.get("plan", "free")}
 
 
 @auth_router.patch("/profile")

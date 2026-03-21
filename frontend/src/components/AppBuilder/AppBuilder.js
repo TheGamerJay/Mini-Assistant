@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { axiosInstance } from '../../App';
+import { useApp } from '../../context/AppContext';
 import { toast } from 'sonner';
 import {
   reconstructHtmlFromProject,
@@ -140,6 +141,8 @@ const loadSessionsLocal = () => {
 };
 
 const AppBuilder = () => {
+  const { isSubscribed } = useApp();
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [mode, setMode] = useState('coach');   // 'coach' | 'build'
 
   // Coach state
@@ -1043,6 +1046,7 @@ const AppBuilder = () => {
   };
 
   const exportZip = async () => {
+    if (!isSubscribed) { setShowUpgradeModal(true); return; }
     if (!generatedApp?.html) return;
     try {
       toast.info('Building ZIP...');
@@ -1067,6 +1071,7 @@ const AppBuilder = () => {
   };
 
   const downloadApp = () => {
+    if (!isSubscribed) { setShowUpgradeModal(true); return; }
     if (!generatedApp?.html) return;
     const blob = new Blob([generatedApp.html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
@@ -1139,6 +1144,7 @@ const AppBuilder = () => {
 
   // ── Phase 4: Publish handlers ─────────────────────────────────────────────────
   const exportSessionJson = () => {
+    if (!isSubscribed) { setShowUpgradeModal(true); return; }
     if (!generatedApp) return;
     const payload = { ...generatedApp, versions, editHistory, exportedAt: new Date().toISOString() };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -2796,6 +2802,38 @@ const AppBuilder = () => {
     )}
 
     {/* ── GitHub Push Modal ── */}
+    {showUpgradeModal && (
+      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowUpgradeModal(false)}>
+        <div className="bg-[#13131f] border border-white/10 rounded-2xl p-8 w-full max-w-sm shadow-2xl text-center" onClick={e => e.stopPropagation()}>
+          <div className="text-4xl mb-4">✦</div>
+          <h3 className="text-lg font-bold text-white mb-2">Subscribe to Download</h3>
+          <p className="text-sm text-slate-400 mb-6 leading-relaxed">
+            Your free trial lets you build and preview apps. Subscribe to download your project code, export ZIPs, and deploy.
+          </p>
+          <div className="space-y-3">
+            <div className="rounded-xl bg-white/5 border border-white/10 p-4 text-left">
+              <p className="text-xs font-medium text-cyan-400 mb-1">What you get with a subscription</p>
+              <ul className="text-xs text-slate-400 space-y-1">
+                <li>✓ Download HTML, ZIP, and project files</li>
+                <li>✓ Unlimited Mini Credits</li>
+                <li>✓ Push to GitHub &amp; deploy</li>
+                <li>✓ Priority model access</li>
+              </ul>
+            </div>
+            <button
+              onClick={() => setShowUpgradeModal(false)}
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-600 text-white text-sm font-semibold hover:from-cyan-400 hover:to-violet-500 transition-all shadow-lg"
+            >
+              View Plans — Coming Soon
+            </button>
+            <button onClick={() => setShowUpgradeModal(false)} className="w-full text-xs text-slate-600 hover:text-slate-400 transition-colors">
+              Keep building for free
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
     {showGithubModal && (
       <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowGithubModal(false)}>
         <div className="bg-[#0d1117] border border-gray-700/60 rounded-lg p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>

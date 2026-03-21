@@ -358,6 +358,9 @@ function Sidebar() {
     addPromptTemplate,
     deletePromptTemplate,
     firePendingTemplate,
+    credits,
+    plan,
+    isSubscribed,
   } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -602,6 +605,38 @@ function Sidebar() {
 
       {/* ---- Bottom fixed area ---- */}
       <div className="flex-shrink-0 border-t border-white/5 px-2 py-3 space-y-1">
+        {/* Credits badge */}
+        {!isSubscribed && credits !== null && (
+          <div
+            title={sidebarCollapsed ? `${credits} Mini Credits remaining` : undefined}
+            className={`flex items-center gap-2 px-2 py-1.5 rounded-lg ${sidebarCollapsed ? 'justify-center' : ''}`}
+          >
+            <span className="text-[13px] flex-shrink-0">⚡</span>
+            {!sidebarCollapsed && (
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-[11px] font-mono text-slate-400">{credits} Mini Credits</span>
+                  {credits === 0 && (
+                    <span className="text-[10px] text-amber-400 font-medium">Upgrade</span>
+                  )}
+                </div>
+                <div className="h-1 rounded-full bg-white/10 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${credits > 5 ? 'bg-cyan-500' : credits > 2 ? 'bg-amber-500' : 'bg-red-500'}`}
+                    style={{ width: `${Math.min(100, (credits / 10) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {isSubscribed && (
+          <div className={`flex items-center gap-2 px-2 py-1.5 rounded-lg ${sidebarCollapsed ? 'justify-center' : ''}`}>
+            <span className="text-[13px] flex-shrink-0">✦</span>
+            {!sidebarCollapsed && <span className="text-[11px] font-mono text-cyan-400 capitalize">{plan}</span>}
+          </div>
+        )}
+
         <div className={`flex items-center gap-2 px-2 py-1.5 rounded-lg ${sidebarCollapsed ? 'justify-center' : ''}`}>
           <span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDot}`} />
           {!sidebarCollapsed && <span className="text-[11px] font-mono text-slate-500">Local AI</span>}
