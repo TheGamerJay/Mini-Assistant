@@ -5,7 +5,7 @@
  */
 
 import React, { useEffect } from 'react';
-import { X, RefreshCw } from 'lucide-react';
+import { X, RefreshCw, FileText, Shield, RotateCcw, AlertOctagon, Copyright, Mail, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/client';
@@ -45,8 +45,17 @@ function SectionHeader({ children }) {
   );
 }
 
+const LEGAL_LINKS = [
+  { page: 'legal-terms',      icon: FileText,      label: 'Terms of Service' },
+  { page: 'legal-privacy',    icon: Shield,        label: 'Privacy Policy' },
+  { page: 'legal-refund',     icon: RotateCcw,     label: 'Refund Policy' },
+  { page: 'legal-prohibited', icon: AlertOctagon,  label: 'Prohibited Content' },
+  { page: 'legal-dmca',       icon: Copyright,     label: 'DMCA & Copyright' },
+  { page: 'legal-contact',    icon: Mail,          label: 'Contact Us' },
+];
+
 function SettingsModal({ onClose }) {
-  const { settings, updateSettings, serverStatus, setServerStatus } = useApp();
+  const { settings, updateSettings, serverStatus, setServerStatus, setPage } = useApp();
 
   // Close on Escape
   useEffect(() => {
@@ -144,6 +153,23 @@ function SettingsModal({ onClose }) {
                 ))}
               </div>
             </div>
+          </div>
+
+          {/* --- Legal --- */}
+          <SectionHeader>Legal</SectionHeader>
+          <div className="rounded-xl border border-white/5 overflow-hidden">
+            {LEGAL_LINKS.map(({ page, icon: Icon, label }, i) => (
+              <button
+                key={page}
+                onClick={() => { setPage(page); onClose(); }}
+                className={`flex items-center gap-3 w-full px-4 py-3 text-left hover:bg-white/5 transition-colors
+                  ${i < LEGAL_LINKS.length - 1 ? 'border-b border-white/5' : ''}`}
+              >
+                <Icon size={14} className="text-slate-500 flex-shrink-0" />
+                <span className="flex-1 text-sm text-slate-300">{label}</span>
+                <ChevronRight size={13} className="text-slate-600" />
+              </button>
+            ))}
           </div>
 
           {/* bottom padding */}

@@ -7,46 +7,12 @@
 import React, { useState, useRef } from 'react';
 import {
   Camera, Check, AlertTriangle, Lock, User, Trash2,
-  ChevronLeft, Eye, EyeOff, FileText, LogOut,
+  ChevronLeft, Eye, EyeOff, LogOut,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { toast } from 'sonner';
 
 // ---------------------------------------------------------------------------
-// TermsModal (inline)
-// ---------------------------------------------------------------------------
-function TermsModal({ onClose }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-      <div className="w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl bg-[#0f0f1a] border border-white/10 shadow-2xl">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/8">
-          <h2 className="text-base font-semibold text-slate-100">Terms & Privacy Policy</h2>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 transition-colors text-lg leading-none">✕</button>
-        </div>
-        <div className="flex-1 overflow-y-auto px-6 py-5 text-sm text-slate-400 space-y-4 leading-relaxed">
-          <section><h3 className="text-slate-200 font-semibold mb-1">1. Your Data</h3>
-            <p>Your chats, projects, and settings are synced to your account in our secure database. You can delete your account and all associated data at any time.</p></section>
-          <section><h3 className="text-slate-200 font-semibold mb-1">2. Authentication</h3>
-            <p>Passwords are hashed with bcrypt before storage. Mini Assistant never stores plaintext passwords. You can reset a forgotten password using your security question.</p></section>
-          <section><h3 className="text-slate-200 font-semibold mb-1">3. AI Outputs</h3>
-            <p>Mini Assistant is powered by Claude AI and DALL-E 3. Outputs may be inaccurate, incomplete, or inappropriate. Always review AI-generated code, text, and images before use in production.</p></section>
-          <section><h3 className="text-slate-200 font-semibold mb-1">4. Image Generation</h3>
-            <p>Images are generated via OpenAI's DALL-E 3 API and are subject to OpenAI's usage policies. Do not generate illegal or harmful content.</p></section>
-          <section><h3 className="text-slate-200 font-semibold mb-1">5. No Warranties</h3>
-            <p>This software is provided "as is" without warranty of any kind. Use at your own risk.</p></section>
-          <section><h3 className="text-slate-200 font-semibold mb-1">6. Account Deletion</h3>
-            <p>Deleting your account permanently erases all associated data from your browser. This action is irreversible.</p></section>
-          <section><h3 className="text-slate-200 font-semibold mb-1">7. Open Source</h3>
-            <p>Mini Assistant is open source. Report issues or contribute at <a href="https://github.com/TheGamerJay/Mini-Assistant" target="_blank" rel="noopener noreferrer" className="text-cyan-400 underline">github.com/TheGamerJay/Mini-Assistant</a>.</p></section>
-        </div>
-        <div className="px-6 py-4 border-t border-white/8">
-          <button onClick={onClose} className="w-full py-2 rounded-xl bg-white/8 hover:bg-white/12 text-slate-300 text-sm font-medium transition-colors">Close</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // DeleteConfirmModal
 // ---------------------------------------------------------------------------
@@ -164,7 +130,6 @@ function ProfilePage() {
   const [pwdSaving, setPwdSaving] = useState(false);
 
   // Modals
-  const [showTerms, setShowTerms] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
 
   const initial = user?.name ? user.name[0].toUpperCase() : 'U';
@@ -315,18 +280,6 @@ function ProfilePage() {
           </form>
         </Card>
 
-        {/* ── Legal ── */}
-        <Card className="mb-4">
-          <SectionTitle>Legal</SectionTitle>
-          <button
-            onClick={() => setShowTerms(true)}
-            className="flex items-center gap-3 w-full px-4 py-3 rounded-xl bg-white/4 hover:bg-white/8 border border-white/8 transition-colors text-left"
-          >
-            <FileText size={16} className="text-slate-500 flex-shrink-0" />
-            <span className="text-sm text-slate-300">Terms & Privacy Policy</span>
-          </button>
-        </Card>
-
         {/* ── Sign Out ── */}
         <Card className="mb-4">
           <SectionTitle>Session</SectionTitle>
@@ -361,7 +314,6 @@ function ProfilePage() {
 
       </div>
 
-      {showTerms && <TermsModal onClose={() => setShowTerms(false)} />}
       {showDelete && (
         <DeleteConfirmModal
           onConfirm={handleDeleteConfirm}
