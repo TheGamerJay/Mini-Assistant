@@ -10,6 +10,7 @@ import os
 import uuid
 import time
 import logging
+import threading
 
 from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
@@ -216,6 +217,18 @@ async def register(body: RegisterBody):
         "created_at": time.time(),
     }
     await db["users"].insert_one(user_doc)
+
+    # Fire welcome email in background — never blocks the response
+    try:
+        from email_service import send_welcome_email  # noqa: PLC0415
+        threading.Thread(
+            target=send_welcome_email,
+            args=(user_doc["email"], user_doc["name"]),
+            daemon=True,
+        ).start()
+    except Exception as _email_exc:
+        log.warning("Could not start welcome email thread: %s", _email_exc)
+
     token = _make_token(user_doc)
     return {"token": token, "user": _public_user(user_doc)}
 
@@ -307,6 +320,17 @@ async def google_login(body: GoogleAuthBody):
             "created_at": time.time(),
         }
         await db["users"].insert_one(user)
+
+        # Fire welcome email for new Google sign-ups
+        try:
+            from email_service import send_welcome_email  # noqa: PLC0415
+            threading.Thread(
+                target=send_welcome_email,
+                args=(user["email"], user["name"]),
+                daemon=True,
+            ).start()
+        except Exception as _email_exc:
+            log.warning("Could not start welcome email thread: %s", _email_exc)
 
     token = _make_token(user)
     return {"token": token, "user": _public_user(user)}
@@ -1376,3 +1400,20 @@ async def admin_bootstrap(body: BootstrapBody):
     results["aceelnene"] = "user" if r2.matched_count else "not found"
 
     return {"ok": True, "results": results}
+
+
+# ---------------------------------------------------------------------------
+# Test email route — GET /api/auth/test-email
+# Remove or restrict this in production after confirming delivery.
+# ---------------------------------------------------------------------------
+
+@auth_router.get("/test-email")
+async def test_email():
+    """Send a test welcome email to verify Resend integration."""
+    from email_service import send_welcome_email  # noqa: PLC0415
+    threading.Thread(
+        target=send_welcome_email,
+        args=("miniassistantai@gmail.com", "Test User"),
+        daemon=True,
+    ).start()
+    return {"status": "sent", "note": "Check your inbox in a few seconds."}

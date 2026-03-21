@@ -109,6 +109,7 @@ python-jose==3.5.0
 python-multipart==0.0.22
 PyYAML==6.0.3
 redis==7.2.1
+resend>=2.0.0
 referencing==0.37.0
 regex==2026.2.28
 requests==2.32.5
