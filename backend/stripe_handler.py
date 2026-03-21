@@ -584,6 +584,25 @@ async def _process_referral_reward(db, subscribed_user: dict) -> None:
         },
     ])
 
+    # If referrer just hit the cap, send completion celebration email (once only)
+    if rewarded_count + 1 >= REFERRAL_MAX_REWARDS:
+        try:
+            from email_sender import send_referral_complete_email  # noqa: PLC0415
+            referrer_doc = await db["users"].find_one(
+                {"id": referrer_id}, {"email": 1, "name": 1}
+            )
+            if referrer_doc and referrer_doc.get("email"):
+                await send_referral_complete_email(
+                    to_email=referrer_doc["email"],
+                    to_name=referrer_doc.get("name", "there"),
+                    total_bonus=REFERRAL_SUB_BONUS * REFERRAL_MAX_REWARDS,
+                    max_referrals=REFERRAL_MAX_REWARDS,
+                    user_id=referrer_id,
+                    db=db,
+                )
+        except Exception as _e:
+            log.warning("referral complete email failed (non-fatal): %s", _e)
+
 
 # Webhook event handlers
 # ---------------------------------------------------------------------------

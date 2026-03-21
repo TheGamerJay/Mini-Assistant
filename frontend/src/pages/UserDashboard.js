@@ -462,11 +462,16 @@ export default function UserDashboard() {
                 {Array.from({ length: referral.max_rewards }).map((_, i) => {
                   const isCompleted = i < referral.referrals_rewarded_count;
                   const isPending   = !isCompleted && i < (referral.referrals_rewarded_count + (referral.referrals_pending_count || 0));
+                  const allDone     = referral.referrals_rewarded_count >= referral.max_rewards;
                   return (
                     <div
                       key={i}
                       className={`h-2 flex-1 rounded-full transition-colors ${
-                        isCompleted ? 'bg-emerald-500' : isPending ? 'bg-amber-400/60' : 'bg-white/10'
+                        isCompleted
+                          ? allDone
+                            ? 'bg-emerald-400 shadow-[0_0_8px_2px_rgba(52,211,153,0.55)] animate-pulse'
+                            : 'bg-emerald-500'
+                          : isPending ? 'bg-amber-400/60' : 'bg-white/10'
                       }`}
                     />
                   );
