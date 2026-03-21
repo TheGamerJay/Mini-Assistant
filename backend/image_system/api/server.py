@@ -2166,14 +2166,40 @@ async def chat_stream(req: ChatRequest):
 
             # Pick system prompt based on what Claude is doing
             if _is_build_intent:
-                _c_sys = (
-                    _APP_BUILDER_CODING_STANDARDS +
-                    "\n\n## BUILD IMMEDIATELY\n"
-                    "Build the complete working app right now from the user's description. "
-                    "No questions. Output the full HTML/CSS/JS as a single ```html code block. "
-                    "After the closing ``` write: "
-                    "'Here\\'s what I built! What would you like to change?\\n1. ...\\n2. ...\\n3. ...'"
-                )
+                if all_images or req.vibe_mode or _has_prior_code:
+                    # Image provided → Claude sees it and builds.
+                    # Vibe mode ON → user explicitly wants instant build.
+                    # Prior code exists → user is refining, update immediately.
+                    _c_sys = (
+                        _APP_BUILDER_CODING_STANDARDS +
+                        "\n\n## BUILD IMMEDIATELY\n"
+                        "Build or update the complete working app right now. "
+                        "No questions. Output the full HTML/CSS/JS as a single ```html code block. "
+                        "After the closing ``` write: "
+                        "'Here\\'s what I built! What would you like to change?\\n1. ...\\n2. ...\\n3. ...'"
+                    )
+                elif _build_history_turns == 0:
+                    # Text-only, very first message, no image — gather requirements first.
+                    # Ask exactly 2 focused questions, then stop. Build on the next turn.
+                    _c_sys = (
+                        "\n\n## APP BUILDER — REQUIREMENTS\n"
+                        "The user wants to build a web app but hasn't provided an image or full details yet.\n"
+                        "Ask exactly 2 short, focused questions as a numbered list to understand what to build.\n"
+                        "Good questions: what is the app for / what does it do, what visual style (dark/light/colors/theme).\n"
+                        "Do NOT ask about fonts, file sizes, pixel dimensions, or anything you can decide yourself.\n"
+                        "End with: 'Ready to build once you answer!'\n"
+                        "Do NOT write any code yet."
+                    )
+                else:
+                    # User has already answered questions — build now, no more questions.
+                    _c_sys = (
+                        _APP_BUILDER_CODING_STANDARDS +
+                        "\n\n## BUILD NOW — USER ANSWERED YOUR QUESTIONS\n"
+                        "The user has answered your questions. Build the complete app immediately.\n"
+                        "Output the full HTML/CSS/JS as a single ```html code block. No more questions.\n"
+                        "After the closing ``` write: "
+                        "'Here\\'s what I built! What would you like to change?\\n1. ...\\n2. ...\\n3. ...'"
+                    )
             elif all_images:
                 _c_sys = (
                     "You are a helpful AI assistant with strong vision capabilities. "
