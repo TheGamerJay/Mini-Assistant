@@ -230,7 +230,11 @@ function ProjectRow({ project, chats, activeChatId, collapsed, onSelectChat, onR
 
   if (collapsed) {
     return (
-      <button className="w-full flex justify-center items-center h-8 rounded-lg mb-0.5 text-slate-500 hover:bg-white/5 hover:text-slate-300" title={project.name}>
+      <button
+        className="w-full flex justify-center items-center h-8 rounded-lg mb-0.5 text-slate-500 hover:bg-white/5 hover:text-slate-300 transition-colors"
+        title={project.name}
+        onClick={() => setOpen((v) => !v)}
+      >
         <FolderOpen size={14} />
       </button>
     );
@@ -569,7 +573,7 @@ function Sidebar() {
               chat={chat}
               active={activeChatId === chat.id}
               collapsed={sidebarCollapsed}
-              onSelect={selectChat}
+              onSelect={navChat}
               onRename={renameChat}
               onDelete={deleteChat}
               onPin={togglePinChat}
@@ -656,9 +660,11 @@ function Sidebar() {
             {sidebarCollapsed && (
               <button
                 onClick={() => setPurchaseModalOpen(true)}
-                className="sr-only"
+                className="p-1 rounded hover:bg-cyan-500/10 text-cyan-500 hover:text-cyan-400 transition-colors"
                 title="Get Credits"
-              />
+              >
+                <Zap size={11} />
+              </button>
             )}
           </div>
         )}
