@@ -27,7 +27,7 @@ from typing import Callable
 log = logging.getLogger(__name__)
 
 # Retry schedule: [seconds to wait before attempt 2, before attempt 3]
-_RETRY_DELAYS: list[float] = [2.0, 5.0]
+_RETRY_DELAYS: list = [2.0, 5.0]
 
 
 # ---------------------------------------------------------------------------
@@ -44,6 +44,9 @@ async def send_with_log(
     params: dict,
     subject: str = "",
     automated: bool = False,   # True for background-task triggered emails
+    variant: str | None = None,
+    sequence_step: int | None = None,
+    sequence: str | None = None,
 ) -> bool:
     """
     Call send_fn(params) with up to 2 retries.
@@ -72,6 +75,9 @@ async def send_with_log(
                 status="sent",
                 resend_id=resend_id,
                 automated=automated,
+                variant=variant,
+                sequence_step=sequence_step,
+                sequence=sequence,
             )
             return True
 
@@ -90,6 +96,9 @@ async def send_with_log(
         status="failed",
         error_message=last_error,
         automated=automated,
+        variant=variant,
+        sequence_step=sequence_step,
+        sequence=sequence,
     )
     return False
 
@@ -152,6 +161,9 @@ async def _write_log(
     resend_id: str | None = None,
     error_message: str | None = None,
     automated: bool = False,
+    variant: str | None = None,
+    sequence_step: int | None = None,
+    sequence: str | None = None,
 ) -> None:
     """Insert one document into email_logs. Non-fatal."""
     if db is None:
@@ -172,6 +184,12 @@ async def _write_log(
             doc["resend_id"] = resend_id
         if error_message:
             doc["error_message"] = error_message
+        if variant is not None:
+            doc["variant"] = variant
+        if sequence_step is not None:
+            doc["sequence_step"] = sequence_step
+        if sequence is not None:
+            doc["sequence"] = sequence
         await db["email_logs"].insert_one(doc)
     except Exception as exc:
         log.warning("email_logger: failed to write log (non-fatal): %s", exc)

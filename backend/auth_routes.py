@@ -1553,3 +1553,17 @@ async def email_logs_list(
     except Exception as exc:
         log.error("email-logs error: %s", exc)
         return {"logs": [], "count": 0, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Admin: email growth analytics — GET /api/admin/email-growth-analytics
+# ---------------------------------------------------------------------------
+
+@admin_router.get("/email-growth-analytics")
+async def email_growth_analytics(admin: dict = Depends(_require_admin)):
+    """A/B test results and sequence funnel analytics."""
+    db = _get_db()
+    from email_growth import get_ab_analytics, get_sequence_analytics  # noqa: PLC0415
+    ab  = await get_ab_analytics(db)
+    seq = await get_sequence_analytics(db)
+    return {"ab_testing": ab, "sequences": seq}
