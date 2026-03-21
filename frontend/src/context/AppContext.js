@@ -443,6 +443,15 @@ export function AppProvider({ children }) {
     _initialTemplatesRef.current = true;
   }, []);
 
+  const loginWithGoogle = useCallback(async (credential) => {
+    const res = await api.authGoogle(credential);
+    setToken(res.token);
+    const session = { id: res.user.id, name: res.user.name, email: res.user.email, role: res.user.role };
+    _setUser(session);
+    if (res.user.avatar) _setAvatar(res.user.avatar);
+    return session;
+  }, []);
+
   const loginWithCredentials = useCallback(async (email, password) => {
     try {
       const res = await api.authLogin(email, password);
@@ -775,6 +784,7 @@ export function AppProvider({ children }) {
     // auth
     user,
     logout,
+    loginWithGoogle,
     loginWithCredentials,
     register,
     getUserSecurityQuestion,

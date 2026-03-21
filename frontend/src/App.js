@@ -9,6 +9,7 @@
 import React, { useEffect } from 'react';
 import axios from 'axios';
 import { Toaster } from 'sonner';
+import { GoogleOAuthProvider } from '@react-oauth/google';
 
 // Context
 import { AppProvider, useApp } from './context/AppContext';
@@ -255,11 +256,15 @@ function AuthGate() {
 // ---------------------------------------------------------------------------
 // App root
 // ---------------------------------------------------------------------------
+const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
+
 function App() {
   return (
-    <AppProvider>
-      <AuthGate />
-    </AppProvider>
+    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+      <AppProvider>
+        <AuthGate />
+      </AppProvider>
+    </GoogleOAuthProvider>
   );
 }
 

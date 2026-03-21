@@ -321,6 +321,11 @@ export const api = {
     return post(`${MAIN_API}/auth/login`, { email, password }, 15000);
   },
 
+  /** Sign in / sign up via Google OAuth. credential = Google ID token. Returns { token, user }. */
+  authGoogle(credential) {
+    return post(`${MAIN_API}/auth/google`, { credential }, 15000);
+  },
+
   /** Get current user profile (requires Bearer token). */
   authMe() {
     return get(`${MAIN_API}/auth/me`, 10000);

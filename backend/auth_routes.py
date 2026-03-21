@@ -24,6 +24,16 @@ except ImportError as _auth_import_err:
     jwt = JWTError = CryptContext = None  # type: ignore
     _AUTH_AVAILABLE = False
 
+try:
+    from google.oauth2 import id_token as google_id_token
+    import google.auth.transport.requests as google_requests
+    _GOOGLE_AUTH_AVAILABLE = True
+except ImportError:
+    google_id_token = google_requests = None  # type: ignore
+    _GOOGLE_AUTH_AVAILABLE = False
+
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+
 # ---------------------------------------------------------------------------
 # Shared db handle — imported from server.py at module level.
 # We do a lazy import inside each route to avoid circular-import issues at
@@ -142,6 +152,10 @@ class ResetPasswordBody(BaseModel):
     new_password: str
 
 
+class GoogleAuthBody(BaseModel):
+    credential: str  # Google ID token from frontend
+
+
 class ChatsBody(BaseModel):
     chats: List[Any] = []
 
@@ -211,6 +225,83 @@ async def login(body: LoginBody):
         raise HTTPException(status_code=401, detail="No account found with this email.")
     if not _verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Incorrect password.")
+    token = _make_token(user)
+    return {"token": token, "user": _public_user(user)}
+
+
+@auth_router.post("/google")
+async def google_login(body: GoogleAuthBody):
+    """Sign in / sign up via Google OAuth.
+    Accepts either a Google ID token (credential) or an access token.
+    Verifies it with Google, then finds or creates a user in MongoDB."""
+    import httpx
+
+    token = body.credential.strip()
+    idinfo: dict = {}
+
+    # Try ID token verification first (works when GOOGLE_CLIENT_ID is set)
+    if _GOOGLE_AUTH_AVAILABLE and GOOGLE_CLIENT_ID:
+        try:
+            req = google_requests.Request()
+            idinfo = google_id_token.verify_oauth2_token(token, req, GOOGLE_CLIENT_ID)
+        except Exception:
+            idinfo = {}
+
+    # Fallback: validate as access token via Google tokeninfo endpoint
+    if not idinfo.get("email"):
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(f"https://www.googleapis.com/oauth2/v3/userinfo",
+                                     headers={"Authorization": f"Bearer {token}"})
+                if r.status_code == 200:
+                    idinfo = r.json()
+        except Exception as exc:
+            raise HTTPException(status_code=401, detail=f"Could not verify Google token: {exc}")
+
+    if not idinfo.get("email"):
+        raise HTTPException(status_code=401, detail="Google token verification failed")
+
+    google_email = idinfo.get("email", "").strip().lower()
+    google_name  = idinfo.get("name", "").strip() or google_email.split("@")[0]
+    google_sub   = idinfo.get("sub", "")
+    google_pic   = idinfo.get("picture")
+
+    if not google_email:
+        raise HTTPException(status_code=400, detail="Google account has no email")
+
+    db = _get_db()
+
+    # Try to find existing user by google_sub first, then by email
+    user = await db["users"].find_one({"google_sub": google_sub})
+    if not user:
+        user = await db["users"].find_one({"email": google_email})
+
+    if user:
+        # Existing user — link google_sub if not already set
+        updates: dict = {}
+        if not user.get("google_sub"):
+            updates["google_sub"] = google_sub
+        if google_pic and not user.get("avatar"):
+            updates["avatar"] = google_pic
+        if updates:
+            await db["users"].update_one({"id": user["id"]}, {"$set": updates})
+            user.update(updates)
+    else:
+        # New user — create account (no password required)
+        count = await db["users"].count_documents({})
+        role = "admin" if count == 0 else "user"
+        user = {
+            "id": str(uuid.uuid4()),
+            "email": google_email,
+            "name": google_name,
+            "password_hash": None,
+            "google_sub": google_sub,
+            "role": role,
+            "avatar": google_pic,
+            "created_at": time.time(),
+        }
+        await db["users"].insert_one(user)
+
     token = _make_token(user)
     return {"token": token, "user": _public_user(user)}
 

@@ -80,7 +80,7 @@ app = FastAPI(
     version="1.0.0",
 )
 
-_CORS_DEFAULTS = ",".join([
+_CORS_ALWAYS = [
     "https://mini-assistant-production.up.railway.app",
     "https://www.miniassistantai.com",
     "https://miniassistantai.com",
@@ -89,10 +89,12 @@ _CORS_DEFAULTS = ",".join([
     "http://localhost:3001",
     "http://127.0.0.1:3000",
     "http://localhost:8080",
-])
+]
+_extra = [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
+_cors_origins = list(dict.fromkeys(_CORS_ALWAYS + _extra))
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.environ.get("CORS_ORIGINS", _CORS_DEFAULTS).split(","),
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -4758,7 +4758,7 @@ if _static_dir.exists():
         index = _static_dir / "index.html"
         return FileResponse(str(index))
 
-_CORS_DEFAULTS = ",".join([
+_CORS_ALWAYS = [
     "https://mini-assistant-production.up.railway.app",
     "https://www.miniassistantai.com",
     "https://miniassistantai.com",
@@ -4767,11 +4767,14 @@ _CORS_DEFAULTS = ",".join([
     "http://localhost:3001",
     "http://127.0.0.1:3000",
     "http://localhost:8080",
-])
+]
+# CORS_ORIGINS env var is additive — merged with the hardcoded list above
+_extra = [o.strip() for o in os.environ.get('CORS_ORIGINS', '').split(',') if o.strip()]
+_cors_origins = list(dict.fromkeys(_CORS_ALWAYS + _extra))  # dedupe, preserve order
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', _CORS_DEFAULTS).split(','),
+    allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

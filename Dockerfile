@@ -6,9 +6,11 @@ COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci --legacy-peer-deps
 
 COPY frontend/ ./
-# Bake the Railway backend URL at build time
+# Bake env vars at build time (Railway passes these as build args)
 ARG REACT_APP_BACKEND_URL=https://ai.miniassistantai.com
+ARG REACT_APP_GOOGLE_CLIENT_ID=
 ENV REACT_APP_BACKEND_URL=$REACT_APP_BACKEND_URL
+ENV REACT_APP_GOOGLE_CLIENT_ID=$REACT_APP_GOOGLE_CLIENT_ID
 RUN npm run build
 
 # ── Stage 2: Python backend + built frontend ──────────────────────────────────
