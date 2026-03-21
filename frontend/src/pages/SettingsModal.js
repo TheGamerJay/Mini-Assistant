@@ -8,8 +8,7 @@ import React, { useEffect } from 'react';
 import { X, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp } from '../context/AppContext';
-import { useModels } from '../hooks/useModels';
-import { api, BACKEND_URL } from '../api/client';
+import { api } from '../api/client';
 import StatusBadge from '../components/StatusBadge';
 
 const QUALITY_OPTIONS = ['fast', 'balanced', 'high'];
@@ -48,7 +47,6 @@ function SectionHeader({ children }) {
 
 function SettingsModal({ onClose }) {
   const { settings, updateSettings, serverStatus, setServerStatus } = useApp();
-  const { status: modelsStatus, refresh: refreshModels, loading: modelsLoading } = useModels();
 
   // Close on Escape
   useEffect(() => {
@@ -68,27 +66,6 @@ function SettingsModal({ onClose }) {
       setServerStatus({ backend: false, openai: false });
     }
     toast.success('Status refreshed');
-  };
-
-  const handlePullModels = async () => {
-    if (!modelsStatus?.required_status) {
-      toast.info('No model list available');
-      return;
-    }
-    const missing = Object.entries(modelsStatus.required_status)
-      .filter(([, v]) => !v.available)
-      .map(([k]) => k);
-    if (missing.length === 0) {
-      toast.success('All models already available');
-      return;
-    }
-    try {
-      await api.pullModels(missing);
-      toast.success(`Pulling ${missing.length} model(s)…`);
-      setTimeout(refreshModels, 3000);
-    } catch (err) {
-      toast.error('Pull failed: ' + (err.message || 'Unknown error'));
-    }
   };
 
   return (
@@ -113,27 +90,15 @@ function SettingsModal({ onClose }) {
 
           {/* --- Connection --- */}
           <SectionHeader>Connection</SectionHeader>
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs text-slate-500 mb-1 block">Backend URL</label>
-              <input
-                readOnly
-                value={BACKEND_URL}
-                className="w-full bg-[#1a1a26] border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-slate-400 outline-none cursor-default"
-              />
-            </div>
-
-            <div className="flex items-center gap-3 flex-wrap">
-              <StatusBadge label="Backend" status={serverStatus.backend} />
-              <StatusBadge label="Claude API" status={serverStatus.openai} />
-              <button
-                onClick={handleRefreshStatus}
-                className="ml-auto flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 bg-white/5 hover:bg-white/10 border border-white/10 px-2.5 py-1.5 rounded-lg transition-colors"
-              >
-                <RefreshCw size={12} /> Refresh
-              </button>
-            </div>
-
+          <div className="flex items-center gap-3 flex-wrap">
+            <StatusBadge label="Backend" status={serverStatus.backend} />
+            <StatusBadge label="Claude API" status={serverStatus.openai} />
+            <button
+              onClick={handleRefreshStatus}
+              className="ml-auto flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 bg-white/5 hover:bg-white/10 border border-white/10 px-2.5 py-1.5 rounded-lg transition-colors"
+            >
+              <RefreshCw size={12} /> Refresh
+            </button>
           </div>
 
           {/* --- Chat preferences --- */}
@@ -179,57 +144,6 @@ function SettingsModal({ onClose }) {
                 ))}
               </div>
             </div>
-          </div>
-
-          {/* --- Models --- */}
-          <SectionHeader>Models</SectionHeader>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-slate-500">
-                {modelsStatus ? 'Model status from server' : 'Loading…'}
-              </p>
-              <button
-                onClick={refreshModels}
-                disabled={modelsLoading}
-                className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors"
-              >
-                <RefreshCw size={11} className={modelsLoading ? 'animate-spin' : ''} />
-                Refresh
-              </button>
-            </div>
-
-            {modelsStatus?.required_status ? (
-              <div className="rounded-xl border border-white/8 overflow-hidden">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-white/8 bg-white/3">
-                      <th className="text-left px-3 py-2 text-slate-500 font-normal">Model</th>
-                      <th className="text-left px-3 py-2 text-slate-500 font-normal">Role</th>
-                      <th className="text-right px-3 py-2 text-slate-500 font-normal">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.entries(modelsStatus.required_status).map(([model, info]) => (
-                      <tr key={model} className="border-b border-white/5 last:border-0">
-                        <td className="px-3 py-2 font-mono text-slate-300 truncate max-w-[160px]">{model}</td>
-                        <td className="px-3 py-2 text-slate-500">{info.role || '—'}</td>
-                        <td className="px-3 py-2 text-right">
-                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono border
-                            ${info.available
-                              ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
-                              : 'text-red-400 bg-red-500/10 border-red-500/20'}`}>
-                            <span className={`w-1 h-1 rounded-full ${info.available ? 'bg-emerald-400' : 'bg-red-400'}`} />
-                            {info.available ? 'ready' : 'missing'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <p className="text-xs text-slate-600 italic">No model data available. Check backend connection.</p>
-            )}
           </div>
 
           {/* bottom padding */}

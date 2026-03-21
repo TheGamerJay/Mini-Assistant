@@ -260,17 +260,17 @@ function ProfilePage() {
             <div className="flex-1 min-w-0">
               <p className="text-base font-semibold text-slate-100 truncate">{user?.name}</p>
               <p className="text-xs text-slate-500 font-mono truncate mt-0.5">{user?.email}</p>
-              <div className="flex gap-2 mt-3">
+              <div className="flex flex-wrap gap-2 mt-3">
                 <button
                   onClick={handleAvatarClick}
-                  className="text-xs px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-slate-200 border border-white/8 transition-colors"
+                  className="text-xs px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-slate-200 border border-white/8 transition-colors whitespace-nowrap"
                 >
                   Upload photo
                 </button>
                 {avatar && (
                   <button
                     onClick={() => { removeAvatar(); toast.success('Avatar removed'); }}
-                    className="text-xs px-3 py-1.5 rounded-lg bg-white/5 hover:bg-red-500/10 text-slate-500 hover:text-red-400 border border-white/8 transition-colors"
+                    className="text-xs px-3 py-1.5 rounded-lg bg-white/5 hover:bg-red-500/10 text-slate-500 hover:text-red-400 border border-white/8 transition-colors whitespace-nowrap"
                   >
                     Remove
                   </button>
