@@ -35,9 +35,9 @@ const PLANS = [
     name: 'Standard',
     icon: Zap,
     color: 'cyan',
-    monthlyPrice: 9,
-    annualPrice: 7,
-    credits: 500,
+    monthlyPrice: 20,
+    annualPrice: 17,
+    credits: 1000,
     badge: null,
     description: 'For individuals building real projects.',
     cta: 'Upgrade to Standard',
@@ -49,9 +49,9 @@ const PLANS = [
     name: 'Pro',
     icon: Crown,
     color: 'violet',
-    monthlyPrice: 19,
-    annualPrice: 15,
-    credits: 2000,
+    monthlyPrice: 50,
+    annualPrice: 42,
+    credits: 4000,
     badge: 'Most Popular',
     description: 'For power users who ship fast.',
     cta: 'Upgrade to Pro',
@@ -63,8 +63,8 @@ const PLANS = [
     name: 'Max',
     icon: Users,
     color: 'amber',
-    monthlyPrice: 49,
-    annualPrice: 39,
+    monthlyPrice: 100,
+    annualPrice: 83,
     credits: 10000,
     badge: null,
     description: 'For teams and power builders.',
@@ -78,7 +78,7 @@ const PLANS = [
 // value: true = checkmark, false = X, string = custom text, null = dash
 const FEATURE_ROWS = [
   { category: 'Credits & AI' },
-  { label: 'Monthly Credits',       free: '50',      standard: '500',        pro: '2,000',       max: '10,000' },
+  { label: 'Monthly Credits',       free: '50',      standard: '1,000',      pro: '4,000',       max: '10,000' },
   { label: 'AI chat (Claude)',       free: true,      standard: true,         pro: true,          max: true },
   { label: 'Image generation',       free: '3/day',   standard: true,         pro: true,          max: true },
   { label: 'AI model priority',      free: 'Standard',standard: 'Standard',   pro: 'Priority',    max: 'Dedicated' },
@@ -258,7 +258,7 @@ export default function PricingPage() {
           <span className={`text-sm font-medium transition-colors ${annual ? 'text-slate-200' : 'text-slate-500'}`}>Annual</span>
           {annual && (
             <span className="text-xs font-bold text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 px-2.5 py-0.5 rounded-full">
-              Save up to 21%
+              Save up to 17%
             </span>
           )}
         </div>

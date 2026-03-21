@@ -27,7 +27,7 @@ const PLAN_UNLOCKS = {
       { icon: Code2,    text: 'Full source code — view, copy, edit' },
       { icon: Download, text: 'Download as HTML & ZIP' },
       { icon: Github,   text: 'Push directly to GitHub' },
-      { icon: Zap,      text: '500 credits every month' },
+      { icon: Zap,      text: '1,000 credits every month' },
     ],
   },
   pro: {
@@ -42,7 +42,7 @@ const PLAN_UNLOCKS = {
       { icon: Rocket,   text: 'One-click deploy to Vercel' },
       { icon: Code2,    text: 'Full-stack project export' },
       { icon: Crown,    text: 'Priority AI model access' },
-      { icon: Zap,      text: '2,000 credits every month' },
+      { icon: Zap,      text: '4,000 credits every month' },
     ],
   },
   max: {

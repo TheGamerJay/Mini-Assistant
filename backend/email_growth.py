@@ -8,8 +8,10 @@ Exports:
   get_sequence_step()  : find next unsent step for a user
   get_ab_analytics()   : aggregate A/B results from email_logs
   get_sequence_analytics() : funnel view for onboarding sequence
+  get_ltv_analytics()  : LTV-based analytics (top users, avg revenue, windowed revenue)
 """
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -23,6 +25,10 @@ log = logging.getLogger(__name__)
 
 AB_MIN_SAMPLE        = int(os.environ.get("AB_MIN_SAMPLE", "50"))
 AB_SIGNIFICANCE_PCT  = float(os.environ.get("AB_SIGNIFICANCE_PCT", "10.0"))
+AB_CONFIDENCE_LOCK   = os.environ.get("AB_CONFIDENCE_LOCK", "true").lower() == "true"
+AB_LOOKBACK_DAYS     = int(os.environ.get("AB_LOOKBACK_DAYS", "14"))
+AB_REVENUE_MIN_DIFF  = float(os.environ.get("AB_REVENUE_MIN_DIFF", "5.0"))
+LTV_TRACKING_ENABLED = os.environ.get("LTV_TRACKING_ENABLED", "true").lower() == "true"
 
 # Weight shift schedule for winner: 50 → 70 → 90 (capped — never 100% to keep learning)
 _WEIGHT_SHIFTS: dict = {50: 70, 70: 90, 90: 90, 30: 10, 10: 10}
@@ -71,32 +77,42 @@ def assign_variant(user_id: str, email_type: str, weight_a: int = 50) -> str:
 
 async def evaluate_ab_winners(db) -> None:
     """
-    Compare A vs B conversion rates per email_type.
-    If one variant outperforms by AB_SIGNIFICANCE_PCT with >= AB_MIN_SAMPLE each,
-    shift traffic 50→70→90 toward the winner in email_ab_weights.
+    Compare A vs B per email_type using revenue (primary) or conversion rate (fallback).
+    Only considers email_logs within AB_LOOKBACK_DAYS recency window.
+    Requires minimum sample size in both arms when AB_CONFIDENCE_LOCK=true.
+    Shifts traffic 50→70→90 toward the winner in email_ab_weights.
     Non-fatal — runs as part of the automation loop.
     """
     try:
+        cutoff = time.time() - (AB_LOOKBACK_DAYS * 86400)
+
         pipeline = [
-            {"$match": {"variant": {"$in": ["A", "B"]}, "status": "sent"}},
+            {"$match": {
+                "variant":   {"$in": ["A", "B"]},
+                "status":    "sent",
+                "timestamp": {"$gte": cutoff},
+            }},
             {"$group": {
                 "_id":       {"email_type": "$email_type", "variant": "$variant"},
                 "count":     {"$sum": 1},
                 "converted": {"$sum": {"$cond": [{"$eq": ["$converted", True]}, 1, 0]}},
+                "revenue":   {"$sum": {"$ifNull": ["$revenue_generated", 0]}},
             }},
         ]
         rows = await db["email_logs"].aggregate(pipeline).to_list(None)
 
-        # Build {email_type: {variant: {count, rate}}}
+        # Build {email_type: {variant: {count, rate, revenue}}}
         stats: dict = {}
         for row in rows:
             et  = row["_id"]["email_type"]
             v   = row["_id"]["variant"]
             cnt = row["count"]
             conv = row["converted"]
+            rev  = round(row.get("revenue", 0.0), 2)
             stats.setdefault(et, {})[v] = {
-                "count": cnt,
-                "rate":  conv / cnt if cnt else 0.0,
+                "count":   cnt,
+                "rate":    conv / cnt if cnt else 0.0,
+                "revenue": rev,
             }
 
         for email_type, variants in stats.items():
@@ -105,15 +121,31 @@ async def evaluate_ab_winners(db) -> None:
             if not a or not b:
                 continue
 
-            # Require minimum sample size in both arms
-            if a["count"] < AB_MIN_SAMPLE or b["count"] < AB_MIN_SAMPLE:
+            # Confidence lock — require minimum sample size in both arms
+            if AB_CONFIDENCE_LOCK and (a["count"] < AB_MIN_SAMPLE or b["count"] < AB_MIN_SAMPLE):
+                log.debug(
+                    "email_growth: %s skipped (confidence lock: A=%d B=%d < %d)",
+                    email_type, a["count"], b["count"], AB_MIN_SAMPLE,
+                )
                 continue
 
-            diff = abs(a["rate"] - b["rate"])
-            if diff < (AB_SIGNIFICANCE_PCT / 100):
-                continue   # not significant enough
-
-            winner = "A" if a["rate"] >= b["rate"] else "B"
+            # Revenue-based winner selection (primary)
+            rev_diff = abs(a["revenue"] - b["revenue"])
+            if rev_diff >= AB_REVENUE_MIN_DIFF:
+                winner       = "A" if a["revenue"] >= b["revenue"] else "B"
+                metric_label = f"rev_A=${a['revenue']:.2f} rev_B=${b['revenue']:.2f} diff=${rev_diff:.2f}"
+                diff_pct     = round(rev_diff, 2)
+            else:
+                # Fallback: conversion rate
+                conv_diff = abs(a["rate"] - b["rate"])
+                if conv_diff < (AB_SIGNIFICANCE_PCT / 100):
+                    continue   # not significant enough
+                winner       = "A" if a["rate"] >= b["rate"] else "B"
+                metric_label = (
+                    f"rate_A={a['rate']*100:.1f}% rate_B={b['rate']*100:.1f}% "
+                    f"diff={conv_diff*100:.1f}%"
+                )
+                diff_pct = round(conv_diff * 100, 2)
 
             # Get current weight
             current_doc = await db["email_ab_weights"].find_one({"email_type": email_type})
@@ -130,23 +162,23 @@ async def evaluate_ab_winners(db) -> None:
                 continue   # already at maximum shift
 
             log.info(
-                "email_growth: %s winner=%s (rate_A=%.1f%% rate_B=%.1f%% diff=%.1f%%) "
-                "shifting weight_a %d→%d",
-                email_type, winner,
-                a["rate"] * 100, b["rate"] * 100, diff * 100,
-                cur_w_a, new_w_a,
+                "email_growth: %s winner=%s (%s) shifting weight_a %d→%d",
+                email_type, winner, metric_label, cur_w_a, new_w_a,
             )
             await db["email_ab_weights"].update_one(
                 {"email_type": email_type},
                 {"$set": {
-                    "weight_a":    new_w_a,
-                    "winner":      winner,
-                    "diff_pct":    round(diff * 100, 2),
-                    "rate_a":      round(a["rate"] * 100, 2),
-                    "rate_b":      round(b["rate"] * 100, 2),
-                    "sample_a":    a["count"],
-                    "sample_b":    b["count"],
-                    "evaluated_at": time.time(),
+                    "weight_a":      new_w_a,
+                    "winner":        winner,
+                    "diff_pct":      diff_pct,
+                    "rate_a":        round(a["rate"] * 100, 2),
+                    "rate_b":        round(b["rate"] * 100, 2),
+                    "revenue_a":     a["revenue"],
+                    "revenue_b":     b["revenue"],
+                    "sample_a":      a["count"],
+                    "sample_b":      b["count"],
+                    "lookback_days": AB_LOOKBACK_DAYS,
+                    "evaluated_at":  time.time(),
                 }},
                 upsert=True,
             )
@@ -194,10 +226,13 @@ async def get_sequence_step(db, user_id: str) -> int:
 async def get_ab_analytics(db) -> dict:
     """
     Aggregate email_logs grouped by (email_type, variant, status).
+    Only considers logs within AB_LOOKBACK_DAYS recency window.
     Returns nested dict: {email_type: {variant: {sent, failed, converted, conversion_rate}}}
     """
     try:
+        cutoff = time.time() - (AB_LOOKBACK_DAYS * 86400)
         pipeline = [
+            {"$match": {"timestamp": {"$gte": cutoff}}},
             {
                 "$group": {
                     "_id": {
@@ -224,7 +259,7 @@ async def get_ab_analytics(db) -> dict:
 
         # Fetch conversion counts grouped by (email_type, variant)
         conv_pipeline = [
-            {"$match": {"converted": True}},
+            {"$match": {"converted": True, "timestamp": {"$gte": cutoff}}},
             {
                 "$group": {
                     "_id": {
@@ -333,6 +368,7 @@ async def get_sequence_analytics(db) -> dict:
 async def get_revenue_analytics(db) -> dict:
     """
     Aggregate revenue_generated from converted email_logs.
+    Only considers logs within AB_LOOKBACK_DAYS recency window.
     Returns revenue_by_email_type, revenue_by_variant, top/worst performers.
     """
     _empty = {
@@ -344,8 +380,9 @@ async def get_revenue_analytics(db) -> dict:
         "total_revenue":         0.0,
     }
     try:
+        cutoff = time.time() - (AB_LOOKBACK_DAYS * 86400)
         pipeline = [
-            {"$match": {"revenue_generated": {"$gt": 0}, "converted": True}},
+            {"$match": {"revenue_generated": {"$gt": 0}, "converted": True, "timestamp": {"$gte": cutoff}}},
             {"$group": {
                 "_id": {"email_type": "$email_type", "variant": "$variant"},
                 "total_revenue": {"$sum": "$revenue_generated"},
@@ -406,3 +443,74 @@ async def get_ab_weights_snapshot(db) -> dict:
     except Exception as exc:
         log.warning("get_ab_weights_snapshot failed (non-fatal): %s", exc)
         return {}
+
+
+# ---------------------------------------------------------------------------
+# LTV analytics
+# ---------------------------------------------------------------------------
+
+async def get_ltv_analytics(db) -> dict:
+    """
+    Lifetime-value analytics (requires LTV_TRACKING_ENABLED=true).
+    Returns:
+      top_users_by_ltv       — top 10 users by lifetime_value
+      average_revenue_per_user — mean lifetime_value across paying users
+      revenue_last_7_days    — email-attributed revenue in last 7 days
+      revenue_last_30_days   — email-attributed revenue in last 30 days
+    """
+    _empty = {
+        "top_users_by_ltv":         [],
+        "average_revenue_per_user": 0.0,
+        "revenue_last_7_days":      0.0,
+        "revenue_last_30_days":     0.0,
+        "ltv_tracking_enabled":     LTV_TRACKING_ENABLED,
+    }
+    if not LTV_TRACKING_ENABLED:
+        return _empty
+
+    try:
+        now        = time.time()
+        window_7d  = now - 7  * 86400
+        window_30d = now - 30 * 86400
+
+        # Top 10 users by lifetime_value
+        top_users = await db["users"].find(
+            {"lifetime_value": {"$gt": 0}},
+            {"_id": 0, "id": 1, "email": 1, "name": 1, "plan": 1, "lifetime_value": 1},
+        ).sort("lifetime_value", -1).limit(10).to_list(None)
+
+        # Average lifetime_value across paying users
+        avg_pipeline = [
+            {"$match": {"lifetime_value": {"$gt": 0}}},
+            {"$group": {"_id": None, "avg": {"$avg": "$lifetime_value"}}},
+        ]
+        avg_rows = await db["users"].aggregate(avg_pipeline).to_list(None)
+        avg_ltv  = round(avg_rows[0]["avg"], 2) if avg_rows else 0.0
+
+        # Email-attributed revenue in 7d and 30d windows (parallel)
+        rev_7d_pipeline = [
+            {"$match": {"converted": True, "revenue_generated": {"$gt": 0}, "timestamp": {"$gte": window_7d}}},
+            {"$group": {"_id": None, "total": {"$sum": "$revenue_generated"}}},
+        ]
+        rev_30d_pipeline = [
+            {"$match": {"converted": True, "revenue_generated": {"$gt": 0}, "timestamp": {"$gte": window_30d}}},
+            {"$group": {"_id": None, "total": {"$sum": "$revenue_generated"}}},
+        ]
+        rev_7d_rows, rev_30d_rows = await asyncio.gather(
+            db["email_logs"].aggregate(rev_7d_pipeline).to_list(None),
+            db["email_logs"].aggregate(rev_30d_pipeline).to_list(None),
+        )
+        rev_7d  = round(rev_7d_rows[0]["total"],  2) if rev_7d_rows  else 0.0
+        rev_30d = round(rev_30d_rows[0]["total"], 2) if rev_30d_rows else 0.0
+
+        return {
+            "top_users_by_ltv":         top_users,
+            "average_revenue_per_user": avg_ltv,
+            "revenue_last_7_days":      rev_7d,
+            "revenue_last_30_days":     rev_30d,
+            "ltv_tracking_enabled":     True,
+        }
+
+    except Exception as exc:
+        log.error("get_ltv_analytics failed (non-fatal): %s", exc)
+        return _empty

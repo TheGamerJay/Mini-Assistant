@@ -1562,24 +1562,27 @@ async def email_logs_list(
 
 @admin_router.get("/email-growth-analytics")
 async def email_growth_analytics(admin: dict = Depends(_require_admin)):
-    """A/B test results, sequence funnel, revenue attribution, and weight snapshot."""
+    """A/B test results, sequence funnel, revenue attribution, weight snapshot, and LTV analytics."""
     db = _get_db()
     from email_growth import (          # noqa: PLC0415
         get_ab_analytics,
         get_sequence_analytics,
         get_revenue_analytics,
         get_ab_weights_snapshot,
+        get_ltv_analytics,
     )
-    ab, seq, rev, weights = await asyncio.gather(
+    ab, seq, rev, weights, ltv = await asyncio.gather(
         get_ab_analytics(db),
         get_sequence_analytics(db),
         get_revenue_analytics(db),
         get_ab_weights_snapshot(db),
+        get_ltv_analytics(db),
         return_exceptions=True,
     )
     return {
-        "ab_testing":        ab      if not isinstance(ab,      Exception) else {},
-        "sequences":         seq     if not isinstance(seq,     Exception) else {},
-        "revenue":           rev     if not isinstance(rev,     Exception) else {},
-        "ab_weights":        weights if not isinstance(weights, Exception) else {},
+        "ab_testing":  ab      if not isinstance(ab,      Exception) else {},
+        "sequences":   seq     if not isinstance(seq,     Exception) else {},
+        "revenue":     rev     if not isinstance(rev,     Exception) else {},
+        "ab_weights":  weights if not isinstance(weights, Exception) else {},
+        "ltv":         ltv     if not isinstance(ltv,     Exception) else {},
     }

@@ -22,13 +22,13 @@ const PLANS = [
     name: 'Standard',
     icon: Zap,
     color: 'cyan',
-    monthlyPrice: 9,
-    annualPrice: 7,
-    credits: 500,
+    monthlyPrice: 20,
+    annualPrice: 17,
+    credits: 1000,
     badge: null,
     description: 'For individuals building real projects.',
     features: [
-      { text: '500 Mini Credits / month', highlight: true },
+      { text: '1,000 Mini Credits / month', highlight: true },
       { text: 'Full source code access (HTML, CSS, JS)' },
       { text: 'Download as HTML & ZIP' },
       { text: 'Push to GitHub' },
@@ -43,13 +43,13 @@ const PLANS = [
     name: 'Pro',
     icon: Crown,
     color: 'violet',
-    monthlyPrice: 19,
-    annualPrice: 15,
-    credits: 2000,
+    monthlyPrice: 50,
+    annualPrice: 42,
+    credits: 4000,
     badge: 'Most Popular',
     description: 'For power users who ship fast.',
     features: [
-      { text: '2,000 Mini Credits / month', highlight: true },
+      { text: '4,000 Mini Credits / month', highlight: true },
       { text: 'Everything in Standard' },
       { text: 'One-click deploy to Vercel', highlight: true },
       { text: 'Full-stack project export' },
@@ -64,8 +64,8 @@ const PLANS = [
     name: 'Max',
     icon: Users,
     color: 'amber',
-    monthlyPrice: 49,
-    annualPrice: 39,
+    monthlyPrice: 100,
+    annualPrice: 83,
     credits: 10000,
     badge: null,
     description: 'For teams building together.',
@@ -304,7 +304,7 @@ export default function UpgradeModal() {
           </span>
           {annual && (
             <span className="text-[10px] font-bold text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 px-2 py-0.5 rounded-full">
-              Save up to 21%
+              Save up to 17%
             </span>
           )}
         </div>

@@ -106,8 +106,8 @@ for _pid_val, _credits in [
 # Subscription credits per plan (per billing cycle)
 PLAN_CREDITS: dict[str, int] = {
     "free":     50,
-    "standard": 500,
-    "pro":      2000,
+    "standard": 1000,
+    "pro":      4000,
     "max":      10000,
     "team":     10000,   # legacy alias for max
 }
@@ -250,6 +250,10 @@ async def create_checkout_session(
 
     if not is_subscription and not is_topup:
         raise HTTPException(400, "Unknown price_id")
+
+    # Top-ups are subscribers-only — block free-plan users at the API level
+    if is_topup and user.get("plan", "free") == "free":
+        raise HTTPException(403, "Credit top-ups are only available to subscribed users (Standard, Pro, or Max).")
 
     try:
         customer_id = await _get_or_create_stripe_customer(db, user)
@@ -528,13 +532,19 @@ async def _handle_checkout_completed(db, session: dict) -> None:
                 user_id, MAX_TOPUP_CREDITS,
             )
         else:
-            log.info("Top-up: +%d topup_credits for user %s", credits_to_add, user_id)
+            log.info(
+                "checkout.topup: user=%s plan=%s +%d topup_credits revenue=%.2f",
+                user_id, user.get("plan", "free"), credits_to_add, topup_revenue,
+            )
             # Record topup timestamp + accumulate total spend for high-value detection
+            _topup_inc: dict = {"total_spend": topup_revenue}
+            if os.environ.get("LTV_TRACKING_ENABLED", "true").lower() == "true" and topup_revenue > 0:
+                _topup_inc["lifetime_value"] = topup_revenue
             await db["users"].update_one(
                 {"id": user_id},
                 {
                     "$set": {"last_topup_at": time.time()},
-                    "$inc": {"total_spend": topup_revenue},
+                    "$inc": _topup_inc,
                 },
             )
 
@@ -632,13 +642,20 @@ async def _handle_invoice_paid(db, invoice: dict) -> None:
                 "payment_failure_count":  0,
                 "last_payment_succeeded_at": time.time(),
             },
-            # Accumulate total spend for high-value user detection
-            "$inc": {"total_spend": invoice_revenue},
+            # Accumulate total spend + lifetime value
+            "$inc": {
+                "total_spend":    invoice_revenue,
+                **( {"lifetime_value": invoice_revenue}
+                    if os.environ.get("LTV_TRACKING_ENABLED", "true").lower() == "true"
+                       and invoice_revenue > 0
+                    else {}
+                ),
+            },
         },
     )
     log.info(
-        "invoice.paid: user %s → plan=%s, subscription_credits reset to %d",
-        user_id, plan, plan_credits,
+        "invoice.paid: user=%s plan=%s subscription_credits=%d revenue=%.2f",
+        user_id, plan, plan_credits, invoice_revenue,
     )
 
     # Send welcome / renewal email + track conversion (non-fatal)
