@@ -28,11 +28,15 @@ import re
 
 logger = logging.getLogger(__name__)
 
-_MAX_FIX_LOOPS        = 2     # reviewer → builder cycles before escalating
-_ESCALATE_THRESHOLD   = 70.0  # confidence below this triggers Claude escalation
-_ESCALATE_MODEL       = "claude-sonnet-4-6"
+_MAX_FIX_LOOPS        = 2     # reviewer → builder cycles (local-only path)
+_ESCALATE_THRESHOLD   = 70.0  # confidence below this triggers escalation (local-only path)
+_BUILD_MODEL          = "claude-sonnet-4-6"   # primary builder when API key present
+_ESCALATE_MODEL       = "claude-sonnet-4-6"   # escalation fallback (same model)
 
-# Optional Claude API escalation (degrades gracefully if anthropic not installed)
+# Claude API — primary builder when ANTHROPIC_API_KEY is set.
+# Without a GPU, local models (qwen2.5-coder on CPU) are slow and low-quality.
+# When the API key is available, skip the local builder/reviewer loop entirely:
+#   moondream (local, free) → Claude (one shot, high quality, ~$0.01-0.03/build)
 try:
     import anthropic as _anthropic_lib
     _CLAUDE_AVAILABLE = bool(os.environ.get("ANTHROPIC_API_KEY"))
@@ -172,6 +176,33 @@ async def _await_with_keepalives(task: asyncio.Task) -> str:
 
 # ── Claude escalation ─────────────────────────────────────────────────────────
 
+async def _stream_claude_build(
+    api_key: str,
+    user_request: str,
+    ui_description: str,
+    skill_context: str = "",
+) -> "AsyncIterator[str]":
+    """Direct Claude build — used when API key is present (primary path)."""
+    msg = (
+        f"[USER REQUIREMENTS — HIGHEST PRIORITY — FOLLOW THESE EXACTLY]\n{user_request}\n\n"
+        f"[VISUAL ANALYSIS FROM SCREENSHOT]\n{ui_description}"
+        f"{skill_context}\n\n"
+        "Build the complete HTML/CSS/JS app now. "
+        "User requirements above override all other context — "
+        "if the user specified exact colors or style, use those exactly. "
+        "Start with ```html"
+    )
+    client = _anthropic_lib.AsyncAnthropic(api_key=api_key)
+    async with client.messages.stream(
+        model=_BUILD_MODEL,
+        max_tokens=8192,
+        system=_BUILD_SYSTEM,
+        messages=[{"role": "user", "content": msg}],
+    ) as stream:
+        async for text in stream.text_stream:
+            yield text
+
+
 async def _stream_claude_fix(
     api_key: str,
     user_request: str,
@@ -179,22 +210,21 @@ async def _stream_claude_fix(
     built_code: str,
     review_result: str,
 ) -> "AsyncIterator[str]":
-    """Async generator yielding text tokens from Claude API."""
-    escalation_msg = (
+    """Claude fix — fallback escalation on the local-only path."""
+    msg = (
         f"[USER REQUIREMENTS — HIGHEST PRIORITY]\n{user_request}\n\n"
         f"[VISUAL ANALYSIS FROM SCREENSHOT]\n{ui_description}\n\n"
         f"[PREVIOUS LOCAL BUILD — needs improvement]\n```html\n{built_code}\n```\n\n"
         f"[REVIEWER ISSUES TO FIX]\n{review_result}\n\n"
-        "Fix ALL issues. User requirements take absolute highest priority — match their exact colors, "
-        "style, and specifications. Build a complete, polished, pixel-faithful implementation. "
-        "Start with ```html"
+        "Fix ALL issues. User requirements take absolute highest priority. "
+        "Build a complete, polished, pixel-faithful implementation. Start with ```html"
     )
     client = _anthropic_lib.AsyncAnthropic(api_key=api_key)
     async with client.messages.stream(
         model=_ESCALATE_MODEL,
         max_tokens=8192,
         system=_BUILD_SYSTEM,
-        messages=[{"role": "user", "content": escalation_msg}],
+        messages=[{"role": "user", "content": msg}],
     ) as stream:
         async for text in stream.text_stream:
             yield text
@@ -300,9 +330,65 @@ async def image_to_code_pipeline(
         logger.warning("Vision Brain returned no useful data for session %s", session_id)
 
     logger.info("Vision OK — %d chars", len(ui_description))
+    _api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+
+    # ── STEP 3: Build — Claude-first or local fallback ────────────────────────
+    #
+    # CLAUDE PATH (API key present):
+    #   moondream → Claude  — one shot, high quality, ~$0.01-0.03
+    #   No review loop needed — Claude gets it right first time.
+    #
+    # LOCAL PATH (no API key):
+    #   moondream → qwen2.5-coder → gemma3 review → fix loop → Claude escalation
+    #   Slower and lower quality without a GPU, but free.
+
+    built_code = ""
+
+    if _CLAUDE_AVAILABLE and _api_key:
+        # ── Claude-first path ─────────────────────────────────────────────────
+        yield _tok("✅ **Vision Brain** done.\n\n🚀 **Builder Brain** (Claude) generating your app...\n\n")
+
+        built_raw = ""
+        with (Timer() if _obs else _NullTimer()) as tmr_claude:
+            try:
+                async for text in _stream_claude_build(
+                    api_key=_api_key,
+                    user_request=user_request,
+                    ui_description=ui_description,
+                    skill_context=skill_context,
+                ):
+                    built_raw += text
+                    yield _tok(text)
+                built_code = _extract_html(built_raw)
+                yield _tok("\n\n✅ **Builder Brain** done!\n\n")
+            except Exception as exc:
+                logger.warning("Claude build failed: %s — falling back to local", exc)
+                yield _tok(f"\n\n⚠️ Claude build failed ({exc}), falling back to local builder...\n\n")
+
+        _obs_record(
+            brain="builder_claude", model=_BUILD_MODEL, task="claude_direct_build",
+            session_id=session_id, latency_ms=tmr_claude.elapsed_ms,
+            tokens_out=len(built_raw.split()),
+            escalated=True,
+            outcome="success" if built_code else "fail",
+        )
+
+        if built_code:
+            # Skip straight to done — Claude builds correctly first time
+            yield _tok(
+                "Here's your build! What would you like to change?\n"
+                "1. Adjust colors, fonts, or spacing\n"
+                "2. Add features or interactions\n"
+                "3. Change a specific component\n"
+            )
+            return
+
+        # If Claude failed, fall through to local path below
+        logger.warning("Claude build returned empty — falling through to local path")
+
+    # ── LOCAL PATH (no API key, or Claude failed) ─────────────────────────────
     yield _tok("✅ **Vision Brain** done.\n\n🔨 **Builder Brain** generating code...\n\n")
 
-    # ── STEP 3: Builder Brain — initial build (streaming) ────────────────────
     _build_user = (
         f"[USER REQUIREMENTS — HIGHEST PRIORITY — FOLLOW THESE EXACTLY]\n"
         f"{user_request}\n\n"
@@ -343,18 +429,17 @@ async def image_to_code_pipeline(
             return
 
     _obs_record(
-        brain="builder", model=builder_model, task="initial_build",
+        brain="builder_local", model=builder_model, task="local_build",
         session_id=session_id, latency_ms=tmr_build.elapsed_ms,
         tokens_out=len(built_code_raw.split()),
         outcome="success" if built_code_raw else "fail",
     )
 
     built_code = _extract_html(built_code_raw)
-    logger.info("Builder OK — %d chars", len(built_code))
+    logger.info("Local builder OK — %d chars", len(built_code))
 
-    # ── STEP 4+: Reviewer Brain + fix loop ───────────────────────────────────
+    # ── Reviewer + fix loop (local path only) ────────────────────────────────
     final_confidence = 50.0
-    final_issues     = []
     last_review_text = ""
 
     for attempt in range(_MAX_FIX_LOOPS + 1):
@@ -391,12 +476,11 @@ async def image_to_code_pipeline(
 
         is_pass, confidence, issues = _parse_review(review_raw)
         final_confidence = confidence
-        final_issues     = issues
         last_review_text = review_raw
         logger.info("Reviewer attempt %d: pass=%s score=%.0f", attempt + 1, is_pass, confidence)
 
         _obs_record(
-            brain="reviewer", model=reviewer_model,
+            brain="reviewer_local", model=reviewer_model,
             task=f"review_attempt_{attempt+1}",
             session_id=session_id, latency_ms=tmr_review.elapsed_ms,
             confidence=confidence,
@@ -410,21 +494,15 @@ async def image_to_code_pipeline(
         yield _tok(f"🔎 Score: {confidence:.0f}/100 — {len(issues)} issue(s) found.\n\n")
 
         if attempt >= _MAX_FIX_LOOPS:
-            # Max local loops reached — escalate or accept
             break
 
-        # Issues found → fix pass
-        yield _tok(
-            f"🔧 **Builder Brain** fixing issues "
-            f"(pass {attempt + 1}/{_MAX_FIX_LOOPS})...\n\n"
-        )
+        yield _tok(f"🔧 **Builder Brain** fixing issues (pass {attempt + 1}/{_MAX_FIX_LOOPS})...\n\n")
         _fix_user = (
             f"[USER REQUIREMENTS — TOP PRIORITY]\n{user_request}\n\n"
             f"[VISUAL ANALYSIS]\n{ui_description}\n\n"
             f"[YOUR PREVIOUS CODE]\n```html\n{built_code}\n```\n\n"
             f"[REVIEWER ISSUES — FIX ALL OF THESE]\n{review_raw}\n\n"
-            "Fix every issue. User requirements above take absolute highest priority — "
-            "ensure their exact colors and style are implemented. "
+            "Fix every issue. User requirements take absolute highest priority. "
             "Output the COMPLETE updated HTML file. Start with ```html"
         )
         fixed_raw = ""
@@ -451,28 +529,24 @@ async def image_to_code_pipeline(
                     except StopAsyncIteration:
                         break
             except Exception as exc:
-                logger.warning("Fix Brain failed: %s — keeping previous build", exc)
+                logger.warning("Fix Brain failed: %s", exc)
                 break
 
         _obs_record(
-            brain="builder_fix", model=builder_model,
-            task=f"fix_attempt_{attempt+1}",
+            brain="builder_fix", model=builder_model, task=f"fix_attempt_{attempt+1}",
             session_id=session_id, latency_ms=tmr_fix.elapsed_ms,
             tokens_out=len(fixed_raw.split()),
             outcome="success" if fixed_raw else "fail",
         )
-
         if fixed_raw:
             built_code = _extract_html(fixed_raw)
 
-    # ── STEP 5: Claude API escalation ─────────────────────────────────────────
-    # Fires when: max fix loops reached AND confidence still below threshold
-    _api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    # ── Local escalation: Claude fixes what local models couldn't ─────────────
     if not _parse_review(last_review_text)[0] and final_confidence < _ESCALATE_THRESHOLD:
         if _CLAUDE_AVAILABLE and _api_key:
             yield _tok(
-                f"\n\n🚀 **Executive Brain** (Claude) is taking over "
-                f"— local confidence {final_confidence:.0f}/100, escalating...\n\n"
+                f"\n\n🚀 **Executive Brain** (Claude) finalizing "
+                f"— local score {final_confidence:.0f}/100...\n\n"
             )
             escalated_raw = ""
             with (Timer() if _obs else _NullTimer()) as tmr_esc:
@@ -487,28 +561,22 @@ async def image_to_code_pipeline(
                         escalated_raw += text
                         yield _tok(text)
                     if escalated_raw:
-                        built_code = _extract_html(escalated_raw)
-                        yield _tok("\n\n✅ **Executive Brain** build complete!\n\n")
+                        yield _tok("\n\n✅ Done!\n\n")
                 except Exception as exc:
                     logger.warning("Claude escalation failed: %s", exc)
-                    yield _tok(f"\n\n⚠️ Executive escalation failed — showing best local version.\n\n")
+                    yield _tok("\n\n⚠️ Escalation failed — showing best local version.\n\n")
 
             _obs_record(
-                brain="executive_escalation", model=_ESCALATE_MODEL,
-                task="claude_fix_escalation",
+                brain="escalation", model=_ESCALATE_MODEL, task="claude_fix",
                 session_id=session_id, latency_ms=tmr_esc.elapsed_ms,
-                confidence=-1.0, escalated=True,
-                tokens_out=len(escalated_raw.split()),
+                escalated=True, tokens_out=len(escalated_raw.split()),
                 outcome="success" if escalated_raw else "fail",
             )
         else:
-            # No API key — tell user why quality might be limited
-            if final_confidence < _ESCALATE_THRESHOLD:
-                yield _tok(
-                    f"\n\n⚠️ Local reviewer score: {final_confidence:.0f}/100. "
-                    "Add ANTHROPIC_API_KEY to Railway env vars to enable Claude escalation "
-                    "for higher quality builds.\n\n"
-                )
+            yield _tok(
+                f"\n\n⚠️ Local score: {final_confidence:.0f}/100. "
+                "Add ANTHROPIC_API_KEY to Railway env vars for Claude-powered builds.\n\n"
+            )
 
     # ── Done ─────────────────────────────────────────────────────────────────
     yield _tok(
