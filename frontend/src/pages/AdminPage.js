@@ -11,6 +11,8 @@ import {
   Shield, Trash2, RefreshCw, LogOut, Zap, CreditCard,
   Activity, Server, AlertCircle, CheckCircle, Clock,
   UserPlus, BarChart2, List, ChevronLeft, Bot, Cpu,
+  TrendingUp, DollarSign, PieChart, Percent, ArrowUpRight,
+  Code2, Rocket, GitBranch, Download,
 } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { api, setToken, clearToken } from '../api/client';
@@ -197,6 +199,10 @@ function AdminDashboard({ adminUser, onLogout }) {
   const [loadingActivity, setLoadingActivity] = useState(false);
   const [serverStatus, setServerStatus] = useState({ backend: null, openai: null });
   const [deletingId, setDeletingId]     = useState(null);
+  const [analytics, setAnalytics]       = useState(null);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+  const [optimizer, setOptimizer]       = useState(null);
+  const [loadingOptimizer, setLoadingOptimizer] = useState(false);
   const [togglingId, setTogglingId]     = useState(null);
   const [grantingId, setGrantingId]     = useState(null);
   const [grantInput, setGrantInput]     = useState({}); // { [userId]: string }
@@ -238,6 +244,30 @@ function AdminDashboard({ adminUser, onLogout }) {
     }
   }, []);
 
+  const loadAnalytics = useCallback(async () => {
+    setLoadingAnalytics(true);
+    try {
+      const data = await api.adminGetAnalytics();
+      setAnalytics(data);
+    } catch (err) {
+      toast.error('Failed to load analytics: ' + (err.message || 'unknown error'));
+    } finally {
+      setLoadingAnalytics(false);
+    }
+  }, []);
+
+  const loadOptimizer = useCallback(async () => {
+    setLoadingOptimizer(true);
+    try {
+      const data = await api.adminGetPricingOptimizer();
+      setOptimizer(data);
+    } catch (err) {
+      toast.error('Failed to load pricing optimizer: ' + (err.message || 'unknown error'));
+    } finally {
+      setLoadingOptimizer(false);
+    }
+  }, []);
+
   const checkStatus = useCallback(async () => {
     try {
       const data = await api.mainHealth();
@@ -258,10 +288,11 @@ function AdminDashboard({ adminUser, onLogout }) {
 
   // Load activity when that tab is first opened
   useEffect(() => {
-    if (activeTab === 'activity' && activity.length === 0) {
-      loadActivity();
-    }
-  }, [activeTab, activity.length, loadActivity]);
+    if (activeTab === 'activity' && activity.length === 0) loadActivity();
+    if (activeTab === 'revenue' && !analytics) loadAnalytics();
+    if (activeTab === 'profit' && !optimizer) loadOptimizer();
+    if (activeTab === 'profit' && !analytics) loadAnalytics();
+  }, [activeTab, activity.length, analytics, optimizer, loadActivity, loadAnalytics, loadOptimizer]);
 
   async function handleDeleteUser(u) {
     if (!window.confirm(`Delete ${u.name} (${u.email})? This removes all their data and cannot be undone.`)) return;
@@ -336,7 +367,12 @@ function AdminDashboard({ adminUser, onLogout }) {
             <span className="flex items-center gap-1.5"><StatusDot ok={serverStatus.openai} /> Claude API</span>
           </div>
           <button
-            onClick={() => { loadStats(); loadUsers(); checkStatus(); if (activeTab === 'activity') loadActivity(); }}
+            onClick={() => {
+            loadStats(); loadUsers(); checkStatus();
+            if (activeTab === 'activity') loadActivity();
+            if (activeTab === 'revenue') loadAnalytics();
+            if (activeTab === 'profit') { loadAnalytics(); loadOptimizer(); }
+          }}
             className="p-2 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all"
             title="Refresh"
           >
@@ -352,11 +388,13 @@ function AdminDashboard({ adminUser, onLogout }) {
       </div>
 
       {/* Tab nav */}
-      <div className="flex-shrink-0 flex items-center gap-1 px-6 pt-4 pb-0">
+      <div className="flex-shrink-0 flex items-center gap-1 px-6 pt-4 pb-0 overflow-x-auto">
         {[
           { id: 'overview',  label: 'Overview',              icon: BarChart2 },
           { id: 'users',     label: `Users (${users.length})`, icon: Users },
           { id: 'activity',  label: 'Activity',              icon: List },
+          { id: 'revenue',   label: 'Revenue',               icon: DollarSign },
+          { id: 'profit',    label: 'Profit & Cost',         icon: TrendingUp },
         ].map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -582,6 +620,231 @@ function AdminDashboard({ adminUser, onLogout }) {
               </div>
             )}
           </div>
+        )}
+
+        {/* ── REVENUE TAB ── */}
+        {activeTab === 'revenue' && (
+          <>
+            {loadingAnalytics ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="rounded-2xl border border-white/5 bg-white/[0.02] p-5 h-20 animate-pulse" />
+                ))}
+              </div>
+            ) : analytics && (
+              <>
+                {/* Revenue KPIs */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <StatCard icon={DollarSign}  label="MRR Estimate"        value={`$${analytics.mrr_estimate_usd?.toFixed(2)}`}      color="emerald" />
+                  <StatCard icon={Percent}      label="Conversion Rate"     value={`${analytics.conversion_rate_pct}%`}               color="cyan" />
+                  <StatCard icon={Users}        label="Paying Users"        value={analytics.paying_users}                            color="violet" />
+                  <StatCard icon={UserPlus}     label="New This Month"      value={analytics.new_users_this_month}                    color="amber" />
+                </div>
+
+                {/* Users by plan */}
+                <div className="rounded-2xl border border-white/10 bg-[#13131f] p-6">
+                  <h2 className="text-sm font-semibold text-slate-200 mb-4 flex items-center gap-2">
+                    <PieChart size={14} className="text-cyan-400" /> Users by Plan
+                  </h2>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {[
+                      { plan: 'free',     color: 'border-slate-500/30 bg-white/[0.03]',            text: 'text-slate-400'  },
+                      { plan: 'standard', color: 'border-cyan-500/30 bg-cyan-500/5',              text: 'text-cyan-400'   },
+                      { plan: 'pro',      color: 'border-violet-500/30 bg-violet-500/5',          text: 'text-violet-400' },
+                      { plan: 'team',     color: 'border-amber-500/30 bg-amber-500/5',            text: 'text-amber-400'  },
+                    ].map(({ plan, color, text }) => {
+                      const count = analytics.users_by_plan?.[plan] || 0;
+                      const pct = analytics.total_users > 0 ? Math.round(count / analytics.total_users * 100) : 0;
+                      const price = { free: 0, standard: 9, pro: 19, team: 49 }[plan];
+                      return (
+                        <div key={plan} className={`rounded-xl border p-4 ${color}`}>
+                          <p className={`text-2xl font-bold text-white`}>{fmt(count)}</p>
+                          <p className={`text-xs font-semibold capitalize mt-0.5 ${text}`}>{plan}</p>
+                          <p className="text-[10px] text-slate-600 mt-1">{pct}% of users</p>
+                          {price > 0 && (
+                            <p className={`text-[10px] mt-0.5 ${text}`}>${(count * price).toFixed(0)}/mo est.</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Daily usage chart */}
+                <div className="rounded-2xl border border-white/10 bg-[#13131f] p-6">
+                  <h2 className="text-sm font-semibold text-slate-200 mb-4 flex items-center gap-2">
+                    <Activity size={14} className="text-violet-400" /> Daily Requests — Last 30 Days
+                  </h2>
+                  {analytics.daily_usage?.length > 0 ? (
+                    <div>
+                      {(() => {
+                        const maxR = Math.max(...analytics.daily_usage.map(d => d.requests), 1);
+                        return (
+                          <div className="flex items-end gap-0.5 h-20 overflow-x-auto pb-2">
+                            {analytics.daily_usage.map((d, i) => {
+                              const pct = Math.max(4, (d.requests / maxR) * 100);
+                              return (
+                                <div key={i} className="flex-1 min-w-[6px] flex flex-col items-center gap-0.5 group relative">
+                                  <div
+                                    className="w-full bg-gradient-to-t from-violet-600 to-violet-400 rounded-sm"
+                                    style={{ height: `${pct}%` }}
+                                  />
+                                  <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block z-10 pointer-events-none">
+                                    <div className="bg-[#1a1a2e] border border-white/10 rounded-lg px-2 py-1 text-[9px] text-slate-300 whitespace-nowrap shadow-xl">
+                                      <p className="font-mono">{d.date}</p>
+                                      <p className="text-violet-400">{d.requests} reqs · {d.credits} cr</p>
+                                      <p className="text-red-400">${d.cost_usd?.toFixed(3)} cost</p>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  ) : (
+                    <p className="text-slate-600 text-sm text-center py-4">No usage data yet.</p>
+                  )}
+                </div>
+
+                {/* Usage by action */}
+                <div className="rounded-2xl border border-white/10 bg-[#13131f] p-6">
+                  <h2 className="text-sm font-semibold text-slate-200 mb-4 flex items-center gap-2">
+                    <BarChart2 size={14} className="text-amber-400" /> Usage by Action (All Time)
+                  </h2>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-white/5">
+                          {['Action', 'Requests', 'Credits', 'AI Cost (USD)'].map(h => (
+                            <th key={h} className="px-3 py-2.5 text-left text-[10px] font-mono uppercase tracking-widest text-slate-600">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {analytics.usage_by_action?.map((row, i) => (
+                          <tr key={i} className="border-b border-white/[0.04] hover:bg-white/[0.02]">
+                            <td className="px-3 py-2.5 text-xs text-slate-300 font-mono">{row.action}</td>
+                            <td className="px-3 py-2.5 text-xs text-slate-400">{fmt(row.requests)}</td>
+                            <td className="px-3 py-2.5 text-xs text-amber-400 font-mono">{fmt(row.credits)}</td>
+                            <td className="px-3 py-2.5 text-xs text-red-400 font-mono">${row.cost_usd?.toFixed(4)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
+          </>
+        )}
+
+        {/* ── PROFIT & COST TAB ── */}
+        {activeTab === 'profit' && (
+          <>
+            {(loadingAnalytics || loadingOptimizer) ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="rounded-2xl border border-white/5 bg-white/[0.02] p-5 h-20 animate-pulse" />
+                ))}
+              </div>
+            ) : (
+              <>
+                {/* P&L summary */}
+                {analytics && (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <StatCard icon={DollarSign}  label="MRR Estimate"       value={`$${analytics.mrr_estimate_usd?.toFixed(2)}`}       color="emerald" />
+                    <StatCard icon={Activity}     label="AI Cost This Month" value={`$${analytics.ai_cost_this_month_usd?.toFixed(2)}`} color="red" />
+                    <StatCard icon={TrendingUp}   label="Net Profit Est."    value={`$${analytics.net_profit_estimate_usd?.toFixed(2)}`} color={analytics.net_profit_estimate_usd > 0 ? 'emerald' : 'red'} />
+                    <StatCard icon={Percent}      label="Profit Margin"      value={`${analytics.profit_margin_pct}%`}                  color="cyan" />
+                  </div>
+                )}
+
+                {/* Profit bar */}
+                {analytics && analytics.mrr_estimate_usd > 0 && (
+                  <div className="rounded-2xl border border-white/10 bg-[#13131f] p-6">
+                    <h2 className="text-sm font-semibold text-slate-200 mb-4 flex items-center gap-2">
+                      <TrendingUp size={14} className="text-emerald-400" /> Revenue vs Cost (This Month)
+                    </h2>
+                    <div className="space-y-3">
+                      {[
+                        { label: 'MRR (Estimated Revenue)', value: analytics.mrr_estimate_usd, color: 'bg-emerald-500', max: analytics.mrr_estimate_usd },
+                        { label: 'AI API Cost',             value: analytics.ai_cost_this_month_usd, color: 'bg-red-500', max: analytics.mrr_estimate_usd },
+                        { label: 'Net Profit',              value: Math.max(0, analytics.net_profit_estimate_usd), color: 'bg-cyan-500', max: analytics.mrr_estimate_usd },
+                      ].map(({ label, value, color, max }) => (
+                        <div key={label}>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs text-slate-500">{label}</span>
+                            <span className="text-xs font-mono text-slate-300">${value?.toFixed(2)}</span>
+                          </div>
+                          <div className="h-2 bg-white/5 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${color} transition-all`}
+                              style={{ width: `${Math.min(100, (value / max) * 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Pricing optimizer */}
+                {optimizer && (
+                  <div className="rounded-2xl border border-white/10 bg-[#13131f] p-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                        <Zap size={14} className="text-amber-400" /> Credit Pricing Optimizer
+                      </h2>
+                      <div className="flex items-center gap-4 text-[10px] font-mono text-slate-500">
+                        <span>Target margin: <span className="text-amber-400">{optimizer.target_margin_pct}%</span></span>
+                        <span>Rev/credit: <span className="text-emerald-400">${optimizer.revenue_per_credit_usd?.toFixed(4)}</span></span>
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-white/5">
+                            {['Action', 'Current Credits', 'Avg AI Cost', 'Current Margin', 'Recommended Credits', '30d Requests'].map(h => (
+                              <th key={h} className="px-3 py-2.5 text-left text-[10px] font-mono uppercase tracking-widest text-slate-600 whitespace-nowrap">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {optimizer.analysis?.map((row, i) => {
+                            const marginOk = row.current_margin_pct >= optimizer.target_margin_pct;
+                            return (
+                              <tr key={i} className="border-b border-white/[0.04] hover:bg-white/[0.02]">
+                                <td className="px-3 py-2.5 text-xs text-slate-300 font-mono">{row.action}</td>
+                                <td className="px-3 py-2.5 text-xs text-amber-400 font-mono">{row.credit_cost}</td>
+                                <td className="px-3 py-2.5 text-xs text-red-400 font-mono">${row.avg_ai_cost_usd}</td>
+                                <td className="px-3 py-2.5">
+                                  <span className={`text-xs font-mono font-semibold ${marginOk ? 'text-emerald-400' : 'text-red-400'}`}>
+                                    {row.current_margin_pct}%
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2.5">
+                                  <span className={`text-xs font-mono font-bold ${row.recommended_credits !== row.credit_cost ? 'text-violet-400' : 'text-slate-500'}`}>
+                                    {row.recommended_credits}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2.5 text-xs text-slate-500 font-mono">{fmt(row.total_requests_30d)}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-[10px] text-slate-600 mt-3">
+                      Recommended credit costs achieve the {optimizer.target_margin_pct}% target margin.
+                      Platform margin estimate: <span className="text-emerald-400 font-semibold">{optimizer.platform_profit_margin_pct}%</span>
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
+          </>
         )}
 
         {/* ── ACTIVITY TAB ── */}

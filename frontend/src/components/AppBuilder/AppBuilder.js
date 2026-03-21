@@ -145,44 +145,66 @@ const loadSessionsLocal = () => {
 // ---------------------------------------------------------------------------
 function LockedCodeView({ code, onUpgrade }) {
   const lines = (code || '').split('\n');
-  const preview = lines.slice(0, 18).join('\n');
+  const totalLines = lines.length;
+  const preview = lines.slice(0, 14).join('\n');
+  const lockedCount = Math.max(0, totalLines - 14);
+
   return (
     <div className="relative h-full bg-[#0d1117] overflow-hidden select-none cursor-default">
-      {/* Preview: first 18 lines, faded out */}
-      <pre className="text-[#e6edf3] font-mono text-xs p-3 whitespace-pre-wrap break-all leading-5 pointer-events-none opacity-60">
+      {/* Preview: first 14 lines */}
+      <pre className="text-[#e6edf3] font-mono text-xs p-3 whitespace-pre-wrap break-all leading-5 pointer-events-none">
         {preview}
-        {lines.length > 18 ? '\n...' : ''}
       </pre>
-      {/* Gradient fade */}
-      <div className="absolute inset-x-0 top-0 h-full bg-gradient-to-b from-transparent via-[#0d1117]/70 to-[#0d1117] pointer-events-none" />
+
+      {/* Gradient fade — starts at 40% so first lines are fully visible */}
+      <div className="absolute inset-x-0 top-0 h-full bg-gradient-to-b from-transparent from-30% via-[#0d1117]/85 to-[#0d1117] pointer-events-none" />
+
+      {/* Locked line counter pill */}
+      {lockedCount > 0 && (
+        <div className="absolute left-3 top-[calc(14*1.25rem+0.75rem)] flex items-center gap-1.5 pointer-events-none">
+          <div className="h-px flex-1 bg-amber-500/20 w-8" />
+          <span className="text-[9px] font-mono text-amber-500/70 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
+            +{lockedCount} lines locked
+          </span>
+          <div className="h-px flex-1 bg-amber-500/20 w-8" />
+        </div>
+      )}
+
       {/* Lock overlay */}
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-4">
-        <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center flex-shrink-0">
+      <div className="absolute inset-x-0 bottom-0 flex flex-col items-center justify-end pb-8 gap-3 px-4 pt-16 bg-gradient-to-t from-[#0d1117] via-[#0d1117]/95 to-transparent">
+        {/* Lock badge */}
+        <div className="flex items-center gap-2.5 bg-[#0d1117]/90 border border-white/10 rounded-2xl px-4 py-3 backdrop-blur-sm shadow-xl">
+          <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center flex-shrink-0">
             <Lock className="w-4 h-4 text-amber-400" />
           </div>
           <div>
-            <p className="text-sm font-semibold text-slate-200 leading-none">Full code locked</p>
-            <p className="text-[10px] text-slate-500 mt-0.5">Available on paid plans</p>
+            <p className="text-xs font-bold text-slate-200 leading-none">Full code locked</p>
+            <p className="text-[10px] text-slate-500 mt-1 leading-none">
+              {lockedCount > 0 ? `${lockedCount} more lines on paid plans` : 'Available on paid plans'}
+            </p>
           </div>
         </div>
-        <p className="text-[11px] text-slate-500 text-center max-w-[220px] leading-relaxed">
-          Upgrade to view, edit, copy, and download your complete source code.
-        </p>
+
+        {/* CTAs */}
         <button
           onClick={onUpgrade}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-600 text-white text-xs font-semibold hover:from-cyan-400 hover:to-violet-500 transition-all shadow-lg shadow-violet-900/30"
+          className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-600 text-white text-xs font-bold hover:from-cyan-400 hover:to-violet-500 transition-all shadow-lg shadow-violet-900/40 w-full max-w-[200px] justify-center"
         >
-          <Lock className="w-3 h-3" /> Upgrade to Unlock Code
+          <Lock className="w-3 h-3" /> Unlock Code
         </button>
+        <p className="text-[10px] text-slate-600 text-center max-w-[180px] leading-relaxed">
+          View, edit, copy &amp; export your complete source code
+        </p>
       </div>
     </div>
   );
 }
 
 const AppBuilder = () => {
-  const { isSubscribed } = useApp();
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const { isSubscribed, openUpgradeModal } = useApp();
+  const setShowUpgradeModal = (open) => { if (open) openUpgradeModal('code'); };
+  // showUpgradeModal is now global — this local alias keeps existing call-sites working
+  const showUpgradeModal = false; // modal is rendered globally in App.js
   const [mode, setMode] = useState('coach');   // 'coach' | 'build'
 
   // Coach state
@@ -1086,7 +1108,7 @@ const AppBuilder = () => {
   };
 
   const exportZip = async () => {
-    if (!isSubscribed) { setShowUpgradeModal(true); return; }
+    if (!isSubscribed) { openUpgradeModal('export'); return; }
     if (!generatedApp?.html) return;
     try {
       toast.info('Building ZIP...');
@@ -1111,7 +1133,7 @@ const AppBuilder = () => {
   };
 
   const downloadApp = () => {
-    if (!isSubscribed) { setShowUpgradeModal(true); return; }
+    if (!isSubscribed) { openUpgradeModal('export'); return; }
     if (!generatedApp?.html) return;
     const blob = new Blob([generatedApp.html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
@@ -1184,7 +1206,7 @@ const AppBuilder = () => {
 
   // ── Phase 4: Publish handlers ─────────────────────────────────────────────────
   const exportSessionJson = () => {
-    if (!isSubscribed) { setShowUpgradeModal(true); return; }
+    if (!isSubscribed) { openUpgradeModal('export'); return; }
     if (!generatedApp) return;
     const payload = { ...generatedApp, versions, editHistory, exportedAt: new Date().toISOString() };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -1220,7 +1242,7 @@ const AppBuilder = () => {
   };
 
   const pushToGithub = async () => {
-    if (!isSubscribed) { setShowUpgradeModal(true); return; }
+    if (!isSubscribed) { openUpgradeModal('github'); return; }
     if (!githubToken.trim() || !githubRepo.trim()) { toast.error('Enter token and repo name'); return; }
     setGithubLoading(true); setGithubResult(null);
     try {
@@ -1242,7 +1264,7 @@ const AppBuilder = () => {
   };
 
   const deployToVercel = async () => {
-    if (!isSubscribed) { setShowUpgradeModal(true); return; }
+    if (!isSubscribed) { openUpgradeModal('deploy'); return; }
     if (!vercelToken.trim()) { toast.error('Enter your Vercel token'); return; }
     setVercelLoading(true); setVercelResult(null);
     try {
@@ -2856,40 +2878,7 @@ const AppBuilder = () => {
     )}
 
     {/* ── GitHub Push Modal ── */}
-    {showUpgradeModal && (
-      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowUpgradeModal(false)}>
-        <div className="bg-[#13131f] border border-white/10 rounded-2xl p-8 w-full max-w-sm shadow-2xl text-center" onClick={e => e.stopPropagation()}>
-          <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-4">
-            <Lock className="w-5 h-5 text-amber-400" />
-          </div>
-          <h3 className="text-lg font-bold text-white mb-2">Unlock Full Code Access</h3>
-          <p className="text-sm text-slate-400 mb-6 leading-relaxed">
-            Free plan includes AI generation and live preview. Upgrade to access your complete source code, download, and deploy.
-          </p>
-          <div className="space-y-3">
-            <div className="rounded-xl bg-white/5 border border-white/10 p-4 text-left">
-              <p className="text-xs font-medium text-cyan-400 mb-2">What you unlock with a paid plan</p>
-              <ul className="text-xs text-slate-400 space-y-1.5">
-                <li className="flex items-center gap-2"><span className="text-cyan-400">✓</span> View &amp; edit complete source code (HTML, CSS, JS)</li>
-                <li className="flex items-center gap-2"><span className="text-cyan-400">✓</span> Download HTML &amp; ZIP project files</li>
-                <li className="flex items-center gap-2"><span className="text-cyan-400">✓</span> Push to GitHub &amp; deploy to Vercel</li>
-                <li className="flex items-center gap-2"><span className="text-cyan-400">✓</span> Unlimited Mini Credits</li>
-                <li className="flex items-center gap-2"><span className="text-cyan-400">✓</span> Priority AI model access</li>
-              </ul>
-            </div>
-            <button
-              onClick={() => setShowUpgradeModal(false)}
-              className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-600 text-white text-sm font-semibold hover:from-cyan-400 hover:to-violet-500 transition-all shadow-lg"
-            >
-              View Plans — Coming Soon
-            </button>
-            <button onClick={() => setShowUpgradeModal(false)} className="w-full text-xs text-slate-600 hover:text-slate-400 transition-colors">
-              Keep building for free
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
+    {/* Upgrade modal is now rendered globally in App.js via openUpgradeModal() */}
 
     {showGithubModal && (
       <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowGithubModal(false)}>

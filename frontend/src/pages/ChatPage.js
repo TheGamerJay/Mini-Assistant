@@ -105,6 +105,7 @@ function ChatPage() {
     pinMessage,
     forkChat,
     setPurchaseModalOpen,
+    openUpgradeModal,
   } = useApp();
 
   const handleExport = useCallback((format = 'md') => {
@@ -628,7 +629,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
                 <OutOfCreditsCard
                   key={idx}
                   onBuy={() => setPurchaseModalOpen(true)}
-                  onUpgrade={() => setPage('settings')}
+                  onUpgrade={() => openUpgradeModal('credits')}
                 />
               );
             }

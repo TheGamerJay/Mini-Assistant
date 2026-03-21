@@ -309,6 +309,14 @@ export function AppProvider({ children }) {
   const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
+  // ---- Global upgrade modal ----
+  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
+  const [upgradeReason, setUpgradeReason]       = useState('generic');
+  const openUpgradeModal = useCallback((reason = 'generic') => {
+    setUpgradeReason(reason);
+    setUpgradeModalOpen(true);
+  }, []);
+
   const refreshCredits = useCallback(() => {
     api.authCredits().then(({ credits: c, plan: p }) => {
       setCredits(c);
@@ -811,6 +819,10 @@ export function AppProvider({ children }) {
     setPurchaseModalOpen,
     mobileSidebarOpen,
     setMobileSidebarOpen,
+    upgradeModalOpen,
+    setUpgradeModalOpen,
+    upgradeReason,
+    openUpgradeModal,
     getUserSecurityQuestion,
     resetPasswordWithSecurityAnswer,
     // profile

@@ -1,14 +1,12 @@
 """
 backend/mini_assistant/phase10/rate_limiter.py
 
-In-process sliding-window rate limiter middleware.
+Sliding-window rate limiter middleware.
 
-Two tiers:
-  - Per-IP    : default 120 req / 60 s  (configurable via env)
-  - Per-session: default 60 req / 60 s  (applied to /api/chat only)
-
-Heavy endpoints (image generation) get a stricter sub-limit:
-  - Per-IP on /*/image/generate or /*/chat : 20 req / 60 s
+Three tiers (applied in order, first failure wins):
+  1. Per-IP general     : default 120 req / 60 s
+  2. Per-IP heavy paths : default 20  req / 60 s  (AI endpoints)
+  3. Per-user (JWT)     : plan-aware limits via safety module
 
 Configuration via environment variables:
   RATE_LIMIT_IP_RPS       default 120
@@ -42,11 +40,15 @@ _IP_LIMIT       = _int("RATE_LIMIT_IP_RPS", 120)
 _IP_WINDOW      = _int("RATE_LIMIT_IP_WINDOW", 60)
 _HEAVY_LIMIT    = _int("RATE_LIMIT_HEAVY_RPS", 20)
 
-# Paths that count as "heavy" (image gen + raw chat)
+# Paths that count as "heavy" (image gen + raw chat + app builder)
 _HEAVY_PATHS = (
     "/image/generate",
     "/api/chat",
     "/image-api/api/chat",
+    "/app-builder/generate",
+    "/app-builder/export-zip",
+    "/app-builder/github-push",
+    "/app-builder/deploy-vercel",
 )
 
 # Paths that bypass rate limiting entirely
