@@ -39,7 +39,7 @@ const PLANS = [
     annualPrice: 17,
     credits: 1000,
     badge: null,
-    description: 'For individuals building real projects.',
+    description: '1,000 credits per month for AI app building, chat, and code generation. Includes full access to core features with standard performance.',
     cta: 'Upgrade to Standard',
     priceMonthly: getPriceId('standard', 'monthly'),
     priceAnnual:  getPriceId('standard', 'yearly'),
@@ -53,7 +53,7 @@ const PLANS = [
     annualPrice: 42,
     credits: 4000,
     badge: 'Most Popular',
-    description: 'For power users who ship fast.',
+    description: '4,000 credits per month with priority performance, advanced AI capabilities, and full access to app building, code generation, and export features.',
     cta: 'Upgrade to Pro',
     priceMonthly: getPriceId('pro', 'monthly'),
     priceAnnual:  getPriceId('pro', 'yearly'),
@@ -67,7 +67,7 @@ const PLANS = [
     annualPrice: 83,
     credits: 10000,
     badge: null,
-    description: 'For teams and power builders.',
+    description: '10,000 credits per month with maximum performance, fastest processing, and complete access to all features including advanced AI, exports, and deployment tools.',
     cta: 'Upgrade to Max',
     priceMonthly: getPriceId('max', 'monthly'),
     priceAnnual:  getPriceId('max', 'yearly'),
@@ -191,7 +191,7 @@ const TOPUP_BUNDLES = [
 ];
 
 export default function PricingPage() {
-  const { plan: currentPlan, isSubscribed, openUpgradeModal, setPage, setPurchaseModalOpen } = useApp();
+  const { plan: currentPlan, isSubscribed, credits, openUpgradeModal, setPage, setPurchaseModalOpen } = useApp();
   const [annual, setAnnual] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState(null); // plan id while loading
   const [topupLoading, setTopupLoading] = useState(null);
@@ -215,6 +215,10 @@ export default function PricingPage() {
       setCheckoutLoading(null);
     }
   }, [annual, currentPlan, openUpgradeModal]);
+
+  // Top-ups available only to subscribers who have fully used their credits
+  const creditsRemaining = credits !== null && credits > 0;
+  const topupsAvailable  = isSubscribed && !creditsRemaining;
 
   const handleTopup = useCallback(async (bundle) => {
     if (!bundle.priceId) { setPurchaseModalOpen(true); return; }
@@ -384,7 +388,7 @@ export default function PricingPage() {
           </div>
         </div>
 
-        {/* Top-Up Credits — subscribers only */}
+        {/* Top-Up Credits — subscribers only, credits must be depleted */}
         <div className="mb-12">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -392,12 +396,17 @@ export default function PricingPage() {
                 <Plus className="w-4 h-4 text-amber-400" /> Credit Top-Ups
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                One-time purchases · Never expire · Available on paid plans only
+                One-time purchases · Never expire · Top-ups unlock after your monthly credits are used.
               </p>
             </div>
             {!isSubscribed && (
               <span className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-1 rounded-full font-medium">
                 Subscribers only
+              </span>
+            )}
+            {isSubscribed && creditsRemaining && (
+              <span className="text-xs text-slate-400 bg-white/5 border border-white/10 px-3 py-1 rounded-full font-medium">
+                {credits} credits remaining
               </span>
             )}
           </div>
@@ -413,7 +422,7 @@ export default function PricingPage() {
                       ? 'border-amber-500/30 bg-amber-500/5'
                       : 'border-white/10 bg-[#111118]'
                     }
-                    ${isSubscribed ? 'hover:border-amber-500/40 cursor-pointer' : 'opacity-60'}
+                    ${topupsAvailable ? 'hover:border-amber-500/40 cursor-pointer' : 'opacity-60'}
                   `}
                 >
                   {bundle.label && (
@@ -435,10 +444,10 @@ export default function PricingPage() {
                     </p>
                   </div>
                   <button
-                    onClick={() => isSubscribed && handleTopup(bundle)}
-                    disabled={!isSubscribed || !!topupLoading}
+                    onClick={() => topupsAvailable && handleTopup(bundle)}
+                    disabled={!topupsAvailable || !!topupLoading}
                     className={`w-full py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-1.5
-                      ${isSubscribed
+                      ${topupsAvailable
                         ? 'bg-amber-500 hover:bg-amber-400 text-black'
                         : 'bg-white/5 text-slate-600 cursor-not-allowed border border-white/10'
                       }
@@ -446,7 +455,11 @@ export default function PricingPage() {
                   >
                     {isLoading
                       ? <><span className="w-3 h-3 border-2 border-black/30 border-t-black rounded-full animate-spin" /> Redirecting…</>
-                      : isSubscribed ? <>Buy Now <ArrowRight className="w-3 h-3" /></> : <><Shield className="w-3 h-3" /> Subscribers Only</>
+                      : !isSubscribed
+                        ? <><Shield className="w-3 h-3" /> Subscribers Only</>
+                        : creditsRemaining
+                          ? <><Zap className="w-3 h-3" /> Use Your Credits First</>
+                          : <>Buy Now <ArrowRight className="w-3 h-3" /></>
                     }
                   </button>
                 </div>
@@ -457,6 +470,11 @@ export default function PricingPage() {
           {!isSubscribed && (
             <p className="text-center text-xs text-slate-600 mt-3">
               Subscribe to a paid plan above to unlock credit top-ups.
+            </p>
+          )}
+          {isSubscribed && creditsRemaining && (
+            <p className="text-center text-xs text-slate-600 mt-3">
+              You have <span className="text-slate-400 font-medium">{credits} credits</span> remaining. Top-ups unlock once your balance reaches zero.
             </p>
           )}
         </div>

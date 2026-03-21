@@ -26,7 +26,7 @@ const PLANS = [
     annualPrice: 17,
     credits: 1000,
     badge: null,
-    description: 'For individuals building real projects.',
+    description: '1,000 credits per month for AI app building, chat, and code generation. Includes full access to core features with standard performance.',
     features: [
       { text: '1,000 Mini Credits / month', highlight: true },
       { text: 'Full source code access (HTML, CSS, JS)' },
@@ -47,7 +47,7 @@ const PLANS = [
     annualPrice: 42,
     credits: 4000,
     badge: 'Most Popular',
-    description: 'For power users who ship fast.',
+    description: '4,000 credits per month with priority performance, advanced AI capabilities, and full access to app building, code generation, and export features.',
     features: [
       { text: '4,000 Mini Credits / month', highlight: true },
       { text: 'Everything in Standard' },
@@ -68,7 +68,7 @@ const PLANS = [
     annualPrice: 83,
     credits: 10000,
     badge: null,
-    description: 'For teams building together.',
+    description: '10,000 credits per month with maximum performance, fastest processing, and complete access to all features including advanced AI, exports, and deployment tools.',
     features: [
       { text: '10,000 Mini Credits / month', highlight: true },
       { text: 'Everything in Pro' },

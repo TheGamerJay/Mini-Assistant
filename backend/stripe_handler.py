@@ -253,7 +253,24 @@ async def create_checkout_session(
 
     # Top-ups are subscribers-only — block free-plan users at the API level
     if is_topup and user.get("plan", "free") == "free":
+        log.warning("checkout.topup: blocked user=%s — free plan cannot purchase top-ups", uid)
         raise HTTPException(403, "Credit top-ups are only available to subscribed users (Standard, Pro, or Max).")
+
+    # Block top-up if user still has credits remaining — must be fully depleted first
+    if is_topup:
+        sub_credits   = max(0, user.get("subscription_credits", 0))
+        topup_credits = max(0, user.get("topup_credits", 0))
+        total_credits = sub_credits + topup_credits
+        if total_credits > 0:
+            log.warning(
+                "checkout.topup: blocked user=%s plan=%s — %d credits still remaining",
+                uid, user.get("plan", "free"), total_credits,
+            )
+            raise HTTPException(
+                403,
+                f"You still have {total_credits} credits remaining. "
+                "Top-ups are only available once your credits are fully used.",
+            )
 
     try:
         customer_id = await _get_or_create_stripe_customer(db, user)
