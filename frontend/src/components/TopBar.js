@@ -7,7 +7,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Settings, Github, User, LogOut, Moon, Sun,
-  HelpCircle, ChevronDown, Terminal, GitBranch, RefreshCw, ShieldCheck,
+  HelpCircle, ChevronDown, Terminal, GitBranch, RefreshCw, ShieldCheck, BarChart2,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/client';
@@ -97,6 +97,7 @@ function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme, user,
 
       {/* Navigation */}
       <div className="py-1.5 border-b border-white/5">
+        <MenuItem icon={BarChart2} label="My Dashboard" onClick={() => go('dashboard')} />
         <MenuItem icon={User} label="My Profile" onClick={() => go('profile')} />
         <MenuItem icon={Settings} label="Settings" onClick={() => go('settings')} />
         {user?.role === 'admin' && (

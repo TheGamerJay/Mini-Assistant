@@ -28,6 +28,7 @@ import SettingsModal from './pages/SettingsModal';
 import AuthPage from './pages/AuthPage';
 import ProfilePage from './pages/ProfilePage';
 import AdminPage from './pages/AdminPage';
+import UserDashboard from './pages/UserDashboard';
 import PurchaseCreditsModal from './components/PurchaseCreditsModal';
 
 // Legal pages
@@ -160,6 +161,7 @@ function AppShell() {
     if (page === 'tool-appbuilder') { setPage('chat'); return <ChatPage />; }
     if (page === 'images') return <ImagePage />;
     if (page === 'profile') return <ProfilePage />;
+    if (page === 'dashboard') return <UserDashboard />;
     if (page === 'admin') return <AdminPage />;
 
     const legalEntry = LEGAL_PAGES[page];

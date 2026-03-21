@@ -740,6 +740,60 @@ async def admin_grant_credits(user_id: str, body: GrantCreditsBody, admin: dict 
     return {"ok": True, "credits": body.credits}
 
 
+@auth_router.get("/dashboard")
+async def user_dashboard(authorization: str = Header(None)):
+    """Return the authenticated user's personal usage stats and recent activity."""
+    user = await get_current_user(authorization)
+    db = _get_db()
+
+    uid = user["id"]
+    plan = user.get("plan", "free")
+    credits = user.get("credits", 0)
+
+    # Auto-backfill missing credits
+    if "credits" not in user:
+        credits = 10
+        await db["users"].update_one({"id": uid}, {"$set": {"credits": 10, "plan": "free"}})
+
+    # Total activity counts for this user
+    total_chats_sent   = await db["activity_logs"].count_documents({"user_id": uid, "type": "chat_message"})
+    total_images_made  = await db["activity_logs"].count_documents({"user_id": uid, "type": "image_generated"})
+    total_credits_used = 0
+    pipeline = [
+        {"$match": {"user_id": uid}},
+        {"$group": {"_id": None, "total": {"$sum": "$credits_used"}}},
+    ]
+    agg = await db["activity_logs"].aggregate(pipeline).to_list(1)
+    if agg:
+        total_credits_used = agg[0].get("total", 0)
+
+    # Recent activity (last 20)
+    recent = await db["activity_logs"].find(
+        {"user_id": uid}, {"_id": 0}
+    ).sort("timestamp", -1).limit(20).to_list(20)
+
+    # Saved chats count
+    chats_doc = await db["chats"].find_one({"user_id": uid}, {"chats": 1})
+    saved_chats = len(chats_doc["chats"]) if chats_doc else 0
+
+    # Images saved
+    images_doc = await db["images"].find_one({"user_id": uid}, {"images": 1})
+    saved_images = len(images_doc["images"]) if images_doc else 0
+
+    return {
+        "plan": plan,
+        "credits": credits,
+        "is_subscribed": plan in ("standard", "pro", "team"),
+        "member_since": user.get("created_at"),
+        "total_chats_sent": total_chats_sent,
+        "total_images_made": total_images_made,
+        "total_credits_used": total_credits_used,
+        "saved_chats": saved_chats,
+        "saved_images": saved_images,
+        "recent_activity": recent,
+    }
+
+
 @admin_router.get("/activity")
 async def admin_activity(limit: int = 100, admin: dict = Depends(_require_admin)):
     """Return recent activity logs across all users."""

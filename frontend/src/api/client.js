@@ -336,6 +336,11 @@ export const api = {
     return get(`${MAIN_API}/auth/credits`, 10000);
   },
 
+  /** Get personal usage dashboard stats + recent activity. */
+  authDashboard() {
+    return get(`${MAIN_API}/auth/dashboard`, 15000);
+  },
+
   /** Update display name. */
   authUpdateProfile(name) {
     return request(`${MAIN_API}/auth/profile`, {
