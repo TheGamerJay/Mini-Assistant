@@ -59,24 +59,13 @@ function SettingsModal({ onClose }) {
 
   const handleRefreshStatus = async () => {
     try {
-      const [mainData] = await Promise.allSettled([api.mainHealth(), api.imageHealth()]);
-      if (mainData.status === 'fulfilled') {
-        const d = mainData.value;
-        setServerStatus({
-          backend: true,
-          ollama: d.ollama === 'connected' ? true : false,
-        });
-      } else {
-        setServerStatus({ backend: false, ollama: false });
-      }
+      const data = await api.mainHealth();
+      setServerStatus({
+        backend: true,
+        openai: data.openai === 'connected',
+      });
     } catch {
-      setServerStatus({ backend: false, ollama: false });
-    }
-    try {
-      const imgHealth = await api.imageHealth();
-      setServerStatus({ comfyui: imgHealth.status === 'ok' ? true : false });
-    } catch {
-      setServerStatus({ comfyui: false });
+      setServerStatus({ backend: false, openai: false });
     }
     toast.success('Status refreshed');
   };
@@ -136,8 +125,7 @@ function SettingsModal({ onClose }) {
 
             <div className="flex items-center gap-3 flex-wrap">
               <StatusBadge label="Backend" status={serverStatus.backend} />
-              <StatusBadge label="Ollama" status={serverStatus.ollama} />
-              <StatusBadge label="ComfyUI" status={serverStatus.comfyui} />
+              <StatusBadge label="Claude API" status={serverStatus.openai} />
               <button
                 onClick={handleRefreshStatus}
                 className="ml-auto flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 bg-white/5 hover:bg-white/10 border border-white/10 px-2.5 py-1.5 rounded-lg transition-colors"
@@ -146,12 +134,6 @@ function SettingsModal({ onClose }) {
               </button>
             </div>
 
-            <button
-              onClick={handlePullModels}
-              className="w-full text-xs text-slate-400 hover:text-slate-200 bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-2 rounded-lg transition-colors text-left"
-            >
-              Pull missing models
-            </button>
           </div>
 
           {/* --- Chat preferences --- */}

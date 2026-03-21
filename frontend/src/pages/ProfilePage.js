@@ -24,14 +24,14 @@ function TermsModal({ onClose }) {
           <button onClick={onClose} className="text-slate-500 hover:text-slate-300 transition-colors text-lg leading-none">✕</button>
         </div>
         <div className="flex-1 overflow-y-auto px-6 py-5 text-sm text-slate-400 space-y-4 leading-relaxed">
-          <section><h3 className="text-slate-200 font-semibold mb-1">1. Local-Only Storage</h3>
-            <p>All your data (chats, images, settings, account credentials) is stored exclusively in your browser's localStorage. No data is sent to any third-party server.</p></section>
+          <section><h3 className="text-slate-200 font-semibold mb-1">1. Your Data</h3>
+            <p>Your chats, projects, and settings are synced to your account in our secure database. You can delete your account and all associated data at any time.</p></section>
           <section><h3 className="text-slate-200 font-semibold mb-1">2. Authentication</h3>
-            <p>Passwords are hashed with SHA-256 before storage. Mini Assistant never stores plaintext passwords. Resetting a forgotten password requires deleting and re-creating your account.</p></section>
+            <p>Passwords are hashed with bcrypt before storage. Mini Assistant never stores plaintext passwords. You can reset a forgotten password using your security question.</p></section>
           <section><h3 className="text-slate-200 font-semibold mb-1">3. AI Outputs</h3>
-            <p>Mini Assistant uses local AI models. Outputs may be inaccurate, incomplete, or inappropriate. Always review AI-generated code, text, and images before use in production.</p></section>
+            <p>Mini Assistant is powered by Claude AI and DALL-E 3. Outputs may be inaccurate, incomplete, or inappropriate. Always review AI-generated code, text, and images before use in production.</p></section>
           <section><h3 className="text-slate-200 font-semibold mb-1">4. Image Generation</h3>
-            <p>Generated images are stored locally and are subject to the policies of the underlying model (ComfyUI / Stable Diffusion). Do not generate illegal or harmful content.</p></section>
+            <p>Images are generated via OpenAI's DALL-E 3 API and are subject to OpenAI's usage policies. Do not generate illegal or harmful content.</p></section>
           <section><h3 className="text-slate-200 font-semibold mb-1">5. No Warranties</h3>
             <p>This software is provided "as is" without warranty of any kind. Use at your own risk.</p></section>
           <section><h3 className="text-slate-200 font-semibold mb-1">6. Account Deletion</h3>

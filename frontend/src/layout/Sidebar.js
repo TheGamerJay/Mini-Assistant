@@ -391,12 +391,7 @@ function Sidebar() {
   const unassignedChats = filteredChats.filter((c) => !c.projectId && !c.pinned)
     .sort((a, b) => b.updatedAt - a.updatedAt);
 
-  const ollamaUp = serverStatus.ollama === true;
   const backendUp = serverStatus.backend === true;
-  const isOnline = ollamaUp && backendUp;
-  const statusDot = serverStatus.backend === null
-    ? 'bg-slate-500 animate-pulse'
-    : isOnline ? 'bg-cyan-400' : 'bg-red-400';
 
   return (
     <div
@@ -638,17 +633,9 @@ function Sidebar() {
         )}
 
         <div className={`flex items-center gap-2 px-2 py-1.5 rounded-lg ${sidebarCollapsed ? 'justify-center' : ''}`}>
-          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDot}`} />
-          {!sidebarCollapsed && <span className="text-[11px] font-mono text-slate-500">Local AI</span>}
+          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${serverStatus.backend === null ? 'bg-slate-500 animate-pulse' : backendUp ? 'bg-cyan-400' : 'bg-red-400'}`} />
+          {!sidebarCollapsed && <span className="text-[11px] font-mono text-slate-500">{backendUp ? 'Connected' : 'Offline'}</span>}
         </div>
-        <button
-          onClick={() => setPage('settings')}
-          title="Settings"
-          className={`w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-colors ${sidebarCollapsed ? 'justify-center' : ''}`}
-        >
-          <Settings size={15} />
-          {!sidebarCollapsed && <span className="text-xs">Settings</span>}
-        </button>
       </div>
     </div>
   );

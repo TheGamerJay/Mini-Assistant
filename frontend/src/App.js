@@ -140,11 +140,10 @@ function AppShell() {
         const data = await api.mainHealth();
         setServerStatus({
           backend: true,
-          ollama: data.ollama === 'connected',
           openai: data.openai === 'connected',
         });
       } catch {
-        setServerStatus({ backend: false, ollama: false, openai: false });
+        setServerStatus({ backend: false, openai: false });
       }
     };
 

@@ -42,7 +42,7 @@ function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme, user,
     return () => document.removeEventListener('mousedown', handler);
   }, [onClose]);
 
-  const allOk = serverStatus.backend && serverStatus.ollama;
+  const allOk = serverStatus.backend && serverStatus.openai;
 
   const go = (page) => { setPage(page); onClose(); };
 
@@ -88,8 +88,8 @@ function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme, user,
             <p className="text-sm font-medium text-slate-200 truncate">{user?.name || 'Mini Assistant'}</p>
             <p className="text-[10px] text-slate-600 font-mono truncate">{user?.email || ''}</p>
             <div className="flex items-center gap-1.5 mt-0.5">
-              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${allOk ? 'bg-emerald-400' : 'bg-red-400 animate-pulse'}`} />
-              <span className="text-[10px] font-mono text-slate-500">{allOk ? 'All systems online' : 'Backend offline'}</span>
+              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${serverStatus.backend ? 'bg-emerald-400' : 'bg-red-400 animate-pulse'}`} />
+              <span className="text-[10px] font-mono text-slate-500">{serverStatus.backend ? 'All systems online' : 'Backend offline'}</span>
             </div>
           </div>
         </div>
@@ -169,16 +169,15 @@ function TopBar() {
   const handleRefresh = useCallback(async () => {
     if (refreshing) return;
     setRefreshing(true);
-    setServerStatus({ backend: null, ollama: null, comfyui: null });
+    setServerStatus({ backend: null, openai: null });
     try {
       const data = await api.mainHealth();
       setServerStatus({
         backend: true,
-        ollama: data.ollama === 'connected',
-        comfyui: data.comfyui === 'connected',
+        openai: data.openai === 'connected',
       });
     } catch {
-      setServerStatus({ backend: false, ollama: false, comfyui: false });
+      setServerStatus({ backend: false, openai: false });
     } finally {
       setRefreshing(false);
     }
@@ -203,8 +202,7 @@ function TopBar() {
       {/* Status indicators */}
       <div className="flex items-center gap-3 ml-5 pl-5 border-l border-white/[0.06]">
         <StatusDot label="Backend" ok={serverStatus.backend} />
-        <StatusDot label="Mini" ok={serverStatus.ollama} />
-        <StatusDot label="ComfyUI" ok={serverStatus.comfyui} />
+        <StatusDot label="Claude" ok={serverStatus.openai} />
         <button
           onClick={handleRefresh}
           disabled={refreshing}
