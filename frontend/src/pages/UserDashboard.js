@@ -484,8 +484,22 @@ export default function UserDashboard() {
                 </span>
               </div>
 
-              {/* Urgency text */}
-              {referral.referrals_rewarded_count < referral.max_rewards && (
+              {/* One-away nudge — subtle, shown only when exactly 1 slot left */}
+              {referral.referrals_rewarded_count === referral.max_rewards - 1 && (
+                <div className="px-3 py-2 rounded-xl bg-emerald-500/8 border border-emerald-500/20 text-center">
+                  <p className="text-[11px] font-medium text-emerald-300">
+                    {referral.max_rewards <= 3
+                      ? `Only 1 more referral to unlock your full ${referral.max_rewards * referral.sub_bonus} credit bonus 👀`
+                      : referral.max_rewards <= 6
+                      ? `Just 1 more referral to unlock your full ${referral.max_rewards * referral.sub_bonus} credit bonus 🔥`
+                      : "You're one step away from maxing out your referral rewards 🚀"
+                    }
+                  </p>
+                </div>
+              )}
+
+              {/* Generic urgency text for earlier stages */}
+              {referral.referrals_rewarded_count < referral.max_rewards - 1 && (
                 <p className="text-[11px] text-slate-500 text-center">
                   {referral.slots_remaining === referral.max_rewards
                     ? <>Invite <span className="text-emerald-400 font-semibold">3 friends</span> who subscribe to unlock your full <span className="text-emerald-400 font-semibold">150 credit bonus</span> 🚀</>

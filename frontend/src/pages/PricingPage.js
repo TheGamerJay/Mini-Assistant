@@ -67,7 +67,7 @@ const PLANS = [
     annualPrice: 83,
     credits: 10000,
     badge: null,
-    description: '10,000 credits per month with maximum performance, fastest processing, and complete access to all features including advanced AI, exports, and deployment tools.',
+    description: '10,000 credits per month with maximum performance, fastest processing, and complete access to every feature — advanced AI, exports, and deployment tools.',
     cta: 'Upgrade to Max',
     priceMonthly: getPriceId('max', 'monthly'),
     priceAnnual:  getPriceId('max', 'yearly'),
@@ -91,12 +91,6 @@ const FEATURE_ROWS = [
   { label: 'Push to GitHub',         free: false,     standard: true,         pro: true,          max: true },
   { label: 'Deploy to Vercel',       free: false,     standard: false,        pro: true,          max: true },
   { label: 'Full-stack export',      free: false,     standard: false,        pro: true,          max: true },
-
-  { category: 'Team & Admin' },
-  { label: 'Team seats',             free: '1',       standard: '1',          pro: '1',           max: 'Up to 10' },
-  { label: 'Shared credit pool',     free: false,     standard: false,        pro: false,         max: true },
-  { label: 'Usage analytics',        free: false,     standard: false,        pro: false,         max: true },
-  { label: 'Admin dashboard',        free: false,     standard: false,        pro: false,         max: true },
 
   { category: 'Credit Top-Ups' },
   { label: 'Buy extra credits',      free: false,     standard: true,         pro: true,          max: true },
@@ -244,8 +238,7 @@ export default function PricingPage() {
             Build more. Pay less.
           </h1>
           <p className="text-slate-400 text-base max-w-xl mx-auto leading-relaxed">
-            Start free, upgrade when you're ready. No hidden fees, no surprises.
-            Cancel anytime.
+            Built for individual creators and builders. Start free, upgrade when you're ready. No hidden fees, cancel anytime.
           </p>
         </div>
 
