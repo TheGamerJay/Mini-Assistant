@@ -503,6 +503,9 @@ async def _handle_checkout_completed(db, session: dict) -> None:
             )
             return
 
+        # Track revenue for attribution and high-value detection
+        topup_revenue = round((session.get("amount_total") or 0) / 100, 2)
+
         # Atomic add with cap to prevent accumulating unlimited credits
         result = await db["users"].update_one(
             {
@@ -526,6 +529,14 @@ async def _handle_checkout_completed(db, session: dict) -> None:
             )
         else:
             log.info("Top-up: +%d topup_credits for user %s", credits_to_add, user_id)
+            # Record topup timestamp + accumulate total spend for high-value detection
+            await db["users"].update_one(
+                {"id": user_id},
+                {
+                    "$set": {"last_topup_at": time.time()},
+                    "$inc": {"total_spend": topup_revenue},
+                },
+            )
 
         await db["activity_logs"].insert_one({
             "user_id":    user_id,
@@ -558,7 +569,7 @@ async def _handle_checkout_completed(db, session: dict) -> None:
                     user_id=user_id,
                     db=db,
                 )
-                await mark_conversion(db, user_id, "topup", window_hours=24)
+                await mark_conversion(db, user_id, "topup", window_hours=24, revenue=topup_revenue)
         except Exception as _email_exc:
             log.warning("Top-up email failed (non-fatal): %s", _email_exc)
 
@@ -605,20 +616,25 @@ async def _handle_invoice_paid(db, invoice: dict) -> None:
         except Exception as exc:
             log.warning("Could not retrieve subscription %s: %s", sub_id, exc)
 
-    plan_credits = PLAN_CREDITS.get(plan, 50)
-    now = datetime.now(timezone.utc)
+    plan_credits    = PLAN_CREDITS.get(plan, 50)
+    now             = datetime.now(timezone.utc)
+    invoice_revenue = round((invoice.get("amount_paid") or 0) / 100, 2)
 
     await db["users"].update_one(
         {"id": user_id},
-        {"$set": {
-            "plan":                  plan,
-            "subscription_credits":  plan_credits,
-            "billing_cycle_start":   now.isoformat(),
-            "stripe_subscription_id": sub_id,
-            # Successful payment — reset failure counter
-            "payment_failure_count":  0,
-            "last_payment_succeeded_at": time.time(),
-        }},
+        {
+            "$set": {
+                "plan":                  plan,
+                "subscription_credits":  plan_credits,
+                "billing_cycle_start":   now.isoformat(),
+                "stripe_subscription_id": sub_id,
+                # Successful payment — reset failure counter
+                "payment_failure_count":  0,
+                "last_payment_succeeded_at": time.time(),
+            },
+            # Accumulate total spend for high-value user detection
+            "$inc": {"total_spend": invoice_revenue},
+        },
     )
     log.info(
         "invoice.paid: user %s → plan=%s, subscription_credits reset to %d",
@@ -639,7 +655,7 @@ async def _handle_invoice_paid(db, invoice: dict) -> None:
                 user_id=user_id,
                 db=db,
             )
-            await mark_conversion(db, user_id, "upgrade", window_hours=48)
+            await mark_conversion(db, user_id, "upgrade", window_hours=48, revenue=invoice_revenue)
     except Exception as _email_exc:
         log.warning("Welcome email failed (non-fatal): %s", _email_exc)
 

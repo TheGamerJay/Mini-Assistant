@@ -341,6 +341,15 @@ async def _on_startup():
         except Exception as _idx3_err:
             logging.warning("email_logs index warning (non-fatal): %s", _idx3_err)
 
+    # Index for email_ab_weights (A/B winner selection config)
+    if db is not None:
+        try:
+            await db["email_ab_weights"].create_index(
+                [("email_type", 1)], unique=True, background=True, name="ab_weights_email_type"
+            )
+        except Exception as _idx4_err:
+            logging.warning("email_ab_weights index warning (non-fatal): %s", _idx4_err)
+
     # Start safety background maintenance tasks + run startup security checks
     try:
         import safety as _safety   # noqa: PLC0415

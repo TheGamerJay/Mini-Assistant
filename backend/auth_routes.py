@@ -6,6 +6,7 @@ Mounted in server.py via:
     app.include_router(db_router)
 """
 
+import asyncio
 import os
 import uuid
 import time
@@ -1561,9 +1562,24 @@ async def email_logs_list(
 
 @admin_router.get("/email-growth-analytics")
 async def email_growth_analytics(admin: dict = Depends(_require_admin)):
-    """A/B test results and sequence funnel analytics."""
+    """A/B test results, sequence funnel, revenue attribution, and weight snapshot."""
     db = _get_db()
-    from email_growth import get_ab_analytics, get_sequence_analytics  # noqa: PLC0415
-    ab  = await get_ab_analytics(db)
-    seq = await get_sequence_analytics(db)
-    return {"ab_testing": ab, "sequences": seq}
+    from email_growth import (          # noqa: PLC0415
+        get_ab_analytics,
+        get_sequence_analytics,
+        get_revenue_analytics,
+        get_ab_weights_snapshot,
+    )
+    ab, seq, rev, weights = await asyncio.gather(
+        get_ab_analytics(db),
+        get_sequence_analytics(db),
+        get_revenue_analytics(db),
+        get_ab_weights_snapshot(db),
+        return_exceptions=True,
+    )
+    return {
+        "ab_testing":        ab      if not isinstance(ab,      Exception) else {},
+        "sequences":         seq     if not isinstance(seq,     Exception) else {},
+        "revenue":           rev     if not isinstance(rev,     Exception) else {},
+        "ab_weights":        weights if not isinstance(weights, Exception) else {},
+    }

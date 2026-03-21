@@ -42,6 +42,8 @@ from email_personalization import (
 )
 from email_growth import (
     assign_variant,
+    get_ab_weight,
+    evaluate_ab_winners,
     get_sequence_step,
     ONBOARDING_SEQUENCE,
 )
@@ -61,6 +63,11 @@ WINDOW_14D           = 14 * 86400
 MAX_AUTO_PER_DAY     = 3
 EMAIL_MAX_PER_RUN    = int(os.environ.get("EMAIL_MAX_PER_RUN", "500"))
 CONVERSION_COOLDOWN  = WINDOW_24H   # skip automation if user converted within this window
+
+# High-value user protection
+HIGH_VALUE_ENABLED   = os.environ.get("HIGH_VALUE_PROTECTION", "true").lower() == "true"
+HIGH_VALUE_THRESHOLD = float(os.environ.get("HIGH_VALUE_THRESHOLD", "100"))  # total USD spent
+HIGH_VALUE_FREQUENCY = int(os.environ.get("HIGH_VALUE_FREQUENCY_HOURS", "48")) * 3600
 
 _PLAN_LIMITS: dict = {
     "free":     50,
@@ -178,44 +185,65 @@ def _reminder_content(name: str) -> tuple:
 
 async def _recently_converted(db, user_id: str) -> bool:
     """
-    Return True if the user made a successful payment in the last 24h.
-    Guards against sending "Still thinking about upgrading?" to someone who
-    just paid but whose Stripe webhook hasn't updated the plan field yet.
+    Return True if the user made ANY payment (subscription or top-up) in the last 24h.
+    Covers two scenarios:
+      1. Stripe webhook delay — plan field not updated yet after upgrade
+      2. Top-up purchase — user just bought credits, no need to nudge immediately
     """
     try:
         user = await db["users"].find_one(
             {"id": user_id},
-            {"last_payment_succeeded_at": 1},
+            {"last_payment_succeeded_at": 1, "last_topup_at": 1},
         )
         if not user:
             return False
-        last_paid = user.get("last_payment_succeeded_at") or 0
-        return (time.time() - last_paid) < CONVERSION_COOLDOWN
+        now        = time.time()
+        last_paid  = user.get("last_payment_succeeded_at") or 0
+        last_topup = user.get("last_topup_at") or 0
+        return (now - max(last_paid, last_topup)) < CONVERSION_COOLDOWN
     except Exception as exc:
         log.warning("_recently_converted check failed (non-fatal): %s", exc)
         return False  # fail open — better to send than to crash
+
+
+async def _is_high_value_user(db, user_id: str) -> bool:
+    """
+    Return True if user's total_spend >= HIGH_VALUE_THRESHOLD.
+    High-value users get reduced automation frequency and skip aggressive triggers.
+    """
+    if not HIGH_VALUE_ENABLED:
+        return False
+    try:
+        user = await db["users"].find_one({"id": user_id}, {"total_spend": 1})
+        return (user or {}).get("total_spend", 0) >= HIGH_VALUE_THRESHOLD
+    except Exception as exc:
+        log.debug("_is_high_value_user check failed (non-fatal): %s", exc)
+        return False
 
 
 # ---------------------------------------------------------------------------
 # Spam guard
 # ---------------------------------------------------------------------------
 
-async def _can_send(db, user_id: str, email_type: str) -> bool:
-    """Return True if this user can receive this automated email type right now."""
+async def _can_send(db, user_id: str, email_type: str, window: int = WINDOW_24H) -> bool:
+    """
+    Return True if this user can receive this automated email type right now.
+    `window` controls the dedup window — use HIGH_VALUE_FREQUENCY for protected users.
+    """
     # Fast pre-check: if last_automation_sent_at is within the last hour, skip
     # all DB log queries — protects against burst sends on large user bases.
     try:
         u = await db["users"].find_one({"id": user_id}, {"last_automation_sent_at": 1})
         if u:
             last_auto = u.get("last_automation_sent_at") or 0
-            if (time.time() - last_auto) < 3600:   # sent something within the last hour
+            if (time.time() - last_auto) < min(3600, window):
                 return False
     except Exception:
         pass  # fall through to full log check
 
-    cutoff = time.time() - WINDOW_24H
+    cutoff = time.time() - window
 
-    # Rule 1: same type not already sent in 24h
+    # Rule 1: same type not already sent within the window
     same_type_count = await db["email_logs"].count_documents({
         "user_id":    user_id,
         "email_type": email_type,
@@ -226,13 +254,13 @@ async def _can_send(db, user_id: str, email_type: str) -> bool:
     if same_type_count > 0:
         return False
 
-    # Rule 2: total automated emails today < MAX_AUTO_PER_DAY
-    total_today = await db["email_logs"].count_documents({
+    # Rule 2: total automated emails within window < MAX_AUTO_PER_DAY
+    total_in_window = await db["email_logs"].count_documents({
         "user_id":   user_id,
         "automated": True,
         "timestamp": {"$gte": cutoff},
     })
-    return total_today < MAX_AUTO_PER_DAY
+    return total_in_window < MAX_AUTO_PER_DAY
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +288,9 @@ async def _send_automated(
 
     from email_logger import send_with_log   # noqa: PLC0415
 
-    variant = assign_variant(user_id, email_type)
+    # Fetch current traffic weight then assign variant deterministically
+    weight_a = await get_ab_weight(db, email_type)
+    variant  = assign_variant(user_id, email_type, weight_a)
 
     # Fetch user for personalisation fields
     try:
@@ -379,6 +409,10 @@ async def _check_followup_upgrades(db, budget: dict) -> int:
         if not user or user.get("plan", "free") != "free":
             continue
 
+        # High-value users skip aggressive upgrade nudges entirely
+        if await _is_high_value_user(db, user_id):
+            continue
+
         # Skip if user converted (paid) within the last 24h — guards webhook delay
         if await _recently_converted(db, user_id):
             continue
@@ -450,7 +484,10 @@ async def _check_low_credits(db, budget: dict) -> int:
         if recent_topup > 0:
             continue
 
-        if not await _can_send(db, user_id, "low_credits"):
+        # High-value users: less frequent nudges (48h instead of 24h)
+        hv     = await _is_high_value_user(db, user_id)
+        window = HIGH_VALUE_FREQUENCY if hv else WINDOW_24H
+        if not await _can_send(db, user_id, "low_credits", window=window):
             continue
 
         subject_base, content = _low_credits_content(user.get("name", ""), total_cr, plan)
@@ -493,7 +530,10 @@ async def _check_payment_failed(db, budget: dict) -> int:
         if await _recently_converted(db, user_id):
             continue
 
-        if not await _can_send(db, user_id, "payment_failed"):
+        # High-value users: still send payment_failed (critical), but use 48h window
+        hv     = await _is_high_value_user(db, user_id)
+        window = HIGH_VALUE_FREQUENCY if hv else WINDOW_24H
+        if not await _can_send(db, user_id, "payment_failed", window=window):
             continue
 
         subject_base, content = _payment_failed_content(user.get("name", ""))
@@ -547,6 +587,10 @@ async def _check_reminders(db, budget: dict) -> int:
             {"plan": 1, "name": 1, "email": 1},
         )
         if not user or user.get("plan", "free") != "free":
+            continue
+
+        # High-value users skip aggressive reminder nudges entirely
+        if await _is_high_value_user(db, user_id):
             continue
 
         # Skip if they just converted (webhook delay guard)
@@ -606,6 +650,12 @@ async def _run_once(db) -> None:
     sent_total = EMAIL_MAX_PER_RUN - budget["remaining"]
     if sent_total:
         log.info("email_automation: run complete — %d total email(s) sent", sent_total)
+
+    # Evaluate A/B winners and shift traffic weights (non-fatal, runs every loop)
+    try:
+        await evaluate_ab_winners(db)
+    except Exception as exc:
+        log.warning("email_automation: evaluate_ab_winners failed (non-fatal): %s", exc)
 
 
 async def start_email_automation(db) -> None:

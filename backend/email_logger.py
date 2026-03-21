@@ -110,19 +110,32 @@ async def send_with_log(
 async def mark_conversion(
     db,
     user_id: str,
-    conversion_type: str,   # "upgrade" | "topup"
+    conversion_type: str,          # "upgrade" | "topup"
     window_hours: int = 48,
+    revenue: float | None = None,  # USD value of the conversion
 ) -> None:
     """
-    Find the most recent welcome/upgrade email sent to this user within
-    `window_hours` and mark it as converted.
+    Find the most recent matching email sent to this user within `window_hours`
+    and mark it as converted. Attaches revenue_generated when provided.
     Non-fatal — any error is logged and swallowed.
     """
     try:
         cutoff = time.time() - (window_hours * 3600)
-        # For upgrade conversions look at "welcome" emails;
-        # for topup conversions look at "topup" emails within 24h
-        email_type_filter = "welcome" if conversion_type == "upgrade" else "topup"
+        # Upgrade → look for automated followup/reminder; also welcome as fallback
+        # Topup   → look for low_credits or topup automated email
+        email_type_filter = (
+            {"$in": ["followup_upgrade", "reminder", "welcome"]}
+            if conversion_type == "upgrade"
+            else {"$in": ["low_credits", "topup"]}
+        )
+
+        update_fields: dict = {
+            "converted":       True,
+            "conversion_type": conversion_type,
+            "converted_at":    time.time(),
+        }
+        if revenue is not None:
+            update_fields["revenue_generated"] = round(revenue, 2)
 
         await db["email_logs"].update_one(
             {
@@ -132,15 +145,7 @@ async def mark_conversion(
                 "timestamp":  {"$gte": cutoff},
                 "converted":  {"$ne": True},
             },
-            {
-                "$set": {
-                    "converted":       True,
-                    "conversion_type": conversion_type,
-                    "converted_at":    time.time(),
-                }
-            },
-            # Sort by most recent; Motor update_one doesn't support sort directly,
-            # so we rely on the natural index sort (newest first via timestamp index).
+            {"$set": update_fields},
         )
     except Exception as exc:
         log.warning("mark_conversion failed (non-fatal): %s", exc)

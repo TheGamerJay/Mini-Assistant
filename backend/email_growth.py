@@ -12,8 +12,20 @@ Exports:
 
 import hashlib
 import logging
+import os
+import time
 
 log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# A/B winner selection config
+# ---------------------------------------------------------------------------
+
+AB_MIN_SAMPLE        = int(os.environ.get("AB_MIN_SAMPLE", "50"))
+AB_SIGNIFICANCE_PCT  = float(os.environ.get("AB_SIGNIFICANCE_PCT", "10.0"))
+
+# Weight shift schedule for winner: 50 → 70 → 90 (capped — never 100% to keep learning)
+_WEIGHT_SHIFTS: dict = {50: 70, 70: 90, 90: 90, 30: 10, 10: 10}
 
 # ---------------------------------------------------------------------------
 # Onboarding sequence definition
@@ -30,14 +42,117 @@ ONBOARDING_SEQUENCE: dict = {
 # A/B variant assignment — deterministic, no DB required
 # ---------------------------------------------------------------------------
 
-def assign_variant(user_id: str, email_type: str) -> str:
+async def get_ab_weight(db, email_type: str) -> int:
     """
-    Deterministic A/B variant assignment.
-    Uses MD5 hash of '{user_id}:{email_type}' — same inputs always give same result.
+    Fetch the current traffic weight for variant A from email_ab_weights.
+    Returns an int 0-100. Default 50 (equal split) if not set or on any error.
+    """
+    try:
+        doc = await db["email_ab_weights"].find_one({"email_type": email_type})
+        if doc and "weight_a" in doc:
+            return max(0, min(100, int(doc["weight_a"])))
+    except Exception as exc:
+        log.debug("get_ab_weight: fallback to 50 for %s (%s)", email_type, exc)
+    return 50
+
+
+def assign_variant(user_id: str, email_type: str, weight_a: int = 50) -> str:
+    """
+    Weighted, deterministic A/B variant assignment.
+    Maps MD5 hash position (0-99) against weight_a threshold.
+    Same user_id + email_type always lands in the same position, so
+    shifting weight_a progressively moves borderline users to the winner.
     Returns "A" or "B".
     """
-    digest = hashlib.md5(f"{user_id}:{email_type}".encode()).hexdigest()
-    return "A" if int(digest, 16) % 2 == 0 else "B"
+    digest   = hashlib.md5(f"{user_id}:{email_type}".encode()).hexdigest()
+    position = int(digest, 16) % 100   # uniform 0–99
+    return "A" if position < weight_a else "B"
+
+
+async def evaluate_ab_winners(db) -> None:
+    """
+    Compare A vs B conversion rates per email_type.
+    If one variant outperforms by AB_SIGNIFICANCE_PCT with >= AB_MIN_SAMPLE each,
+    shift traffic 50→70→90 toward the winner in email_ab_weights.
+    Non-fatal — runs as part of the automation loop.
+    """
+    try:
+        pipeline = [
+            {"$match": {"variant": {"$in": ["A", "B"]}, "status": "sent"}},
+            {"$group": {
+                "_id":       {"email_type": "$email_type", "variant": "$variant"},
+                "count":     {"$sum": 1},
+                "converted": {"$sum": {"$cond": [{"$eq": ["$converted", True]}, 1, 0]}},
+            }},
+        ]
+        rows = await db["email_logs"].aggregate(pipeline).to_list(None)
+
+        # Build {email_type: {variant: {count, rate}}}
+        stats: dict = {}
+        for row in rows:
+            et  = row["_id"]["email_type"]
+            v   = row["_id"]["variant"]
+            cnt = row["count"]
+            conv = row["converted"]
+            stats.setdefault(et, {})[v] = {
+                "count": cnt,
+                "rate":  conv / cnt if cnt else 0.0,
+            }
+
+        for email_type, variants in stats.items():
+            a = variants.get("A")
+            b = variants.get("B")
+            if not a or not b:
+                continue
+
+            # Require minimum sample size in both arms
+            if a["count"] < AB_MIN_SAMPLE or b["count"] < AB_MIN_SAMPLE:
+                continue
+
+            diff = abs(a["rate"] - b["rate"])
+            if diff < (AB_SIGNIFICANCE_PCT / 100):
+                continue   # not significant enough
+
+            winner = "A" if a["rate"] >= b["rate"] else "B"
+
+            # Get current weight
+            current_doc = await db["email_ab_weights"].find_one({"email_type": email_type})
+            cur_w_a = int(current_doc["weight_a"]) if current_doc else 50
+
+            if winner == "A":
+                new_w_a = _WEIGHT_SHIFTS.get(cur_w_a, cur_w_a)
+            else:
+                # Shift toward B = decrease weight_a
+                mirrored = _WEIGHT_SHIFTS.get(100 - cur_w_a, 100 - cur_w_a)
+                new_w_a  = 100 - mirrored
+
+            if new_w_a == cur_w_a:
+                continue   # already at maximum shift
+
+            log.info(
+                "email_growth: %s winner=%s (rate_A=%.1f%% rate_B=%.1f%% diff=%.1f%%) "
+                "shifting weight_a %d→%d",
+                email_type, winner,
+                a["rate"] * 100, b["rate"] * 100, diff * 100,
+                cur_w_a, new_w_a,
+            )
+            await db["email_ab_weights"].update_one(
+                {"email_type": email_type},
+                {"$set": {
+                    "weight_a":    new_w_a,
+                    "winner":      winner,
+                    "diff_pct":    round(diff * 100, 2),
+                    "rate_a":      round(a["rate"] * 100, 2),
+                    "rate_b":      round(b["rate"] * 100, 2),
+                    "sample_a":    a["count"],
+                    "sample_b":    b["count"],
+                    "evaluated_at": time.time(),
+                }},
+                upsert=True,
+            )
+
+    except Exception as exc:
+        log.error("evaluate_ab_winners failed (non-fatal): %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -209,3 +324,85 @@ async def get_sequence_analytics(db) -> dict:
     except Exception as exc:
         log.warning("get_sequence_analytics: DB error (non-fatal): %s", exc)
         return {"sequence": "onboarding", "steps": []}
+
+
+# ---------------------------------------------------------------------------
+# Revenue analytics
+# ---------------------------------------------------------------------------
+
+async def get_revenue_analytics(db) -> dict:
+    """
+    Aggregate revenue_generated from converted email_logs.
+    Returns revenue_by_email_type, revenue_by_variant, top/worst performers.
+    """
+    _empty = {
+        "revenue_by_email_type": {},
+        "revenue_by_variant":    {},
+        "top_performing":        None,
+        "worst_performing":      None,
+        "ranked":                [],
+        "total_revenue":         0.0,
+    }
+    try:
+        pipeline = [
+            {"$match": {"revenue_generated": {"$gt": 0}, "converted": True}},
+            {"$group": {
+                "_id": {"email_type": "$email_type", "variant": "$variant"},
+                "total_revenue": {"$sum": "$revenue_generated"},
+                "count":         {"$sum": 1},
+                "avg_revenue":   {"$avg": "$revenue_generated"},
+            }},
+            {"$sort": {"total_revenue": -1}},
+        ]
+        rows = await db["email_logs"].aggregate(pipeline).to_list(None)
+        if not rows:
+            return _empty
+
+        by_type:    dict = {}
+        by_variant: dict = {}
+        ranked:     list = []
+
+        for row in rows:
+            et      = row["_id"].get("email_type") or "unknown"
+            variant = row["_id"].get("variant")
+            rev     = round(row["total_revenue"], 2)
+            count   = row["count"]
+            avg     = round(row["avg_revenue"], 2)
+
+            by_type[et] = round(by_type.get(et, 0) + rev, 2)
+
+            if variant:
+                key = f"{et}_{variant}"
+                by_variant[key] = {"revenue": rev, "count": count, "avg_revenue": avg}
+
+            ranked.append({
+                "email_type": et,
+                "variant":    variant,
+                "revenue":    rev,
+                "count":      count,
+                "avg_revenue": avg,
+            })
+
+        total = round(sum(by_type.values()), 2)
+        return {
+            "revenue_by_email_type": by_type,
+            "revenue_by_variant":    by_variant,
+            "top_performing":        ranked[0]  if ranked else None,
+            "worst_performing":      ranked[-1] if ranked else None,
+            "ranked":                ranked,
+            "total_revenue":         total,
+        }
+
+    except Exception as exc:
+        log.error("get_revenue_analytics failed (non-fatal): %s", exc)
+        return _empty
+
+
+async def get_ab_weights_snapshot(db) -> dict:
+    """Return current A/B weight config for all email types (admin view)."""
+    try:
+        docs = await db["email_ab_weights"].find({}, {"_id": 0}).to_list(None)
+        return {d["email_type"]: d for d in docs if "email_type" in d}
+    except Exception as exc:
+        log.warning("get_ab_weights_snapshot failed (non-fatal): %s", exc)
+        return {}
