@@ -272,16 +272,16 @@ export default function PricingPage() {
           {PLANS.map(plan => {
             const c = COLOR[plan.color];
             const Icon = plan.icon;
-            const price = annual ? plan.annualPrice : plan.monthlyPrice;
             const isCurrentPlan = currentPlan === plan.id;
+            const displayPrice  = annual ? plan.annualPrice * 12 : plan.monthlyPrice;
 
             return (
               <div
                 key={plan.id}
-                className={`relative flex flex-col rounded-2xl border bg-[#111118] p-5 transition-all ${c.border} ${c.ring}`}
+                className={`flex flex-col rounded-2xl border bg-[#111118] p-5 transition-all ${c.border} ${c.ring}`}
               >
                 {plan.badge && (
-                  <div className={`absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${c.badge}`}>
+                  <div className={`self-center mb-3 px-3 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${c.badge}`}>
                     {plan.badge}
                   </div>
                 )}
@@ -301,19 +301,19 @@ export default function PricingPage() {
                 <p className="text-[11px] text-slate-500 mb-3 leading-relaxed">{plan.description}</p>
 
                 <div className="mb-4">
-                  {price === 0 ? (
+                  {plan.monthlyPrice === 0 ? (
                     <div className="text-3xl font-black text-white">Free</div>
                   ) : (
                     <>
                       <div className="flex items-end gap-1">
-                        <span className="text-3xl font-black text-white">${price}</span>
-                        <span className="text-xs text-slate-500 mb-1">/mo</span>
+                        <span className="text-3xl font-black text-white">${displayPrice}</span>
+                        <span className="text-xs text-slate-500 mb-1">{annual ? '/yr' : '/mo'}</span>
                       </div>
-                      {annual && (
+                      {annual ? (
                         <p className="text-[10px] text-emerald-400">
-                          Save ${(plan.monthlyPrice - plan.annualPrice) * 12}/yr
+                          ${plan.annualPrice}/mo · Save ${(plan.monthlyPrice - plan.annualPrice) * 12}/yr
                         </p>
-                      )}
+                      ) : null}
                     </>
                   )}
                   <p className={`text-[11px] font-semibold mt-1 ${c.text}`}>

@@ -495,7 +495,19 @@ async def stripe_webhook(request: Request):
 # ---------------------------------------------------------------------------
 # Referral reward constants (must match auth_routes.py)
 REFERRAL_SUB_BONUS   = 50   # credits awarded to both parties on first subscription
-REFERRAL_MAX_REWARDS = 3    # max successful referrals a referrer can earn from
+REFERRAL_MAX_REWARDS = 3    # default max (free/standard plans)
+
+# Plan-based referral caps — higher plans unlock more referral slots
+REFERRAL_MAX_REWARDS_BY_PLAN: dict[str, int] = {
+    "free":     3,
+    "standard": 3,
+    "pro":      6,
+    "max":      10,
+    "team":     10,
+}
+
+def _referral_max_for_plan(plan: str) -> int:
+    return REFERRAL_MAX_REWARDS_BY_PLAN.get(plan, REFERRAL_MAX_REWARDS)
 
 
 async def _process_referral_reward(db, subscribed_user: dict) -> None:
@@ -527,10 +539,12 @@ async def _process_referral_reward(db, subscribed_user: dict) -> None:
         log.warning("referral.reward: self-referral blocked user=%s", referred_user_id)
         return
 
-    # Check cap
+    # Check plan-based cap
+    referrer_plan  = referrer.get("plan", "free")
+    max_rewards    = _referral_max_for_plan(referrer_plan)
     rewarded_count = referrer.get("referrals_rewarded_count", 0)
-    if rewarded_count >= REFERRAL_MAX_REWARDS:
-        log.info("referral.reward: referrer=%s hit cap (%d), no reward", referrer_id, REFERRAL_MAX_REWARDS)
+    if rewarded_count >= max_rewards:
+        log.info("referral.reward: referrer=%s plan=%s hit cap (%d), no reward", referrer_id, referrer_plan, max_rewards)
         return
 
     # Mark referred user so they can't trigger another reward
@@ -559,8 +573,8 @@ async def _process_referral_reward(db, subscribed_user: dict) -> None:
     )
 
     log.info(
-        "referral.reward: referrer=%s referred=%s +%d credits each (referrer total=%d/%d)",
-        referrer_id, referred_user_id, REFERRAL_SUB_BONUS, rewarded_count + 1, REFERRAL_MAX_REWARDS,
+        "referral.reward: referrer=%s plan=%s referred=%s +%d credits each (referrer total=%d/%d)",
+        referrer_id, referrer_plan, referred_user_id, REFERRAL_SUB_BONUS, rewarded_count + 1, max_rewards,
     )
 
     # Log activity for both users
@@ -584,8 +598,8 @@ async def _process_referral_reward(db, subscribed_user: dict) -> None:
         },
     ])
 
-    # If referrer just hit the cap, send completion celebration email (once only)
-    if rewarded_count + 1 >= REFERRAL_MAX_REWARDS:
+    # If referrer just hit their plan cap, send completion celebration email (once only)
+    if rewarded_count + 1 >= max_rewards:
         try:
             from email_sender import send_referral_complete_email  # noqa: PLC0415
             referrer_doc = await db["users"].find_one(

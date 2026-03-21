@@ -127,7 +127,16 @@ def _public_user(user: dict) -> dict:
 # Referral constants
 REFERRAL_SIGNUP_BONUS   = 5    # credits given to new user on signup with referral
 REFERRAL_SUB_BONUS      = 50   # credits given to both parties on subscription
-REFERRAL_MAX_REWARDS    = 3    # max referrals a referrer can earn from
+REFERRAL_MAX_REWARDS    = 3    # default max (free/standard plans)
+
+# Plan-based referral caps — must match stripe_handler.py
+REFERRAL_MAX_REWARDS_BY_PLAN: dict[str, int] = {
+    "free":     3,
+    "standard": 3,
+    "pro":      6,
+    "max":      10,
+    "team":     10,
+}
 
 def _gen_referral_code() -> str:
     """Generate a unique 8-char alphanumeric referral code."""
@@ -470,7 +479,9 @@ async def get_referral_info(authorization: str = Header(None)):
         user["referral_code"] = code
 
     code = user["referral_code"]
-    completed = user.get("referrals_rewarded_count", 0)
+    completed  = user.get("referrals_rewarded_count", 0)
+    user_plan  = user.get("plan", "free")
+    max_rewards = REFERRAL_MAX_REWARDS_BY_PLAN.get(user_plan, REFERRAL_MAX_REWARDS)
 
     # Count signups using this code that haven't subscribed yet (pending)
     pending = await db["users"].count_documents({
@@ -482,10 +493,12 @@ async def get_referral_info(authorization: str = Header(None)):
         "referral_code": code,
         "referrals_rewarded_count": completed,
         "referrals_pending_count": pending,
-        "max_rewards": REFERRAL_MAX_REWARDS,
-        "slots_remaining": max(0, REFERRAL_MAX_REWARDS - completed),
+        "max_rewards": max_rewards,
+        "slots_remaining": max(0, max_rewards - completed),
         "signup_bonus": REFERRAL_SIGNUP_BONUS,
         "sub_bonus": REFERRAL_SUB_BONUS,
+        "plan": user_plan,
+        "can_unlock_more": user_plan not in ("max", "team") and completed >= max_rewards,
     }
 
 

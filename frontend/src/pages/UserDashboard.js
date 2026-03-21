@@ -508,7 +508,17 @@ export default function UserDashboard() {
               </button>
 
               {referral.referrals_rewarded_count >= referral.max_rewards && (
-                <p className="text-xs text-amber-400/80 text-center">🎉 You've maxed out your referral rewards — nice work!</p>
+                <div className="text-center space-y-2">
+                  <p className="text-xs text-amber-400/80">🎉 You've maxed out your referral rewards — nice work!</p>
+                  {referral.can_unlock_more && (
+                    <button
+                      onClick={() => setPage('pricing')}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-violet-300 bg-violet-500/10 border border-violet-500/20 hover:bg-violet-500/20 transition-all"
+                    >
+                      <TrendingUp size={11} /> Upgrade to unlock more referral slots
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           ) : (
