@@ -35,7 +35,7 @@ export default function TermsPage() {
       <p>We may update these Terms at any time. Continued use of the Service after changes constitutes acceptance. We will notify users of material changes via email or in-app notification.</p>
 
       <h2>11. Contact</h2>
-      <p>For questions about these Terms, contact us at support@miniassistantai.com.</p>
+      <p>For questions about these Terms, contact us at miniassistantai@gmail.com.</p>
     </LegalLayout>
   );
 }

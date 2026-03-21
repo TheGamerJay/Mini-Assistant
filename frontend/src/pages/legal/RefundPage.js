@@ -22,7 +22,7 @@ export default function RefundPage() {
       </ul>
 
       <h2>How to Request a Refund</h2>
-      <p>Email <strong>support@miniassistantai.com</strong> with your account email, the charge amount, date, and reason. We will respond within 3 business days.</p>
+      <p>Email <strong>miniassistantai@gmail.com</strong> with your account email, the charge amount, date, and reason. We will respond within 3 business days.</p>
 
       <h2>Chargebacks</h2>
       <p>If you initiate a chargeback without contacting us first, your account may be suspended pending investigation. We encourage you to contact support first — we are happy to work with you.</p>

@@ -6,7 +6,7 @@ export default function ContactPage() {
   const [copied, setCopied] = useState(false);
 
   const copyEmail = () => {
-    navigator.clipboard.writeText('support@miniassistantai.com');
+    navigator.clipboard.writeText('miniassistantai@gmail.com');
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -21,28 +21,28 @@ export default function ContactPage() {
             icon: MessageSquare,
             title: 'General Support',
             desc: 'Account issues, billing questions, feature requests',
-            email: 'support@miniassistantai.com',
+            email: 'miniassistantai@gmail.com',
             color: 'cyan',
           },
           {
             icon: Shield,
             title: 'Trust & Safety',
             desc: 'Report abuse, harmful content, or policy violations',
-            email: 'support@miniassistantai.com',
+            email: 'miniassistantai@gmail.com',
             color: 'red',
           },
           {
             icon: FileText,
             title: 'Legal & DMCA',
             desc: 'Copyright claims, legal notices, privacy requests',
-            email: 'support@miniassistantai.com',
+            email: 'miniassistantai@gmail.com',
             color: 'violet',
           },
           {
             icon: Mail,
             title: 'Business Enquiries',
             desc: 'Partnerships, enterprise plans, press',
-            email: 'support@miniassistantai.com',
+            email: 'miniassistantai@gmail.com',
             color: 'emerald',
           },
         ].map(({ icon: Icon, title, desc, email, color }) => (

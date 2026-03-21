@@ -40,10 +40,10 @@ export default function PrivacyPage() {
       <p>The Service is not directed to children under 13. We do not knowingly collect data from children under 13. If you believe we have, contact us immediately.</p>
 
       <h2>9. Your Rights</h2>
-      <p>Depending on your location, you may have rights to access, correct, or delete your personal data. Contact support@miniassistantai.com to exercise these rights.</p>
+      <p>Depending on your location, you may have rights to access, correct, or delete your personal data. Contact miniassistantai@gmail.com to exercise these rights.</p>
 
       <h2>10. Contact</h2>
-      <p>Privacy questions: support@miniassistantai.com</p>
+      <p>Privacy questions: miniassistantai@gmail.com</p>
     </LegalLayout>
   );
 }

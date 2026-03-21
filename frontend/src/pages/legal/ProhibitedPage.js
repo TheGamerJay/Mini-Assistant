@@ -50,7 +50,7 @@ export default function ProhibitedPage() {
       </ul>
 
       <h2>Reporting Violations</h2>
-      <p>If you encounter prohibited content or suspect a violation, report it to <strong>support@miniassistantai.com</strong>. We take all reports seriously.</p>
+      <p>If you encounter prohibited content or suspect a violation, report it to <strong>miniassistantai@gmail.com</strong>. We take all reports seriously.</p>
     </LegalLayout>
   );
 }
