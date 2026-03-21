@@ -2114,8 +2114,10 @@ async def chat_stream(req: ChatRequest):
             _is_build_intent = True
             execution_intent = "app_builder"
 
-        reply_text = ""
-        ollama_client = _get_ollama()
+        _api_key_claude = os.environ.get("ANTHROPIC_API_KEY", "")
+        _use_claude     = bool(_api_key_claude)
+        reply_text      = ""
+        ollama_client   = _get_ollama()
 
         if _is_build_intent and all_images and not _has_prior_code:
             from .pipeline import image_to_code_pipeline
@@ -2138,11 +2140,75 @@ async def chat_stream(req: ChatRequest):
                     except Exception:
                         pass
 
+        elif _use_claude and (_is_build_intent or all_images or _is_code_intent):
+            # ── Claude-powered stream ─────────────────────────────────────────
+            # Routes: text builds, image analysis, code debugging → Claude API.
+            # Local models stay for simple chat (cost control).
+
+            # Convert history to Claude message format (filter system msgs)
+            _c_msgs = []
+            for _hm in history_msgs:
+                _hr, _hc = _hm.get("role"), _hm.get("content", "")
+                if _hr in ("user", "assistant") and _hc:
+                    _c_msgs.append({"role": _hr, "content": _hc})
+
+            # Inject images into last user message as multipart content
+            if all_images and _c_msgs and _c_msgs[-1]["role"] == "user":
+                _img_parts = []
+                for _b64 in all_images[:4]:
+                    _mt = "image/png" if _b64.startswith("iVBOR") else "image/jpeg"
+                    _img_parts.append({
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": _mt, "data": _b64},
+                    })
+                _img_parts.append({"type": "text", "text": _c_msgs[-1]["content"]})
+                _c_msgs[-1]["content"] = _img_parts
+
+            # Pick system prompt based on what Claude is doing
+            if _is_build_intent:
+                _c_sys = (
+                    _APP_BUILDER_CODING_STANDARDS +
+                    "\n\n## BUILD IMMEDIATELY\n"
+                    "Build the complete working app right now from the user's description. "
+                    "No questions. Output the full HTML/CSS/JS as a single ```html code block. "
+                    "After the closing ``` write: "
+                    "'Here\\'s what I built! What would you like to change?\\n1. ...\\n2. ...\\n3. ...'"
+                )
+            elif all_images:
+                _c_sys = (
+                    "You are a helpful AI assistant with strong vision capabilities. "
+                    "Analyze images accurately. Describe colors precisely (use hex values when visible), "
+                    "layout, text content, UI elements, and style. Be specific and technical."
+                )
+            else:  # code intent
+                _c_sys = (
+                    "You are an expert software engineer and debugger. "
+                    "Read error messages carefully, identify root causes, and provide clear fixes. "
+                    "Show corrected code with explanation of what was wrong and why the fix works."
+                )
+
+            try:
+                import anthropic as _am_lib
+                _ac = _am_lib.AsyncAnthropic(api_key=_api_key_claude)
+                async with _ac.messages.stream(
+                    model="claude-sonnet-4-6",
+                    max_tokens=8192,
+                    system=_c_sys,
+                    messages=_c_msgs,
+                ) as _cs:
+                    async for _ct in _cs.text_stream:
+                        reply_text += _ct
+                        yield f"data: {_json.dumps({'t': _ct})}\n\n"
+            except Exception as _ce:
+                logger.warning("Claude stream failed, falling back to Ollama: %s", _ce)
+                _err_msg = f"⚠️ Claude unavailable: {_ce}. Retrying with local model...\n\n"
+                yield f"data: {_json.dumps({'t': _err_msg})}\n\n"
+                # Fall through isn't possible in elif — emit error and continue to done event
+
         else:
-            # ── Normal Ollama stream ──────────────────────────────────────────
-            # Use wait_for(3s) on every token pull so we can send keepalives while
-            # Ollama loads a model — critical for models not already in memory.
-            # Cloudflare drops connections with no data after ~100s.
+            # ── Local Ollama stream ───────────────────────────────────────────
+            # Simple chat stays local — free, fast enough for conversation.
+            # Complex tasks (builds, vision, code) routed to Claude above.
             _fallback_model = _reg_model_name("router")
             _model_to_try = _active_model
             for _attempt in range(2):  # Try primary model first, fall back to router on model error
