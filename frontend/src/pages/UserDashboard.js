@@ -58,7 +58,7 @@ function StatCard({ icon: Icon, label, value, sub, color = 'slate' }) {
     <div className={`rounded-2xl border p-5 flex items-center gap-4 ${colors[color]}`}>
       <Icon size={20} className="flex-shrink-0" />
       <div>
-        <p className="text-xl font-bold text-white">{fmt(value)}</p>
+        <p className="text-lg sm:text-xl font-bold text-white">{fmt(value)}</p>
         <p className="text-xs text-slate-500 mt-0.5">{label}</p>
         {sub && <p className="text-[10px] text-slate-600 mt-0.5">{sub}</p>}
       </div>
@@ -137,7 +137,7 @@ function CreditBar({ credits, plan, isSubscribed, onBuyCredits, onUpgrade }) {
           <p className="text-[11px] text-slate-600">
             1 credit = 1 chat message · 3 credits = 1 image
           </p>
-          <div className="flex gap-2 pt-1">
+          <div className="flex flex-wrap gap-2 pt-1">
             <button
               onClick={onBuyCredits}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold transition-all"

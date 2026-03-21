@@ -7,7 +7,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Settings, Github, User, LogOut, Moon, Sun,
-  HelpCircle, ChevronDown, Terminal, GitBranch, RefreshCw, ShieldCheck, BarChart2,
+  HelpCircle, ChevronDown, Terminal, GitBranch, RefreshCw, ShieldCheck, BarChart2, Menu,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/client';
@@ -74,7 +74,7 @@ function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme, user,
   return (
     <div
       ref={menuRef}
-      className="absolute right-0 top-full mt-2 w-60 rounded-xl bg-[#13131f] border border-white/10 shadow-2xl z-50 overflow-hidden"
+      className="absolute right-0 top-full mt-2 w-[min(240px,calc(100vw-1rem))] rounded-xl bg-[#13131f] border border-white/10 shadow-2xl z-50 overflow-hidden"
     >
       {/* User info + status */}
       <div className="px-4 py-3 border-b border-white/5">
@@ -163,7 +163,7 @@ function MenuItem({ icon: Icon, label, onClick, hint }) {
 // TopBar
 // ---------------------------------------------------------------------------
 function TopBar() {
-  const { setPage, serverStatus, setServerStatus, theme, toggleTheme, user, logout, avatar } = useApp();
+  const { setPage, serverStatus, setServerStatus, theme, toggleTheme, user, logout, avatar, setMobileSidebarOpen } = useApp();
   const [profileOpen, setProfileOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -185,10 +185,19 @@ function TopBar() {
   }, [refreshing, setServerStatus]);
 
   return (
-    <header className="flex items-center h-14 px-5 border-b border-white/[0.06] bg-[#0b0d16] flex-shrink-0 z-20">
+    <header className="flex items-center h-14 px-3 md:px-5 border-b border-white/[0.06] bg-[#0b0d16] flex-shrink-0 z-20">
+
+      {/* Hamburger — mobile only */}
+      <button
+        className="md:hidden p-2 mr-1 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-colors flex-shrink-0"
+        onClick={() => setMobileSidebarOpen(true)}
+        title="Open menu"
+      >
+        <Menu size={18} />
+      </button>
 
       {/* Logo */}
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-2">
         <div className="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 bg-gradient-to-br from-cyan-400 to-violet-600">
           <img
             src="/Logo.png"
@@ -197,11 +206,11 @@ function TopBar() {
             onError={e => { e.target.style.display = 'none'; }}
           />
         </div>
-        <span className="text-[15px] font-semibold text-white tracking-tight">Mini Assistant</span>
+        <span className="hidden sm:block text-[15px] font-semibold text-white tracking-tight">Mini Assistant</span>
       </div>
 
-      {/* Status indicators */}
-      <div className="flex items-center gap-3 ml-5 pl-5 border-l border-white/[0.06]">
+      {/* Status indicators — hidden on small screens */}
+      <div className="hidden sm:flex items-center gap-3 ml-4 pl-4 border-l border-white/[0.06]">
         <StatusDot label="Backend" ok={serverStatus.backend} />
         <StatusDot label="Claude" ok={serverStatus.openai} />
         <button

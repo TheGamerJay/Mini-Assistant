@@ -54,7 +54,7 @@ function StreamingBubble({ text }) {
         <img src="/Logo.png" alt="Mini Assistant" className="w-full h-full object-contain"
           onError={e => { e.target.style.display = 'none'; }} />
       </div>
-      <div className="max-w-[80%] px-5 py-4 rounded-2xl rounded-tl-sm border bg-[#151520] border-white/5 text-sm leading-relaxed text-slate-200 whitespace-pre-wrap">
+      <div className="max-w-[92%] sm:max-w-[82%] px-3 sm:px-5 py-3 sm:py-4 rounded-2xl rounded-tl-sm border bg-[#151520] border-white/5 text-sm leading-relaxed text-slate-200 whitespace-pre-wrap">
         {text || <span className="text-slate-600 text-xs italic">Thinking…</span>}
         <span className="inline-block w-0.5 h-3.5 bg-cyan-400 ml-0.5 align-middle animate-pulse" />
       </div>
@@ -621,7 +621,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
 
         {/* Messages */}
         <div className="relative flex-1 overflow-hidden">
-        <div ref={scrollContainerRef} className="h-full overflow-y-auto px-4 md:px-10 lg:px-16 py-6 space-y-6">
+        <div ref={scrollContainerRef} className="h-full overflow-y-auto px-3 sm:px-6 md:px-10 lg:px-16 py-4 sm:py-6 space-y-4 sm:space-y-6">
           {messages.map((msg, idx) => {
             if (msg._outOfCredits) {
               return (

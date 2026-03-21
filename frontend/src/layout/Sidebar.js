@@ -362,7 +362,20 @@ function Sidebar() {
     plan,
     isSubscribed,
     setPurchaseModalOpen,
+    mobileSidebarOpen,
+    setMobileSidebarOpen,
   } = useApp();
+
+  // Close mobile sidebar on page/chat navigation
+  const navTo = useCallback((pageName) => {
+    setPage(pageName);
+    setMobileSidebarOpen(false);
+  }, [setPage, setMobileSidebarOpen]);
+
+  const navChat = useCallback((chatId) => {
+    selectChat(chatId);
+    setMobileSidebarOpen(false);
+  }, [selectChat, setMobileSidebarOpen]);
 
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -395,8 +408,19 @@ function Sidebar() {
   const backendUp = serverStatus.backend === true;
 
   return (
+    <>
+    {/* Mobile backdrop */}
+    {mobileSidebarOpen && (
+      <div
+        className="fixed inset-0 bg-black/60 z-40 md:hidden"
+        onClick={() => setMobileSidebarOpen(false)}
+      />
+    )}
     <div
-      className={`flex flex-col bg-[#0a0a0f] border-r border-white/5 transition-all duration-200 ease-in-out flex-shrink-0 ${sidebarCollapsed ? 'w-16' : 'w-[260px]'}`}
+      className={`flex flex-col bg-[#0a0a0f] border-r border-white/5 transition-all duration-300 ease-in-out flex-shrink-0
+        fixed md:relative inset-y-0 left-0 z-50 md:z-auto
+        ${sidebarCollapsed ? 'w-[260px] md:w-16' : 'w-[260px]'}
+        ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
       style={{ height: '100vh' }}
     >
       {/* ---- Brand + toggle ---- */}
@@ -428,7 +452,7 @@ function Sidebar() {
       {/* ---- New Chat ---- */}
       <div className={`px-2 pt-3 pb-2 flex-shrink-0 ${sidebarCollapsed ? 'flex justify-center' : ''}`}>
         <button
-          onClick={() => { newChat(); setPage('chat'); }}
+          onClick={() => { newChat(); navTo('chat'); }}
           className={`flex items-center gap-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/8 hover:border-white/15 text-slate-300 hover:text-white transition-all text-sm font-medium
             ${sidebarCollapsed ? 'p-2' : 'w-full px-3 py-2'}`}
           title="New Chat"
@@ -471,7 +495,7 @@ function Sidebar() {
               {images.slice(0, 9).map((img) => (
                 <button
                   key={img.id}
-                  onClick={() => setPage('images')}
+                  onClick={() => navTo('images')}
                   title={img.prompt}
                   className="rounded-md overflow-hidden border border-white/10 hover:border-cyan-500/30 transition-colors aspect-square bg-black/40"
                   style={sidebarCollapsed ? { width: 36, height: 36 } : {}}
@@ -497,7 +521,7 @@ function Sidebar() {
                 chat={chat}
                 active={activeChatId === chat.id}
                 collapsed={sidebarCollapsed}
-                onSelect={selectChat}
+                onSelect={navChat}
                 onRename={renameChat}
                 onDelete={deleteChat}
                 onPin={togglePinChat}
@@ -526,7 +550,7 @@ function Sidebar() {
                 chats={projChats}
                 activeChatId={activeChatId}
                 collapsed={sidebarCollapsed}
-                onSelectChat={selectChat}
+                onSelectChat={navChat}
                 onRenameProject={renameProject}
                 onDeleteProject={deleteProject}
               />
@@ -569,7 +593,7 @@ function Sidebar() {
               key={t.id}
               template={t}
               collapsed={sidebarCollapsed}
-              onUse={(text) => { firePendingTemplate(text); setPage('chat'); }}
+              onUse={(text) => { firePendingTemplate(text); navTo('chat'); }}
               onDelete={deletePromptTemplate}
             />
           ))}
@@ -583,7 +607,7 @@ function Sidebar() {
             return (
               <button
                 key={id}
-                onClick={() => setPage(targetPage)}
+                onClick={() => navTo(targetPage)}
                 title={label}
                 className={`w-full flex items-center gap-2 rounded-lg px-2 py-1.5 mb-0.5 text-xs transition-colors
                   ${isActive
@@ -651,6 +675,7 @@ function Sidebar() {
         </div>
       </div>
     </div>
+    </>
   );
 }
 
