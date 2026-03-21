@@ -315,13 +315,33 @@ async def google_login(body: GoogleAuthBody):
 @auth_router.get("/me")
 async def me(authorization: str = Header(None)):
     user = await get_current_user(authorization)
+    # Backfill starter credits for pre-existing accounts
+    if "credits" not in user:
+        db = _get_db()
+        await db["users"].update_one(
+            {"id": user["id"]},
+            {"$set": {"credits": 10, "plan": "free"}},
+        )
+        user["credits"] = 10
+        user["plan"] = "free"
     return _public_user(user)
 
 
 @auth_router.get("/credits")
 async def get_credits(authorization: str = Header(None)):
-    """Return current credit balance and plan for the authenticated user."""
+    """Return current credit balance and plan for the authenticated user.
+    Auto-grants 10 starter credits to existing accounts that pre-date the credit system."""
     user = await get_current_user(authorization)
+    db = _get_db()
+
+    # Backfill: existing users have no 'credits' field → grant 10 starter credits
+    if "credits" not in user:
+        await db["users"].update_one(
+            {"id": user["id"]},
+            {"$set": {"credits": 10, "plan": "free"}},
+        )
+        return {"credits": 10, "plan": "free"}
+
     return {"credits": user.get("credits", 0), "plan": user.get("plan", "free")}
 
 

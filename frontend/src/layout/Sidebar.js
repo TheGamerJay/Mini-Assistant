@@ -612,7 +612,12 @@ function Sidebar() {
                 <div className="flex items-center justify-between mb-0.5">
                   <span className="text-[11px] font-mono text-slate-400">{credits} Mini Credits</span>
                   {credits === 0 && (
-                    <span className="text-[10px] text-amber-400 font-medium">Upgrade</span>
+                    <button
+                      onClick={() => setPage('settings')}
+                      className="text-[10px] text-amber-400 font-medium bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 px-1.5 py-0.5 rounded transition-colors"
+                    >
+                      Upgrade
+                    </button>
                   )}
                 </div>
                 <div className="h-1 rounded-full bg-white/10 overflow-hidden">
