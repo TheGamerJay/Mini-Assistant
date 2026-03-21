@@ -356,6 +356,16 @@ function SignupForm({ onSwitchToLogin }) {
   const [error, setError]       = useState('');
   const [loading, setLoading]   = useState(false);
 
+  // Pick up referral code from URL (?ref=CODE) or localStorage
+  const referralCode = (() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const fromUrl = p.get('ref') || p.get('referral');
+      if (fromUrl) { localStorage.setItem('ma_ref', fromUrl.toUpperCase()); return fromUrl.toUpperCase(); }
+      return localStorage.getItem('ma_ref') || '';
+    } catch { return ''; }
+  })();
+
   const handleSignup = useCallback(async (e) => {
     e.preventDefault();
     if (!name || !email || !password || !confirm) { setError('Please fill in all fields.'); return; }
@@ -366,17 +376,24 @@ function SignupForm({ onSwitchToLogin }) {
     setError('');
     setLoading(true);
     try {
-      await register(name, email, password, securityQuestion, securityAnswer);
+      await register(name, email, password, securityQuestion, securityAnswer, referralCode || null);
+      try { localStorage.removeItem('ma_ref'); } catch {}
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, [name, email, password, confirm, securityQuestion, securityAnswer, agreed, register]);
+  }, [name, email, password, confirm, securityQuestion, securityAnswer, agreed, register, referralCode]);
 
   return (
     <>
       {showTerms && <TermsModal onClose={() => setShowTerms(false)} />}
+      {referralCode && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium mb-2">
+          <span>🎁</span>
+          <span>Referral code <strong>{referralCode}</strong> applied — you'll get +5 bonus credits on signup!</span>
+        </div>
+      )}
       <div className="space-y-4">
         <GoogleButton />
         <OrDivider />

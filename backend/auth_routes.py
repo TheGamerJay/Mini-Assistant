@@ -8,6 +8,8 @@ Mounted in server.py via:
 
 import asyncio
 import os
+import secrets
+import string
 import uuid
 import time
 import logging
@@ -117,7 +119,20 @@ def _public_user(user: dict) -> dict:
         "avatar": user.get("avatar"),
         "credits": user.get("credits", 0),
         "plan": user.get("plan", "free"),
+        "referral_code": user.get("referral_code"),
+        "referrals_rewarded_count": user.get("referrals_rewarded_count", 0),
     }
+
+
+# Referral constants
+REFERRAL_SIGNUP_BONUS   = 5    # credits given to new user on signup with referral
+REFERRAL_SUB_BONUS      = 50   # credits given to both parties on subscription
+REFERRAL_MAX_REWARDS    = 3    # max referrals a referrer can earn from
+
+def _gen_referral_code() -> str:
+    """Generate a unique 8-char alphanumeric referral code."""
+    alphabet = string.ascii_uppercase + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(8))
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +145,7 @@ class RegisterBody(BaseModel):
     password: str
     security_question: Optional[str] = None
     security_answer: Optional[str] = None
+    referral_code: Optional[str] = None  # referral code of the person who invited them
 
 
 class LoginBody(BaseModel):
@@ -204,6 +220,16 @@ async def register(body: RegisterBody):
     if body.security_question and body.security_answer:
         sec_answer_hash = _hash_password(body.security_answer.strip().lower())
 
+    # Validate referral code (not self-referral — can't refer yourself since user doesn't exist yet)
+    referrer = None
+    referred_by_code = (body.referral_code or "").strip().upper() or None
+    if referred_by_code:
+        referrer = await db["users"].find_one({"referral_code": referred_by_code})
+        if not referrer:
+            referred_by_code = None  # invalid code — ignore silently
+
+    signup_credits = 10 + (REFERRAL_SIGNUP_BONUS if referred_by_code else 0)
+
     user_doc = {
         "id": str(uuid.uuid4()),
         "email": email_lc,
@@ -213,11 +239,19 @@ async def register(body: RegisterBody):
         "security_question": body.security_question or None,
         "security_answer_hash": sec_answer_hash,
         "avatar": None,
-        "credits": 10,
+        "credits": signup_credits,
         "plan": "free",
         "created_at": time.time(),
+        "referral_code": _gen_referral_code(),
+        "referred_by": referred_by_code,
+        "referral_reward_given": False,
+        "referrals_rewarded_count": 0,
     }
     await db["users"].insert_one(user_doc)
+
+    if referred_by_code:
+        log.info("referral.signup: new user=%s referred_by=%s +%d signup credits",
+                 user_doc["id"], referred_by_code, REFERRAL_SIGNUP_BONUS)
 
     # Fire welcome email in background — never blocks the response
     try:
@@ -319,6 +353,10 @@ async def google_login(body: GoogleAuthBody):
             "credits": 10,
             "plan": "free",
             "created_at": time.time(),
+            "referral_code": _gen_referral_code(),
+            "referred_by": None,
+            "referral_reward_given": False,
+            "referrals_rewarded_count": 0,
         }
         await db["users"].insert_one(user)
 
@@ -398,6 +436,31 @@ async def change_password(body: ChangePasswordBody, authorization: str = Header(
     new_hash = _hash_password(body.new_password)
     await db["users"].update_one({"id": user["id"]}, {"$set": {"password_hash": new_hash}})
     return {"ok": True}
+
+
+@auth_router.get("/referral")
+async def get_referral_info(authorization: str = Header(None)):
+    """Return current user's referral code, link, and stats."""
+    user = await get_current_user(authorization)
+    db = _get_db()
+    # Backfill referral_code for pre-existing accounts
+    if not user.get("referral_code"):
+        code = _gen_referral_code()
+        await db["users"].update_one({"id": user["id"]}, {"$set": {
+            "referral_code": code,
+            "referrals_rewarded_count": 0,
+            "referral_reward_given": False,
+        }})
+        user["referral_code"] = code
+    count = user.get("referrals_rewarded_count", 0)
+    return {
+        "referral_code": user["referral_code"],
+        "referrals_rewarded_count": count,
+        "max_rewards": REFERRAL_MAX_REWARDS,
+        "slots_remaining": max(0, REFERRAL_MAX_REWARDS - count),
+        "signup_bonus": REFERRAL_SIGNUP_BONUS,
+        "sub_bonus": REFERRAL_SUB_BONUS,
+    }
 
 
 @auth_router.delete("/account")

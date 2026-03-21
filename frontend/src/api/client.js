@@ -306,14 +306,20 @@ export const api = {
   // ── Auth endpoints ──────────────────────────────────────────────────────────
 
   /** Register a new account. Returns { token, user }. */
-  authRegister(name, email, password, securityQuestion, securityAnswer) {
+  authRegister(name, email, password, securityQuestion, securityAnswer, referralCode) {
     return post(`${MAIN_API}/auth/register`, {
       name,
       email,
       password,
       security_question: securityQuestion || null,
       security_answer: securityAnswer || null,
+      referral_code: referralCode || null,
     }, 15000);
+  },
+
+  /** Get current user's referral code and stats. */
+  authReferral() {
+    return get(`${MAIN_API}/auth/referral`, 10000);
   },
 
   /** Login with credentials. Returns { token, user }. */

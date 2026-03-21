@@ -8,7 +8,7 @@ import {
   Zap, MessageSquare, Image, Star, Clock,
   BarChart2, RefreshCw, ChevronRight, Shield,
   TrendingUp, Folder, Calendar, Code2, Cpu,
-  Rocket, GitBranch, Download, Activity,
+  Rocket, GitBranch, Download, Activity, Gift, Copy, Check,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import api from '../api/client';
@@ -282,6 +282,8 @@ export default function UserDashboard() {
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState(null);
   const [billingLoading, setBillingLoading] = useState(false);
+  const [referral, setReferral]   = useState(null);
+  const [copied, setCopied]       = useState(false);
 
   const handleManageBilling = useCallback(async () => {
     setBillingLoading(true);
@@ -309,6 +311,19 @@ export default function UserDashboard() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    api.authReferral().then(setReferral).catch(() => {});
+  }, []);
+
+  const copyReferralLink = useCallback(() => {
+    if (!referral?.referral_code) return;
+    const link = `${window.location.origin}?ref=${referral.referral_code}`;
+    navigator.clipboard.writeText(link).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [referral]);
 
   const planCfg = PLAN_CONFIG[plan] || PLAN_CONFIG.free;
 
@@ -430,6 +445,46 @@ export default function UserDashboard() {
               </button>
             )}
           </div>
+        </div>
+
+        {/* Referral card */}
+        <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-6">
+          <h2 className="text-sm font-semibold text-slate-200 mb-1 flex items-center gap-2">
+            <Gift size={14} className="text-emerald-400" /> Refer a Friend
+          </h2>
+          <p className="text-xs text-slate-500 mb-4">
+            Share your link. When a friend subscribes, you both get <span className="text-emerald-400 font-medium">+50 credits</span>. Max 3 referrals.
+          </p>
+          {referral ? (
+            <div className="space-y-3">
+              {/* Progress dots */}
+              <div className="flex items-center gap-2">
+                {Array.from({ length: referral.max_rewards }).map((_, i) => (
+                  <div key={i} className={`h-2 flex-1 rounded-full transition-colors ${i < referral.referrals_rewarded_count ? 'bg-emerald-500' : 'bg-white/10'}`} />
+                ))}
+                <span className="text-xs text-slate-500 ml-1 flex-shrink-0">
+                  {referral.referrals_rewarded_count}/{referral.max_rewards}
+                </span>
+              </div>
+              {/* Copy link button */}
+              <button
+                onClick={copyReferralLink}
+                className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white/5 border border-white/10 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-all text-xs"
+              >
+                <span className="text-slate-400 font-mono truncate">
+                  {window.location.origin}?ref={referral.referral_code}
+                </span>
+                <span className={`flex items-center gap-1 flex-shrink-0 font-medium ${copied ? 'text-emerald-400' : 'text-slate-400'}`}>
+                  {copied ? <><Check size={12} /> Copied!</> : <><Copy size={12} /> Copy</>}
+                </span>
+              </button>
+              {referral.referrals_rewarded_count >= referral.max_rewards && (
+                <p className="text-xs text-amber-400/80 text-center">You've reached the referral cap — nice work!</p>
+              )}
+            </div>
+          ) : (
+            <div className="h-8 bg-white/5 rounded-xl animate-pulse" />
+          )}
         </div>
 
         {/* Recent activity */}

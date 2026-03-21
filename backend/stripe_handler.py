@@ -493,6 +493,98 @@ async def stripe_webhook(request: Request):
 
 
 # ---------------------------------------------------------------------------
+# Referral reward constants (must match auth_routes.py)
+REFERRAL_SUB_BONUS   = 50   # credits awarded to both parties on first subscription
+REFERRAL_MAX_REWARDS = 3    # max successful referrals a referrer can earn from
+
+
+async def _process_referral_reward(db, subscribed_user: dict) -> None:
+    """
+    Called after a successful subscription payment.
+    - Finds the referrer via referred_by code
+    - Checks cap (referrals_rewarded_count < REFERRAL_MAX_REWARDS)
+    - Ensures this referred user hasn't already triggered a reward
+    - Awards +50 credits to both parties atomically
+    """
+    referred_by_code = subscribed_user.get("referred_by")
+    if not referred_by_code:
+        return  # user wasn't referred
+
+    if subscribed_user.get("referral_reward_given"):
+        return  # reward already given for this user
+
+    referred_user_id = subscribed_user["id"]
+
+    # Find referrer
+    referrer = await db["users"].find_one({"referral_code": referred_by_code})
+    if not referrer:
+        return
+
+    referrer_id = referrer["id"]
+
+    # Anti-abuse: block self-referral (shouldn't happen but be safe)
+    if referrer_id == referred_user_id:
+        log.warning("referral.reward: self-referral blocked user=%s", referred_user_id)
+        return
+
+    # Check cap
+    rewarded_count = referrer.get("referrals_rewarded_count", 0)
+    if rewarded_count >= REFERRAL_MAX_REWARDS:
+        log.info("referral.reward: referrer=%s hit cap (%d), no reward", referrer_id, REFERRAL_MAX_REWARDS)
+        return
+
+    # Mark referred user so they can't trigger another reward
+    res = await db["users"].update_one(
+        {"id": referred_user_id, "referral_reward_given": {"$ne": True}},
+        {"$set": {"referral_reward_given": True}},
+    )
+    if res.modified_count == 0:
+        return  # race condition — another webhook already processed this
+
+    # Award referrer (capped increment)
+    await db["users"].update_one(
+        {"id": referrer_id},
+        {
+            "$inc": {
+                "subscription_credits": REFERRAL_SUB_BONUS,
+                "referrals_rewarded_count": 1,
+            }
+        },
+    )
+
+    # Award referred user
+    await db["users"].update_one(
+        {"id": referred_user_id},
+        {"$inc": {"subscription_credits": REFERRAL_SUB_BONUS}},
+    )
+
+    log.info(
+        "referral.reward: referrer=%s referred=%s +%d credits each (referrer total=%d/%d)",
+        referrer_id, referred_user_id, REFERRAL_SUB_BONUS, rewarded_count + 1, REFERRAL_MAX_REWARDS,
+    )
+
+    # Log activity for both users
+    now_ts = time.time()
+    await db["activity_logs"].insert_many([
+        {
+            "user_id": referrer_id,
+            "type": "referral_reward",
+            "action_type": "referral_reward",
+            "credits_used": -REFERRAL_SUB_BONUS,
+            "referred_user_id": referred_user_id,
+            "timestamp": now_ts,
+        },
+        {
+            "user_id": referred_user_id,
+            "type": "referral_reward",
+            "action_type": "referral_reward",
+            "credits_used": -REFERRAL_SUB_BONUS,
+            "referrer_id": referrer_id,
+            "timestamp": now_ts,
+        },
+    ])
+
+
 # Webhook event handlers
 # ---------------------------------------------------------------------------
 
@@ -674,6 +766,12 @@ async def _handle_invoice_paid(db, invoice: dict) -> None:
         "invoice.paid: user=%s plan=%s subscription_credits=%d revenue=%.2f",
         user_id, plan, plan_credits, invoice_revenue,
     )
+
+    # ── Referral rewards (non-fatal) ────────────────────────────────────────
+    try:
+        await _process_referral_reward(db, user)
+    except Exception as _ref_exc:
+        log.warning("referral reward failed (non-fatal): %s", _ref_exc)
 
     # Send welcome / renewal email + track conversion (non-fatal)
     try:

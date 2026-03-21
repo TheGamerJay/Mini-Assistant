@@ -502,9 +502,9 @@ export function AppProvider({ children }) {
     }
   }, []);
 
-  const register = useCallback(async (name, email, password, securityQuestion, securityAnswer) => {
+  const register = useCallback(async (name, email, password, securityQuestion, securityAnswer, referralCode) => {
     try {
-      const res = await api.authRegister(name, email, password, securityQuestion, securityAnswer);
+      const res = await api.authRegister(name, email, password, securityQuestion, securityAnswer, referralCode);
       setToken(res.token);
       const session = { id: res.user.id, name: res.user.name, email: res.user.email, role: res.user.role };
       _setUser(session);

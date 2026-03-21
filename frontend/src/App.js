@@ -166,6 +166,16 @@ function AppShell() {
     return () => window.removeEventListener('ma:outofcredits', handler);
   }, [openUpgradeModal]);
 
+  // Capture referral code from URL and persist to localStorage
+  useEffect(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const ref = p.get('ref') || p.get('referral');
+      if (ref) localStorage.setItem('ma_ref', ref.toUpperCase());
+    } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Handle Stripe redirect params (?checkout=success|cancelled, ?portal=return)
   useEffect(() => {
     const result = handleCheckoutReturn();
