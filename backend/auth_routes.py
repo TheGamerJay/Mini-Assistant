@@ -283,7 +283,7 @@ async def register(body: RegisterBody):
         from email_service import send_welcome_email  # noqa: PLC0415
         threading.Thread(
             target=send_welcome_email,
-            args=(user_doc["email"], user_doc["name"]),
+            args=(user_doc["email"], user_doc["name"], user_doc["id"]),
             daemon=True,
         ).start()
     except Exception as _email_exc:
@@ -390,7 +390,7 @@ async def google_login(body: GoogleAuthBody):
             from email_service import send_welcome_email  # noqa: PLC0415
             threading.Thread(
                 target=send_welcome_email,
-                args=(user["email"], user["name"]),
+                args=(user["email"], user["name"], user["id"]),
                 daemon=True,
             ).start()
         except Exception as _email_exc:

@@ -14,7 +14,7 @@ resend.api_key = os.environ.get("RESEND_API_KEY", "")
 
 log = logging.getLogger(__name__)
 
-SENDER      = "Mini Assistant AI <onboarding@resend.dev>"
+SENDER      = os.environ.get("EMAIL_FROM", "Mini Assistant AI <noreply@miniassistantai.com>")
 FRONTEND    = os.environ.get("FRONTEND_URL", "https://miniassistantai.com")
 PRICING_URL = f"{FRONTEND}/pricing"
 LOGO_URL    = "https://miniassistantai.com/logo.png"

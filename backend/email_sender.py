@@ -14,7 +14,7 @@ resend.api_key = os.environ.get("RESEND_API_KEY", "")
 
 log = logging.getLogger(__name__)
 
-SENDER      = "Mini Assistant AI <onboarding@resend.dev>"
+SENDER      = os.environ.get("EMAIL_FROM", "Mini Assistant AI <noreply@miniassistantai.com>")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://miniassistantai.com")
 
 # ---------------------------------------------------------------------------
@@ -427,4 +427,71 @@ async def send_referral_signup_email(
         )
     except Exception as exc:
         log.error("send_referral_signup_email failed: %s", exc)
+        return False
+
+
+def _referral_complete_html(name: str, total_bonus: int, max_referrals: int) -> tuple[str, str]:
+    subject = "🎉 You just earned your full referral bonus!"
+    content = f"""
+      <h1 style="margin:0 0 8px;font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.5px;">
+        You unlocked your full referral bonus!
+      </h1>
+      <p style="margin:0 0 24px;font-size:15px;color:#94a3b8;line-height:1.6;">
+        Hey {name}, you successfully referred {max_referrals} friends who all subscribed.
+        That's the full referral program — you crushed it! 🚀
+      </p>
+
+      <div style="background:linear-gradient(135deg,rgba(16,185,129,0.12),rgba(6,182,212,0.08));
+                  border:1px solid rgba(16,185,129,0.3);border-radius:16px;padding:28px 24px;
+                  margin-bottom:24px;text-align:center;">
+        <p style="margin:0 0 6px;font-size:13px;font-weight:600;color:#10b981;
+                  text-transform:uppercase;letter-spacing:1.2px;">Total Bonus Earned</p>
+        <p style="margin:0;font-size:48px;font-weight:900;color:#ffffff;letter-spacing:-2px;">
+          +{total_bonus}
+        </p>
+        <p style="margin:4px 0 0;font-size:15px;color:#10b981;font-weight:600;">Mini Credits</p>
+      </div>
+
+      <div style="background:#0d1117;border:1px solid rgba(255,255,255,0.08);border-radius:14px;
+                  padding:20px 24px;margin-bottom:24px;">
+        <p style="margin:0 0 14px;font-size:13px;font-weight:600;color:#94a3b8;
+                  text-transform:uppercase;letter-spacing:1px;">What you did</p>
+        {''.join([
+          f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">'
+          f'<span style="color:#10b981;font-size:16px;">✓</span>'
+          f'<span style="font-size:14px;color:#e2e8f0;">Referral {i+1} — friend subscribed, +{total_bonus // max_referrals} credits earned</span>'
+          f'</div>'
+          for i in range(max_referrals)
+        ])}
+      </div>
+
+      <p style="margin:0 0 24px;font-size:14px;color:#64748b;line-height:1.6;text-align:center;">
+        Thank you for spreading the word about Mini Assistant AI. Your support helps us build
+        a better product for everyone. 💙
+      </p>
+    """
+    html = _shell(content, FRONTEND_URL, "Go to my dashboard")
+    return subject, html
+
+
+async def send_referral_complete_email(
+    to_email: str,
+    to_name: str,
+    total_bonus: int = 150,
+    max_referrals: int = 3,
+    *,
+    user_id: str = "",
+    db=None,
+) -> bool:
+    """Send ONE-TIME email when user completes all referral slots. Non-fatal."""
+    try:
+        subject, html = _referral_complete_html(to_name, total_bonus, max_referrals)
+        return await _send(
+            to_email, to_name, subject, html,
+            user_id=user_id or to_email,
+            email_type="referral_complete",
+            db=db,
+        )
+    except Exception as exc:
+        log.error("send_referral_complete_email failed: %s", exc)
         return False

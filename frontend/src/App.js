@@ -34,6 +34,7 @@ import UserDashboard from './pages/UserDashboard';
 import PurchaseCreditsModal from './components/PurchaseCreditsModal';
 import UpgradeModal from './components/UpgradeModal';
 import OnboardingModal from './components/OnboardingModal';
+import MascotAssistant from './components/MascotAssistant';
 import PricingPage from './pages/PricingPage';
 import CheckoutSuccessPage from './pages/CheckoutSuccessPage';
 
@@ -279,6 +280,9 @@ function AppShell() {
 
       {/* First-session onboarding — shown once per account */}
       {showOnboarding && <OnboardingModal onDone={handleOnboardingDone} />}
+
+      {/* Floating mascot assistant — bottom-right, always visible */}
+      {!showOnboarding && <MascotAssistant />}
     </div>
   );
 }
