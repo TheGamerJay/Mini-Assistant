@@ -146,6 +146,21 @@ def _build_html(name: str) -> str:
                 You're receiving this because you created an account.
                 Questions? Reply to this email.
               </p>
+              <!-- Stamp -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin-top:20px;">
+                <tr><td>
+                  <hr style="border:none;border-top:1px solid #1e2030;margin:0 0 14px;" />
+                  <p style="margin:0;font-size:12px;color:#888888;text-align:center;line-height:1.6;">
+                    Powered by
+                    <a href="{FRONTEND}" style="color:#888888;text-decoration:none;font-weight:600;">
+                      Mini Assistant AI
+                    </a>
+                  </p>
+                  <p style="margin:4px 0 0;font-size:11px;color:#555555;text-align:center;">
+                    Build apps, chat with AI, ship faster.
+                  </p>
+                </td></tr>
+              </table>
             </td>
           </tr>
 
