@@ -1,22 +1,17 @@
 """
 Image-to-Code Chain Orchestrator
 =================================
-Ceiling architecture implementation — four-brain, confidence-scored pipeline:
+Four specialized brains, each with its own role and system prompt.
+All powered by Claude when ANTHROPIC_API_KEY is present.
+Falls back to local Ollama models when no API key.
 
-  1. 👁  Vision Brain  (moondream)       — reads screenshot → detailed UI spec (two focused queries)
-  2. 🔨  Builder Brain (qwen2.5-coder)   — streams HTML/CSS/JS from spec + user requirements
-  3. 🔍  Reviewer Brain (gemma3:4b)      — returns SCORE: X/100 + issues list (or PASS)
-  4. 🔧  Builder Brain fix loop          — fixes issues, re-reviewed up to _MAX_FIX_LOOPS times
-  5. 🚀  Executive Brain (Claude API)    — escalates when confidence < _ESCALATE_THRESHOLD
+  👁  Vision Brain  — reads the screenshot, produces a precise UI spec
+  🔨  Builder Brain — builds complete HTML/CSS/JS from the spec (streaming)
+  🔍  Reviewer Brain — scores the build 0-100, lists any gaps
+  🔧  Fixer Brain   — fixes reviewer issues, re-reviewed up to N times
 
-Ceiling features wired in:
-  • Confidence scoring — reviewer outputs 0-100; drives escalation decisions
-  • Claude API escalation — when local models can't get above threshold, Claude takes over
-  • Observability — every brain call logged to telemetry.jsonl (non-fatal)
-  • Skill template injection — checks phase3 skill registry for matching templates
-  • Graceful degradation — every brain failure falls back gracefully, never hard-crashes
-
-Yields SSE-formatted strings for direct use in the streaming endpoint.
+Claude path  (~$0.01-0.02/build):  Vision→Build→Review→Fix  all via Claude API
+Local path   (free, slower):        moondream→qwen2.5-coder→gemma3→fix loop
 """
 from __future__ import annotations
 
@@ -28,15 +23,12 @@ import re
 
 logger = logging.getLogger(__name__)
 
-_MAX_FIX_LOOPS        = 2     # reviewer → builder cycles (local-only path)
-_ESCALATE_THRESHOLD   = 70.0  # confidence below this triggers escalation (local-only path)
-_BUILD_MODEL          = "claude-sonnet-4-6"   # primary builder when API key present
-_ESCALATE_MODEL       = "claude-sonnet-4-6"   # escalation fallback (same model)
+_MAX_FIX_LOOPS  = 2
+_VISION_MODEL   = "claude-sonnet-4-6"
+_BUILD_MODEL    = "claude-sonnet-4-6"
+_REVIEW_MODEL   = "claude-haiku-4-5-20251001"  # cheaper — review is a simple task
+_FIX_MODEL      = "claude-sonnet-4-6"
 
-# Claude API — primary builder when ANTHROPIC_API_KEY is set.
-# Without a GPU, local models (qwen2.5-coder on CPU) are slow and low-quality.
-# When the API key is available, skip the local builder/reviewer loop entirely:
-#   moondream (local, free) → Claude (one shot, high quality, ~$0.01-0.03/build)
 try:
     import anthropic as _anthropic_lib
     _CLAUDE_AVAILABLE = bool(os.environ.get("ANTHROPIC_API_KEY"))
@@ -45,67 +37,77 @@ except ImportError:
     _CLAUDE_AVAILABLE = False
 
 
-# ── Prompts ───────────────────────────────────────────────────────────────────
+# ── System prompts — each brain stays in its lane ────────────────────────────
 
-# Two short prompts — moondream (1.8B) handles short focused questions best
-_VISION_COLORS_PROMPT = (
-    "What colors do you see in this UI? "
-    "List: background color, text color, button color, input field color, any accent colors. "
-    "Use hex codes if you can read them."
-)
+_VISION_PROMPT = """\
+You are a UI analyst. You will receive a screenshot of a web UI.
 
-_VISION_LAYOUT_PROMPT = (
-    "Describe the layout of this UI screenshot. "
-    "What elements are visible? (logo, form fields, buttons, navigation, etc.) "
-    "Where are they positioned on the page?"
-)
+Your job: produce a precise technical specification so a developer can rebuild it exactly.
+
+Describe:
+1. COLOR PALETTE — background, text, buttons, inputs, accents. Use exact hex codes where readable.
+2. LAYOUT — structure, grid/flex, sections, positioning of each element
+3. TYPOGRAPHY — font sizes, weights, hierarchy (h1/h2/body/label)
+4. COMPONENTS — every visible element: logo, nav, inputs, buttons, cards, icons, images
+5. SPACING — padding, margins, gaps between elements
+6. STYLE — dark/light, glass, flat, gradient, shadows, border-radius
+7. TEXT CONTENT — exact labels, placeholders, button text, headings
+
+Be precise and technical. This spec will be handed directly to a developer."""
 
 _BUILD_SYSTEM = """\
-You are an expert frontend developer. Your job is to build complete, pixel-faithful web UIs.
+You are an expert frontend developer. Build complete, pixel-faithful web UIs from specs.
 
-## Coding Standards
-- Single self-contained HTML file: all CSS inside <style>, all JS inside <script>
-- Use CSS custom properties (--primary, --bg, --text, etc.) for every color
-- Flexbox or CSS Grid for all layouts — no floats, no tables
-- Real JavaScript — live state management, real event handlers, no stubs, no TODOs
-- Every button, input, dropdown, and control must be fully functional
-- NEVER use external image URLs (via.placeholder.com, picsum.photos, lorempixel, etc.) — they are dead
-- For logos: generate an inline SVG logo using the app name and brand colors
-- For placeholder images: use CSS gradient div or inline SVG with descriptive text
+## Standards
+- Single self-contained HTML file: CSS in <style>, JS in <script>
+- CSS custom properties for every color: --primary, --bg, --text, --accent, etc.
+- Flexbox or CSS Grid — no floats, no tables
+- Real JavaScript — live state, real event handlers, no stubs, no TODO comments
+- Every interactive element must actually work
+- NEVER use external image URLs (via.placeholder.com etc.) — they are dead
+- Logos: inline SVG using the app name and brand colors
+- Placeholder images: CSS gradient or SVG with text
 - Smooth transitions (0.2s ease) on all interactive elements
-- Mobile-responsive by default (media queries where needed)
-- Empty states for lists / content areas
-- Complete, working code — never partial diffs or snippets
+- Mobile-responsive (media queries)
+- Empty states for lists and content areas
 
 ## Output format
-Start your response with ```html on its own line.
+Start with ```html on its own line.
 End with ``` on its own line.
-Output the COMPLETE file every time."""
+Output the COMPLETE file every time — never partial snippets."""
 
-_REVIEWER_SYSTEM = """\
-You are a senior frontend code reviewer. You check whether generated code faithfully implements a UI spec.
+_REVIEW_SYSTEM = """\
+You are a senior frontend code reviewer. Your job is to check whether generated code \
+faithfully implements a UI specification.
 
-You will receive:
-1. USER REQUIREMENTS (highest priority — the user's own words)
-2. VISUAL ANALYSIS (from screenshot)
-3. GENERATED CODE
+You receive:
+1. The original user requirements
+2. The UI specification from the vision analyst
+3. The generated HTML/CSS/JS code
 
-Your task: check that the code correctly implements the requirements.
-Focus on: colors (are they exactly right?), layout, all required elements, functionality.
+Check for:
+- All required elements present and positioned correctly
+- Colors match the spec exactly (check hex values)
+- All interactive elements functional
+- Layout matches the screenshot description
+- Typography and spacing reasonable
 
-Output format (STRICT — no exceptions):
-- If the code correctly implements everything: output exactly PASS
-- If there are issues: first line must be "SCORE: X/100" where X is quality 0–100,
-  then a numbered list of specific, actionable problems.
+Output format (STRICT):
+- Code is correct: output exactly PASS
+- Issues found: first line "SCORE: X/100", then numbered list of specific problems
   Example:
-    SCORE: 68/100
-    1. Background should be dark (#0d0d12), currently white
+    SCORE: 72/100
+    1. Background should be #0d0d12, currently white
     2. Missing email input field
     3. Submit button has no click handler
 
-Do NOT rewrite or suggest the code. Do NOT explain general best practices. Only flag real gaps."""
+Do NOT rewrite code. Only flag real gaps."""
 
-_FIX_SYSTEM = _BUILD_SYSTEM + "\n\nYou are fixing a previous build attempt based on code reviewer feedback."
+_FIX_SYSTEM = _BUILD_SYSTEM + """
+
+You are fixing a previous build based on reviewer feedback.
+Every issue in the reviewer list MUST be fixed.
+User requirements take absolute priority over everything else."""
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -119,19 +121,21 @@ def _extract_html(text: str) -> str:
     return m.group(1).strip() if m else text.strip()
 
 
-def _valid(s: str) -> bool:
-    """True if vision response contains real content (not garbage)."""
-    return bool(s) and len(s.strip()) > 5 and s.strip() not in ("?", "...", "N/A", "")
+def _detect_media_type(b64: str) -> str:
+    if b64.startswith("/9j/") or b64.startswith("/9J/"):
+        return "image/jpeg"
+    if b64.startswith("iVBOR"):
+        return "image/png"
+    if b64.startswith("UklGR"):
+        return "image/webp"
+    return "image/jpeg"
 
 
 def _parse_review(text: str) -> tuple[bool, float, list[str]]:
-    """
-    Parse reviewer output.
-    Returns: (is_pass, confidence_0_100, issues_list)
-    """
+    """Returns (is_pass, confidence_0_100, issues_list)."""
     t = text.strip()
     if re.match(r"^PASS\b", t, re.IGNORECASE):
-        return True, 95.0, []
+        return True, 98.0, []
     score_m = re.search(r"SCORE:\s*(\d+)", t, re.IGNORECASE)
     score   = float(score_m.group(1)) if score_m else 50.0
     issues  = [ln.strip() for ln in t.split("\n") if re.match(r"^\d+[.)]\s", ln.strip())]
@@ -139,58 +143,64 @@ def _parse_review(text: str) -> tuple[bool, float, list[str]]:
 
 
 def _get_skill_context(user_request: str) -> str:
-    """
-    Check the phase3 skill registry for matching templates.
-    Returns a context hint string, or "" if no match / skill system unavailable.
-    """
     try:
         from mini_assistant.phase3.skill_selector import SkillSelector
-        selector = SkillSelector()
-        # skill_selector.select() takes (request, intent)
-        skill = selector.select(user_request, intent="app_builder")
+        skill = SkillSelector().select(user_request, intent="app_builder")
         if skill and skill.validation_rules:
             rules = "\n".join(f"• {r}" for r in skill.validation_rules)
-            return (
-                f"\n\n[SKILL TEMPLATE MATCHED: {skill.name}]\n"
-                f"Quality checklist for this type of UI:\n{rules}"
-            )
+            return f"\n\n[SKILL CHECKLIST: {skill.name}]\n{rules}"
     except Exception as exc:
-        logger.debug("Skill registry lookup failed (non-fatal): %s", exc)
+        logger.debug("Skill lookup failed (non-fatal): %s", exc)
     return ""
 
 
-async def _await_with_keepalives(task: asyncio.Task) -> str:
-    """Await an asyncio Task, yielding SSE keepalives every 3s until it's done."""
-    # This helper is called from within an async generator using 'async for' trick.
-    # We return the result; the caller yields keepalives manually.
-    result = None
-    while not task.done():
-        try:
-            result = await asyncio.wait_for(asyncio.shield(task), timeout=3.0)
-        except asyncio.TimeoutError:
-            pass  # caller must yield keepalive
-    if result is None:
-        result = task.result()  # raises if task failed
-    return result
+def _obs_record(**kwargs):
+    try:
+        from mini_assistant.observability import BrainCall, record
+        record(BrainCall(**kwargs))
+    except Exception:
+        pass
 
 
-# ── Claude escalation ─────────────────────────────────────────────────────────
+# ── Claude brain functions ────────────────────────────────────────────────────
 
-async def _stream_claude_build(
-    api_key: str,
-    user_request: str,
-    ui_description: str,
-    skill_context: str = "",
-) -> "AsyncIterator[str]":
-    """Direct Claude build — used when API key is present (primary path)."""
+async def _claude_vision(api_key: str, images: list[str]) -> str:
+    """
+    Vision Brain — Claude analyzes the screenshot and returns a UI spec.
+    Non-streaming (we need the full spec before building).
+    """
+    content = []
+    for b64 in images[:4]:
+        content.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": _detect_media_type(b64),
+                "data": b64,
+            },
+        })
+    content.append({"type": "text", "text": _VISION_PROMPT})
+
+    client = _anthropic_lib.AsyncAnthropic(api_key=api_key)
+    response = await client.messages.create(
+        model=_VISION_MODEL,
+        max_tokens=1024,
+        messages=[{"role": "user", "content": content}],
+    )
+    return response.content[0].text
+
+
+async def _claude_build_stream(api_key: str, user_request: str, ui_spec: str, skill_ctx: str):
+    """
+    Builder Brain — Claude streams HTML/CSS/JS from the vision spec.
+    Async generator yielding text tokens.
+    """
     msg = (
-        f"[USER REQUIREMENTS — HIGHEST PRIORITY — FOLLOW THESE EXACTLY]\n{user_request}\n\n"
-        f"[VISUAL ANALYSIS FROM SCREENSHOT]\n{ui_description}"
-        f"{skill_context}\n\n"
-        "Build the complete HTML/CSS/JS app now. "
-        "User requirements above override all other context — "
-        "if the user specified exact colors or style, use those exactly. "
-        "Start with ```html"
+        f"[USER REQUIREMENTS — HIGHEST PRIORITY]\n{user_request}\n\n"
+        f"[UI SPECIFICATION FROM VISION ANALYST]\n{ui_spec}"
+        f"{skill_ctx}\n\n"
+        "Build the complete app now. User requirements override everything else — "
+        "match their exact colors, style, and naming. Start with ```html"
     )
     client = _anthropic_lib.AsyncAnthropic(api_key=api_key)
     async with client.messages.stream(
@@ -203,212 +213,171 @@ async def _stream_claude_build(
             yield text
 
 
-async def _stream_claude_fix(
-    api_key: str,
-    user_request: str,
-    ui_description: str,
-    built_code: str,
-    review_result: str,
-) -> "AsyncIterator[str]":
-    """Claude fix — fallback escalation on the local-only path."""
+async def _claude_review(api_key: str, user_request: str, ui_spec: str, code: str) -> str:
+    """
+    Reviewer Brain — Claude checks the build against spec and requirements.
+    Non-streaming (we just need PASS or issue list).
+    Uses Haiku — cheaper for this simple classification task.
+    """
     msg = (
-        f"[USER REQUIREMENTS — HIGHEST PRIORITY]\n{user_request}\n\n"
-        f"[VISUAL ANALYSIS FROM SCREENSHOT]\n{ui_description}\n\n"
-        f"[PREVIOUS LOCAL BUILD — needs improvement]\n```html\n{built_code}\n```\n\n"
-        f"[REVIEWER ISSUES TO FIX]\n{review_result}\n\n"
-        "Fix ALL issues. User requirements take absolute highest priority. "
-        "Build a complete, polished, pixel-faithful implementation. Start with ```html"
+        f"[USER REQUIREMENTS]\n{user_request}\n\n"
+        f"[UI SPECIFICATION]\n{ui_spec}\n\n"
+        f"[GENERATED CODE]\n```html\n{code}\n```"
+    )
+    client = _anthropic_lib.AsyncAnthropic(api_key=api_key)
+    response = await client.messages.create(
+        model=_REVIEW_MODEL,
+        max_tokens=512,
+        system=_REVIEW_SYSTEM,
+        messages=[{"role": "user", "content": msg}],
+    )
+    return response.content[0].text
+
+
+async def _claude_fix_stream(
+    api_key: str, user_request: str, ui_spec: str, code: str, issues: str
+):
+    """
+    Fixer Brain — Claude fixes the build based on reviewer feedback.
+    Async generator yielding text tokens.
+    """
+    msg = (
+        f"[USER REQUIREMENTS — TOP PRIORITY]\n{user_request}\n\n"
+        f"[UI SPECIFICATION]\n{ui_spec}\n\n"
+        f"[PREVIOUS CODE]\n```html\n{code}\n```\n\n"
+        f"[REVIEWER ISSUES — FIX ALL OF THESE]\n{issues}\n\n"
+        "Fix every issue. User requirements take absolute priority. "
+        "Output the COMPLETE updated HTML file. Start with ```html"
     )
     client = _anthropic_lib.AsyncAnthropic(api_key=api_key)
     async with client.messages.stream(
-        model=_ESCALATE_MODEL,
+        model=_FIX_MODEL,
         max_tokens=8192,
-        system=_BUILD_SYSTEM,
+        system=_FIX_SYSTEM,
         messages=[{"role": "user", "content": msg}],
     ) as stream:
         async for text in stream.text_stream:
             yield text
 
 
+# ── Local brain helpers (fallback when no API key) ────────────────────────────
+
+async def _local_vision(ollama_client, vision_model: str, images: list[str]) -> str:
+    """moondream fallback — two focused queries, filter garbage."""
+    colors_t = asyncio.ensure_future(ollama_client.run_chat(
+        vision_model,
+        [{"role": "user", "content": "What colors do you see? List background, text, button, input colors. Use hex if readable.", "images": images}],
+        timeout=90,
+    ))
+    layout_t = asyncio.ensure_future(ollama_client.run_chat(
+        vision_model,
+        [{"role": "user", "content": "Describe the layout. What elements are visible and where?", "images": images}],
+        timeout=90,
+    ))
+    results = []
+    for task, label in [(colors_t, "COLORS"), (layout_t, "LAYOUT")]:
+        try:
+            val = await asyncio.wait_for(task, timeout=95)
+            if val and len(val.strip()) > 5 and val.strip() not in ("?", "...", "N/A"):
+                results.append(f"{label}: {val.strip()}")
+        except Exception as exc:
+            logger.warning("Local vision %s failed: %s", label, exc)
+    return "\n".join(results) or "No visual details extracted."
+
+
 # ── Main pipeline ─────────────────────────────────────────────────────────────
 
 async def image_to_code_pipeline(
-    images:        list,
-    user_request:  str,
+    images:         list,
+    user_request:   str,
     ollama_client,
-    vision_model:  str,
-    builder_model: str,
+    vision_model:   str,
+    builder_model:  str,
     reviewer_model: str,
-    session_id:    str = "",
+    session_id:     str = "",
 ):
     """
     Async generator — yields SSE strings.
 
-    Ceiling pipeline:
-      Vision → Builder (stream) → Reviewer (scored)
-        └─ if issues + confidence < threshold → Builder fix (stream) → Reviewer  ×N
-           └─ if still failing → Claude API escalation (stream)
+    Claude path (API key present):
+      👁 Vision Brain (Claude) → 🔨 Builder Brain (Claude, streaming)
+        → 🔍 Reviewer Brain (Claude Haiku) → 🔧 Fixer Brain (Claude, streaming) × N
+
+    Local path (no API key):
+      👁 moondream → 🔨 qwen2.5-coder (streaming) → 🔍 gemma3 → 🔧 fix loop
     """
-    # Lazy import so observability failures never crash the pipeline
-    try:
-        from mini_assistant.observability import BrainCall, Timer, record as obs_record
-        _obs = True
-    except Exception:
-        _obs = False
+    import time
 
-    def _obs_record(**kwargs):
-        if _obs:
+    api_key     = os.environ.get("ANTHROPIC_API_KEY", "")
+    use_claude  = _CLAUDE_AVAILABLE and bool(api_key)
+    skill_ctx   = _get_skill_context(user_request)
+
+    # ── STEP 1: Vision Brain ─────────────────────────────────────────────────
+    yield _tok("👁 **Vision Brain** analyzing your image...\n\n")
+    t0 = time.perf_counter()
+
+    if use_claude:
+        try:
+            ui_spec = await _claude_vision(api_key, images)
+            logger.info("Claude Vision OK — %d chars", len(ui_spec))
+            _obs_record(
+                brain="vision", model=_VISION_MODEL, task="vision_analysis",
+                session_id=session_id, latency_ms=(time.perf_counter() - t0) * 1000,
+                outcome="success", tokens_out=len(ui_spec.split()),
+            )
+        except Exception as exc:
+            logger.warning("Claude Vision failed: %s — falling back to local", exc)
+            yield _tok(f"⚠️ Vision fallback (Claude unavailable)...\n\n")
+            ui_spec = await _local_vision(ollama_client, vision_model, images)
+    else:
+        ui_spec = ""
+        _t_local = asyncio.ensure_future(_local_vision(ollama_client, vision_model, images))
+        while not _t_local.done():
             try:
-                obs_record(BrainCall(**kwargs))
-            except Exception:
-                pass
-
-    # ── STEP 1: Skill template lookup (fast, non-blocking) ────────────────────
-    skill_context = _get_skill_context(user_request)
-
-    # ── STEP 2: Vision Brain — two focused queries ────────────────────────────
-    yield _tok("👁 **Vision Brain** is analyzing your image...\n\n")
-
-    _t_colors = asyncio.ensure_future(
-        ollama_client.run_chat(
-            vision_model,
-            [{"role": "user", "content": _VISION_COLORS_PROMPT, "images": images}],
-            timeout=90,
-        )
-    )
-    colors_desc = ""
-    with (Timer() if _obs else _NullTimer()) as tmr_colors:
-        while not _t_colors.done():
-            try:
-                colors_desc = await asyncio.wait_for(asyncio.shield(_t_colors), timeout=3.0)
+                ui_spec = await asyncio.wait_for(asyncio.shield(_t_local), timeout=3.0)
             except asyncio.TimeoutError:
                 yield ": keepalive\n\n"
-        if not colors_desc:
+        if not ui_spec:
             try:
-                colors_desc = _t_colors.result()
+                ui_spec = _t_local.result()
             except Exception as exc:
-                logger.warning("Vision colors failed: %s", exc)
-    _obs_record(
-        brain="vision_colors", model=vision_model, task="color_extraction",
-        session_id=session_id, latency_ms=tmr_colors.elapsed_ms,
-        outcome="success" if _valid(colors_desc) else "fail",
-        notes=colors_desc[:80] if _valid(colors_desc) else "garbage",
-    )
+                logger.warning("Local vision failed: %s", exc)
+                ui_spec = "Could not analyze image."
 
-    _t_layout = asyncio.ensure_future(
-        ollama_client.run_chat(
-            vision_model,
-            [{"role": "user", "content": _VISION_LAYOUT_PROMPT, "images": images}],
-            timeout=90,
-        )
-    )
-    layout_desc = ""
-    with (Timer() if _obs else _NullTimer()) as tmr_layout:
-        while not _t_layout.done():
-            try:
-                layout_desc = await asyncio.wait_for(asyncio.shield(_t_layout), timeout=3.0)
-            except asyncio.TimeoutError:
-                yield ": keepalive\n\n"
-        if not layout_desc:
-            try:
-                layout_desc = _t_layout.result()
-            except Exception as exc:
-                logger.warning("Vision layout failed: %s", exc)
-    _obs_record(
-        brain="vision_layout", model=vision_model, task="layout_extraction",
-        session_id=session_id, latency_ms=tmr_layout.elapsed_ms,
-        outcome="success" if _valid(layout_desc) else "fail",
-    )
+    yield _tok("✅ **Vision Brain** done.\n\n")
 
-    ui_description = ""
-    if _valid(colors_desc):
-        ui_description += f"COLORS: {colors_desc.strip()}\n"
-    if _valid(layout_desc):
-        ui_description += f"LAYOUT: {layout_desc.strip()}\n"
-    if not ui_description:
-        ui_description = "No visual details extracted — build from user requirements only."
-        logger.warning("Vision Brain returned no useful data for session %s", session_id)
-
-    logger.info("Vision OK — %d chars", len(ui_description))
-    _api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-
-    # ── STEP 3: Build — Claude-first or local fallback ────────────────────────
-    #
-    # CLAUDE PATH (API key present):
-    #   moondream → Claude  — one shot, high quality, ~$0.01-0.03
-    #   No review loop needed — Claude gets it right first time.
-    #
-    # LOCAL PATH (no API key):
-    #   moondream → qwen2.5-coder → gemma3 review → fix loop → Claude escalation
-    #   Slower and lower quality without a GPU, but free.
-
+    # ── STEP 2: Builder Brain ────────────────────────────────────────────────
+    yield _tok("🔨 **Builder Brain** generating your app...\n\n")
+    t0 = time.perf_counter()
+    built_raw  = ""
     built_code = ""
 
-    if _CLAUDE_AVAILABLE and _api_key:
-        # ── Claude-first path ─────────────────────────────────────────────────
-        yield _tok("✅ **Vision Brain** done.\n\n🚀 **Builder Brain** (Claude) generating your app...\n\n")
-
-        built_raw = ""
-        with (Timer() if _obs else _NullTimer()) as tmr_claude:
-            try:
-                async for text in _stream_claude_build(
-                    api_key=_api_key,
-                    user_request=user_request,
-                    ui_description=ui_description,
-                    skill_context=skill_context,
-                ):
-                    built_raw += text
-                    yield _tok(text)
-                built_code = _extract_html(built_raw)
-                yield _tok("\n\n✅ **Builder Brain** done!\n\n")
-            except Exception as exc:
-                logger.warning("Claude build failed: %s — falling back to local", exc)
-                yield _tok(f"\n\n⚠️ Claude build failed ({exc}), falling back to local builder...\n\n")
-
-        _obs_record(
-            brain="builder_claude", model=_BUILD_MODEL, task="claude_direct_build",
-            session_id=session_id, latency_ms=tmr_claude.elapsed_ms,
-            tokens_out=len(built_raw.split()),
-            escalated=True,
-            outcome="success" if built_code else "fail",
-        )
-
-        if built_code:
-            # Skip straight to done — Claude builds correctly first time
-            yield _tok(
-                "Here's your build! What would you like to change?\n"
-                "1. Adjust colors, fonts, or spacing\n"
-                "2. Add features or interactions\n"
-                "3. Change a specific component\n"
+    if use_claude:
+        try:
+            async for text in _claude_build_stream(api_key, user_request, ui_spec, skill_ctx):
+                built_raw += text
+                yield _tok(text)
+            built_code = _extract_html(built_raw)
+            _obs_record(
+                brain="builder", model=_BUILD_MODEL, task="build",
+                session_id=session_id, latency_ms=(time.perf_counter() - t0) * 1000,
+                tokens_out=len(built_raw.split()), outcome="success" if built_code else "fail",
             )
+        except Exception as exc:
+            logger.warning("Claude Builder failed: %s", exc)
+            yield _tok(f"\n\n⚠️ Builder error: {exc}\n")
             return
-
-        # If Claude failed, fall through to local path below
-        logger.warning("Claude build returned empty — falling through to local path")
-
-    # ── LOCAL PATH (no API key, or Claude failed) ─────────────────────────────
-    yield _tok("✅ **Vision Brain** done.\n\n🔨 **Builder Brain** generating code...\n\n")
-
-    _build_user = (
-        f"[USER REQUIREMENTS — HIGHEST PRIORITY — FOLLOW THESE EXACTLY]\n"
-        f"{user_request}\n\n"
-        f"[VISUAL ANALYSIS FROM SCREENSHOT]\n{ui_description}"
-        f"{skill_context}\n\n"
-        "Build the complete HTML/CSS/JS app now. "
-        "User requirements above override all other context — "
-        "if the user specified exact colors, use those exact colors. "
-        "Start your response with ```html"
-    )
-
-    built_code_raw = ""
-    with (Timer() if _obs else _NullTimer()) as tmr_build:
+    else:
+        # Local builder (qwen2.5-coder)
+        _build_msg = (
+            f"[USER REQUIREMENTS — TOP PRIORITY]\n{user_request}\n\n"
+            f"[VISUAL ANALYSIS]\n{ui_spec}{skill_ctx}\n\n"
+            "Build the complete HTML/CSS/JS app. Start with ```html"
+        )
         try:
             _b_stream = ollama_client.run_chat_stream(
                 model=builder_model,
-                messages=[
-                    {"role": "system", "content": _BUILD_SYSTEM},
-                    {"role": "user",   "content": _build_user},
-                ],
+                messages=[{"role": "system", "content": _BUILD_SYSTEM}, {"role": "user", "content": _build_msg}],
                 temperature=0.3,
             )
             _b_aiter = _b_stream.__aiter__()
@@ -416,7 +385,7 @@ async def image_to_code_pipeline(
             while True:
                 try:
                     token = await asyncio.wait_for(asyncio.shield(_b_next), timeout=3.0)
-                    built_code_raw += token
+                    built_raw += token
                     yield _tok(token)
                     _b_next = asyncio.ensure_future(_b_aiter.__anext__())
                 except asyncio.TimeoutError:
@@ -424,96 +393,91 @@ async def image_to_code_pipeline(
                 except StopAsyncIteration:
                     break
         except Exception as exc:
-            logger.warning("Builder Brain failed: %s", exc)
             yield _tok(f"\n\n⚠️ Builder error: {exc}\n")
             return
+        built_code = _extract_html(built_raw)
 
-    _obs_record(
-        brain="builder_local", model=builder_model, task="local_build",
-        session_id=session_id, latency_ms=tmr_build.elapsed_ms,
-        tokens_out=len(built_code_raw.split()),
-        outcome="success" if built_code_raw else "fail",
-    )
+    logger.info("Builder OK — %d chars", len(built_code))
 
-    built_code = _extract_html(built_code_raw)
-    logger.info("Local builder OK — %d chars", len(built_code))
-
-    # ── Reviewer + fix loop (local path only) ────────────────────────────────
-    final_confidence = 50.0
-    last_review_text = ""
+    # ── STEP 3+: Reviewer Brain + Fixer Brain loop ───────────────────────────
+    last_review = ""
+    final_score = 50.0
 
     for attempt in range(_MAX_FIX_LOOPS + 1):
-        yield _tok(f"\n\n🔍 **Reviewer Brain** checking build quality...\n\n")
+        yield _tok(f"\n\n🔍 **Reviewer Brain** checking the build...\n\n")
+        t0 = time.perf_counter()
 
-        _review_user = (
-            f"[USER REQUIREMENTS — TOP PRIORITY]\n{user_request}\n\n"
-            f"[VISUAL ANALYSIS]\n{ui_description}\n\n"
-            f"[GENERATED CODE]\n```html\n{built_code}\n```"
-        )
-        _r_task = asyncio.ensure_future(
-            ollama_client.run_chat(
-                reviewer_model,
-                [
-                    {"role": "system", "content": _REVIEWER_SYSTEM},
-                    {"role": "user",   "content": _review_user},
-                ],
-                timeout=90,
+        if use_claude:
+            try:
+                review_text = await _claude_review(api_key, user_request, ui_spec, built_code)
+            except Exception as exc:
+                logger.warning("Claude Reviewer failed: %s — accepting build", exc)
+                review_text = "PASS"
+        else:
+            _r_task = asyncio.ensure_future(
+                ollama_client.run_chat(
+                    reviewer_model,
+                    [{"role": "system", "content": _REVIEW_SYSTEM},
+                     {"role": "user", "content": f"[USER REQUIREMENTS]\n{user_request}\n\n[SPEC]\n{ui_spec}\n\n[CODE]\n```html\n{built_code}\n```"}],
+                    timeout=90,
+                )
             )
-        )
-        review_raw = ""
-        with (Timer() if _obs else _NullTimer()) as tmr_review:
+            review_text = ""
             while not _r_task.done():
                 try:
-                    review_raw = await asyncio.wait_for(asyncio.shield(_r_task), timeout=3.0)
+                    review_text = await asyncio.wait_for(asyncio.shield(_r_task), timeout=3.0)
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"
-            if not review_raw:
+            if not review_text:
                 try:
-                    review_raw = _r_task.result()
-                except Exception as exc:
-                    logger.warning("Reviewer failed: %s — accepting build", exc)
-                    review_raw = "PASS"
+                    review_text = _r_task.result()
+                except Exception:
+                    review_text = "PASS"
 
-        is_pass, confidence, issues = _parse_review(review_raw)
-        final_confidence = confidence
-        last_review_text = review_raw
-        logger.info("Reviewer attempt %d: pass=%s score=%.0f", attempt + 1, is_pass, confidence)
-
+        is_pass, score, issues = _parse_review(review_text)
+        last_review  = review_text
+        final_score  = score
         _obs_record(
-            brain="reviewer_local", model=reviewer_model,
-            task=f"review_attempt_{attempt+1}",
-            session_id=session_id, latency_ms=tmr_review.elapsed_ms,
-            confidence=confidence,
-            outcome="success" if is_pass else "partial",
+            brain="reviewer", model=_REVIEW_MODEL if use_claude else reviewer_model,
+            task=f"review_{attempt+1}", session_id=session_id,
+            latency_ms=(time.perf_counter() - t0) * 1000,
+            confidence=score, outcome="success" if is_pass else "partial",
         )
 
         if is_pass:
-            yield _tok(f"✅ **Reviewer Brain** approved! (confidence {confidence:.0f}/100)\n\n")
+            yield _tok(f"✅ **Reviewer Brain** approved! (score {score:.0f}/100)\n\n")
             break
 
-        yield _tok(f"🔎 Score: {confidence:.0f}/100 — {len(issues)} issue(s) found.\n\n")
+        yield _tok(f"🔎 Score: {score:.0f}/100 — {len(issues)} issue(s) found.\n\n")
 
         if attempt >= _MAX_FIX_LOOPS:
+            yield _tok("⚠️ Max fix cycles reached — delivering best version.\n\n")
             break
 
-        yield _tok(f"🔧 **Builder Brain** fixing issues (pass {attempt + 1}/{_MAX_FIX_LOOPS})...\n\n")
-        _fix_user = (
-            f"[USER REQUIREMENTS — TOP PRIORITY]\n{user_request}\n\n"
-            f"[VISUAL ANALYSIS]\n{ui_description}\n\n"
-            f"[YOUR PREVIOUS CODE]\n```html\n{built_code}\n```\n\n"
-            f"[REVIEWER ISSUES — FIX ALL OF THESE]\n{review_raw}\n\n"
-            "Fix every issue. User requirements take absolute highest priority. "
-            "Output the COMPLETE updated HTML file. Start with ```html"
-        )
+        # ── Fixer Brain ───────────────────────────────────────────────────────
+        yield _tok(f"🔧 **Fixer Brain** fixing issues (round {attempt + 1}/{_MAX_FIX_LOOPS})...\n\n")
+        t0 = time.perf_counter()
         fixed_raw = ""
-        with (Timer() if _obs else _NullTimer()) as tmr_fix:
+
+        if use_claude:
+            try:
+                async for text in _claude_fix_stream(api_key, user_request, ui_spec, built_code, review_text):
+                    fixed_raw += text
+                    yield _tok(text)
+            except Exception as exc:
+                logger.warning("Claude Fixer failed: %s", exc)
+                yield _tok(f"\n\n⚠️ Fixer error: {exc} — keeping previous build.\n\n")
+                break
+        else:
+            _fix_msg = (
+                f"[USER REQUIREMENTS]\n{user_request}\n\n[SPEC]\n{ui_spec}\n\n"
+                f"[PREVIOUS CODE]\n```html\n{built_code}\n```\n\n"
+                f"[ISSUES TO FIX]\n{review_text}\n\nOutput the COMPLETE fixed file. Start with ```html"
+            )
             try:
                 _f_stream = ollama_client.run_chat_stream(
                     model=builder_model,
-                    messages=[
-                        {"role": "system", "content": _FIX_SYSTEM},
-                        {"role": "user",   "content": _fix_user},
-                    ],
+                    messages=[{"role": "system", "content": _FIX_SYSTEM}, {"role": "user", "content": _fix_msg}],
                     temperature=0.2,
                 )
                 _f_aiter = _f_stream.__aiter__()
@@ -529,54 +493,17 @@ async def image_to_code_pipeline(
                     except StopAsyncIteration:
                         break
             except Exception as exc:
-                logger.warning("Fix Brain failed: %s", exc)
+                logger.warning("Local Fixer failed: %s", exc)
                 break
 
         _obs_record(
-            brain="builder_fix", model=builder_model, task=f"fix_attempt_{attempt+1}",
-            session_id=session_id, latency_ms=tmr_fix.elapsed_ms,
-            tokens_out=len(fixed_raw.split()),
-            outcome="success" if fixed_raw else "fail",
+            brain="fixer", model=_FIX_MODEL if use_claude else builder_model,
+            task=f"fix_{attempt+1}", session_id=session_id,
+            latency_ms=(time.perf_counter() - t0) * 1000,
+            tokens_out=len(fixed_raw.split()), outcome="success" if fixed_raw else "fail",
         )
         if fixed_raw:
             built_code = _extract_html(fixed_raw)
-
-    # ── Local escalation: Claude fixes what local models couldn't ─────────────
-    if not _parse_review(last_review_text)[0] and final_confidence < _ESCALATE_THRESHOLD:
-        if _CLAUDE_AVAILABLE and _api_key:
-            yield _tok(
-                f"\n\n🚀 **Executive Brain** (Claude) finalizing "
-                f"— local score {final_confidence:.0f}/100...\n\n"
-            )
-            escalated_raw = ""
-            with (Timer() if _obs else _NullTimer()) as tmr_esc:
-                try:
-                    async for text in _stream_claude_fix(
-                        api_key=_api_key,
-                        user_request=user_request,
-                        ui_description=ui_description,
-                        built_code=built_code,
-                        review_result=last_review_text,
-                    ):
-                        escalated_raw += text
-                        yield _tok(text)
-                    if escalated_raw:
-                        yield _tok("\n\n✅ Done!\n\n")
-                except Exception as exc:
-                    logger.warning("Claude escalation failed: %s", exc)
-                    yield _tok("\n\n⚠️ Escalation failed — showing best local version.\n\n")
-
-            _obs_record(
-                brain="escalation", model=_ESCALATE_MODEL, task="claude_fix",
-                session_id=session_id, latency_ms=tmr_esc.elapsed_ms,
-                escalated=True, tokens_out=len(escalated_raw.split()),
-                outcome="success" if escalated_raw else "fail",
-            )
-        else:
-            yield _tok(
-                f"\n\n⚠️ Local score: {final_confidence:.0f}/100. "
-                "Add ANTHROPIC_API_KEY to Railway env vars for Claude-powered builds.\n\n"
-            )
 
     # ── Done ─────────────────────────────────────────────────────────────────
     yield _tok(
@@ -585,11 +512,3 @@ async def image_to_code_pipeline(
         "2. Add features or interactions\n"
         "3. Change a specific component\n"
     )
-
-
-# ── Null timer (when observability import fails) ──────────────────────────────
-
-class _NullTimer:
-    elapsed_ms = 0.0
-    def __enter__(self): return self
-    def __exit__(self, *_): pass
