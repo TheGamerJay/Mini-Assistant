@@ -52,13 +52,15 @@ log = logging.getLogger(__name__)
 # Config
 # ---------------------------------------------------------------------------
 
-ENABLED           = os.environ.get("EMAIL_AUTOMATION_ENABLED", "true").lower() == "true"
-INTERVAL_SECONDS  = 600          # 10 minutes
-WINDOW_24H        = 86400        # seconds
-WINDOW_7D         = 7 * 86400
-WINDOW_72H        = 3 * 86400
-WINDOW_14D        = 14 * 86400
-MAX_AUTO_PER_DAY  = 3
+ENABLED              = os.environ.get("EMAIL_AUTOMATION_ENABLED", "true").lower() == "true"
+INTERVAL_SECONDS     = 600          # 10 minutes
+WINDOW_24H           = 86400        # seconds
+WINDOW_7D            = 7 * 86400
+WINDOW_72H           = 3 * 86400
+WINDOW_14D           = 14 * 86400
+MAX_AUTO_PER_DAY     = 3
+EMAIL_MAX_PER_RUN    = int(os.environ.get("EMAIL_MAX_PER_RUN", "500"))
+CONVERSION_COOLDOWN  = WINDOW_24H   # skip automation if user converted within this window
 
 _PLAN_LIMITS: dict = {
     "free":     50,
@@ -171,11 +173,46 @@ def _reminder_content(name: str) -> tuple:
 
 
 # ---------------------------------------------------------------------------
+# Conversion cooldown
+# ---------------------------------------------------------------------------
+
+async def _recently_converted(db, user_id: str) -> bool:
+    """
+    Return True if the user made a successful payment in the last 24h.
+    Guards against sending "Still thinking about upgrading?" to someone who
+    just paid but whose Stripe webhook hasn't updated the plan field yet.
+    """
+    try:
+        user = await db["users"].find_one(
+            {"id": user_id},
+            {"last_payment_succeeded_at": 1},
+        )
+        if not user:
+            return False
+        last_paid = user.get("last_payment_succeeded_at") or 0
+        return (time.time() - last_paid) < CONVERSION_COOLDOWN
+    except Exception as exc:
+        log.warning("_recently_converted check failed (non-fatal): %s", exc)
+        return False  # fail open — better to send than to crash
+
+
+# ---------------------------------------------------------------------------
 # Spam guard
 # ---------------------------------------------------------------------------
 
 async def _can_send(db, user_id: str, email_type: str) -> bool:
     """Return True if this user can receive this automated email type right now."""
+    # Fast pre-check: if last_automation_sent_at is within the last hour, skip
+    # all DB log queries — protects against burst sends on large user bases.
+    try:
+        u = await db["users"].find_one({"id": user_id}, {"last_automation_sent_at": 1})
+        if u:
+            last_auto = u.get("last_automation_sent_at") or 0
+            if (time.time() - last_auto) < 3600:   # sent something within the last hour
+                return False
+    except Exception:
+        pass  # fall through to full log check
+
     cutoff = time.time() - WINDOW_24H
 
     # Rule 1: same type not already sent in 24h
@@ -273,7 +310,7 @@ async def _send_automated(
         "html":    html,
     }
 
-    return await send_with_log(
+    ok = await send_with_log(
         db=db,
         user_id=user_id,
         email=to_email,
@@ -287,12 +324,24 @@ async def _send_automated(
         sequence_step=sequence_step,
     )
 
+    # Stamp user doc with send time — enables fast pre-check in _can_send
+    if ok:
+        try:
+            await db["users"].update_one(
+                {"id": user_id},
+                {"$set": {"last_automation_sent_at": time.time()}},
+            )
+        except Exception as exc:
+            log.warning("last_automation_sent_at update failed (non-fatal): %s", exc)
+
+    return ok
+
 
 # ---------------------------------------------------------------------------
 # Trigger A: followup_upgrade
 # ---------------------------------------------------------------------------
 
-async def _check_followup_upgrades(db) -> int:
+async def _check_followup_upgrades(db, budget: dict) -> int:
     """
     Find free users who got a welcome email 24–168h ago and haven't upgraded.
     Send them a 'Still thinking about upgrading?' nudge.
@@ -316,6 +365,9 @@ async def _check_followup_upgrades(db) -> int:
     log.debug("followup_upgrade: %d candidates from welcome emails", len(candidates))
 
     for row in candidates:
+        if budget["remaining"] <= 0:
+            break
+
         user_id    = row["_id"]
         user_email = row["email"]
 
@@ -325,6 +377,10 @@ async def _check_followup_upgrades(db) -> int:
             {"plan": 1, "name": 1, "email": 1},
         )
         if not user or user.get("plan", "free") != "free":
+            continue
+
+        # Skip if user converted (paid) within the last 24h — guards webhook delay
+        if await _recently_converted(db, user_id):
             continue
 
         if not await _can_send(db, user_id, "followup_upgrade"):
@@ -342,6 +398,7 @@ async def _check_followup_upgrades(db) -> int:
         )
         if ok:
             sent += 1
+            budget["remaining"] -= 1
 
     return sent
 
@@ -350,7 +407,7 @@ async def _check_followup_upgrades(db) -> int:
 # Trigger B: low_credits
 # ---------------------------------------------------------------------------
 
-async def _check_low_credits(db) -> int:
+async def _check_low_credits(db, budget: dict) -> int:
     """
     Find paid subscribers with < 20% credits left and no topup in the last 24h.
     Returns number of emails sent.
@@ -366,6 +423,9 @@ async def _check_low_credits(db) -> int:
     ).to_list(None)
 
     for user in users:
+        if budget["remaining"] <= 0:
+            break
+
         user_id  = user.get("id", "")
         to_email = user.get("email", "")
         if not user_id or not to_email:
@@ -399,6 +459,7 @@ async def _check_low_credits(db) -> int:
         )
         if ok:
             sent += 1
+            budget["remaining"] -= 1
 
     return sent
 
@@ -407,7 +468,7 @@ async def _check_low_credits(db) -> int:
 # Trigger C: payment_failed
 # ---------------------------------------------------------------------------
 
-async def _check_payment_failed(db) -> int:
+async def _check_payment_failed(db, budget: dict) -> int:
     """
     Find users with payment_failure_count >= 1 and no payment_failed email in 24h.
     Returns number of emails sent.
@@ -420,9 +481,16 @@ async def _check_payment_failed(db) -> int:
     ).to_list(None)
 
     for user in users:
+        if budget["remaining"] <= 0:
+            break
+
         user_id  = user.get("id", "")
         to_email = user.get("email", "")
         if not user_id or not to_email:
+            continue
+
+        # Skip if they just paid successfully (webhook delay guard)
+        if await _recently_converted(db, user_id):
             continue
 
         if not await _can_send(db, user_id, "payment_failed"):
@@ -434,6 +502,7 @@ async def _check_payment_failed(db) -> int:
         )
         if ok:
             sent += 1
+            budget["remaining"] -= 1
 
     return sent
 
@@ -442,7 +511,7 @@ async def _check_payment_failed(db) -> int:
 # Trigger D: reminder
 # ---------------------------------------------------------------------------
 
-async def _check_reminders(db) -> int:
+async def _check_reminders(db, budget: dict) -> int:
     """
     Find free users who got a followup_upgrade email 72h–14d ago and are still free.
     Send them a final 'reminder' nudge.
@@ -466,6 +535,9 @@ async def _check_reminders(db) -> int:
     log.debug("reminder: %d candidates from followup_upgrade emails", len(candidates))
 
     for row in candidates:
+        if budget["remaining"] <= 0:
+            break
+
         user_id    = row["_id"]
         user_email = row["email"]
 
@@ -475,6 +547,10 @@ async def _check_reminders(db) -> int:
             {"plan": 1, "name": 1, "email": 1},
         )
         if not user or user.get("plan", "free") != "free":
+            continue
+
+        # Skip if they just converted (webhook delay guard)
+        if await _recently_converted(db, user_id):
             continue
 
         if not await _can_send(db, user_id, "reminder"):
@@ -492,6 +568,7 @@ async def _check_reminders(db) -> int:
         )
         if ok:
             sent += 1
+            budget["remaining"] -= 1
 
     return sent
 
@@ -504,18 +581,31 @@ async def _run_once(db) -> None:
     """Run all four triggers once. Catches all exceptions per-trigger."""
     log.info("email_automation: running triggers")
 
-    for label, coro in [
-        ("followup_upgrade", _check_followup_upgrades(db)),
-        ("low_credits",      _check_low_credits(db)),
-        ("payment_failed",   _check_payment_failed(db)),
-        ("reminder",         _check_reminders(db)),
+    # Shared budget — enforces global cap across all triggers in one run
+    budget = {"remaining": EMAIL_MAX_PER_RUN}
+
+    for label, trigger_fn, args in [
+        ("followup_upgrade", _check_followup_upgrades, (db, budget)),
+        ("low_credits",      _check_low_credits,       (db, budget)),
+        ("payment_failed",   _check_payment_failed,    (db, budget)),
+        ("reminder",         _check_reminders,         (db, budget)),
     ]:
+        if budget["remaining"] <= 0:
+            log.warning(
+                "email_automation: global send limit (%d) reached — stopping run early",
+                EMAIL_MAX_PER_RUN,
+            )
+            break
         try:
-            count = await coro
+            count = await trigger_fn(*args)
             if count:
                 log.info("email_automation: %s → sent %d email(s)", label, count)
         except Exception as exc:
             log.error("email_automation: %s trigger failed: %s", label, exc)
+
+    sent_total = EMAIL_MAX_PER_RUN - budget["remaining"]
+    if sent_total:
+        log.info("email_automation: run complete — %d total email(s) sent", sent_total)
 
 
 async def start_email_automation(db) -> None:
