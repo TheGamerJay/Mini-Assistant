@@ -803,6 +803,21 @@ async def extract_text(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@app.get("/api/observatory")
+async def observatory():
+    """
+    Ceiling architecture: observability dashboard stats.
+    Returns aggregate telemetry from the last 1000 brain calls.
+    """
+    try:
+        from mini_assistant.observability import summary_stats, get_recent
+        stats   = summary_stats()
+        recent  = get_recent(20)
+        return JSONResponse({"stats": stats, "recent_calls": recent})
+    except Exception as exc:
+        return JSONResponse({"error": str(exc), "stats": {}, "recent_calls": []})
+
+
 @app.get("/api/health")
 async def health_check():
     """Health check: reports ComfyUI connectivity and checkpoint availability."""
@@ -2111,6 +2126,7 @@ async def chat_stream(req: ChatRequest):
                 vision_model=_reg_model_name("vision"),
                 builder_model=_reg_model_name("coder"),
                 reviewer_model=_reg_model_name("router"),
+                session_id=session_id,
             ):
                 yield _sse
                 # Accumulate reply text for session memory
@@ -2163,6 +2179,20 @@ async def chat_stream(req: ChatRequest):
                     err = _friendly_error(exc)
                 yield f"data: {_json.dumps({'t': err})}\n\n"
                 reply_text = err
+
+        # ── Observability: log this brain call (non-fatal) ────────────────────
+        try:
+            from mini_assistant.observability import BrainCall, record as _obs_record
+            _obs_record(BrainCall(
+                brain=execution_intent,
+                model=_active_model,
+                task=effective_msg[:80],
+                session_id=session_id,
+                tokens_out=len(reply_text.split()),
+                outcome="success" if reply_text else "fail",
+            ))
+        except Exception:
+            pass
 
         # ── Post-processing: session memory (non-fatal) ───────────────────────
         memory_facts_stored = []
