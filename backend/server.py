@@ -3754,6 +3754,7 @@ async def health_check(deep: bool = False):
         comfyui_check = checks_by_name.get("comfyui", {})
         report["ollama"]  = "connected" if ollama_check.get("status") == "ok" and ollama_check.get("http_status", 0) == 200 else "disconnected"
         report["comfyui"] = "connected" if comfyui_check.get("status") == "ok" and comfyui_check.get("http_status", 0) == 200 else "disconnected"
+        report["openai"]  = "connected" if os.environ.get("OPENAI_API_KEY") else "disconnected"
         return report
     except Exception:
         # Fallback to legacy check if Phase 10 unavailable
@@ -3772,6 +3773,7 @@ async def health_check(deep: bool = False):
             "status":  "healthy",
             "ollama":  "connected" if ollama_client else "disconnected",
             "comfyui": comfyui_status,
+            "openai":  "connected" if os.environ.get("OPENAI_API_KEY") else "disconnected",
             "whisper": "loaded" if whisper_model else "not_loaded",
         }
 
