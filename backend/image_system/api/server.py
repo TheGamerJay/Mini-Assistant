@@ -26,6 +26,8 @@ except ImportError:
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from .models import (
@@ -99,6 +101,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+class COOPMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: StarletteRequest, call_next):
+        response = await call_next(request)
+        response.headers["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
+        return response
+
+app.add_middleware(COOPMiddleware)
 
 # ---------------------------------------------------------------------------
 # Phase 10: Production middleware stack

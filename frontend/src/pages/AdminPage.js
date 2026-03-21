@@ -8,8 +8,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Users, MessageSquare, ThumbsUp, ThumbsDown, Image,
-  Shield, Trash2, ChevronLeft, RefreshCw, LogOut,
+  Shield, Trash2, RefreshCw, LogOut, Zap, CreditCard,
   Activity, Server, AlertCircle, CheckCircle, Clock,
+  UserPlus, BarChart2, List, ChevronLeft, Bot, Cpu,
 } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { api, setToken, clearToken } from '../api/client';
@@ -22,6 +23,15 @@ function timeAgo(ts) {
   if (!ts) return '—';
   const d = new Date(ts * 1000);
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function timeStamp(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts * 1000);
+  return d.toLocaleString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true,
+  });
 }
 
 function fmt(n) {
@@ -40,6 +50,7 @@ function StatCard({ icon: Icon, label, value, sub, color = 'cyan' }) {
     amber:   'text-amber-400 bg-amber-500/10 border-amber-500/20',
     red:     'text-red-400 bg-red-500/10 border-red-500/20',
     slate:   'text-slate-400 bg-white/5 border-white/10',
+    blue:    'text-blue-400 bg-blue-500/10 border-blue-500/20',
   };
   return (
     <div className={`rounded-2xl border p-5 flex items-center gap-4 ${colors[color]}`}>
@@ -59,6 +70,35 @@ function StatusDot({ ok }) {
     : ok
       ? <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse inline-block" />
       : <span className="w-2 h-2 rounded-full bg-red-500 inline-block" />;
+}
+
+function PlanBadge({ plan }) {
+  const cfg = {
+    free:     'text-slate-500 bg-white/5 border-white/10',
+    standard: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20',
+    pro:      'text-violet-400 bg-violet-500/10 border-violet-500/20',
+    team:     'text-amber-400 bg-amber-500/10 border-amber-500/20',
+  };
+  return (
+    <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${cfg[plan] || cfg.free}`}>
+      {plan || 'free'}
+    </span>
+  );
+}
+
+function ActivityTypeBadge({ type }) {
+  if (type === 'image_generated') {
+    return (
+      <span className="flex items-center gap-1 text-[10px] font-mono text-violet-400 bg-violet-500/10 border border-violet-500/20 px-2 py-0.5 rounded-full">
+        <Image size={9} /> image
+      </span>
+    );
+  }
+  return (
+    <span className="flex items-center gap-1 text-[10px] font-mono text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-2 py-0.5 rounded-full">
+      <MessageSquare size={9} /> chat
+    </span>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -149,14 +189,18 @@ function AdminLoginForm({ onLogin }) {
 // Admin Dashboard
 // ---------------------------------------------------------------------------
 function AdminDashboard({ adminUser, onLogout }) {
-  const [stats, setStats] = useState(null);
-  const [users, setUsers] = useState([]);
+  const [stats, setStats]               = useState(null);
+  const [users, setUsers]               = useState([]);
+  const [activity, setActivity]         = useState([]);
   const [loadingStats, setLoadingStats] = useState(true);
   const [loadingUsers, setLoadingUsers] = useState(true);
-  const [serverStatus, setServerStatus] = useState({ backend: null, ollama: null, comfyui: null });
-  const [deletingId, setDeletingId] = useState(null);
-  const [togglingId, setTogglingId] = useState(null);
-  const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'users'
+  const [loadingActivity, setLoadingActivity] = useState(false);
+  const [serverStatus, setServerStatus] = useState({ backend: null, openai: null });
+  const [deletingId, setDeletingId]     = useState(null);
+  const [togglingId, setTogglingId]     = useState(null);
+  const [grantingId, setGrantingId]     = useState(null);
+  const [grantInput, setGrantInput]     = useState({}); // { [userId]: string }
+  const [activeTab, setActiveTab]       = useState('overview'); // 'overview' | 'users' | 'activity'
 
   const loadStats = useCallback(async () => {
     setLoadingStats(true);
@@ -182,16 +226,27 @@ function AdminDashboard({ adminUser, onLogout }) {
     }
   }, []);
 
+  const loadActivity = useCallback(async () => {
+    setLoadingActivity(true);
+    try {
+      const data = await api.adminGetActivity(100);
+      setActivity(data.activity || []);
+    } catch (err) {
+      toast.error('Failed to load activity: ' + (err.message || 'unknown error'));
+    } finally {
+      setLoadingActivity(false);
+    }
+  }, []);
+
   const checkStatus = useCallback(async () => {
     try {
       const data = await api.mainHealth();
       setServerStatus({
         backend: true,
-        ollama: data.ollama === 'connected',
-        comfyui: data.comfyui === 'connected',
+        openai: data.openai === 'connected',
       });
     } catch {
-      setServerStatus({ backend: false, ollama: false, comfyui: false });
+      setServerStatus({ backend: false, openai: false });
     }
   }, []);
 
@@ -200,6 +255,13 @@ function AdminDashboard({ adminUser, onLogout }) {
     loadUsers();
     checkStatus();
   }, [loadStats, loadUsers, checkStatus]);
+
+  // Load activity when that tab is first opened
+  useEffect(() => {
+    if (activeTab === 'activity' && activity.length === 0) {
+      loadActivity();
+    }
+  }, [activeTab, activity.length, loadActivity]);
 
   async function handleDeleteUser(u) {
     if (!window.confirm(`Delete ${u.name} (${u.email})? This removes all their data and cannot be undone.`)) return;
@@ -230,6 +292,26 @@ function AdminDashboard({ adminUser, onLogout }) {
     }
   }
 
+  async function handleGrantCredits(u) {
+    const raw = grantInput[u.id];
+    const credits = parseInt(raw, 10);
+    if (isNaN(credits) || credits < 0) {
+      toast.error('Enter a valid credit amount (0 or more).');
+      return;
+    }
+    setGrantingId(u.id);
+    try {
+      await api.adminSetCredits(u.id, credits);
+      setUsers(prev => prev.map(x => x.id === u.id ? { ...x, credits } : x));
+      setGrantInput(prev => ({ ...prev, [u.id]: '' }));
+      toast.success(`Set ${u.name}'s credits to ${credits}.`);
+    } catch (err) {
+      toast.error(err.message || 'Failed to set credits.');
+    } finally {
+      setGrantingId(null);
+    }
+  }
+
   const positiveRate = stats && (stats.thumbs_up + stats.thumbs_down) > 0
     ? Math.round(stats.thumbs_up / (stats.thumbs_up + stats.thumbs_down) * 100)
     : null;
@@ -251,11 +333,10 @@ function AdminDashboard({ adminUser, onLogout }) {
           {/* Server status pills */}
           <div className="hidden md:flex items-center gap-3 text-[11px] text-slate-500 font-mono">
             <span className="flex items-center gap-1.5"><StatusDot ok={serverStatus.backend} /> Backend</span>
-            <span className="flex items-center gap-1.5"><StatusDot ok={serverStatus.ollama} /> AI</span>
-            <span className="flex items-center gap-1.5"><StatusDot ok={serverStatus.comfyui} /> ComfyUI</span>
+            <span className="flex items-center gap-1.5"><StatusDot ok={serverStatus.openai} /> Claude API</span>
           </div>
           <button
-            onClick={() => { loadStats(); loadUsers(); checkStatus(); }}
+            onClick={() => { loadStats(); loadUsers(); checkStatus(); if (activeTab === 'activity') loadActivity(); }}
             className="p-2 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all"
             title="Refresh"
           >
@@ -273,8 +354,9 @@ function AdminDashboard({ adminUser, onLogout }) {
       {/* Tab nav */}
       <div className="flex-shrink-0 flex items-center gap-1 px-6 pt-4 pb-0">
         {[
-          { id: 'overview', label: 'Overview', icon: Activity },
-          { id: 'users',    label: `Users (${users.length})`, icon: Users },
+          { id: 'overview',  label: 'Overview',              icon: BarChart2 },
+          { id: 'users',     label: `Users (${users.length})`, icon: Users },
+          { id: 'activity',  label: 'Activity',              icon: List },
         ].map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -298,18 +380,20 @@ function AdminDashboard({ adminUser, onLogout }) {
             {/* Stats grid */}
             {loadingStats ? (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {Array.from({ length: 6 }).map((_, i) => (
+                {Array.from({ length: 8 }).map((_, i) => (
                   <div key={i} className="rounded-2xl border border-white/5 bg-white/[0.02] p-5 h-20 animate-pulse" />
                 ))}
               </div>
             ) : (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                <StatCard icon={Users}         label="Total Users"    value={stats?.total_users}    sub={`${stats?.total_admins || 0} admin(s)`} color="cyan" />
-                <StatCard icon={MessageSquare} label="Total Chats"    value={stats?.total_chats}    color="violet" />
-                <StatCard icon={Activity}      label="Total Messages" value={stats?.total_messages} color="amber" />
-                <StatCard icon={Image}         label="Image Sessions" value={stats?.total_image_docs} color="slate" />
-                <StatCard icon={ThumbsUp}      label="Thumbs Up"      value={stats?.thumbs_up}      color="emerald" />
-                <StatCard icon={ThumbsDown}    label="Thumbs Down"    value={stats?.thumbs_down}    color="red" />
+                <StatCard icon={Users}         label="Total Users"         value={stats?.total_users}             sub={`${stats?.total_admins || 0} admin(s)`} color="cyan" />
+                <StatCard icon={UserPlus}      label="New This Week"       value={stats?.new_users_week}          color="emerald" />
+                <StatCard icon={MessageSquare} label="Chat Messages"       value={stats?.total_chat_messages}     color="violet" />
+                <StatCard icon={Image}         label="Images Generated"    value={stats?.total_images_generated}  color="blue" />
+                <StatCard icon={Zap}           label="Credits Remaining"   value={stats?.total_credits_remaining} sub="across all free users" color="amber" />
+                <StatCard icon={Activity}      label="Total Activity"      value={stats?.total_activity_events}   color="slate" />
+                <StatCard icon={ThumbsUp}      label="Thumbs Up"           value={stats?.thumbs_up}               color="emerald" />
+                <StatCard icon={ThumbsDown}    label="Thumbs Down"         value={stats?.thumbs_down}             color="red" />
               </div>
             )}
 
@@ -342,11 +426,12 @@ function AdminDashboard({ adminUser, onLogout }) {
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {[
-                  { key: 'backend', label: 'Backend API', desc: 'Railway server' },
-                  { key: 'ollama',  label: 'AI Engine',   desc: 'Local inference' },
-                  { key: 'comfyui', label: 'ComfyUI',     desc: 'Image generation' },
-                ].map(({ key, label, desc }) => {
-                  const ok = serverStatus[key];
+                  { key: 'backend', label: 'Backend API',  desc: 'Railway server',       icon: Server },
+                  { key: 'openai',  label: 'Claude API',   desc: 'Anthropic / Claude',   icon: Bot },
+                  { key: 'dalle',   label: 'DALL-E 3',     desc: 'OpenAI image API',     icon: Image },
+                ].map(({ key, label, desc, icon: Icon }) => {
+                  // dalle mirrors openai status since both go through OpenAI
+                  const ok = key === 'dalle' ? serverStatus.openai : serverStatus[key];
                   return (
                     <div key={key} className={`flex items-center gap-3 p-3 rounded-xl border ${ok === true ? 'border-emerald-500/20 bg-emerald-500/5' : ok === false ? 'border-red-500/20 bg-red-500/5' : 'border-white/5 bg-white/[0.02]'}`}>
                       {ok === true
@@ -386,14 +471,15 @@ function AdminDashboard({ adminUser, onLogout }) {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-white/5">
-                      {['User', 'Email', 'Role', 'Joined', 'Actions'].map(h => (
-                        <th key={h} className="px-4 py-3 text-left text-[11px] font-mono uppercase tracking-widest text-slate-600">{h}</th>
+                      {['User', 'Email', 'Auth', 'Role', 'Plan', 'Credits', 'Grant Credits', 'Joined', 'Actions'].map(h => (
+                        <th key={h} className="px-4 py-3 text-left text-[11px] font-mono uppercase tracking-widest text-slate-600 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {users.map(u => (
                       <tr key={u.id} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
+
                         {/* Avatar + name */}
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2.5">
@@ -402,13 +488,24 @@ function AdminDashboard({ adminUser, onLogout }) {
                                 ? <img src={u.avatar} alt="" className="w-full h-full object-cover" />
                                 : (u.name?.[0] || '?').toUpperCase()}
                             </div>
-                            <span className="text-slate-200 font-medium text-sm">{u.name}</span>
+                            <span className="text-slate-200 font-medium text-sm whitespace-nowrap">{u.name}</span>
                             {u.id === adminUser.id && (
                               <span className="text-[9px] font-mono text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20">you</span>
                             )}
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-slate-500 font-mono text-xs">{u.email}</td>
+
+                        {/* Email */}
+                        <td className="px-4 py-3 text-slate-500 font-mono text-xs whitespace-nowrap">{u.email}</td>
+
+                        {/* Auth method */}
+                        <td className="px-4 py-3">
+                          {u.google_linked
+                            ? <span className="text-[10px] font-mono text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded-full">Google</span>
+                            : <span className="text-[10px] font-mono text-slate-600 bg-white/5 border border-white/10 px-2 py-0.5 rounded-full">Email</span>
+                          }
+                        </td>
+
                         {/* Role badge + toggle */}
                         <td className="px-4 py-3">
                           <button
@@ -424,7 +521,47 @@ function AdminDashboard({ adminUser, onLogout }) {
                             {togglingId === u.id ? '…' : u.role}
                           </button>
                         </td>
-                        <td className="px-4 py-3 text-slate-600 text-xs font-mono">{timeAgo(u.created_at)}</td>
+
+                        {/* Plan */}
+                        <td className="px-4 py-3">
+                          <PlanBadge plan={u.plan} />
+                        </td>
+
+                        {/* Credits */}
+                        <td className="px-4 py-3">
+                          <span className={`text-sm font-mono font-semibold ${
+                            u.plan && u.plan !== 'free' ? 'text-emerald-400' :
+                            u.credits > 5 ? 'text-slate-300' :
+                            u.credits > 0 ? 'text-amber-400' : 'text-red-400'
+                          }`}>
+                            {u.plan && u.plan !== 'free' ? '∞' : fmt(u.credits ?? 0)}
+                          </span>
+                        </td>
+
+                        {/* Grant credits input */}
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="number"
+                              min="0"
+                              placeholder="amount"
+                              value={grantInput[u.id] || ''}
+                              onChange={e => setGrantInput(prev => ({ ...prev, [u.id]: e.target.value }))}
+                              className="w-20 px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-slate-200 text-xs font-mono outline-none focus:border-cyan-500/40 transition-all"
+                            />
+                            <button
+                              disabled={grantingId === u.id || !grantInput[u.id]}
+                              onClick={() => handleGrantCredits(u)}
+                              className="px-2 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-[10px] font-mono hover:bg-cyan-500/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              {grantingId === u.id ? '…' : 'Set'}
+                            </button>
+                          </div>
+                        </td>
+
+                        {/* Joined */}
+                        <td className="px-4 py-3 text-slate-600 text-xs font-mono whitespace-nowrap">{timeAgo(u.created_at)}</td>
+
                         {/* Delete */}
                         <td className="px-4 py-3">
                           {u.id !== adminUser.id && (
@@ -446,6 +583,65 @@ function AdminDashboard({ adminUser, onLogout }) {
             )}
           </div>
         )}
+
+        {/* ── ACTIVITY TAB ── */}
+        {activeTab === 'activity' && (
+          <div className="rounded-2xl border border-white/10 bg-[#13131f] overflow-hidden">
+            <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                <List size={14} className="text-amber-400" /> Recent Activity
+              </h2>
+              <div className="flex items-center gap-3">
+                <span className="text-[11px] font-mono text-slate-600">{activity.length} events</span>
+                <button
+                  onClick={loadActivity}
+                  className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all"
+                  title="Refresh activity"
+                >
+                  <RefreshCw size={13} className={loadingActivity ? 'animate-spin' : ''} />
+                </button>
+              </div>
+            </div>
+
+            {loadingActivity ? (
+              <div className="px-6 py-10 text-center text-slate-600 text-sm">Loading activity…</div>
+            ) : activity.length === 0 ? (
+              <div className="px-6 py-10 text-center text-slate-600 text-sm">No activity recorded yet.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-white/5">
+                      {['User', 'Email', 'Action', 'Credits Used', 'Timestamp'].map(h => (
+                        <th key={h} className="px-4 py-3 text-left text-[11px] font-mono uppercase tracking-widest text-slate-600 whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activity.map((a, i) => (
+                      <tr key={i} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
+                        <td className="px-4 py-3 text-slate-200 text-sm font-medium whitespace-nowrap">{a.user_name || '—'}</td>
+                        <td className="px-4 py-3 text-slate-500 font-mono text-xs whitespace-nowrap">{a.user_email || '—'}</td>
+                        <td className="px-4 py-3">
+                          <ActivityTypeBadge type={a.type} />
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="text-xs font-mono text-amber-400 flex items-center gap-1">
+                            <Zap size={10} /> {a.credits_used ?? '—'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 text-xs font-mono whitespace-nowrap">
+                          {timeStamp(a.timestamp)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
       </div>
     </div>
   );
@@ -455,26 +651,16 @@ function AdminDashboard({ adminUser, onLogout }) {
 // AdminPage — root export, handles auth state independently
 // ---------------------------------------------------------------------------
 export default function AdminPage() {
-  const { user, loginWithCredentials, logout, setPage } = useApp();
-  const [localAdmin, setLocalAdmin] = useState(null); // used only when AppContext user isn't set yet
+  const { user, logout, setPage } = useApp();
+  const [localAdmin, setLocalAdmin] = useState(null);
 
-  // The effective admin is either the AppContext user (if already logged in) or localAdmin
+  // The effective admin is either the AppContext user (if already logged in as admin) or localAdmin
   const effectiveUser = (user?.role === 'admin' ? user : null) || localAdmin;
-
-  async function handleLogin(userData, token) {
-    // Use loginWithCredentials to update AppContext (triggers data reload etc.)
-    try {
-      await loginWithCredentials(userData.email, ''); // This won't work without password
-    } catch { /* ignore */ }
-    // Fallback: set local state with the already-verified user data
-    setLocalAdmin(userData);
-  }
 
   function handleLogout() {
     setLocalAdmin(null);
     logout();
     setPage('chat');
-    // Clear URL back to root
     try { window.history.pushState({}, '', '/'); } catch {}
   }
 
@@ -486,16 +672,11 @@ export default function AdminPage() {
     };
   }, []);
 
-  // Not authenticated or authenticated but not admin → show login
   if (!effectiveUser) {
     return (
       <>
-        <AdminLoginForm
-          onLogin={(userData, token) => {
-            setLocalAdmin(userData);
-          }}
-        />
-        {/* Back to app link */}
+        <Toaster richColors position="bottom-right" />
+        <AdminLoginForm onLogin={(userData) => setLocalAdmin(userData)} />
         <button
           onClick={() => { setPage('chat'); try { window.history.pushState({}, '', '/'); } catch {} }}
           className="fixed bottom-4 left-4 flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-400 transition-colors"
@@ -508,6 +689,7 @@ export default function AdminPage() {
 
   return (
     <>
+      <Toaster richColors position="bottom-right" />
       <AdminDashboard adminUser={effectiveUser} onLogout={handleLogout} />
       <button
         onClick={() => { setPage('chat'); try { window.history.pushState({}, '', '/'); } catch {} }}

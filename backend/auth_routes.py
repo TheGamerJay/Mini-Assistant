@@ -626,7 +626,10 @@ async def admin_list_users(admin: dict = Depends(_require_admin)):
                 "email": u["email"],
                 "role": u.get("role", "user"),
                 "avatar": u.get("avatar"),
+                "credits": u.get("credits", 0),
+                "plan": u.get("plan", "free"),
                 "created_at": u.get("created_at"),
+                "google_linked": bool(u.get("google_sub")),
             }
             for u in users
         ]
@@ -659,14 +662,32 @@ async def admin_stats(admin: dict = Depends(_require_admin)):
 
     total_image_docs = await db["images"].count_documents({})
 
+    # Credits stats
+    credits_pipeline = [{"$group": {"_id": None, "total": {"$sum": "$credits"}}}]
+    credits_result = await db["users"].aggregate(credits_pipeline).to_list(1)
+    total_credits_remaining = credits_result[0]["total"] if credits_result else 0
+
+    total_activity = await db["activity_logs"].count_documents({})
+    total_images_gen = await db["activity_logs"].count_documents({"type": "image_generated"})
+    total_chats_gen = await db["activity_logs"].count_documents({"type": "chat_message"})
+
+    # New users in last 7 days
+    week_ago = time.time() - 7 * 86400
+    new_users_week = await db["users"].count_documents({"created_at": {"$gte": week_ago}})
+
     return {
         "total_users": total_users,
         "total_admins": total_admins,
+        "new_users_week": new_users_week,
         "total_chats": total_chats,
         "total_messages": total_messages,
         "thumbs_up": thumbs_up,
         "thumbs_down": thumbs_down,
         "total_image_docs": total_image_docs,
+        "total_images_generated": total_images_gen,
+        "total_chat_messages": total_chats_gen,
+        "total_activity_events": total_activity,
+        "total_credits_remaining": total_credits_remaining,
         "server_time": time.time(),
     }
 
@@ -699,4 +720,31 @@ async def admin_delete_user(user_id: str, admin: dict = Depends(_require_admin))
     await db["settings"].delete_many({"user_id": user_id})
     await db["templates"].delete_many({"user_id": user_id})
     await db["tasks"].delete_many({"user_id": user_id})
+    await db["activity_logs"].delete_many({"user_id": user_id})
     return {"ok": True}
+
+
+class GrantCreditsBody(BaseModel):
+    credits: int
+
+
+@admin_router.patch("/users/{user_id}/credits")
+async def admin_grant_credits(user_id: str, body: GrantCreditsBody, admin: dict = Depends(_require_admin)):
+    """Set a user's credit balance directly (admin override)."""
+    if body.credits < 0:
+        raise HTTPException(status_code=400, detail="Credits cannot be negative.")
+    db = _get_db()
+    result = await db["users"].update_one({"id": user_id}, {"$set": {"credits": body.credits}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return {"ok": True, "credits": body.credits}
+
+
+@admin_router.get("/activity")
+async def admin_activity(limit: int = 100, admin: dict = Depends(_require_admin)):
+    """Return recent activity logs across all users."""
+    db = _get_db()
+    logs = await db["activity_logs"].find(
+        {}, {"_id": 0}
+    ).sort("timestamp", -1).limit(min(limit, 500)).to_list(500)
+    return {"logs": logs}

@@ -395,6 +395,14 @@ export const api = {
   /** Delete a user and all their data — admin only */
   adminDeleteUser(userId) { return del(`${MAIN_API}/admin/users/${userId}`, 10000); },
 
+  /** Set a user's credit balance — admin only */
+  adminSetCredits(userId, credits) {
+    return request(`${MAIN_API}/admin/users/${userId}/credits`, { method: 'PATCH', body: JSON.stringify({ credits }) }, 10000);
+  },
+
+  /** Get recent activity logs — admin only */
+  adminGetActivity(limit = 100) { return get(`${MAIN_API}/admin/activity?limit=${limit}`, 15000); },
+
   // ── DB sync endpoints ───────────────────────────────────────────────────────
 
   /** Fetch all chats for the current user from MongoDB. */

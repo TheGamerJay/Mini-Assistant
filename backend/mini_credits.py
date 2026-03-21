@@ -92,11 +92,25 @@ async def check_and_deduct(authorization: str | None, cost: int) -> tuple[bool, 
         {"id": payload["sub"], "credits": {"$gte": cost}},
         {"$inc": {"credits": -cost}},
         return_document=True,
-        projection={"credits": 1},
+        projection={"credits": 1, "name": 1, "email": 1},
     )
     if not result:
         # Race condition — someone else spent the last credits
         fresh = await db["users"].find_one({"id": payload["sub"]}, {"credits": 1})
         return False, fresh.get("credits", 0) if fresh else 0
+
+    # Log activity
+    try:
+        action = "image_generated" if cost >= 3 else "chat_message"
+        await db["activity_logs"].insert_one({
+            "user_id":    payload["sub"],
+            "user_name":  user.get("name", ""),
+            "user_email": user.get("email", ""),
+            "type":       action,
+            "credits_used": cost,
+            "timestamp":  time.time(),
+        })
+    except Exception:
+        pass  # non-fatal
 
     return True, result["credits"]
