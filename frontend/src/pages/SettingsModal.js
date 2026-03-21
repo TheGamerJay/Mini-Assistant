@@ -161,7 +161,7 @@ function SettingsModal({ onClose }) {
             {LEGAL_LINKS.map(({ page, icon: Icon, label }, i) => (
               <button
                 key={page}
-                onClick={() => { setPage(page); onClose(); }}
+                onClick={() => setPage(page)}
                 className={`flex items-center gap-3 w-full px-4 py-3 text-left hover:bg-white/5 transition-colors
                   ${i < LEGAL_LINKS.length - 1 ? 'border-b border-white/5' : ''}`}
               >
