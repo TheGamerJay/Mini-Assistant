@@ -69,7 +69,9 @@ const FixLoop = () => {
         toast.success('No errors detected!');
       }
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Analysis failed');
+      if (error.response?.status !== 402) {
+        toast.error(error.response?.data?.detail || 'Analysis failed');
+      }
     } finally {
       setLoading(false);
     }

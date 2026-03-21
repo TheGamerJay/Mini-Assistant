@@ -66,7 +66,9 @@ const TesterAgent = () => {
         toast.warning(`${passed} passed, ${failed} failed`);
       }
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Test run failed');
+      if (error.response?.status !== 402) {
+        toast.error(error.response?.data?.detail || 'Test run failed');
+      }
     } finally {
       setLoading(false);
     }
@@ -77,7 +79,7 @@ const TesterAgent = () => {
       toast.error('Enter a URL first');
       return;
     }
-    
+
     setGenerating(true);
     try {
       const response = await axiosInstance.post('/tester/generate', {
@@ -88,7 +90,9 @@ const TesterAgent = () => {
       setGeneratedTests(response.data.generated_tests);
       toast.success('Test cases generated!');
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Generation failed');
+      if (error.response?.status !== 402) {
+        toast.error(error.response?.data?.detail || 'Generation failed');
+      }
     } finally {
       setGenerating(false);
     }

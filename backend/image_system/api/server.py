@@ -1190,12 +1190,22 @@ async def generate_image(req: GenerateRequest, request: Request):
 
 
 @app.post("/api/image/analyze")
-async def analyze_image(req: AnalyzeRequest):
+async def analyze_image(req: AnalyzeRequest, request: Request):
     """
     Analyse an image using the vision brain.
 
     Body: { image_base64: str, question?: str }
     """
+    try:
+        from mini_credits import check_and_deduct as _deduct
+        _ok, _remaining = await _deduct(request.headers.get("authorization"), action_type="image_analyze")
+        if not _ok:
+            raise HTTPException(status_code=402, detail="out_of_credits")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
     try:
         image_bytes = base64.b64decode(req.image_base64)
     except Exception:
@@ -2254,11 +2264,21 @@ async def chat_stream(req: ChatRequest, request: Request):
 
 
 @app.post("/api/chat/compare")
-async def chat_compare(req: ChatRequest):
+async def chat_compare(req: ChatRequest, request: Request):
     """
     Run the same message through two models in parallel and return both replies.
     Used by the frontend every 10 responses to let the user pick their preferred model output.
     """
+    try:
+        from mini_credits import check_and_deduct as _deduct
+        _ok, _remaining = await _deduct(request.headers.get("authorization"), action_type="chat_compare")
+        if not _ok:
+            raise HTTPException(status_code=402, detail="out_of_credits")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
     import json as _json
 
     session_id = req.session_id or str(uuid.uuid4())

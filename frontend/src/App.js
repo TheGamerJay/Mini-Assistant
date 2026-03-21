@@ -85,6 +85,24 @@ export const axiosInstance = axios.create({
   timeout: 180000, // 3 min — accommodates CPU-based slow model inference
 });
 
+// Attach JWT token to every axiosInstance request
+axiosInstance.interceptors.request.use((config) => {
+  const token = localStorage.getItem('ma_token');
+  if (token) config.headers['Authorization'] = `Bearer ${token}`;
+  return config;
+});
+
+// Global 402 handler — fires a DOM event so AppShell can open the upgrade modal
+axiosInstance.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (err.response?.status === 402) {
+      window.dispatchEvent(new CustomEvent('ma:outofcredits'));
+    }
+    return Promise.reject(err);
+  }
+);
+
 // ---------------------------------------------------------------------------
 // Tool page map: page id → { component, title }
 // Note: 'tool-appbuilder' is intentionally removed — App Builder is now
@@ -139,7 +157,14 @@ function pageTitle(page) {
 // AppShell — rendered inside AppProvider so it can use useApp()
 // ---------------------------------------------------------------------------
 function AppShell() {
-  const { page, setPage, getPrevPage, serverStatus, setServerStatus, purchaseModalOpen, setPurchaseModalOpen, upgradeModalOpen, setUpgradeModalOpen, refreshCredits } = useApp();
+  const { page, setPage, getPrevPage, serverStatus, setServerStatus, purchaseModalOpen, setPurchaseModalOpen, upgradeModalOpen, setUpgradeModalOpen, refreshCredits, openUpgradeModal } = useApp();
+
+  // Open upgrade modal when any axiosInstance call returns 402
+  useEffect(() => {
+    const handler = () => openUpgradeModal('credits');
+    window.addEventListener('ma:outofcredits', handler);
+    return () => window.removeEventListener('ma:outofcredits', handler);
+  }, [openUpgradeModal]);
 
   // Handle Stripe redirect params (?checkout=success|cancelled, ?portal=return)
   useEffect(() => {

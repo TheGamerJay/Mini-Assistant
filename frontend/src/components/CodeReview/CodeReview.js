@@ -51,8 +51,9 @@ const CodeReview = () => {
       setFixedCode(response.data.fixed_code || '');
       toast.success('Code analysis complete!');
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Analysis failed');
-      console.error('Analysis error:', error);
+      if (error.response?.status !== 402) {
+        toast.error(error.response?.data?.detail || 'Analysis failed');
+      }
     } finally {
       setLoading(false);
     }

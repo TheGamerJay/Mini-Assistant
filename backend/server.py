@@ -815,10 +815,20 @@ async def generate_image(request: ImageGenRequest):
 
 # FixLoop - Error analysis
 @api_router.post("/fixloop/analyze")
-async def analyze_error(request: FixLoopRequest):
+async def analyze_error(request: FixLoopRequest, authorization: str = Header(None)):
     if not ollama_client:
         raise HTTPException(status_code=503, detail="Ollama service not available")
-    
+
+    try:
+        from mini_credits import check_and_deduct as _deduct
+        _ok, _remaining = await _deduct(authorization, action_type="fixloop_analyze")
+        if not _ok:
+            raise HTTPException(status_code=402, detail="out_of_credits")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
     try:
         prompt = f"""Analyze this command error and suggest a fix:
 
@@ -2535,10 +2545,20 @@ class SnippetCreate(BaseModel):
     tags: Optional[str] = None
 
 @api_router.post("/code-review/analyze")
-async def review_code(request: CodeReviewRequest):
+async def review_code(request: CodeReviewRequest, authorization: str = Header(None)):
     if not ollama_client:
         raise HTTPException(status_code=503, detail="Ollama service not available")
-    
+
+    try:
+        from mini_credits import check_and_deduct as _deduct
+        _ok, _remaining = await _deduct(authorization, action_type="code_review")
+        if not _ok:
+            raise HTTPException(status_code=402, detail="out_of_credits")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
     try:
         prompt = f"""Review this {request.language} code and provide:
 
@@ -3866,11 +3886,21 @@ Suggest 3-5 specific test cases that would improve coverage. Format as a numbere
         raise HTTPException(status_code=500, detail=f"Tester error: {str(e)}")
 
 @api_router.post("/tester/generate")
-async def tester_generate_tests(request: TestRequest):
+async def tester_generate_tests(request: TestRequest, authorization: str = Header(None)):
     """Generate test cases using AI"""
     if not ollama_client:
         raise HTTPException(status_code=503, detail="Ollama not available")
-    
+
+    try:
+        from mini_credits import check_and_deduct as _deduct
+        _ok, _remaining = await _deduct(authorization, action_type="tester_generate")
+        if not _ok:
+            raise HTTPException(status_code=402, detail="out_of_credits")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
     try:
         prompt = f"""Generate comprehensive test cases for this application:
 
