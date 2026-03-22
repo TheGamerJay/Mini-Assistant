@@ -42,14 +42,24 @@ body {
   position: relative;
 }
 
-/* ── Light theme — invert all colors so dark→white, white→dark ── */
-[data-theme="light"] #root {
-  filter: invert(1) hue-rotate(180deg) contrast(1.25);
+/* ── Light theme ──────────────────────────────────────────────────────────────
+   Apply the inversion on <body> (not #root) so that position:fixed children
+   (sidebar on mobile, modals, dropdowns) are also caught by the filter.
+   The html element sits outside body, so we override its bg separately.
+   Images/iframes/videos are double-inverted to restore their natural look.
+── */
+[data-theme="light"] html {
+  background-color: #f0f2f8;
 }
-/* Cancel inversion on images and iframes so they stay natural */
+[data-theme="light"] body {
+  filter: invert(1) hue-rotate(180deg);
+  background-color: #f0f2f8;
+}
+/* Restore natural appearance for media & embedded content */
 [data-theme="light"] img,
 [data-theme="light"] iframe,
-[data-theme="light"] video {
+[data-theme="light"] video,
+[data-theme="light"] canvas {
   filter: invert(1) hue-rotate(180deg);
 }
 
