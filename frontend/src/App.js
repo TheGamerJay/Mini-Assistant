@@ -35,6 +35,7 @@ import UserDashboard from './pages/UserDashboard';
 import PurchaseCreditsModal from './components/PurchaseCreditsModal';
 import UpgradeModal from './components/UpgradeModal';
 import MascotAssistant from './components/MascotAssistant';
+import OnboardingModal from './components/OnboardingModal';
 import PricingPage from './pages/PricingPage';
 import CheckoutSuccessPage from './pages/CheckoutSuccessPage';
 import SharedPage from './pages/SharedPage';
@@ -163,6 +164,18 @@ function pageTitle(page) {
 function AppShell() {
   const { page, setPage, getPrevPage, serverStatus, setServerStatus, purchaseModalOpen, setPurchaseModalOpen, upgradeModalOpen, setUpgradeModalOpen, refreshCredits, openUpgradeModal, user, logout } = useApp();
 
+  // First-login onboarding modal
+  const [showOnboarding, setShowOnboarding] = React.useState(false);
+  useEffect(() => {
+    if (!user?.id) return;
+    const key = `ma_onboarding_done_${user.id}`;
+    if (!localStorage.getItem(key)) setShowOnboarding(true);
+  }, [user?.id]);
+  const handleOnboardingDone = () => {
+    if (user?.id) localStorage.setItem(`ma_onboarding_done_${user.id}`, '1');
+    setShowOnboarding(false);
+  };
+
 
   // Open upgrade modal when any axiosInstance call returns 402
   useEffect(() => {
@@ -279,6 +292,9 @@ function AppShell() {
 
       {/* Floating mascot assistant — bottom-right, always visible */}
       <MascotAssistant />
+
+      {/* First-login onboarding modal */}
+      {showOnboarding && <OnboardingModal onDone={handleOnboardingDone} />}
     </div>
   );
 }

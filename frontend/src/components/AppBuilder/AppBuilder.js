@@ -194,7 +194,7 @@ function LockedCodeView({ code, onUpgrade }) {
 }
 
 const AppBuilder = () => {
-  const { isSubscribed, openUpgradeModal } = useApp();
+  const { isSubscribed, openUpgradeModal, pendingBuildPrompt, clearPendingBuildPrompt } = useApp();
   const setShowUpgradeModal = (open) => { if (open) openUpgradeModal('code'); };
   // showUpgradeModal is now global — this local alias keeps existing call-sites working
   const showUpgradeModal = false; // modal is rendered globally in App.js
@@ -219,6 +219,7 @@ const AppBuilder = () => {
   const [buildStep, setBuildStep] = useState(0);
   const [buildJustCompleted, setBuildJustCompleted] = useState(false);
   const [isResumed, setIsResumed] = useState(false);
+  const [autoBuildPending, setAutoBuildPending] = useState(false);
   const [generatedApp, setGeneratedApp] = useState(null);
   const [projectType, setProjectType] = useState('app');
   const [buildMode, setBuildMode] = useState('polished');
@@ -376,6 +377,22 @@ const AppBuilder = () => {
     { name: 'Landing Page',    cat: 'Dashboard', desc: 'Product landing page with hero section, features grid, testimonials, pricing table, and contact form. Smooth scroll animations.' },
     { name: 'Weather App',     cat: 'Dashboard', desc: 'Weather dashboard with city search, 7-day forecast cards, hourly chart, UV index, humidity, and wind speed' },
   ];
+
+  // Onboarding bridge: consume pendingBuildPrompt from context
+  useEffect(() => {
+    if (!pendingBuildPrompt) return;
+    setDescription(pendingBuildPrompt);
+    setMode('build');
+    setAutoBuildPending(true);
+    clearPendingBuildPrompt();
+  }, [pendingBuildPrompt]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-trigger build once description is set from onboarding
+  useEffect(() => {
+    if (!autoBuildPending || !description || buildLoading || generatedApp) return;
+    setAutoBuildPending(false);
+    generateApp();
+  }, [autoBuildPending, description]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Start coach with opening question
   useEffect(() => {
@@ -1119,6 +1136,25 @@ const AppBuilder = () => {
     if (!isSubscribed) { openUpgradeModal('save'); return; }
     // Auto-save already runs via useEffect; just confirm to the user
     toast.success('Project saved.');
+  };
+
+  const [shareLoading, setShareLoading] = useState(false);
+  const handleShare = async () => {
+    if (!generatedApp?.html || shareLoading) return;
+    setShareLoading(true);
+    try {
+      const res = await axiosInstance.post('/share', {
+        content_type: 'app',
+        content: generatedApp.html,
+        title: generatedApp.name || 'My App',
+      });
+      const url = res.data.url || `${window.location.origin}/s/${res.data.id}`;
+      navigator.clipboard.writeText(url).then(() => toast.success('Share link copied!'));
+    } catch {
+      toast.error('Failed to generate share link');
+    } finally {
+      setShareLoading(false);
+    }
   };
 
   const exportZip = async () => {
@@ -2125,6 +2161,10 @@ const AppBuilder = () => {
                 <button onClick={exportSessionJson} title="Export session as importable JSON"
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700/30 border border-slate-600/40 text-slate-400 text-xs font-mono uppercase rounded-sm hover:bg-slate-600/30 transition-all">
                   <Download className="w-3.5 h-3.5" /> JSON
+                </button>
+                <button onClick={handleShare} disabled={shareLoading} title="Share a public live preview link"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-pink-500/15 border border-pink-500/40 text-pink-400 text-xs font-mono uppercase rounded-sm hover:bg-pink-500/25 transition-all disabled:opacity-50">
+                  {shareLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Share2 className="w-3.5 h-3.5" />} SHARE
                 </button>
 
                 <div className="w-px h-5 bg-slate-700/60 mx-2" />

@@ -306,3 +306,86 @@ def send_welcome_email(user_email: str, name: str, user_id: str = "") -> None:
             log.info("Welcome email sent to %s (id=%s)", user_email, response.get("id"))
         except Exception as send_exc:
             log.error("send_welcome_email failed for %s: %s", user_email, send_exc)
+
+
+# ---------------------------------------------------------------------------
+# Credit expiry reminder email
+# ---------------------------------------------------------------------------
+
+def _build_expiry_html(name: str) -> str:
+    first = name.split()[0] if name else "there"
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Your Mini Credits expire in 2 days</title></head>
+<body style="margin:0;padding:0;background-color:#0d0d12;font-family:Inter,system-ui,-apple-system,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0d0d12;min-height:100vh;">
+    <tr><td align="center" style="padding:48px 16px;">
+      <table width="100%" style="max-width:520px;" cellpadding="0" cellspacing="0">
+        <tr><td align="center" style="padding-bottom:32px;">
+          <img src="{LOGO_URL}" width="100" alt="Mini Assistant AI"
+               style="display:block;border:0;outline:none;text-decoration:none;"/>
+        </td></tr>
+        <tr><td style="background:#111118;border:1px solid rgba(255,255,255,0.08);
+                       border-radius:20px;padding:40px 36px;">
+          <h1 style="margin:0 0 8px;font-size:24px;font-weight:800;color:#fff;
+                     letter-spacing:-0.5px;text-align:center;">
+            Your Mini Credits expire in 2 days ⚡
+          </h1>
+          <p style="margin:0 0 24px;font-size:14px;color:#94a3b8;line-height:1.7;text-align:center;">
+            Hey {first}, your free Mini Credits are about to expire.<br/>
+            Use them now to build something — or upgrade to keep your credits and get more every month.
+          </p>
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px;">
+            <tr><td align="center">
+              <a href="{FRONTEND}"
+                 style="display:inline-block;background:linear-gradient(135deg,#06b6d4,#7c3aed);
+                        color:#fff;font-size:15px;font-weight:700;text-decoration:none;
+                        padding:14px 40px;border-radius:12px;letter-spacing:0.2px;">
+                Use my credits now →
+              </a>
+            </td></tr>
+          </table>
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+            <tr><td align="center">
+              <a href="{PRICING_URL}"
+                 style="display:inline-block;background:rgba(255,255,255,0.05);
+                        color:#94a3b8;font-size:13px;font-weight:600;text-decoration:none;
+                        padding:10px 32px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);">
+                View plans
+              </a>
+            </td></tr>
+          </table>
+          <p style="margin:0;font-size:11px;color:#475569;text-align:center;line-height:1.6;">
+            Unused free credits are permanently forfeited after 7 days from signup.<br/>
+            Paid plans include a monthly credit refresh — no expiry.
+          </p>
+        </td></tr>
+        <tr><td style="padding-top:24px;">
+          <p style="margin:0;font-size:11px;color:#334155;text-align:center;">
+            Mini Assistant AI · <a href="{PRICING_URL}" style="color:#475569;">Upgrade</a>
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+
+
+async def send_expiry_reminder_email(user_email: str, name: str, user_id: str = None) -> bool:
+    """Send a credit-expiry warning email. Returns True on success, False on failure."""
+    subject = "Your Mini Credits expire in 2 days"
+    params  = {
+        "from":    SENDER,
+        "to":      [user_email],
+        "subject": subject,
+        "html":    _build_expiry_html(name),
+    }
+    try:
+        resend.Emails.send(params)
+        log.info("Expiry reminder sent to %s", user_email)
+        return True
+    except Exception as exc:
+        log.error("send_expiry_reminder_email failed for %s: %s", user_email, exc)
+        return False

@@ -311,6 +311,12 @@ export function AppProvider({ children }) {
   const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
+  // ---- Onboarding build prompt bridge ----
+  // OnboardingModal sets this; AppBuilder reads + clears it to auto-fill + build
+  const [pendingBuildPrompt, _setPendingBuildPrompt] = useState(null);
+  const firePendingBuildPrompt = useCallback((text) => { _setPendingBuildPrompt(text); }, []);
+  const clearPendingBuildPrompt = useCallback(() => { _setPendingBuildPrompt(null); }, []);
+
   // ---- Global upgrade modal ----
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [upgradeReason, setUpgradeReason]       = useState('generic');
@@ -864,6 +870,10 @@ export function AppProvider({ children }) {
     firePendingTemplate,
     clearPendingTemplate,
     clearPendingAutoSubmit,
+    // onboarding build prompt bridge
+    pendingBuildPrompt,
+    firePendingBuildPrompt,
+    clearPendingBuildPrompt,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

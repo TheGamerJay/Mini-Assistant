@@ -5093,6 +5093,96 @@ async def events_summary():
     return {r["_id"]: r["count"] for r in rows}
 
 
+@app.get("/api/admin/events/funnel", tags=["analytics"])
+async def events_funnel():
+    """Conversion funnel: counts + drop-off rates between key events."""
+    if db is None:
+        return {}
+    events = ["build_started", "build_completed", "credits_exhausted",
+              "upgrade_modal_opened", "upgrade_completed"]
+    counts = {}
+    for ev in events:
+        counts[ev] = await db["user_events"].count_documents({"event": ev})
+
+    def rate(num, denom):
+        return round(num / denom * 100, 1) if denom > 0 else 0.0
+
+    return {
+        "counts": counts,
+        "rates": {
+            "build_completion":  rate(counts["build_completed"],    counts["build_started"]),
+            "credits_exhausted": rate(counts["credits_exhausted"],  counts["build_completed"]),
+            "modal_open_rate":   rate(counts["upgrade_modal_opened"],counts["credits_exhausted"]),
+            "upgrade_conversion":rate(counts["upgrade_completed"],  counts["upgrade_modal_opened"]),
+        },
+    }
+
+
+@app.get("/api/admin/events/by-trigger", tags=["analytics"])
+async def events_by_trigger():
+    """Break down upgrade_modal_opened events by trigger_type."""
+    if db is None:
+        return {}
+    pipeline = [
+        {"$match": {"event": "upgrade_modal_opened"}},
+        {"$group": {"_id": "$metadata.trigger_type", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    rows = await db["user_events"].aggregate(pipeline).to_list(20)
+    return {(r["_id"] or "unknown"): r["count"] for r in rows}
+
+
+@app.get("/api/admin/events/recent", tags=["analytics"])
+async def events_recent(limit: int = 50):
+    """Return the most recent user events."""
+    if db is None:
+        return []
+    rows = await db["user_events"].find({}, {"_id": 0}).sort("timestamp", -1).limit(limit).to_list(limit)
+    return rows
+
+
+# ── Credit Expiry Reminder ────────────────────────────────────────────────────
+
+@app.post("/api/admin/send-expiry-reminders", tags=["analytics"])
+async def send_expiry_reminders():
+    """
+    Find free users whose credits expire within 48 hours and haven't been
+    reminded yet, then send them an email. Safe to call from a daily cron.
+    """
+    if db is None:
+        return {"sent": 0, "error": "No DB"}
+    import datetime as _dt
+    from email_service import send_expiry_reminder_email  # noqa: PLC0415
+
+    now    = _dt.datetime.utcnow().timestamp()
+    window = 48 * 3600  # 48 hours
+    cursor = db["users"].find({
+        "plan":                   "free",
+        "credits":                {"$gt": 0},
+        "free_credits_expire_at": {"$gt": now, "$lt": now + window},
+        "expiry_reminder_sent":   {"$ne": True},
+        "email_verified":         True,
+    })
+    users = await cursor.to_list(500)
+
+    sent = 0
+    for u in users:
+        ok = await send_expiry_reminder_email(
+            user_email=u.get("email", ""),
+            name=u.get("name", "") or u.get("display_name", "") or "there",
+            user_id=str(u.get("id") or u.get("_id", "")),
+        )
+        if ok:
+            await db["users"].update_one(
+                {"_id": u["_id"]},
+                {"$set": {"expiry_reminder_sent": True}},
+            )
+            sent += 1
+
+    logging.info("Expiry reminders sent: %d / %d", sent, len(users))
+    return {"sent": sent, "eligible": len(users)}
+
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
     if client is not None:

@@ -206,7 +206,11 @@ function AdminDashboard({ adminUser, onLogout }) {
   const [togglingId, setTogglingId]     = useState(null);
   const [grantingId, setGrantingId]     = useState(null);
   const [grantInput, setGrantInput]     = useState({}); // { [userId]: string }
-  const [activeTab, setActiveTab]       = useState('overview'); // 'overview' | 'users' | 'activity'
+  const [activeTab, setActiveTab]       = useState('overview'); // 'overview' | 'users' | 'activity' | 'analytics'
+  const [funnel, setFunnel]             = useState(null);
+  const [byTrigger, setByTrigger]       = useState(null);
+  const [recentEvents, setRecentEvents] = useState([]);
+  const [loadingFunnel, setLoadingFunnel] = useState(false);
 
   const loadStats = useCallback(async () => {
     setLoadingStats(true);
@@ -268,6 +272,27 @@ function AdminDashboard({ adminUser, onLogout }) {
     }
   }, []);
 
+  const loadFunnel = useCallback(async () => {
+    setLoadingFunnel(true);
+    try {
+      const BASE = process.env.REACT_APP_BACKEND_URL || '/api';
+      const tok  = localStorage.getItem('ma_token') || '';
+      const headers = { Authorization: `Bearer ${tok}` };
+      const [funnelRes, triggerRes, recentRes] = await Promise.all([
+        fetch(`${BASE}/admin/events/funnel`,      { headers }).then(r => r.json()),
+        fetch(`${BASE}/admin/events/by-trigger`,  { headers }).then(r => r.json()),
+        fetch(`${BASE}/admin/events/recent?limit=50`, { headers }).then(r => r.json()),
+      ]);
+      setFunnel(funnelRes);
+      setByTrigger(triggerRes);
+      setRecentEvents(Array.isArray(recentRes) ? recentRes : []);
+    } catch (err) {
+      toast.error('Failed to load funnel: ' + (err.message || 'unknown'));
+    } finally {
+      setLoadingFunnel(false);
+    }
+  }, []);
+
   const checkStatus = useCallback(async () => {
     try {
       const data = await api.mainHealth();
@@ -286,13 +311,14 @@ function AdminDashboard({ adminUser, onLogout }) {
     checkStatus();
   }, [loadStats, loadUsers, checkStatus]);
 
-  // Load activity when that tab is first opened
+  // Load tab data when first opened
   useEffect(() => {
     if (activeTab === 'activity' && activity.length === 0) loadActivity();
     if (activeTab === 'revenue' && !analytics) loadAnalytics();
     if (activeTab === 'profit' && !optimizer) loadOptimizer();
     if (activeTab === 'profit' && !analytics) loadAnalytics();
-  }, [activeTab, activity.length, analytics, optimizer, loadActivity, loadAnalytics, loadOptimizer]);
+    if (activeTab === 'analytics' && !funnel) loadFunnel();
+  }, [activeTab, activity.length, analytics, optimizer, funnel, loadActivity, loadAnalytics, loadOptimizer, loadFunnel]);
 
   async function handleDeleteUser(u) {
     if (!window.confirm(`Delete ${u.name} (${u.email})? This removes all their data and cannot be undone.`)) return;
@@ -390,11 +416,12 @@ function AdminDashboard({ adminUser, onLogout }) {
       {/* Tab nav */}
       <div className="flex-shrink-0 flex items-center gap-1 px-6 pt-4 pb-0 overflow-x-auto">
         {[
-          { id: 'overview',  label: 'Overview',              icon: BarChart2 },
-          { id: 'users',     label: `Users (${users.length})`, icon: Users },
-          { id: 'activity',  label: 'Activity',              icon: List },
-          { id: 'revenue',   label: 'Revenue',               icon: DollarSign },
-          { id: 'profit',    label: 'Profit & Cost',         icon: TrendingUp },
+          { id: 'overview',   label: 'Overview',              icon: BarChart2 },
+          { id: 'users',      label: `Users (${users.length})`, icon: Users },
+          { id: 'activity',   label: 'Activity',              icon: List },
+          { id: 'revenue',    label: 'Revenue',               icon: DollarSign },
+          { id: 'profit',     label: 'Profit & Cost',         icon: TrendingUp },
+          { id: 'analytics',  label: 'Funnel',                icon: Percent },
         ].map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -903,6 +930,115 @@ function AdminDashboard({ adminUser, onLogout }) {
               </div>
             )}
           </div>
+        )}
+
+        {/* ── ANALYTICS / FUNNEL TAB ── */}
+        {activeTab === 'analytics' && (
+          <>
+            {loadingFunnel ? (
+              <div className="text-center py-16 text-slate-600 text-sm">Loading funnel data…</div>
+            ) : (
+              <>
+                {/* Funnel counts + rates */}
+                {funnel && (
+                  <div className="rounded-2xl border border-white/10 bg-[#13131f] overflow-hidden mb-6">
+                    <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between">
+                      <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                        <TrendingUp size={14} className="text-cyan-400" /> Conversion Funnel
+                      </h2>
+                      <button onClick={loadFunnel} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all" title="Refresh">
+                        <RefreshCw size={13} className={loadingFunnel ? 'animate-spin' : ''} />
+                      </button>
+                    </div>
+                    <div className="p-6 space-y-3">
+                      {[
+                        { label: 'Builds started',      key: 'build_started',        color: 'text-cyan-400' },
+                        { label: 'Builds completed',    key: 'build_completed',      color: 'text-emerald-400', rateKey: 'build_completion',   rateLabel: 'completion rate' },
+                        { label: 'Credits exhausted',   key: 'credits_exhausted',    color: 'text-amber-400',   rateKey: 'credits_exhausted',  rateLabel: 'of completions' },
+                        { label: 'Upgrade modal opened',key: 'upgrade_modal_opened', color: 'text-violet-400',  rateKey: 'modal_open_rate',    rateLabel: 'of exhausted' },
+                        { label: 'Upgrades completed',  key: 'upgrade_completed',    color: 'text-green-400',   rateKey: 'upgrade_conversion', rateLabel: 'modal → paid' },
+                      ].map(({ label, key, color, rateKey, rateLabel }) => (
+                        <div key={key} className="flex items-center justify-between py-2 border-b border-white/[0.04] last:border-0">
+                          <span className="text-sm text-slate-400">{label}</span>
+                          <div className="flex items-center gap-4">
+                            {rateKey && (
+                              <span className="text-[11px] font-mono text-slate-600">
+                                {funnel.rates?.[rateKey] ?? '—'}% {rateLabel}
+                              </span>
+                            )}
+                            <span className={`text-lg font-bold font-mono ${color}`}>
+                              {(funnel.counts?.[key] ?? 0).toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Trigger breakdown */}
+                {byTrigger && Object.keys(byTrigger).length > 0 && (
+                  <div className="rounded-2xl border border-white/10 bg-[#13131f] overflow-hidden mb-6">
+                    <div className="px-6 py-4 border-b border-white/5">
+                      <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                        <Percent size={14} className="text-violet-400" /> Upgrade Triggers
+                      </h2>
+                    </div>
+                    <div className="p-6 grid grid-cols-2 sm:grid-cols-4 gap-4">
+                      {Object.entries(byTrigger).map(([trigger, count]) => (
+                        <div key={trigger} className="rounded-xl border border-white/8 bg-white/[0.02] p-4 text-center">
+                          <p className="text-2xl font-bold text-white">{count.toLocaleString()}</p>
+                          <p className="text-xs text-slate-500 mt-1 font-mono">{trigger}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Recent events */}
+                {recentEvents.length > 0 && (
+                  <div className="rounded-2xl border border-white/10 bg-[#13131f] overflow-hidden">
+                    <div className="px-6 py-4 border-b border-white/5">
+                      <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                        <Activity size={14} className="text-amber-400" /> Recent Events (last 50)
+                      </h2>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-white/5">
+                            {['Event', 'Trigger', 'User', 'Time'].map(h => (
+                              <th key={h} className="px-4 py-3 text-left text-[11px] font-mono uppercase tracking-widest text-slate-600 whitespace-nowrap">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {recentEvents.map((ev, i) => (
+                            <tr key={i} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
+                              <td className="px-4 py-2.5">
+                                <span className="text-xs font-mono text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-2 py-0.5 rounded-full">
+                                  {ev.event}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2.5 text-xs text-slate-500 font-mono">
+                                {ev.metadata?.trigger_type || '—'}
+                              </td>
+                              <td className="px-4 py-2.5 text-xs text-slate-600 font-mono truncate max-w-[140px]">
+                                {ev.user_id || 'anon'}
+                              </td>
+                              <td className="px-4 py-2.5 text-xs text-slate-600 font-mono whitespace-nowrap">
+                                {ev.timestamp ? new Date(ev.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </>
         )}
 
       </div>

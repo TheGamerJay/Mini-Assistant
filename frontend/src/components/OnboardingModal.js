@@ -11,85 +11,91 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Sparkles, Code2, Image, MessageSquare, ArrowRight, ChevronLeft, X } from 'lucide-react';
+import {
+  Globe, BarChart2, Wand2, Star, Gamepad2, Sparkles,
+  ArrowRight, ChevronLeft, X,
+} from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 // ---------------------------------------------------------------------------
-// Category data — ALL Tailwind classes written as full literal strings
-// so the JIT scanner includes them without dynamic concatenation
+// AppBuilder-focused category data.
+// builder:true → uses firePendingBuildPrompt; otherwise firePendingTemplate.
+// ALL Tailwind classes written as full literal strings so JIT includes them.
 // ---------------------------------------------------------------------------
 const CATEGORIES = [
   {
-    id: 'app',
-    label: 'AI App',
-    icon: Sparkles,
-    bg:          'bg-violet-500/10',
-    border:      'border-violet-500/30',
-    text:        'text-violet-400',
-    ring:        'ring-violet-500/40',
-    cardActive:  'active:bg-violet-500/20 hover:bg-violet-500/20',
-    promptActive:'hover:bg-violet-500/10 hover:border-violet-500/40 active:bg-violet-500/10',
-    arrowText:   'text-violet-400',
-    prompts: [
-      'Build me a todo app with dark mode and local storage',
-      'Create a portfolio website with smooth animations',
-      'Make a weather dashboard that fetches real data',
-      'Build a Pomodoro timer with sound alerts',
-    ],
-  },
-  {
-    id: 'code',
-    label: 'Code',
-    icon: Code2,
-    bg:          'bg-cyan-500/10',
-    border:      'border-cyan-500/30',
-    text:        'text-cyan-400',
-    ring:        'ring-cyan-500/40',
+    id: 'landing',   label: 'Landing Page', icon: Globe,    builder: true,
+    bg: 'bg-cyan-500/10', border: 'border-cyan-500/30', text: 'text-cyan-400',
+    ring: 'ring-cyan-500/40',
     cardActive:  'active:bg-cyan-500/20 hover:bg-cyan-500/20',
     promptActive:'hover:bg-cyan-500/10 hover:border-cyan-500/40 active:bg-cyan-500/10',
-    arrowText:   'text-cyan-400',
+    arrowText: 'text-cyan-400',
     prompts: [
-      'Write a Python web scraper with BeautifulSoup',
-      'Create a REST API in FastAPI with JWT auth',
-      'Write a binary search tree in JavaScript',
-      'Build a CLI tool that monitors file changes',
+      'SaaS landing page with hero, feature grid, pricing table, and email signup',
+      'Startup landing page with animated headline, product screenshots, and CTA buttons',
+      'Agency landing page with client logos, case studies, and contact form',
     ],
   },
   {
-    id: 'image',
-    label: 'Image',
-    icon: Image,
-    bg:          'bg-pink-500/10',
-    border:      'border-pink-500/30',
-    text:        'text-pink-400',
-    ring:        'ring-pink-500/40',
-    cardActive:  'active:bg-pink-500/20 hover:bg-pink-500/20',
-    promptActive:'hover:bg-pink-500/10 hover:border-pink-500/40 active:bg-pink-500/10',
-    arrowText:   'text-pink-400',
+    id: 'dashboard', label: 'Dashboard',    icon: BarChart2, builder: true,
+    bg: 'bg-violet-500/10', border: 'border-violet-500/30', text: 'text-violet-400',
+    ring: 'ring-violet-500/40',
+    cardActive:  'active:bg-violet-500/20 hover:bg-violet-500/20',
+    promptActive:'hover:bg-violet-500/10 hover:border-violet-500/40 active:bg-violet-500/10',
+    arrowText: 'text-violet-400',
     prompts: [
-      'Generate a futuristic city skyline at night with neon lights',
-      'Create a fantasy landscape with mountains and a waterfall',
-      'Design a minimalist logo for a tech startup',
-      'Paint an anime character in a glowing forest setting',
+      'Analytics dashboard with line and bar charts, KPI cards, and date range filter',
+      'Admin panel with user management table, search, and role badges',
+      'Sales dashboard with revenue chart, conversion funnel, and top products list',
     ],
   },
   {
-    id: 'chat',
-    label: 'Chat',
-    icon: MessageSquare,
-    bg:          'bg-emerald-500/10',
-    border:      'border-emerald-500/30',
-    text:        'text-emerald-400',
-    ring:        'ring-emerald-500/40',
+    id: 'tool',      label: 'Tool / App',   icon: Wand2,    builder: true,
+    bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-400',
+    ring: 'ring-emerald-500/40',
     cardActive:  'active:bg-emerald-500/20 hover:bg-emerald-500/20',
     promptActive:'hover:bg-emerald-500/10 hover:border-emerald-500/40 active:bg-emerald-500/10',
-    arrowText:   'text-emerald-400',
+    arrowText: 'text-emerald-400',
     prompts: [
-      'Explain quantum computing in simple terms',
-      'Help me write a compelling cover letter',
-      'Give me 10 unique business ideas for 2025',
-      'Summarize the key principles of stoicism',
+      'Budget tracker with income and expense categories, monthly charts, and balance',
+      'Pomodoro timer with 25/5 sessions, history, and streak counter',
+      'Password generator with length slider, strength meter, and copy button',
     ],
+  },
+  {
+    id: 'portfolio', label: 'Portfolio',    icon: Star,     builder: true,
+    bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400',
+    ring: 'ring-amber-500/40',
+    cardActive:  'active:bg-amber-500/20 hover:bg-amber-500/20',
+    promptActive:'hover:bg-amber-500/10 hover:border-amber-500/40 active:bg-amber-500/10',
+    arrowText: 'text-amber-400',
+    prompts: [
+      'Developer portfolio with project cards, skills section, GitHub links, and contact form',
+      'Designer portfolio with full-screen image gallery and case studies',
+      'Creative portfolio with animated transitions and a dark minimal aesthetic',
+    ],
+  },
+  {
+    id: 'game',      label: 'Game',         icon: Gamepad2, builder: true,
+    bg: 'bg-pink-500/10', border: 'border-pink-500/30', text: 'text-pink-400',
+    ring: 'ring-pink-500/40',
+    cardActive:  'active:bg-pink-500/20 hover:bg-pink-500/20',
+    promptActive:'hover:bg-pink-500/10 hover:border-pink-500/40 active:bg-pink-500/10',
+    arrowText: 'text-pink-400',
+    prompts: [
+      'Classic Snake game with score tracking, speed scaling, and high score saved',
+      'Breakout brick breaker with multiple rows, ball physics, lives, and power-ups',
+      'Space shooter with enemy waves, explosions, shield, and boss every 5 levels',
+    ],
+  },
+  {
+    id: 'custom',    label: 'Custom idea',  icon: Sparkles, builder: true,
+    bg: 'bg-slate-500/10', border: 'border-slate-500/30', text: 'text-slate-400',
+    ring: 'ring-slate-500/40',
+    cardActive:  'active:bg-slate-500/20 hover:bg-slate-500/20',
+    promptActive:'hover:bg-slate-500/10 hover:border-slate-500/40 active:bg-slate-500/10',
+    arrowText: 'text-slate-400',
+    prompts: [],
   },
 ];
 
@@ -97,11 +103,12 @@ const CATEGORIES = [
 // OnboardingModal
 // ---------------------------------------------------------------------------
 export default function OnboardingModal({ onDone }) {
-  const { firePendingTemplate, setPage } = useApp();
-  const [step, setStep]         = useState(1);
-  const [category, setCategory] = useState(null);
+  const { firePendingTemplate, firePendingBuildPrompt, setPage } = useApp();
+  const [step, setStep]           = useState(1);
+  const [category, setCategory]   = useState(null);
+  const [customText, setCustomText] = useState('');
   const modalRef  = useRef(null);
-  const firedRef  = useRef(false);   // Phase 4: single-fire guard
+  const firedRef  = useRef(false);   // single-fire guard
 
   // Phase 3 — iOS Safari scroll lock (position:fixed method prevents rubber-band scroll)
   useEffect(() => {
@@ -159,13 +166,22 @@ export default function OnboardingModal({ onDone }) {
 
   const handleCategory = (cat) => { setCategory(cat); setStep(2); };
 
-  // Phase 4 — guard against double-fire from rapid taps
+  // Guard against double-fire from rapid taps
   const handlePrompt = (prompt) => {
     if (firedRef.current) return;
     firedRef.current = true;
-    setPage(category.id === 'image' ? 'images' : 'chat');
-    firePendingTemplate(prompt, true);
+    if (category?.builder) {
+      firePendingBuildPrompt(prompt);
+    } else {
+      firePendingTemplate(prompt, true);
+    }
+    setPage('chat');
     onDone();
+  };
+
+  const handleCustomSubmit = () => {
+    if (!customText.trim()) return;
+    handlePrompt(customText.trim());
   };
 
   return (
@@ -276,9 +292,10 @@ export default function OnboardingModal({ onDone }) {
             </div>
           )}
 
-          {/* Step 2 — Prompt list */}
+          {/* Step 2 — Prompt list or custom textarea */}
           {step === 2 && category && (
             <div className="px-5 pb-4 space-y-2">
+              {/* Example prompts (non-custom categories) */}
               {category.prompts.map((prompt, i) => (
                 <button
                   key={i}
@@ -298,6 +315,52 @@ export default function OnboardingModal({ onDone }) {
                   />
                 </button>
               ))}
+              {/* Custom textarea — shown for 'custom' category, or as extra option */}
+              {(category.id === 'custom' || category.prompts.length === 0) && (
+                <div className="pt-1 space-y-2">
+                  <textarea
+                    value={customText}
+                    onChange={e => setCustomText(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleCustomSubmit(); }}
+                    placeholder="Describe your idea — e.g. A recipe manager with categories, search, and a shopping list…"
+                    rows={3}
+                    autoFocus
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder:text-slate-700 outline-none focus:border-cyan-500/50 resize-none"
+                  />
+                  <button
+                    onClick={handleCustomSubmit}
+                    disabled={!customText.trim()}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-violet-600 text-white text-sm font-bold rounded-xl hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Build it <ArrowRight size={14} />
+                  </button>
+                </div>
+              )}
+              {/* "Or describe your own" for non-custom categories */}
+              {category.id !== 'custom' && category.prompts.length > 0 && (
+                <details className="group pt-1">
+                  <summary className="text-[11px] text-slate-600 hover:text-slate-400 cursor-pointer select-none list-none">
+                    + Describe your own idea
+                  </summary>
+                  <div className="pt-2 space-y-2">
+                    <textarea
+                      value={customText}
+                      onChange={e => setCustomText(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleCustomSubmit(); }}
+                      placeholder="Describe your idea…"
+                      rows={2}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder:text-slate-700 outline-none focus:border-cyan-500/50 resize-none"
+                    />
+                    <button
+                      onClick={handleCustomSubmit}
+                      disabled={!customText.trim()}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-violet-600 text-white text-sm font-bold rounded-xl hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Build it <ArrowRight size={14} />
+                    </button>
+                  </div>
+                </details>
+              )}
             </div>
           )}
 
