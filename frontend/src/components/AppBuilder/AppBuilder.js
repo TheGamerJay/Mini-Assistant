@@ -146,54 +146,46 @@ const loadSessionsLocal = () => {
 function LockedCodeView({ code, onUpgrade }) {
   const lines = (code || '').split('\n');
   const totalLines = lines.length;
-  const preview = lines.slice(0, 14).join('\n');
-  const lockedCount = Math.max(0, totalLines - 14);
+  const preview = lines.slice(0, 8).join('\n');
+  const lockedCount = Math.max(0, totalLines - 8);
 
   return (
     <div className="relative h-full bg-[#0d1117] overflow-hidden select-none cursor-default">
-      {/* Preview: first 14 lines */}
-      <pre className="text-[#e6edf3] font-mono text-xs p-3 whitespace-pre-wrap break-all leading-5 pointer-events-none">
+      {/* Preview: first 8 lines */}
+      <pre className="text-[#e6edf3] font-mono text-xs p-3 whitespace-pre-wrap break-all leading-5 pointer-events-none opacity-60">
         {preview}
       </pre>
 
-      {/* Gradient fade — starts at 40% so first lines are fully visible */}
-      <div className="absolute inset-x-0 top-0 h-full bg-gradient-to-b from-transparent from-30% via-[#0d1117]/85 to-[#0d1117] pointer-events-none" />
-
-      {/* Locked line counter pill */}
-      {lockedCount > 0 && (
-        <div className="absolute left-3 top-[calc(14*1.25rem+0.75rem)] flex items-center gap-1.5 pointer-events-none">
-          <div className="h-px flex-1 bg-amber-500/20 w-8" />
-          <span className="text-[9px] font-mono text-amber-500/70 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
-            +{lockedCount} lines locked
-          </span>
-          <div className="h-px flex-1 bg-amber-500/20 w-8" />
-        </div>
-      )}
+      {/* Gradient fade */}
+      <div className="absolute inset-x-0 top-0 h-full bg-gradient-to-b from-transparent from-20% via-[#0d1117]/90 to-[#0d1117] pointer-events-none" />
 
       {/* Lock overlay */}
-      <div className="absolute inset-x-0 bottom-0 flex flex-col items-center justify-end pb-8 gap-3 px-4 pt-16 bg-gradient-to-t from-[#0d1117] via-[#0d1117]/95 to-transparent">
-        {/* Lock badge */}
-        <div className="flex items-center gap-2.5 bg-[#0d1117]/90 border border-white/10 rounded-2xl px-4 py-3 backdrop-blur-sm shadow-xl">
-          <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center flex-shrink-0">
-            <Lock className="w-4 h-4 text-amber-400" />
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6">
+        {/* Lock icon + heading */}
+        <div className="flex flex-col items-center gap-2 text-center">
+          <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-center shadow-lg">
+            <Lock className="w-5 h-5 text-amber-400" />
           </div>
-          <div>
-            <p className="text-xs font-bold text-slate-200 leading-none">Full code locked</p>
-            <p className="text-[10px] text-slate-500 mt-1 leading-none">
-              {lockedCount > 0 ? `${lockedCount} more lines on paid plans` : 'Available on paid plans'}
-            </p>
-          </div>
+          <p className="text-sm font-bold text-slate-200">🔒 Source code is locked</p>
+          <p className="text-[11px] text-slate-500 max-w-[220px] leading-relaxed text-center">
+            Upgrade to access full source code and deployment.
+          </p>
+          {lockedCount > 0 && (
+            <span className="text-[9px] font-mono text-amber-500/70 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
+              +{lockedCount} lines hidden
+            </span>
+          )}
         </div>
 
-        {/* CTAs */}
+        {/* CTA */}
         <button
           onClick={onUpgrade}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-600 text-white text-xs font-bold hover:from-cyan-400 hover:to-violet-500 transition-all shadow-lg shadow-violet-900/40 w-full max-w-[200px] justify-center"
+          className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-600 text-white text-xs font-bold hover:from-cyan-400 hover:to-violet-500 transition-all shadow-lg shadow-violet-900/40"
         >
-          <Lock className="w-3 h-3" /> Unlock Code
+          <Lock className="w-3 h-3" /> Unlock Full Access
         </button>
-        <p className="text-[10px] text-slate-600 text-center max-w-[180px] leading-relaxed">
-          View, edit, copy &amp; export your complete source code
+        <p className="text-[10px] text-slate-600 text-center max-w-[200px] leading-relaxed">
+          Your project is ready to go live.<br />Upgrade to deploy and take ownership.
         </p>
       </div>
     </div>
@@ -223,6 +215,8 @@ const AppBuilder = () => {
   const [description, setDescription] = useState('');
   const [buildLoading, setBuildLoading] = useState(false);
   const [buildMsg, setBuildMsg] = useState('');
+  const [buildStep, setBuildStep] = useState(0);
+  const [buildJustCompleted, setBuildJustCompleted] = useState(false);
   const [generatedApp, setGeneratedApp] = useState(null);
   const [projectType, setProjectType] = useState('app');
   const [buildMode, setBuildMode] = useState('polished');
@@ -333,17 +327,23 @@ const AppBuilder = () => {
     'Analyzing requirements...', 'Almost there...',
   ];
   const BUILD_LOADING_MSGS = [
-    'Reading your requirements...', 'Planning the architecture...',
-    'Writing the code...', 'Building components...', 'Wiring everything together...',
-    'Adding finishing touches...', 'Almost done...',
+    'Analyzing request…',
+    'Initializing build…',
+    'Designing interface…',
+    'Generating functionality…',
+    'Connecting components…',
+    'Build is progressing smoothly.',
+    'Applying final adjustments…',
   ];
 
-  const startLoadingCycle = (msgs, setter) => {
+  const startLoadingCycle = (msgs, setter, stepSetter = null) => {
     let i = 0;
     setter(msgs[0]);
+    if (stepSetter) stepSetter(0);
     loadingIntervalRef.current = setInterval(() => {
-      i = (i + 1) % msgs.length;
+      i = Math.min(i + 1, msgs.length - 1);
       setter(msgs[i]);
+      if (stepSetter) stepSetter(i);
     }, 2500);
   };
 
@@ -722,8 +722,9 @@ const AppBuilder = () => {
   const generateApp = async () => {
     if (!description.trim() || buildLoading) return;
     setBuildLoading(true);
+    setBuildJustCompleted(false);
     setProjectBrief(null);
-    startLoadingCycle(BUILD_LOADING_MSGS, setBuildMsg);
+    startLoadingCycle(BUILD_LOADING_MSGS, setBuildMsg, setBuildStep);
     try {
       const response = await axiosInstance.post('/app-builder/generate', {
         description, framework: 'react',
@@ -737,11 +738,13 @@ const AppBuilder = () => {
       data.project_type = data.project_type || projectType;
       data.build_mode   = data.build_mode   || buildMode;
       setGeneratedApp(data);
-      toast.success('App generated!');
+      setBuildJustCompleted(true);
+      setTimeout(() => setBuildJustCompleted(false), 4000);
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to generate app');
     } finally {
       stopLoadingCycle(setBuildMsg);
+      setBuildStep(0);
       setBuildLoading(false);
     }
   };
@@ -1901,6 +1904,57 @@ const AppBuilder = () => {
                 </div>
               )}
 
+              {/* ── Live build progress panel ── */}
+              {buildLoading ? (
+                <div className="flex-1 flex flex-col items-center justify-center py-10 px-6 gap-6">
+                  {/* Header */}
+                  <div className="flex flex-col items-center gap-1.5 text-center">
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />
+                      <span className="text-[10px] font-mono text-cyan-500 uppercase tracking-widest">Building your application</span>
+                    </div>
+                    <p className="text-base font-bold text-white mt-1">{buildMsg || 'Initializing…'}</p>
+                  </div>
+
+                  {/* Step list */}
+                  <div className="w-full max-w-sm space-y-1.5">
+                    {BUILD_LOADING_MSGS.map((msg, i) => (
+                      <div key={i} className={`flex items-center gap-3 px-3 py-2 rounded-lg border transition-all duration-500 ${
+                        i < buildStep  ? 'bg-emerald-500/8 border-emerald-500/20' :
+                        i === buildStep ? 'bg-cyan-500/10 border-cyan-500/30' :
+                        'border-transparent opacity-25'
+                      }`}>
+                        {i < buildStep
+                          ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                          : i === buildStep
+                            ? <Loader2 className="w-3.5 h-3.5 text-cyan-400 animate-spin flex-shrink-0" />
+                            : <div className="w-3.5 h-3.5 rounded-full border border-slate-700 flex-shrink-0" />
+                        }
+                        <span className={`text-xs font-mono ${
+                          i < buildStep  ? 'text-emerald-400' :
+                          i === buildStep ? 'text-cyan-300' :
+                          'text-slate-600'
+                        }`}>{msg}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Progress bar */}
+                  <div className="w-full max-w-sm h-0.5 bg-slate-800 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-cyan-500 to-violet-600 rounded-full transition-all duration-1000"
+                      style={{ width: `${Math.min(((buildStep + 1) / BUILD_LOADING_MSGS.length) * 100, 95)}%` }}
+                    />
+                  </div>
+
+                  {/* Helper text */}
+                  <p className="text-[10px] text-slate-600 text-center max-w-xs leading-relaxed">
+                    The preview updates in real time.{' '}
+                    You can interact with the application as it builds.
+                  </p>
+                </div>
+              ) : (
+              <>
               <textarea
                 data-testid="app-description-input"
                 value={description}
@@ -1908,7 +1962,6 @@ const AppBuilder = () => {
                 placeholder="Describe your app in detail (or use the Coach to build a spec first)..."
                 className="w-full bg-black/50 border border-cyan-900/50 text-cyan-100 placeholder:text-cyan-900/50 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 rounded-sm font-mono p-4 outline-none resize-none"
                 rows={5}
-                disabled={buildLoading}
               />
               {/* Hidden import file inputs */}
               <input ref={importHtmlRef} type="file" accept=".html,.htm" onChange={handleImportHtml} className="hidden" />
@@ -1920,10 +1973,10 @@ const AppBuilder = () => {
                 <button
                   data-testid="generate-app-btn"
                   onClick={generateApp}
-                  disabled={buildLoading || !description.trim()}
+                  disabled={!description.trim()}
                   className="px-8 py-3 bg-gradient-to-r from-cyan-500 to-violet-600 text-white font-bold hover:from-cyan-400 hover:to-violet-500 hover:shadow-[0_0_20px_rgba(0,243,255,0.4)] uppercase tracking-wider rounded-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                  {buildLoading ? <><Loader2 className="w-5 h-5 animate-spin" />{buildMsg || 'GENERATING...'}</> : <><Wand2 className="w-5 h-5" />GENERATE APP</>}
+                  <Wand2 className="w-5 h-5" />GENERATE APP
                 </button>
                 {!spec && (
                   <button
@@ -1944,6 +1997,8 @@ const AppBuilder = () => {
                   </button>
                 </div>
               </div>
+              </>
+              )}
             </div>
           ) : (
             <div className="flex-1 flex flex-col overflow-hidden">
@@ -2543,7 +2598,7 @@ const AppBuilder = () => {
 
                 {/* Preview pane: always visible in split mode; also in normal mode when activeTab=preview */}
                 {(splitView || activeTab === 'preview') && (
-                  <div className={splitView ? 'w-1/2 border-r border-cyan-500/20 flex-shrink-0 h-full' : 'h-full'}>
+                  <div className={`relative ${splitView ? 'w-1/2 border-r border-cyan-500/20 flex-shrink-0 h-full' : 'h-full'}`}>
                     <iframe
                       key={generatedApp.html}
                       srcDoc={injectConsoleCapture(generatedApp.html)}
@@ -2551,6 +2606,17 @@ const AppBuilder = () => {
                       className="w-full h-full border-0 bg-white"
                       sandbox="allow-scripts allow-forms allow-modals allow-same-origin"
                     />
+                    {/* Build complete notification */}
+                    {buildJustCompleted && (
+                      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2.5 bg-emerald-950/95 border border-emerald-500/40 rounded-xl px-4 py-2.5 shadow-2xl backdrop-blur-sm pointer-events-none"
+                        style={{ animation: 'fadeInDown 0.3s ease-out' }}>
+                        <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                        <div>
+                          <p className="text-xs font-bold text-emerald-300 leading-none">Build complete.</p>
+                          <p className="text-[10px] text-emerald-600 mt-0.5 leading-none">Your application is ready. You can now interact with the preview.</p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
