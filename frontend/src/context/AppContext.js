@@ -333,20 +333,82 @@ export function AppProvider({ children }) {
   // ---- Image usage (server-authoritative, separate from credits) ----
   const [imageUsage, setImageUsage] = useState({ used: 0, limit: 2, resetsOn: null });
 
-  const incrementImageUsage = useCallback(() => {
-    setImageUsage(prev => ({ ...prev, used: prev.used + 1 }));
-    // Resync with server after a short delay so the optimistic count corrects
-    // itself if the backend disagrees (e.g. dedup blocked the log).
-    setTimeout(() => {
-      api.authCredits().then(({ credits: c, plan: p, images_used, images_limit, images_resets_on }) => {
-        setCredits(c);
-        setPlan(p);
-        if (images_used !== undefined) {
-          setImageUsage({ used: images_used, limit: images_limit ?? 2, resetsOn: images_resets_on ?? null });
+  // Ref holds the BroadcastChannel so incrementImageUsage can post without
+  // being recreated every render.
+  const _imgSyncChannelRef = useRef(null);
+
+  // Set up BroadcastChannel (+ storage-event fallback for older browsers).
+  // Receiving a message from another tab immediately updates local count.
+  useEffect(() => {
+    let channel = null;
+    try {
+      channel = new BroadcastChannel('image_usage');
+      _imgSyncChannelRef.current = channel;
+      channel.onmessage = (e) => {
+        if (e.data?.used !== undefined) {
+          setImageUsage(prev => ({ ...prev, used: e.data.used }));
         }
-      }).catch(() => {});
-    }, 1500);
-  }, []);
+      };
+    } catch {
+      _imgSyncChannelRef.current = null;
+    }
+
+    // Storage-event fallback: fires on other tabs even without BroadcastChannel.
+    const onStorage = (e) => {
+      if (e.key === 'ma_img_usage_bc') {
+        try {
+          const data = JSON.parse(e.newValue);
+          if (data?.used !== undefined) {
+            setImageUsage(prev => ({ ...prev, used: data.used }));
+          }
+        } catch {}
+      }
+    };
+    window.addEventListener('storage', onStorage);
+
+    return () => {
+      channel?.close();
+      _imgSyncChannelRef.current = null;
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Retry delays: first attempt at 1.5 s, then +2 s, then +5 s (max 3 attempts).
+  const _RESYNC_DELAYS = [1500, 2000, 5000];
+
+  const incrementImageUsage = useCallback(() => {
+    // Optimistic update + broadcast to other tabs
+    let nextUsed;
+    setImageUsage(prev => {
+      nextUsed = prev.used + 1;
+      return { ...prev, used: nextUsed };
+    });
+
+    // Broadcast via BroadcastChannel
+    try { _imgSyncChannelRef.current?.postMessage({ used: nextUsed }); } catch {}
+    // Storage-event fallback for other tabs (and older browsers)
+    try { localStorage.setItem('ma_img_usage_bc', JSON.stringify({ used: nextUsed, t: Date.now() })); } catch {}
+
+    // Resilient resync — retry up to 2 times on network failure, silent (no UI)
+    let attempt = 0;
+    const trySync = () => {
+      api.authCredits()
+        .then(({ credits: c, plan: p, images_used, images_limit, images_resets_on }) => {
+          setCredits(c);
+          setPlan(p);
+          if (images_used !== undefined) {
+            setImageUsage({ used: images_used, limit: images_limit ?? 2, resetsOn: images_resets_on ?? null });
+          }
+        })
+        .catch(() => {
+          attempt += 1;
+          if (attempt < _RESYNC_DELAYS.length) {
+            setTimeout(trySync, _RESYNC_DELAYS[attempt]);
+          }
+        });
+    };
+    setTimeout(trySync, _RESYNC_DELAYS[0]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- Onboarding build prompt bridge ----
   // OnboardingModal sets this; AppBuilder reads + clears it to auto-fill + build
