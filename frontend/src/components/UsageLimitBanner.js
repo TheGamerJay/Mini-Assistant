@@ -1,128 +1,90 @@
 /**
  * UsageLimitBanner.js
- * Soft warning banner — shown when a user's credits are running low.
- * Dismissable per session. Never shown to users with plenty of credits.
+ * Shows a one-time toast when credits are running low.
  *
- * Thresholds:
- *   < 10% remaining → danger   "You're almost out of credits"
- *   < 25% remaining → warning  "You're approaching your usage limit"
+ * Rules:
+ *  - Auto-dismisses after 8 s (no permanent banner)
+ *  - Dismissal stored in localStorage — survives page refresh
+ *  - Re-shows only if credits have dropped further since last dismiss
+ *  - Three tiers: warning (<25%), danger (<10%), critical (≤1 credit)
  */
 
-import React, { useState, useEffect } from 'react';
-import { AlertTriangle, X, Zap, ArrowRight } from 'lucide-react';
+import { useEffect, useRef } from 'react';
+import { toast } from 'sonner';
 import { useApp } from '../context/AppContext';
 
 const PLAN_LIMITS = { free: 50, standard: 500, pro: 2000, team: 10000, max: 10000 };
+const STORAGE_KEY = 'ma_usage_banner';
 
-// Don't re-show the same severity after dismiss within the same session
-const _dismissed = new Set();
+function getStore() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch { return {}; }
+}
+
+/** Returns true if we should show the toast for this severity + credit count. */
+function shouldShow(severity, credits) {
+  const store = getStore();
+  if (!(severity in store)) return true;
+  // Re-show only if credits have dropped by more than 1 since last dismiss
+  return credits < store[severity] - 1;
+}
+
+function markDismissed(severity, credits) {
+  try {
+    const store = getStore();
+    store[severity] = credits;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+  } catch {}
+}
 
 export default function UsageLimitBanner() {
-  const { credits, plan, isSubscribed, openUpgradeModal, setPurchaseModalOpen, setPage, page } = useApp();
-  const [visible, setVisible] = useState(false);
-  const [severity, setSeverity] = useState(null); // 'warning' | 'danger'
+  const { credits, plan, page, isSubscribed, openUpgradeModal, setPurchaseModalOpen } = useApp();
+  // Track which (severity, credits) combos we've already toasted this session
+  const shownRef = useRef(new Set());
 
   useEffect(() => {
     if (credits === null || credits === undefined) return;
-
-    // Don't show on pricing/dashboard pages — user is already looking at billing
-    if (page === 'pricing' || page === 'dashboard') { setVisible(false); return; }
+    // Skip on billing-focused pages — user is already aware
+    if (page === 'pricing' || page === 'dashboard') return;
 
     const limit = PLAN_LIMITS[plan] || 50;
-    const pct   = Math.max(0, Math.min(100, (credits / limit) * 100));
+    const pct   = (credits / limit) * 100;
 
-    if (credits === 1 && !_dismissed.has('critical')) {
-      setSeverity('critical');
-      setVisible(true);
-    } else if (pct < 10 && !_dismissed.has('danger')) {
-      setSeverity('danger');
-      setVisible(true);
-    } else if (pct < 25 && !_dismissed.has('warning')) {
-      setSeverity('warning');
-      setVisible(true);
-    } else {
-      setVisible(false);
-    }
-  }, [credits, plan, page]);
+    let severity = null;
+    if      (credits <= 1) severity = 'critical';
+    else if (pct < 10)     severity = 'danger';
+    else if (pct < 25)     severity = 'warning';
 
-  const dismiss = () => {
-    _dismissed.add(severity);
-    setVisible(false);
-  };
+    if (!severity)                        return;
+    if (!shouldShow(severity, credits))   return;
 
-  const handleAction = () => {
-    dismiss();
-    if (!isSubscribed) {
-      openUpgradeModal('credits');
-    } else {
-      setPurchaseModalOpen(true);
-    }
-  };
+    // Prevent duplicate toasts within the same JS session
+    const sessionKey = `${severity}-${credits}`;
+    if (shownRef.current.has(sessionKey)) return;
+    shownRef.current.add(sessionKey);
 
-  if (!visible || !severity) return null;
+    const messages = {
+      critical: `1 credit left — AI will pause after your next action.`,
+      danger:   `Almost out — ${credits} credit${credits !== 1 ? 's' : ''} remaining.`,
+      warning:  `Low on credits — ${credits} of ${limit} remaining.`,
+    };
 
-  const isCritical = severity === 'critical';
-  const isDanger   = severity === 'danger';
-  const limit      = PLAN_LIMITS[plan] || 50;
-  const pct        = Math.max(0, Math.min(100, ((credits ?? 0) / limit) * 100)).toFixed(0);
+    const dismiss = () => markDismissed(severity, credits);
+    const toastFn = severity === 'warning' ? toast.warning : toast.error;
 
-  return (
-    <div
-      className={`flex items-center gap-3 px-4 py-2.5 border-b text-sm transition-all
-        ${isCritical
-          ? 'bg-red-600/15 border-red-600/25 text-red-200'
-          : isDanger
-          ? 'bg-red-500/10 border-red-500/20 text-red-300'
-          : 'bg-amber-500/10 border-amber-500/20 text-amber-300'
-        }`}
-    >
-      <AlertTriangle
-        size={14}
-        className={`flex-shrink-0 ${isCritical ? 'text-red-300' : isDanger ? 'text-red-400' : 'text-amber-400'}`}
-      />
+    toastFn(messages[severity], {
+      id:          'usage-banner',   // deduplicates if already on screen
+      duration:    8000,
+      action: {
+        label:   isSubscribed ? 'Top Up' : 'Upgrade',
+        onClick: () => {
+          dismiss();
+          isSubscribed ? setPurchaseModalOpen(true) : openUpgradeModal('credits');
+        },
+      },
+      onDismiss:   dismiss,
+      onAutoClose: dismiss,
+    });
+  }, [credits, plan, page, isSubscribed, openUpgradeModal, setPurchaseModalOpen]);
 
-      <span className="flex-1 text-xs leading-snug">
-        {isCritical ? (
-          <>
-            <strong>1 Mini Credit remaining</strong> — this is your last credit.
-            {' '}AI features will pause after your next action.
-          </>
-        ) : isDanger ? (
-          <>
-            <strong>Almost out of credits</strong> — you have{' '}
-            <span className="font-mono font-bold">{credits ?? 0}</span> credits left ({pct}%).
-            {' '}AI features will pause when you hit zero.
-          </>
-        ) : (
-          <>
-            <strong>Approaching your usage limit</strong> — you've used{' '}
-            <span className="font-mono font-bold">{100 - Number(pct)}%</span> of your {plan} plan credits.
-          </>
-        )}
-      </span>
-
-      <button
-        onClick={handleAction}
-        className={`flex-shrink-0 flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold transition-all
-          ${isCritical
-            ? 'bg-red-600/25 hover:bg-red-600/35 text-red-200 border border-red-600/40'
-            : isDanger
-            ? 'bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/30'
-            : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30'
-          }`}
-      >
-        <Zap size={11} />
-        {isSubscribed ? 'Top Up' : 'Upgrade'}
-        <ArrowRight size={11} />
-      </button>
-
-      <button
-        onClick={dismiss}
-        className="flex-shrink-0 p-1 rounded text-current opacity-50 hover:opacity-100 transition-opacity"
-        title="Dismiss"
-      >
-        <X size={13} />
-      </button>
-    </div>
-  );
+  return null;
 }
