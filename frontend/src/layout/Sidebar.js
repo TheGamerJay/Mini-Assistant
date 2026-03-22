@@ -5,7 +5,7 @@
  */
 
 import React, { useState, useCallback, useEffect } from 'react';
-import { useApp } from '../context/AppContext';
+import { useApp, imageFullMap } from '../context/AppContext';
 import {
   ChevronLeft,
   Menu,
@@ -337,9 +337,55 @@ function PromptTemplateRow({ template, collapsed, onUse, onDelete }) {
 }
 
 // ---------------------------------------------------------------------------
+// ImageLightbox — fullscreen overlay for sidebar thumbnail clicks
+// ---------------------------------------------------------------------------
+function ImageLightbox({ img, onClose }) {
+  // Close on Escape key
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  if (!img) return null;
+
+  // Prefer the full base64 from the module-level map, fall back to thumbnail
+  const full = imageFullMap.get(img.id);
+  let src = full
+    ? (full.startsWith('data:') ? full : `data:image/png;base64,${full}`)
+    : img.thumb;
+
+  return (
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="relative max-w-[90vw] max-h-[90vh] rounded-xl overflow-hidden shadow-2xl border border-white/10"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <img src={src} alt={img.prompt} className="max-w-[90vw] max-h-[85vh] object-contain" />
+        {img.prompt && (
+          <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-4 py-2 text-xs text-slate-300 truncate">
+            {img.prompt}
+          </div>
+        )}
+        <button
+          className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-slate-400 hover:text-white hover:bg-black/80 transition-colors"
+          onClick={onClose}
+        >
+          <X size={14} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Sidebar
 // ---------------------------------------------------------------------------
 function Sidebar() {
+  const [lightboxImg, setLightboxImg] = useState(null);
   const {
     sidebarCollapsed,
     toggleSidebar,
@@ -499,7 +545,7 @@ function Sidebar() {
               {images.slice(0, 9).map((img) => (
                 <button
                   key={img.id}
-                  onClick={() => navTo('images')}
+                  onClick={() => setLightboxImg(img)}
                   title={img.prompt}
                   className="rounded-md overflow-hidden border border-white/10 hover:border-cyan-500/30 transition-colors aspect-square bg-black/40"
                   style={sidebarCollapsed ? { width: 36, height: 36 } : {}}
@@ -681,6 +727,7 @@ function Sidebar() {
         </div>
       </div>
     </div>
+      {lightboxImg && <ImageLightbox img={lightboxImg} onClose={() => setLightboxImg(null)} />}
     </>
   );
 }

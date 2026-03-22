@@ -417,6 +417,8 @@ export function AppProvider({ children }) {
     api.dbGetTemplates()
       .then((data) => { if (data?.templates?.length) setPromptTemplates(data.templates); })
       .catch(() => {});
+    // Hydrate image usage from server so it survives page refreshes
+    refreshCredits();
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Persist per-user data to localStorage whenever it changes

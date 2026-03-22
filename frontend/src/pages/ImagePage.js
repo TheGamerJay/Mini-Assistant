@@ -35,7 +35,7 @@ function SkeletonCard() {
 }
 
 function ImagePage() {
-  const { settings, updateSettings, addImage } = useApp();
+  const { settings, updateSettings, addImage, imageUsage, incrementImageUsage } = useApp();
 
   const [prompt, setPrompt]       = useState('');
   const [quality, setQuality]     = useState(settings.quality || 'balanced');
@@ -50,6 +50,12 @@ function ImagePage() {
     if (activePrompt.length < 3) { toast.warning('Prompt too short (min 3 characters)'); return; }
     if (generating) return;
 
+    // Image limit gate
+    if (imageUsage.used >= imageUsage.limit) {
+      toast.error(`Image limit reached (${imageUsage.limit}/${imageUsage.limit}). Upgrade for more.`);
+      return;
+    }
+
     sessionIdRef.current = crypto.randomUUID();
     setGenerating(true);
     try {
@@ -61,11 +67,13 @@ function ImagePage() {
         session_id: sessionIdRef.current,
         override_width: w,
         override_height: h,
+        request_id: crypto.randomUUID(),
       });
 
       if (data.image_base64) {
         const thumb = await makeThumbnail(data.image_base64);
         await addImage(thumb, activePrompt, data.image_base64);
+        incrementImageUsage();
       }
 
       setResults((prev) => [{ ...data, prompt: activePrompt, _id: crypto.randomUUID() }, ...prev]);
@@ -82,7 +90,7 @@ function ImagePage() {
     } finally {
       setGenerating(false);
     }
-  }, [prompt, quality, size, addImage, generating]);
+  }, [prompt, quality, size, addImage, generating, imageUsage, incrementImageUsage]);
 
   const handleCancel = useCallback(() => {
     setGenerating(false);
@@ -178,9 +186,9 @@ function ImagePage() {
           )}
         </div>
 
-        {/* Cost hint */}
+        {/* Cost hint + usage */}
         <p className="text-[10px] text-slate-600 text-center">
-          {quality === 'high' ? 'HD ~$0.08/image' : 'Standard ~$0.04/image'}
+          ~$0.13/image · {imageUsage.used}/{imageUsage.limit} used this{imageUsage.resetsOn ? ` month` : ' lifetime'}
         </p>
       </div>
 
