@@ -164,6 +164,29 @@ function pageTitle(page) {
 function AppShell() {
   const { page, setPage, getPrevPage, serverStatus, setServerStatus, purchaseModalOpen, setPurchaseModalOpen, upgradeModalOpen, setUpgradeModalOpen, refreshCredits, openUpgradeModal, user, logout } = useApp();
 
+  // Session sleep / resume — Page Visibility API
+  const [sessionResumed, setSessionResumed] = React.useState(false);
+  const lastHiddenRef = React.useRef(null);
+  const SLEEP_THRESHOLD_MS = 3 * 60 * 1000; // 3 min
+
+  useEffect(() => {
+    const onChange = () => {
+      if (document.visibilityState === 'hidden') {
+        lastHiddenRef.current = Date.now();
+      } else if (document.visibilityState === 'visible' && lastHiddenRef.current) {
+        const elapsed = Date.now() - lastHiddenRef.current;
+        lastHiddenRef.current = null;
+        if (elapsed >= SLEEP_THRESHOLD_MS) {
+          setSessionResumed(true);
+          setTimeout(() => setSessionResumed(false), 4000);
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', onChange);
+    return () => document.removeEventListener('visibilitychange', onChange);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // First-login onboarding modal
   const [showOnboarding, setShowOnboarding] = React.useState(false);
   useEffect(() => {
@@ -214,9 +237,10 @@ function AppShell() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Poll server status every 60 s
+  // Poll server status every 60 s — skips silently when tab is hidden
   useEffect(() => {
     const check = async () => {
+      if (document.visibilityState === 'hidden') return;
       try {
         const data = await api.mainHealth();
         setServerStatus({
@@ -295,6 +319,15 @@ function AppShell() {
 
       {/* First-login onboarding modal */}
       {showOnboarding && <OnboardingModal onDone={handleOnboardingDone} />}
+
+      {/* Session resume notification — shown after 3+ min of inactivity */}
+      {sessionResumed && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[90] flex items-center gap-2.5 px-4 py-2.5 bg-[#0f0f18]/95 border border-cyan-500/25 rounded-xl shadow-2xl backdrop-blur-sm pointer-events-none"
+          style={{ animation: 'fadeInDown 0.3s ease-out' }}>
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
+          <p className="text-xs text-slate-300">Session resumed. You can continue building.</p>
+        </div>
+      )}
     </div>
   );
 }
