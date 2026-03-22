@@ -27,7 +27,7 @@ const PLANS = [
     annualTotal: 0,
     credits: 50,
     badge: null,
-    description: 'Get 5 free credits after email verification. 50 monthly credits on the free tier — no card required.',
+    description: 'Start with 5 free credits after email verification. Earn more through referrals. No card required.',
     cta: 'Current Plan',
     ctaDisabled: true,
   },
@@ -73,7 +73,7 @@ const PLANS = [
 // value: true = checkmark, false = X, string = custom text, null = dash
 const FEATURE_ROWS = [
   { category: 'Credits & AI' },
-  { label: 'Monthly Credits',       free: '50',      standard: '1,000',      pro: '4,000',       max: '10,000' },
+  { label: 'Credits',                free: '5 to start', standard: '1,000/mo',   pro: '4,000/mo',    max: '10,000/mo' },
   { label: 'AI chat (Claude)',       free: true,      standard: true,         pro: true,          max: true },
   { label: 'Image generation',       free: '3/day',   standard: true,         pro: true,          max: true },
   { label: 'AI model priority',      free: 'Standard',standard: 'Standard',   pro: 'Priority',    max: 'Dedicated' },
@@ -102,7 +102,7 @@ const FEATURE_ROWS = [
 const FAQ = [
   {
     q: 'What are Mini Credits?',
-    a: 'Mini Credits are the currency used on our platform. 1 credit = 1 chat message. Image generation uses 3 credits. App Builder generation uses credits based on complexity. Credits reset monthly on your billing date.',
+    a: 'Mini Credits are the currency used on our platform. 1 credit = 1 chat message. Image generation uses 3 credits. App Builder generation uses credits based on complexity. Paid plan credits reset monthly on your billing date; free credits are granted once on signup.',
   },
   {
     q: 'Can I cancel anytime?',
@@ -110,7 +110,7 @@ const FAQ = [
   },
   {
     q: 'What happens when I run out of credits?',
-    a: "When you hit zero credits, AI features are paused until your credits reset at the start of your next billing cycle. You can also purchase a one-time credit top-up at any time from the Credits section in your dashboard.",
+    a: "When you hit zero credits, AI features are paused. Paid subscribers get credits reset at the start of each billing cycle. Free users can earn additional credits through referrals or upgrade to a paid plan for a monthly allotment.",
   },
   {
     q: 'Can I upgrade or downgrade at any time?',
@@ -118,7 +118,7 @@ const FAQ = [
   },
   {
     q: 'Do unused credits roll over?',
-    a: "No. Credits reset at the start of each billing period and do not roll over. This applies to all plan tiers.",
+    a: "No. Paid plan credits reset at the start of each billing period and do not roll over. Free credits are granted once on signup and do not refresh.",
   },
   {
     q: 'Is there a free trial for paid plans?',
@@ -329,7 +329,7 @@ export default function PricingPage() {
                     </>
                   )}
                   <p className={`text-[11px] font-semibold mt-1 ${c.text}`}>
-                    {plan.credits.toLocaleString()} credits/mo
+                    {plan.id === 'free' ? '5 credits to start' : `${plan.credits.toLocaleString()} credits/mo`}
                   </p>
                 </div>
 
