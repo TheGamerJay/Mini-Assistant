@@ -4,7 +4,7 @@
  * 260 px expanded · 64 px collapsed (icon-only)
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useApp, imageFullMap } from '../context/AppContext';
 import {
   ChevronLeft,
@@ -340,18 +340,39 @@ function PromptTemplateRow({ template, collapsed, onUse, onDelete }) {
 }
 
 // ---------------------------------------------------------------------------
-// ImageLightbox — fullscreen overlay for sidebar thumbnail clicks
+// ImageLightbox — fullscreen overlay with scroll-wheel + click incremental zoom
 // ---------------------------------------------------------------------------
 function ImageLightbox({ img, onClose, onDelete }) {
-  const [zoomed, setZoomed] = useState(false);
+  const [scale, setScale] = useState(1);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const containerRef = useRef(null);
+  const dragRef = useRef(null); // { startX, startY, posX, posY, moved }
 
+  // Non-passive wheel listener for zoom
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e) => {
+      e.preventDefault();
+      const step = e.deltaY < 0 ? 0.15 : -0.15;
+      setScale(prev => Math.max(0.5, Math.min(8, +(prev + step).toFixed(2))));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  // Keyboard: Esc resets zoom first, then closes
   useEffect(() => {
     const handler = (e) => {
-      if (e.key === 'Escape') { if (zoomed) setZoomed(false); else onClose(); }
+      if (e.key === 'Escape') {
+        if (scale > 1.01) { setScale(1); setPos({ x: 0, y: 0 }); }
+        else onClose();
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [onClose, zoomed]);
+  }, [onClose, scale]);
 
   if (!img) return null;
 
@@ -369,55 +390,91 @@ function ImageLightbox({ img, onClose, onDelete }) {
 
   const handleDelete = () => { onDelete(img.id); onClose(); };
 
+  const isZoomed = scale > 1.01;
+
+  // Drag-to-pan (pointer events for touch + mouse)
+  const handlePointerDown = (e) => {
+    if (!isZoomed) return;
+    e.preventDefault();
+    dragRef.current = { startX: e.clientX, startY: e.clientY, posX: pos.x, posY: pos.y, moved: false };
+    setIsDragging(true);
+  };
+  const handlePointerMove = (e) => {
+    if (!isDragging || !dragRef.current) return;
+    const dx = e.clientX - dragRef.current.startX;
+    const dy = e.clientY - dragRef.current.startY;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragRef.current.moved = true;
+    setPos({ x: dragRef.current.posX + dx, y: dragRef.current.posY + dy });
+  };
+  const handlePointerUp = () => setIsDragging(false);
+
+  // Click on image: step zoom +0.5, reset when >= 4
+  const handleImgClick = (e) => {
+    e.stopPropagation();
+    if (dragRef.current?.moved) return;
+    setScale(prev => {
+      if (prev >= 4) { setPos({ x: 0, y: 0 }); return 1; }
+      return +(prev + 0.5).toFixed(2);
+    });
+  };
+
+  const pct = Math.round(scale * 100);
+
   return (
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.92)' }}
-      onClick={() => { if (zoomed) setZoomed(false); else onClose(); }}
+      ref={containerRef}
+      className="fixed inset-0 z-[200] flex flex-col items-center justify-center overflow-hidden"
+      style={{ background: 'rgba(0,0,0,0.92)', userSelect: 'none' }}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerUp}
+      onClick={() => { if (!isZoomed) onClose(); }}
     >
-      {/* Close button — top right, always visible */}
-      {!zoomed && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onClose(); }}
-          className="absolute top-4 right-4 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white/60 hover:text-white transition-all"
-        >
-          <X size={15} />
-        </button>
+      {/* Close */}
+      <button
+        onClick={(e) => { e.stopPropagation(); onClose(); }}
+        className="absolute top-4 right-4 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white/60 hover:text-white transition-all"
+      >
+        <X size={15} />
+      </button>
+
+      {/* Zoom % badge */}
+      {pct !== 100 && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 bg-black/70 backdrop-blur-sm text-white/60 text-[11px] font-mono px-3 py-1.5 rounded-full border border-white/10 pointer-events-none">
+          {pct}%
+        </div>
       )}
 
-      {/* ── NORMAL VIEW ── */}
-      {!zoomed && (
-        <div className="flex flex-col items-center gap-4 w-full px-4">
-          {/* Image */}
-          <div
-            className="relative cursor-zoom-in group"
-            onClick={(e) => { e.stopPropagation(); setZoomed(true); }}
-          >
-            <img
-              src={src}
-              alt={img.prompt}
-              className="block rounded-2xl select-none"
-              style={{
-                maxWidth: 'min(86vw, 820px)',
-                maxHeight: 'min(76vh, 820px)',
-                width: 'auto',
-                height: 'auto',
-                filter: 'drop-shadow(0 0 40px rgba(99,102,241,0.15))',
-              }}
-            />
-            {/* Zoom hint — fades in on hover */}
-            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-              <div className="flex items-center gap-1.5 bg-black/60 backdrop-blur-sm text-white/80 text-xs font-medium px-3 py-1.5 rounded-full border border-white/10">
-                <ZoomIn size={12} /> Zoom
-              </div>
-            </div>
-          </div>
+      {/* Image + action bar */}
+      <div
+        className="flex flex-col items-center gap-4 w-full px-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <img
+          src={src}
+          alt={img.prompt}
+          draggable={false}
+          className="block rounded-2xl"
+          style={{
+            maxWidth: 'min(86vw, 820px)',
+            maxHeight: 'min(76vh, 820px)',
+            width: 'auto',
+            height: 'auto',
+            transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})`,
+            transition: isDragging ? 'none' : 'transform 0.1s ease-out',
+            transformOrigin: 'center center',
+            cursor: isZoomed ? (isDragging ? 'grabbing' : 'grab') : 'zoom-in',
+            filter: 'drop-shadow(0 0 40px rgba(99,102,241,0.15))',
+          }}
+          onClick={handleImgClick}
+          onPointerDown={handlePointerDown}
+        />
 
-          {/* Floating action bar */}
+        {/* Action bar — hidden while zoomed to reduce clutter */}
+        {!isZoomed && (
           <div
             className="flex items-center gap-1 p-1 rounded-2xl backdrop-blur-xl border border-white/8"
             style={{ background: 'rgba(15,15,25,0.85)' }}
-            onClick={(e) => e.stopPropagation()}
           >
             {img.prompt && (
               <>
@@ -426,15 +483,7 @@ function ImageLightbox({ img, onClose, onDelete }) {
               </>
             )}
             <button
-              onClick={() => setZoomed(true)}
-              title="Zoom in"
-              className="flex items-center gap-1.5 text-[11px] font-medium text-slate-400 hover:text-white px-3 py-2 rounded-xl hover:bg-white/8 transition-all"
-            >
-              <ZoomIn size={13} /> Zoom
-            </button>
-            <button
               onClick={handleDownload}
-              title="Save image"
               className="flex items-center gap-1.5 text-[11px] font-medium text-slate-400 hover:text-white px-3 py-2 rounded-xl hover:bg-white/8 transition-all"
             >
               <Download size={13} /> Save
@@ -442,30 +491,18 @@ function ImageLightbox({ img, onClose, onDelete }) {
             <div className="w-px h-4 bg-white/10 flex-shrink-0" />
             <button
               onClick={handleDelete}
-              title="Remove from gallery"
               className="flex items-center gap-1.5 text-[11px] font-medium text-red-500/80 hover:text-red-400 px-3 py-2 rounded-xl hover:bg-red-500/10 transition-all"
             >
               <Trash2 size={13} /> Delete
             </button>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* ── ZOOMED VIEW ── */}
-      {zoomed && (
-        <div
-          className="w-screen h-screen overflow-auto flex items-start justify-center p-10 cursor-zoom-out"
-          onClick={() => setZoomed(false)}
-        >
-          <img
-            src={src}
-            alt={img.prompt}
-            className="rounded-2xl select-none"
-            style={{ width: '100%', maxWidth: '1800px' }}
-          />
-          <div className="fixed bottom-5 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-black/70 backdrop-blur-sm text-white/50 text-[11px] px-3 py-1.5 rounded-full border border-white/10 pointer-none">
-            <ZoomOut size={11} /> Click or Esc to exit
-          </div>
+      {/* Hint bar when zoomed */}
+      {isZoomed && (
+        <div className="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-black/70 backdrop-blur-sm text-white/40 text-[11px] px-3 py-1.5 rounded-full border border-white/10 pointer-events-none">
+          <ZoomOut size={11} /> Scroll · Click to step · Esc to reset
         </div>
       )}
     </div>
