@@ -390,14 +390,20 @@ function ImageLightbox({ img, onClose, onDelete }) {
         <div className="flex flex-col items-center gap-4 w-full px-4">
           {/* Image */}
           <div
-            className="relative w-[min(86vw,820px)] h-[min(76vh,820px)] cursor-zoom-in group"
+            className="relative cursor-zoom-in group"
             onClick={(e) => { e.stopPropagation(); setZoomed(true); }}
           >
             <img
               src={src}
               alt={img.prompt}
-              className="w-full h-full object-contain rounded-2xl select-none"
-              style={{ filter: 'drop-shadow(0 0 40px rgba(99,102,241,0.15))' }}
+              className="block rounded-2xl select-none"
+              style={{
+                maxWidth: 'min(86vw, 820px)',
+                maxHeight: 'min(76vh, 820px)',
+                width: 'auto',
+                height: 'auto',
+                filter: 'drop-shadow(0 0 40px rgba(99,102,241,0.15))',
+              }}
             />
             {/* Zoom hint — fades in on hover */}
             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
