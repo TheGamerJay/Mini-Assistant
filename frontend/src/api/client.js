@@ -60,6 +60,11 @@ async function request(url, options = {}, timeoutMs = 30000) {
     }
 
     if (!res.ok) {
+      // Auto-logout on 401 — token expired or account deleted
+      if (res.status === 401) {
+        clearToken();
+        window.dispatchEvent(new CustomEvent('ma:unauthorized'));
+      }
       throw new ApiError(
         (data && data.detail) || (data && data.message) || `HTTP ${res.status}`,
         res.status,

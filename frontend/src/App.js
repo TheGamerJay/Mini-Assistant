@@ -159,7 +159,7 @@ function pageTitle(page) {
 // AppShell — rendered inside AppProvider so it can use useApp()
 // ---------------------------------------------------------------------------
 function AppShell() {
-  const { page, setPage, getPrevPage, serverStatus, setServerStatus, purchaseModalOpen, setPurchaseModalOpen, upgradeModalOpen, setUpgradeModalOpen, refreshCredits, openUpgradeModal, user } = useApp();
+  const { page, setPage, getPrevPage, serverStatus, setServerStatus, purchaseModalOpen, setPurchaseModalOpen, upgradeModalOpen, setUpgradeModalOpen, refreshCredits, openUpgradeModal, user, logout } = useApp();
 
   // Show onboarding once per account — stored in localStorage scoped to user id
   const [showOnboarding, setShowOnboarding] = React.useState(false);
@@ -179,6 +179,13 @@ function AppShell() {
     window.addEventListener('ma:outofcredits', handler);
     return () => window.removeEventListener('ma:outofcredits', handler);
   }, [openUpgradeModal]);
+
+  // Auto-logout when any API call returns 401 (expired/deleted token)
+  useEffect(() => {
+    const handler = () => logout();
+    window.addEventListener('ma:unauthorized', handler);
+    return () => window.removeEventListener('ma:unauthorized', handler);
+  }, [logout]);
 
   // Capture referral code from URL and persist to localStorage
   useEffect(() => {
