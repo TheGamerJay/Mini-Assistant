@@ -363,7 +363,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
             content: 'Rendering your image...', timestamp: Date.now(), _placeholder: true,
           }]);
           try {
-            const data = await send(text, sessionIdRef.current, history, null, preferredModel);
+            const data = await send(text, sessionIdRef.current, history, imgs.length ? imgs : null, preferredModel);
             setStreamResponse(data);
             const isImg = !!data.image_base64;
             if (isImg) {
