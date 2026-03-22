@@ -8,7 +8,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   X, Lock, Zap, Code2, Download, Github, Rocket, Users,
-  Check, Crown, Star, ArrowRight, Sparkles, Shield,
+  Check, Crown, Star, ArrowRight, Sparkles, Shield, Copy,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { startCheckout, getPriceId } from '../api/checkout';
@@ -90,8 +90,8 @@ const REASON_COPY = {
     icon: Code2,
   },
   credits: {
-    headline: "You've Run Out of Credits",
-    sub: "Upgrade to a paid plan and get up to 10,000 credits/month — enough to build, iterate, and ship without limits.",
+    headline: "You've used all your Mini Credits.",
+    sub: "You can continue by earning more through referrals, or upgrade for full access.",
     icon: Zap,
   },
   export: {
@@ -218,9 +218,10 @@ function PlanCard({ plan, annual, currentPlan, onSelect, checkoutLoading }) {
 // UpgradeModal
 // ---------------------------------------------------------------------------
 export default function UpgradeModal() {
-  const { upgradeModalOpen, setUpgradeModalOpen, upgradeReason, plan: currentPlan, setPage } = useApp();
+  const { upgradeModalOpen, setUpgradeModalOpen, upgradeReason, plan: currentPlan, setPage, user } = useApp();
   const [annual, setAnnual] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState(null);
+  const [referralCopied, setReferralCopied] = useState(false);
 
   const copy = REASON_COPY[upgradeReason] || REASON_COPY.generic;
   const HeadlineIcon = copy.icon;
@@ -273,6 +274,16 @@ export default function UpgradeModal() {
   const handleViewAllPlans = () => {
     close();
     setPage('pricing');
+  };
+
+  const handleCopyReferral = () => {
+    const code = user?.referral_code;
+    if (!code) return;
+    const link = `${window.location.origin}?ref=${code}`;
+    navigator.clipboard.writeText(link).then(() => {
+      setReferralCopied(true);
+      setTimeout(() => setReferralCopied(false), 2500);
+    });
   };
 
   return (
@@ -337,6 +348,26 @@ export default function UpgradeModal() {
           ))}
         </div>
 
+        {/* Referral path — shown when user is out of credits */}
+        {upgradeReason === 'credits' && user?.referral_code && (
+          <div className="mx-6 mb-4 rounded-xl border border-white/8 bg-white/[0.03] px-4 py-3 flex items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-slate-300">Invite a friend to earn more credits</p>
+              <p className="text-[10px] text-slate-600 mt-0.5">
+                When a friend you refer subscribes, you both earn bonus credits.
+              </p>
+            </div>
+            <button
+              onClick={handleCopyReferral}
+              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all
+                bg-white/5 hover:bg-white/10 border-white/10 text-slate-300"
+            >
+              <Copy className="w-3 h-3" />
+              {referralCopied ? 'Copied!' : 'Get referral link'}
+            </button>
+          </div>
+        )}
+
         {/* Trust signals + free note */}
         <div className="px-6 pb-6 space-y-4">
           <div className="flex items-center justify-center gap-6 py-3 border-t border-white/[0.06]">
@@ -356,13 +387,15 @@ export default function UpgradeModal() {
 
           <div className="text-center">
             <span className="text-xs text-slate-600">
-              Keep building on free — or{' '}
+              Start with 5 Mini Credits after email verification.
+              Earn additional credits through referrals, or{' '}
               <button
                 onClick={handleViewAllPlans}
                 className="text-cyan-500 hover:text-cyan-400 underline underline-offset-2"
               >
                 view full plan details
               </button>
+              .
             </span>
           </div>
         </div>

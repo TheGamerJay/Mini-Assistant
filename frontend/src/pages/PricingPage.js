@@ -27,7 +27,7 @@ const PLANS = [
     annualTotal: 0,
     credits: 50,
     badge: null,
-    description: 'Start with 5 free credits after email verification. Earn more through referrals. No card required.',
+    description: 'Start with 5 Mini Credits after email verification. Earn additional credits through referrals, or upgrade for full access.',
     cta: 'Current Plan',
     ctaDisabled: true,
   },
@@ -102,7 +102,7 @@ const FEATURE_ROWS = [
 const FAQ = [
   {
     q: 'What are Mini Credits?',
-    a: 'Mini Credits are the currency used on our platform. 1 credit = 1 chat message. Image generation uses 3 credits. App Builder generation uses credits based on complexity. Paid plan credits reset monthly on your billing date; free credits are granted once on signup.',
+    a: 'Mini Credits are the currency used on our platform. 1 Mini Credit = 1 chat message. Image generation uses 3 Mini Credits. App Builder uses credits based on complexity. Paid plan credits reset monthly on your billing date. Free accounts receive 5 Mini Credits after email verification; these do not refresh automatically.',
   },
   {
     q: 'Can I cancel anytime?',
@@ -110,7 +110,7 @@ const FAQ = [
   },
   {
     q: 'What happens when I run out of credits?',
-    a: "When you hit zero credits, AI features are paused. Paid subscribers get credits reset at the start of each billing cycle. Free users can earn additional credits through referrals or upgrade to a paid plan for a monthly allotment.",
+    a: "When you hit zero Mini Credits, AI features are paused. Paid subscribers receive a fresh credit allotment at the start of each billing cycle. Free users can earn additional credits by referring friends who subscribe, or upgrade to a paid plan for a recurring monthly allotment.",
   },
   {
     q: 'Can I upgrade or downgrade at any time?',

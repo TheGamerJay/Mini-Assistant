@@ -31,7 +31,10 @@ export default function UsageLimitBanner() {
     const limit = PLAN_LIMITS[plan] || 50;
     const pct   = Math.max(0, Math.min(100, (credits / limit) * 100));
 
-    if (pct < 10 && !_dismissed.has('danger')) {
+    if (credits === 1 && !_dismissed.has('critical')) {
+      setSeverity('critical');
+      setVisible(true);
+    } else if (pct < 10 && !_dismissed.has('danger')) {
       setSeverity('danger');
       setVisible(true);
     } else if (pct < 25 && !_dismissed.has('warning')) {
@@ -58,25 +61,33 @@ export default function UsageLimitBanner() {
 
   if (!visible || !severity) return null;
 
-  const isDanger = severity === 'danger';
-  const limit    = PLAN_LIMITS[plan] || 50;
-  const pct      = Math.max(0, Math.min(100, ((credits ?? 0) / limit) * 100)).toFixed(0);
+  const isCritical = severity === 'critical';
+  const isDanger   = severity === 'danger';
+  const limit      = PLAN_LIMITS[plan] || 50;
+  const pct        = Math.max(0, Math.min(100, ((credits ?? 0) / limit) * 100)).toFixed(0);
 
   return (
     <div
       className={`flex items-center gap-3 px-4 py-2.5 border-b text-sm transition-all
-        ${isDanger
+        ${isCritical
+          ? 'bg-red-600/15 border-red-600/25 text-red-200'
+          : isDanger
           ? 'bg-red-500/10 border-red-500/20 text-red-300'
           : 'bg-amber-500/10 border-amber-500/20 text-amber-300'
         }`}
     >
       <AlertTriangle
         size={14}
-        className={`flex-shrink-0 ${isDanger ? 'text-red-400' : 'text-amber-400'}`}
+        className={`flex-shrink-0 ${isCritical ? 'text-red-300' : isDanger ? 'text-red-400' : 'text-amber-400'}`}
       />
 
       <span className="flex-1 text-xs leading-snug">
-        {isDanger ? (
+        {isCritical ? (
+          <>
+            <strong>1 Mini Credit remaining</strong> — this is your last credit.
+            {' '}AI features will pause after your next action.
+          </>
+        ) : isDanger ? (
           <>
             <strong>Almost out of credits</strong> — you have{' '}
             <span className="font-mono font-bold">{credits ?? 0}</span> credits left ({pct}%).
@@ -93,7 +104,9 @@ export default function UsageLimitBanner() {
       <button
         onClick={handleAction}
         className={`flex-shrink-0 flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold transition-all
-          ${isDanger
+          ${isCritical
+            ? 'bg-red-600/25 hover:bg-red-600/35 text-red-200 border border-red-600/40'
+            : isDanger
             ? 'bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/30'
             : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30'
           }`}
