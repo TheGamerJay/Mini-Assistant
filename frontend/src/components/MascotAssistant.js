@@ -243,8 +243,8 @@ export default function MascotAssistant() {
           {/* Breathing + floating wrapper */}
           <span className="mascot-float mascot-breathe mascot-glow block w-full h-full">
             <img
-              src="/Assistant Image.png"
-              alt="Mini Assistant mascot"
+              src="/mascot.png"
+              alt=""
               draggable={false}
               className="w-full h-full object-cover rounded-full"
               style={{
