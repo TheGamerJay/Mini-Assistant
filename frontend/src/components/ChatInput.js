@@ -160,7 +160,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
     if ((!text && !attachedImages.length && !attachedDoc) || loading) return;
     setSlashHints([]);
     // Prepend document text if one is attached
-    let finalText = text || (attachedImages.length ? '/analyze' : '');
+    let finalText = text || '';
     if (attachedDoc?.text) {
       const docPrefix = `[Document: ${attachedDoc.name}]\n\`\`\`\n${attachedDoc.text}\n\`\`\`\n\n`;
       finalText = finalText ? docPrefix + finalText : docPrefix.trimEnd();
@@ -212,7 +212,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
       const combined = [...prev, ...valid].slice(0, 8); // max 8 images
       return combined;
     });
-    if (!value.trim()) setValue('/analyze ');
+    if (!value.trim()) setValue('');
     textareaRef.current?.focus();
   }, [processImageFile, value]);
 
@@ -263,7 +263,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
   const removeImage = useCallback((idx) => {
     setAttachedImages(prev => {
       const next = prev.filter((_, i) => i !== idx);
-      if (!next.length && value.trimStart().startsWith('/analyze')) setValue('');
+      if (!next.length && !value.trim()) setValue('');
       return next;
     });
     textareaRef.current?.focus();
