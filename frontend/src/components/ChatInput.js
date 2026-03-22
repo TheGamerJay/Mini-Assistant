@@ -175,7 +175,6 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
   const [attachedDoc, setAttachedDoc] = useState(null); // { name, text, extracting }
   const [extractingDoc, setExtractingDoc] = useState(false);
   const fileInputRef = useRef(null);
-  const docInputRef  = useRef(null);
 
   // Mic / recording state
   const [recording, setRecording]       = useState(false);
@@ -299,12 +298,23 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
   }, [processImageFile, value]);
 
   const handleFileChange = useCallback((e) => {
-    if (e.target.files?.length) addImages(e.target.files);
+    const files = e.target.files;
+    if (!files?.length) return;
+    // Route each file: media → image pipeline, docs → doc pipeline
+    const mediaFiles = [];
+    for (const f of files) {
+      const ext = '.' + (f.name.split('.').pop() || '').toLowerCase();
+      if (ACCEPTED_DOC_TYPES.includes(f.type) || ACCEPTED_DOC_EXTS.includes(ext)) {
+        processDocFile(f);
+      } else {
+        mediaFiles.push(f);
+      }
+    }
+    if (mediaFiles.length) addImages(mediaFiles);
     e.target.value = '';
-  }, [addImages]);
+  }, [addImages, processDocFile]);
 
   const openFilePicker = useCallback(() => { fileInputRef.current?.click(); }, []);
-  const openDocPicker  = useCallback(() => { docInputRef.current?.click(); },  []);
 
   const processDocFile = useCallback(async (file) => {
     const ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
@@ -326,12 +336,6 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
       textareaRef.current?.focus();
     }
   }, []);
-
-  const handleDocChange = useCallback((e) => {
-    const file = e.target.files?.[0];
-    if (file) processDocFile(file);
-    e.target.value = '';
-  }, [processDocFile]);
 
   const removeDoc = useCallback(() => {
     setAttachedDoc(null);
@@ -430,21 +434,14 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
       onDrop={handleDrop}
       onDragOver={handleDragOver}
     >
-      {/* Hidden file inputs */}
+      {/* Single hidden file input — handles images, videos, and documents */}
       <input
         ref={fileInputRef}
         type="file"
-        accept={ALL_MEDIA_TYPES.join(',')}
+        accept={[...ALL_MEDIA_TYPES, ...ACCEPTED_DOC_TYPES, ...ACCEPTED_DOC_EXTS].join(',')}
         multiple
         className="hidden"
         onChange={handleFileChange}
-      />
-      <input
-        ref={docInputRef}
-        type="file"
-        accept={[...ACCEPTED_DOC_TYPES, ...ACCEPTED_DOC_EXTS].join(',')}
-        className="hidden"
-        onChange={handleDocChange}
       />
 
       {/* Slash command hints dropdown */}
@@ -537,20 +534,6 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
           >
             <Paperclip size={16} />
           </button>
-          {/* Attach document */}
-          <button
-            type="button"
-            onClick={openDocPicker}
-            disabled={loading || extractingDoc}
-            className={`flex-shrink-0 p-1.5 rounded-lg transition-colors mb-0.5
-              ${attachedDoc
-                ? 'text-violet-400 hover:text-violet-300 hover:bg-white/5'
-                : 'text-slate-600 hover:text-slate-400 hover:bg-white/5'}`}
-            title="Attach PDF or text document"
-          >
-            <FileText size={16} />
-          </button>
-
           {/* Textarea */}
           <textarea
             ref={textareaRef}
