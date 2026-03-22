@@ -1512,14 +1512,24 @@ async def admin_bootstrap(body: BootstrapBody):
 
 @auth_router.get("/test-email")
 async def test_email():
-    """Send a test welcome email to verify Resend integration."""
-    from email_service import send_welcome_email  # noqa: PLC0415
-    threading.Thread(
-        target=send_welcome_email,
-        args=("miniassistantai@gmail.com", "Test User"),
-        daemon=True,
-    ).start()
-    return {"status": "sent", "note": "Check your inbox in a few seconds."}
+    """Send a test welcome email and return the actual Resend response."""
+    import resend as _resend  # noqa: PLC0415
+    from email_service import SENDER, _build_html  # noqa: PLC0415
+
+    if not _resend.api_key:
+        return {"status": "error", "detail": "RESEND_API_KEY not set"}
+
+    params = {
+        "from":    SENDER,
+        "to":      ["miniassistantai@gmail.com"],
+        "subject": "Mini Assistant — Email Test",
+        "html":    _build_html("Test User"),
+    }
+    try:
+        result = _resend.Emails.send(params)
+        return {"status": "ok", "resend_id": result.get("id"), "sender": SENDER}
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc), "sender": SENDER}
 
 
 # ---------------------------------------------------------------------------
