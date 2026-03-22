@@ -9,22 +9,7 @@
  *   placeholder
  */
 
-import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
-
-/** Muted looping video thumbnail — useEffect approach avoids autoplay-policy race. */
-const VideoThumb = memo(function VideoThumb({ src, className }) {
-  const ref = useRef(null);
-  useEffect(() => {
-    const v = ref.current;
-    if (!v) return;
-    v.muted = true;
-    const tryPlay = () => v.play().catch(() => {});
-    v.addEventListener('canplay', tryPlay);
-    tryPlay();
-    return () => v.removeEventListener('canplay', tryPlay);
-  }, [src]);
-  return <video ref={ref} src={src} className={className} loop playsInline preload="auto" controls />;
-});
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Paperclip, Mic, MicOff, Send, Loader2, X, Image, FileText, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../api/client';
@@ -46,8 +31,7 @@ const SLASH_COMMANDS = [
 ];
 
 const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-const ACCEPTED_VIDEO_TYPES = ['video/mp4', 'video/quicktime', 'video/webm'];
-const ALL_MEDIA_TYPES      = [...ACCEPTED_IMAGE_TYPES, ...ACCEPTED_VIDEO_TYPES];
+const ALL_MEDIA_TYPES      = [...ACCEPTED_IMAGE_TYPES];
 const ACCEPTED_DOC_TYPES   = ['application/pdf', 'text/plain', 'text/markdown', 'text/csv'];
 const ACCEPTED_DOC_EXTS    = ['.pdf', '.txt', '.md', '.csv'];
 const MAX_IMAGE_SIZE_MB = 15;
@@ -95,66 +79,6 @@ function readFileAsDataUrl(file) {
     reader.onload = () => resolve(reader.result);
     reader.onerror = reject;
     reader.readAsDataURL(file);
-  });
-}
-
-const MAX_VIDEO_DURATION_S = 15;
-
-/** Extract a frame from a video file as a JPEG data URL. */
-function extractVideoFrame(file) {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const video = document.createElement('video');
-    video.muted = true;
-    video.playsInline = true;
-    video.preload = 'auto';
-    let settled = false;
-
-    const cleanup = () => URL.revokeObjectURL(url);
-    const fail = (msg) => { if (settled) return; settled = true; cleanup(); reject(new Error(msg)); };
-
-    const capture = () => {
-      if (settled) return;
-      settled = true;
-      try {
-        const maxW = 800;
-        const scale = Math.min(1, maxW / (video.videoWidth || 640));
-        const w = Math.max(1, Math.round((video.videoWidth || 640) * scale));
-        const h = Math.max(1, Math.round((video.videoHeight || 480) * scale));
-        const canvas = document.createElement('canvas');
-        canvas.width = w; canvas.height = h;
-        canvas.getContext('2d').drawImage(video, 0, 0, w, h);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
-        cleanup();
-        resolve({ base64: dataUrl.split(',')[1], preview: dataUrl });
-      } catch (e) {
-        cleanup();
-        reject(new Error('Could not capture frame'));
-      }
-    };
-
-    // Timeout fallback — capture whatever is rendered after 4s
-    const timer = setTimeout(capture, 4000);
-
-    video.onerror = () => { clearTimeout(timer); fail('Video format not supported by browser'); };
-
-    video.onloadedmetadata = () => {
-      if (video.duration > MAX_VIDEO_DURATION_S) {
-        clearTimeout(timer);
-        fail(`Video must be ${MAX_VIDEO_DURATION_S} seconds or less`);
-        return;
-      }
-      video.currentTime = 0;
-    };
-
-    // onseeked fires after currentTime is set — most reliable capture point
-    video.onseeked = () => { clearTimeout(timer); capture(); };
-
-    // oncanplay fallback for browsers that don't fire onseeked on t=0
-    video.oncanplay = () => { if (!settled && video.readyState >= 3) capture(); };
-
-    video.src = url;
-    video.load();
   });
 }
 
@@ -244,7 +168,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
     const imagesBase64 = attachedImages.length ? attachedImages.map(i => i.base64) : null;
     onSubmit(finalText, imagesBase64, null);
     setValue('');
-    setAttachedImages(prev => { prev.forEach(img => { if (img.videoUrl) URL.revokeObjectURL(img.videoUrl); }); return []; });
+    setAttachedImages([]);
     setAttachedDoc(null);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
   }, [value, loading, attachedImages, attachedDoc, onSubmit]);
@@ -257,7 +181,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
 
   const processImageFile = useCallback(async (file) => {
     if (!ALL_MEDIA_TYPES.includes(file.type)) {
-      toast.error('Supported: PNG, JPG, WebP, GIF, MP4, MOV, WebM');
+      toast.error('Supported image types: PNG, JPG, WebP, GIF');
       return null;
     }
     if (file.size > MAX_IMAGE_SIZE_MB * 1024 * 1024) {
@@ -265,12 +189,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
       return null;
     }
     try {
-      if (ACCEPTED_VIDEO_TYPES.includes(file.type)) {
-        // Keep a playable object URL for preview; extract first frame for AI vision
-        const videoUrl = URL.createObjectURL(file);
-        const { base64, preview } = await extractVideoFrame(file);
-        return { base64, preview, name: file.name, isVideo: true, videoUrl };
-      } else if (file.type === 'image/gif') {
+      if (file.type === 'image/gif') {
         // Read GIF as-is — canvas would kill animation
         const dataUrl = await readFileAsDataUrl(file);
         return { base64: dataUrl.split(',')[1], preview: dataUrl, name: file.name };
@@ -344,8 +263,6 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
 
   const removeImage = useCallback((idx) => {
     setAttachedImages(prev => {
-      const item = prev[idx];
-      if (item?.videoUrl) URL.revokeObjectURL(item.videoUrl);
       const next = prev.filter((_, i) => i !== idx);
       if (!next.length && value.trimStart().startsWith('/analyze')) setValue('');
       return next;
@@ -467,18 +384,11 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
           <div className="px-4 pt-3 pb-0 flex items-start gap-2 flex-wrap">
             {attachedImages.map((img, idx) => (
               <div key={idx} className="relative group flex-shrink-0">
-                {img.isVideo && img.videoUrl ? (
-                  <VideoThumb
-                    src={img.videoUrl}
-                    className="h-16 w-16 rounded-lg object-cover border border-white/10"
-                  />
-                ) : (
-                  <img
-                    src={img.preview}
-                    alt={img.name}
-                    className="h-16 w-16 rounded-lg object-cover border border-white/10"
-                  />
-                )}
+                <img
+                  src={img.preview}
+                  alt={img.name}
+                  className="h-16 w-16 rounded-lg object-cover border border-white/10"
+                />
                 <button
                   type="button"
                   onClick={() => removeImage(idx)}
