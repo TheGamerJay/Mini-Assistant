@@ -4970,6 +4970,10 @@ if _static_dir.exists():
         fav = _static_dir / "favicon.ico"
         if fav.exists():
             return FileResponse(str(fav), media_type="image/x-icon")
+        # Fall back to Logo.png if no .ico file exists
+        logo = _static_dir / "Logo.png"
+        if logo.exists():
+            return FileResponse(str(logo), media_type="image/png")
         raise HTTPException(status_code=404, detail="favicon not found")
 
     @app.get("/{full_path:path}")
