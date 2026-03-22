@@ -217,6 +217,7 @@ const AppBuilder = () => {
   const [buildMsg, setBuildMsg] = useState('');
   const [buildStep, setBuildStep] = useState(0);
   const [buildJustCompleted, setBuildJustCompleted] = useState(false);
+  const [isResumed, setIsResumed] = useState(false);
   const [generatedApp, setGeneratedApp] = useState(null);
   const [projectType, setProjectType] = useState('app');
   const [buildMode, setBuildMode] = useState('polished');
@@ -508,6 +509,7 @@ const AppBuilder = () => {
     });
     setEditHistory(session.editHistory || []);
     setVersions(session.versions || []);
+    setIsResumed(true);
     setMode('build');
   };
 
@@ -1108,6 +1110,12 @@ const AppBuilder = () => {
       toast.success(`Imported ZIP: "${data.name}"`);
     } catch { toast.error('ZIP import failed'); }
     e.target.value = '';
+  };
+
+  const handleSaveProject = () => {
+    if (!isSubscribed) { openUpgradeModal('save'); return; }
+    // Auto-save already runs via useEffect; just confirm to the user
+    toast.success('Project saved!');
   };
 
   const exportZip = async () => {
@@ -2129,6 +2137,19 @@ const AppBuilder = () => {
                   <Globe className="w-3.5 h-3.5" /> VERCEL
                 </button>
 
+                <div className="w-px h-5 bg-slate-700/60 mx-2" />
+
+                {/* Save group */}
+                <button onClick={handleSaveProject} title={isSubscribed ? 'Save project' : 'Upgrade to save your project'}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono uppercase rounded-sm transition-all border ${
+                    isSubscribed
+                      ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/20'
+                      : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-slate-300'
+                  }`}>
+                  <BookmarkPlus className="w-3.5 h-3.5" /> SAVE
+                  {!isSubscribed && <Lock className="w-2.5 h-2.5 opacity-50" />}
+                </button>
+
                 <div className="flex-1" />
 
                 <button onClick={() => { setGeneratedApp(null); setDescription(''); setEditInput(''); setEditHistory([]); setUndoStack([]); setRedoStack([]); setVersions([]); setActiveTab('preview'); setDiffView(null); setShowFileExplorer(false); setScanResult(null); setConsoleErrors([]); }}
@@ -2606,6 +2627,27 @@ const AppBuilder = () => {
                       className="w-full h-full border-0 bg-white"
                       sandbox="allow-scripts allow-forms allow-modals allow-same-origin"
                     />
+                    {/* Return experience banner — shown when resuming an existing session */}
+                    {isResumed && !buildJustCompleted && (
+                      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2.5 bg-[#0d0d16]/95 border border-cyan-500/30 rounded-xl px-4 py-2.5 shadow-2xl backdrop-blur-sm"
+                        style={{ animation: 'fadeInDown 0.3s ease-out' }}>
+                        <CheckCircle className="w-4 h-4 text-cyan-400 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold text-cyan-300 leading-none">Your project is ready.</p>
+                          <p className="text-[10px] text-cyan-700 mt-0.5 leading-none">Continue building or take it live.</p>
+                        </div>
+                        <button
+                          onClick={() => { setIsResumed(false); if (!isSubscribed) { openUpgradeModal('deploy'); } else { setShowVercelModal(true); setVercelResult(null); } }}
+                          className="flex-shrink-0 flex items-center gap-1 px-2.5 py-1 bg-violet-500/20 border border-violet-500/40 text-violet-300 text-[10px] font-mono uppercase rounded-sm hover:bg-violet-500/30 transition-colors">
+                          <Globe className="w-3 h-3" /> Deploy
+                        </button>
+                        <button onClick={() => setIsResumed(false)}
+                          className="flex-shrink-0 p-1 text-slate-600 hover:text-slate-300 transition-colors rounded">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+
                     {/* Build complete notification */}
                     {buildJustCompleted && (
                       <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2.5 bg-emerald-950/95 border border-emerald-500/40 rounded-xl px-4 py-2.5 shadow-2xl backdrop-blur-sm pointer-events-none"

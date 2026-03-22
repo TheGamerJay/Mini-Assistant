@@ -8,7 +8,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   X, Lock, Zap, Code2, Download, Github, Rocket, Users,
-  Check, Crown, Star, ArrowRight, Sparkles, Shield, Copy,
+  Check, Crown, Star, ArrowRight, Sparkles, Shield, Copy, Bookmark,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { startCheckout, getPriceId } from '../api/checkout';
@@ -108,6 +108,11 @@ const REASON_COPY = {
     headline: 'Push to GitHub',
     sub: "Paid plans let you push directly to a GitHub repo — perfect for version control and collaboration.",
     icon: Github,
+  },
+  save: {
+    headline: 'Save your project',
+    sub: "Store your project and continue anytime. Upgrade to save and manage your builds.",
+    icon: Bookmark,
   },
   generic: {
     headline: 'Upgrade Mini Assistant',
