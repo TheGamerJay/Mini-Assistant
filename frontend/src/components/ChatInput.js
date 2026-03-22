@@ -31,6 +31,8 @@ const SLASH_COMMANDS = [
 ];
 
 const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const ACCEPTED_VIDEO_TYPES = ['video/mp4', 'video/quicktime', 'video/webm'];
+const ALL_MEDIA_TYPES      = [...ACCEPTED_IMAGE_TYPES, ...ACCEPTED_VIDEO_TYPES];
 const ACCEPTED_DOC_TYPES   = ['application/pdf', 'text/plain', 'text/markdown', 'text/csv'];
 const ACCEPTED_DOC_EXTS    = ['.pdf', '.txt', '.md', '.csv'];
 const MAX_IMAGE_SIZE_MB = 15;
@@ -78,6 +80,32 @@ function readFileAsDataUrl(file) {
     reader.onload = () => resolve(reader.result);
     reader.onerror = reject;
     reader.readAsDataURL(file);
+  });
+}
+
+/** Extract first frame from a video file as a JPEG data URL. */
+function extractVideoFrame(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.crossOrigin = 'anonymous';
+    video.muted = true;
+    video.preload = 'metadata';
+    video.onerror = () => { URL.revokeObjectURL(url); reject(new Error('video load failed')); };
+    video.onloadedmetadata = () => { video.currentTime = Math.min(0.5, video.duration * 0.1); };
+    video.onseeked = () => {
+      const maxW = 800;
+      const scale = Math.min(1, maxW / video.videoWidth);
+      const w = Math.round(video.videoWidth * scale);
+      const h = Math.round(video.videoHeight * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(video, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+      URL.revokeObjectURL(url);
+      resolve({ base64: dataUrl.split(',')[1], preview: dataUrl });
+    };
+    video.src = url;
   });
 }
 
@@ -180,21 +208,30 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
   // ── Image attach ────────────────────────────────────────────────────────────
 
   const processImageFile = useCallback(async (file) => {
-    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
-      toast.error('Only JPEG, PNG, WebP, and GIF images are supported.');
+    if (!ALL_MEDIA_TYPES.includes(file.type)) {
+      toast.error('Supported: PNG, JPG, WebP, GIF, MP4, MOV, WebM');
       return null;
     }
     if (file.size > MAX_IMAGE_SIZE_MB * 1024 * 1024) {
-      toast.error(`Image too large — maximum ${MAX_IMAGE_SIZE_MB} MB.`);
+      toast.error(`File too large — maximum ${MAX_IMAGE_SIZE_MB} MB.`);
       return null;
     }
     try {
-      // Compress + resize to max 800px JPEG before sending to backend.
-      // This reduces upload size dramatically and prevents Cloudflare tunnel timeouts.
-      const { base64, preview } = await compressImageFile(file);
-      return { base64, preview, name: file.name };
+      if (ACCEPTED_VIDEO_TYPES.includes(file.type)) {
+        // Extract first frame from video for AI vision + preview
+        const { base64, preview } = await extractVideoFrame(file);
+        return { base64, preview, name: file.name, isVideo: true };
+      } else if (file.type === 'image/gif') {
+        // Read GIF as-is — canvas would kill animation
+        const dataUrl = await readFileAsDataUrl(file);
+        return { base64: dataUrl.split(',')[1], preview: dataUrl, name: file.name };
+      } else {
+        // JPEG/PNG/WebP — compress + resize to max 800px
+        const { base64, preview } = await compressImageFile(file);
+        return { base64, preview, name: file.name };
+      }
     } catch {
-      toast.error('Could not read image file.');
+      toast.error('Could not read file.');
       return null;
     }
   }, []);
@@ -345,7 +382,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
       <input
         ref={fileInputRef}
         type="file"
-        accept={ACCEPTED_IMAGE_TYPES.join(',')}
+        accept={ALL_MEDIA_TYPES.join(',')}
         multiple
         className="hidden"
         onChange={handleFileChange}
@@ -437,7 +474,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
               ${attachedImages.length
                 ? 'text-cyan-400 hover:text-cyan-300 hover:bg-white/5'
                 : 'text-slate-600 hover:text-slate-400 hover:bg-white/5'}`}
-            title="Attach images — click to pick or drag & drop multiple"
+            title="Attach image or video — PNG, JPG, GIF, WebP, MP4 · Max 15 MB"
           >
             <Paperclip size={16} />
           </button>
@@ -522,6 +559,11 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
           </button>
         </div>
       </div>
+
+      {/* Supported formats hint */}
+      <p className="mt-1.5 text-center text-[10px] text-slate-700 select-none">
+        📎 PNG · JPG · GIF · WebP · MP4 · MOV &nbsp;·&nbsp; 📄 PDF · TXT · MD · CSV &nbsp;·&nbsp; Max 15 MB
+      </p>
 
     </div>
   );
