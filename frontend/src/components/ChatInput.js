@@ -9,7 +9,22 @@
  *   placeholder
  */
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
+
+/** Muted looping video thumbnail — useEffect approach avoids autoplay-policy race. */
+const VideoThumb = memo(function VideoThumb({ src, className }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const v = ref.current;
+    if (!v) return;
+    v.muted = true;
+    const tryPlay = () => v.play().catch(() => {});
+    v.addEventListener('canplay', tryPlay);
+    tryPlay();
+    return () => v.removeEventListener('canplay', tryPlay);
+  }, [src]);
+  return <video ref={ref} src={src} className={className} loop playsInline preload="auto" />;
+});
 import { Paperclip, Mic, MicOff, Send, Loader2, X, Image, FileText, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../api/client';
@@ -456,16 +471,9 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
             {attachedImages.map((img, idx) => (
               <div key={idx} className="relative group flex-shrink-0">
                 {img.isVideo && img.videoUrl ? (
-                  <video
+                  <VideoThumb
                     src={img.videoUrl}
                     className="h-16 w-16 rounded-lg object-cover border border-white/10"
-                    autoPlay
-                    muted
-                    loop
-                    playsInline
-                    preload="auto"
-                    ref={el => { if (el) { el.muted = true; el.play().catch(() => {}); } }}
-                    onCanPlay={e => { e.target.muted = true; e.target.play().catch(() => {}); }}
                   />
                 ) : (
                   <img

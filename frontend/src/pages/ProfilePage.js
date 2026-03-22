@@ -271,12 +271,12 @@ function ProfilePage() {
           <div className="flex items-center gap-5">
             {/* Avatar */}
             <div className="relative flex-shrink-0 group cursor-pointer" onClick={handleAvatarClick}>
-              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center text-white text-2xl font-bold select-none">
+              <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center text-white text-2xl font-bold select-none overflow-hidden">
                 {avatar
-                  ? <img src={avatar} alt="Avatar" className="w-20 h-20 rounded-full object-contain" />
+                  ? <img src={avatar} alt="Avatar" className="w-24 h-24 rounded-2xl object-cover" />
                   : initial}
               </div>
-              <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+              <div className="absolute inset-0 rounded-2xl bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                 <Camera size={18} className="text-white" />
               </div>
             </div>
