@@ -568,7 +568,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     setStreamPrompt('');
   }, []);
 
-  const showHero = !activeChatId && messages.length === 0;
+  const showHero = messages.length === 0;
 
   if (showHero) {
     return (
