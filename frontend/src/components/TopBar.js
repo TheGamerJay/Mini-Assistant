@@ -66,9 +66,21 @@ function CreditChip() {
           />
         </div>
         {/* Image usage */}
-        <span className="text-[9px] text-slate-600 leading-none mt-0.5">
-          {imgCount} / {imgLimit} imgs
-        </span>
+        {imgCount >= imgLimit - 1 && imgCount < imgLimit ? (
+          <span className="text-[9px] font-semibold text-red-400 leading-none mt-0.5">
+            1 image remaining — last one!
+          </span>
+        ) : (
+          <span className="text-[9px] text-slate-600 leading-none mt-0.5">
+            {imgCount} / {imgLimit} imgs
+          </span>
+        )}
+        {/* Upgrade nudge */}
+        {!isSubscribed && (
+          <span className="text-[8px] text-slate-700 leading-none mt-0.5 group-hover:text-violet-400/60 transition-colors">
+            Need more? Upgrade
+          </span>
+        )}
       </div>
       {!isSubscribed ? (
         <TrendingUp className="w-3 h-3 text-slate-600 group-hover:text-violet-400 transition-colors" />
