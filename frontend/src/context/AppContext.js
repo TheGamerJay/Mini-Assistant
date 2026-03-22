@@ -135,7 +135,7 @@ export function AppProvider({ children }) {
 
   const setPage = useCallback((p) => {
     _setPage((prev) => {
-      if (prev !== 'settings') prevPageRef.current = prev;
+      if (prev !== 'settings' || p.startsWith('legal-')) prevPageRef.current = prev;
       try { localStorage.setItem('ma_active_page', p); } catch {}
       return p;
     });

@@ -166,7 +166,7 @@ function PlanCard({ plan, annual, currentPlan, onSelect, checkoutLoading }) {
         </div>
         {annual && (
           <p className="text-[10px] text-emerald-400 mt-0.5">
-            Save ${(plan.monthlyPrice - plan.annualPrice) * 12}/yr vs monthly
+            Billed annually · Save ${(plan.monthlyPrice - plan.annualPrice) * 12}/yr
           </p>
         )}
         <p className={`text-[11px] font-semibold mt-1 ${c.text}`}>

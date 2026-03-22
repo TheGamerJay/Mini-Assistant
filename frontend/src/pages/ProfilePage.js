@@ -139,7 +139,7 @@ function ProfilePage() {
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) { toast.error('Image must be under 2 MB'); return; }
+    if (file.size > 15 * 1024 * 1024) { toast.error('File must be under 15 MB'); return; }
     const reader = new FileReader();
     reader.onload = (ev) => {
       updateAvatar(ev.target.result);
@@ -219,7 +219,7 @@ function ProfilePage() {
                 <Camera size={18} className="text-white" />
               </div>
             </div>
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+            <input ref={fileRef} type="file" accept="image/*,image/gif" className="hidden" onChange={handleFileChange} />
 
             {/* Identity */}
             <div className="flex-1 min-w-0">

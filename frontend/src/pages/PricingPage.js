@@ -9,7 +9,7 @@ import { startCheckout, getPriceId, PRICE_IDS } from '../api/checkout';
 import {
   Check, X as XIcon, Zap, Crown, Users, Star, Shield,
   Code2, Download, Github, Rocket, MessageSquare, Image,
-  ArrowRight, HelpCircle, ChevronDown, Plus,
+  ArrowRight, HelpCircle, ChevronDown, Plus, ArrowLeft,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -185,7 +185,7 @@ const TOPUP_BUNDLES = [
 ];
 
 export default function PricingPage() {
-  const { plan: currentPlan, isSubscribed, credits, openUpgradeModal, setPage, setPurchaseModalOpen } = useApp();
+  const { plan: currentPlan, isSubscribed, credits, openUpgradeModal, setPage, getPrevPage, setPurchaseModalOpen } = useApp();
   const [annual, setAnnual] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState(null); // plan id while loading
   const [topupLoading, setTopupLoading] = useState(null);
@@ -228,6 +228,14 @@ export default function PricingPage() {
   return (
     <div className="h-full overflow-y-auto bg-[#0b0b12]">
       <div className="max-w-5xl mx-auto px-4 py-12">
+
+        {/* Back button */}
+        <button
+          onClick={() => setPage(getPrevPage() || 'chat')}
+          className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors mb-6"
+        >
+          <ArrowLeft size={13} /> Back
+        </button>
 
         {/* Hero */}
         <div className="text-center mb-10">
