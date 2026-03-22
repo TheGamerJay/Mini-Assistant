@@ -18,7 +18,7 @@ import AvatarMedia from '../components/AvatarMedia';
 // ---------------------------------------------------------------------------
 const AVATAR_ACCEPTED     = 'image/jpeg,image/png,image/webp,image/gif,video/mp4';
 const AVATAR_MAX_MB       = 50;
-const AVATAR_MAX_VIDEO_MB = 3;   // videos stored as base64 — keep small for localStorage
+const AVATAR_MAX_VIDEO_MB = 15;  // videos stored as base64 data URL
 const AVATAR_PX           = 256;
 const AVATAR_QUALITY      = 0.85;
 
@@ -337,7 +337,7 @@ function ProfilePage() {
                   </button>
                 )}
               </div>
-              <p className="text-[10px] text-slate-600 mt-2">PNG · JPG · JPEG · GIF · WebP · MP4 (≤15s) &nbsp;·&nbsp; Max 50 MB</p>
+              <p className="text-[10px] text-slate-600 mt-2">PNG · JPG · JPEG · GIF · WebP · Max 50 MB &nbsp;·&nbsp; MP4 · Max 15 MB</p>
             </div>
           </div>
         </Card>
