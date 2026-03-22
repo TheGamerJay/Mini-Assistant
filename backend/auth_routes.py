@@ -1007,9 +1007,9 @@ async def admin_stats(admin: dict = Depends(_require_admin)):
 
     total_image_docs = await db["images"].count_documents({})
 
-    # Credits stats — only meaningful for non-admin free-plan users
+    # Credits stats — sum credits for all free-plan users (paid plans have unlimited)
     credits_pipeline = [
-        {"$match": {"plan": {"$in": ["free", None]}, "role": {"$ne": "admin"}}},
+        {"$match": {"plan": {"$nin": ["standard", "pro", "max", "team"]}}},
         {"$group": {"_id": None, "total": {"$sum": "$credits"}}},
     ]
     credits_result = await db["users"].aggregate(credits_pipeline).to_list(1)
