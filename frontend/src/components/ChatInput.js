@@ -230,7 +230,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
     const imagesBase64 = attachedImages.length ? attachedImages.map(i => i.base64) : null;
     onSubmit(finalText, imagesBase64, null);
     setValue('');
-    setAttachedImages([]);
+    setAttachedImages(prev => { prev.forEach(img => { if (img.videoUrl) URL.revokeObjectURL(img.videoUrl); }); return []; });
     setAttachedDoc(null);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
   }, [value, loading, attachedImages, attachedDoc, onSubmit]);
@@ -252,9 +252,10 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
     }
     try {
       if (ACCEPTED_VIDEO_TYPES.includes(file.type)) {
-        // Extract first frame from video for AI vision + preview
+        // Keep a playable object URL for preview; extract first frame for AI vision
+        const videoUrl = URL.createObjectURL(file);
         const { base64, preview } = await extractVideoFrame(file);
-        return { base64, preview, name: file.name, isVideo: true };
+        return { base64, preview, name: file.name, isVideo: true, videoUrl };
       } else if (file.type === 'image/gif') {
         // Read GIF as-is — canvas would kill animation
         const dataUrl = await readFileAsDataUrl(file);
@@ -324,6 +325,8 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
 
   const removeImage = useCallback((idx) => {
     setAttachedImages(prev => {
+      const item = prev[idx];
+      if (item?.videoUrl) URL.revokeObjectURL(item.videoUrl);
       const next = prev.filter((_, i) => i !== idx);
       if (!next.length && value.trimStart().startsWith('/analyze')) setValue('');
       return next;
@@ -452,11 +455,25 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
           <div className="px-4 pt-3 pb-0 flex items-start gap-2 flex-wrap">
             {attachedImages.map((img, idx) => (
               <div key={idx} className="relative group flex-shrink-0">
-                <img
-                  src={img.preview}
-                  alt={img.name}
-                  className="h-16 w-16 rounded-lg object-cover border border-white/10"
-                />
+                {img.isVideo && img.videoUrl ? (
+                  <video
+                    src={img.videoUrl}
+                    className="h-16 w-16 rounded-lg object-cover border border-white/10"
+                    autoPlay
+                    muted
+                    loop
+                    playsInline
+                    preload="auto"
+                    ref={el => { if (el) { el.muted = true; el.play().catch(() => {}); } }}
+                    onCanPlay={e => { e.target.muted = true; e.target.play().catch(() => {}); }}
+                  />
+                ) : (
+                  <img
+                    src={img.preview}
+                    alt={img.name}
+                    className="h-16 w-16 rounded-lg object-cover border border-white/10"
+                  />
+                )}
                 <button
                   type="button"
                   onClick={() => removeImage(idx)}
@@ -469,7 +486,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
             ))}
             <div className="flex flex-col justify-center pt-1 min-w-0">
               <span className="text-xs text-cyan-500/70 flex items-center gap-1">
-                <Image size={10} /> {attachedImages.length} image{attachedImages.length > 1 ? 's' : ''} attached
+                <Image size={10} /> {attachedImages.length} file{attachedImages.length > 1 ? 's' : ''} attached
               </span>
               <span className="text-[10px] text-slate-600 mt-0.5">Drop more or click 📎</span>
             </div>

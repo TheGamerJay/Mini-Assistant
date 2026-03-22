@@ -7,6 +7,7 @@ Mounted in server.py via:
 """
 
 import asyncio
+import collections
 import os
 import secrets
 import string
@@ -15,7 +16,7 @@ import time
 import logging
 import threading
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from pydantic import BaseModel
 from typing import Optional, List, Any
 
@@ -121,6 +122,8 @@ def _public_user(user: dict) -> dict:
         "plan": user.get("plan", "free"),
         "referral_code": user.get("referral_code"),
         "referrals_rewarded_count": user.get("referrals_rewarded_count", 0),
+        # True for existing users (backward compat) and Google OAuth users
+        "email_verified": user.get("email_verified", True),
     }
 
 
@@ -137,6 +140,93 @@ REFERRAL_MAX_REWARDS_BY_PLAN: dict[str, int] = {
     "max":      10,
     "team":     10,
 }
+
+# ---------------------------------------------------------------------------
+# Anti-abuse constants
+# ---------------------------------------------------------------------------
+
+SIGNUP_CREDITS      = 5     # credits granted AFTER email verification (down from 10)
+VERIFY_TOKEN_EXPIRY = 86400 # 24 hours in seconds
+FREE_CREDIT_TTL     = 7 * 86400  # free credits expire after 7 days
+
+# In-memory IP-based signup rate limiter  {ip: [timestamps]}
+_signup_attempts: dict = collections.defaultdict(list)
+SIGNUP_RATE_LIMIT  = 3     # max signups per IP per window
+SIGNUP_RATE_WINDOW = 3600  # 1 hour
+
+# Disposable / throwaway email domains
+DISPOSABLE_EMAIL_DOMAINS: frozenset = frozenset({
+    "mailinator.com", "guerrillamail.com", "guerrillamail.info", "guerrillamail.biz",
+    "guerrillamail.de", "guerrillamail.net", "guerrillamail.org", "guerrillamailblock.com",
+    "sharklasers.com", "grr.la", "spam4.me", "trashmail.com", "trashmail.me",
+    "trashmail.net", "trashmail.io", "trashmail.at", "trashdevil.com", "trashdevil.de",
+    "trashmailer.com", "dispostable.com", "yopmail.com", "yopmail.fr", "cool.fr.nf",
+    "jetable.fr.nf", "jetable.com", "jetable.net", "jetable.org", "nospam.ze.tc",
+    "nomail.xl.cx", "10minutemail.com", "10minutemail.net", "10minutemail.org",
+    "10minemail.com", "minutemailbox.com", "mailnull.com", "spamgourmet.com",
+    "spamgourmet.net", "spamgourmet.org", "spamgourmet.me", "mailnesia.com",
+    "tempr.email", "discard.email", "discardmail.com", "discardmail.de",
+    "cuvox.de", "dayrep.com", "einrot.com", "fleckens.hu", "gustr.com",
+    "jourrapide.com", "rhyta.com", "superrito.com", "teleworm.us", "armyspy.com",
+    "maildrop.cc", "spamfree24.org", "fakemail.net", "fakeinbox.com", "fakeinbox.net",
+    "fakemail.fr", "filzmail.com", "filzmail.de", "mailfreeonline.com",
+    "getnada.com", "nada.email", "nadaemail.com", "mohmal.com", "moakt.com", "moakt.ws",
+    "mailcatch.com", "mailexpire.com", "mailme.ir", "spamgob.com", "spamgob.net",
+    "binkmail.com", "bobmail.info", "chammy.info", "devnullmail.com", "dodgit.com",
+    "dumpandforfeit.com", "dumpmail.de", "email60.com", "emailfake.com", "emailigo.com",
+    "gishpuppy.com", "haltospam.com", "hatespam.org", "ieatspam.eu", "ieatspam.info",
+    "kasmail.com", "klzlk.com", "kurzepost.de", "maileater.com", "mailipsum.com",
+    "meltmail.com", "noclickemail.com", "nospamfor.us", "objectmail.com", "odaymail.com",
+    "oneoffemail.com", "pookmail.com", "rppkn.com", "safe-mail.net", "sharedmailbox.org",
+    "shortmail.net", "spamavert.com", "spambe.com", "spamgone.com", "spamhereatme.com",
+    "spaminmotion.com", "spamme.dk", "spamoff.de", "spamspot.com", "spamthis.co.uk",
+    "spamthisplease.com", "temporaryemail.com", "temporaryforwarding.com",
+    "temporaryinbox.com", "tempymail.com", "throwam.com", "throwam.net",
+    "throwam.org", "throwam.me", "tyldd.com", "uggsrock.com", "wegwerfmail.de",
+    "wegwerfmail.net", "wegwerfmail.org", "xagloo.com", "yepmail.net", "yobshmail.com",
+    "zippymail.info", "getairmail.com", "tempinbox.com", "crazymailing.com",
+    "mailsucker.net", "spamherelots.com",
+})
+
+
+def _check_disposable_email(email: str) -> None:
+    """Raise 400 if the email domain is a known disposable email service."""
+    domain = email.split("@")[-1].lower() if "@" in email else ""
+    if domain in DISPOSABLE_EMAIL_DOMAINS:
+        raise HTTPException(
+            status_code=400,
+            detail="Disposable email addresses are not allowed. Please use a real email address.",
+        )
+
+
+def _check_signup_rate_limit(ip: str) -> None:
+    """Raise 429 if IP has exceeded signup rate limit."""
+    if ip in ("127.0.0.1", "::1", "unknown"):
+        return  # never rate-limit localhost (dev)
+    now = time.time()
+    _signup_attempts[ip] = [t for t in _signup_attempts[ip] if now - t < SIGNUP_RATE_WINDOW]
+    if len(_signup_attempts[ip]) >= SIGNUP_RATE_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many signup attempts from this IP. Please try again in 1 hour.",
+        )
+    _signup_attempts[ip].append(now)
+
+
+def _gen_verify_token() -> str:
+    """Generate a 48-char hex email verification token."""
+    return secrets.token_hex(24)
+
+
+def _expire_free_credits_if_needed(user: dict) -> int:
+    """Return the effective credit balance, zeroing out expired free credits."""
+    if user.get("plan", "free") != "free":
+        return user.get("credits", 0)
+    expire_at = user.get("free_credits_expire_at")
+    if expire_at and expire_at < time.time() and user.get("credits", 0) > 0:
+        return -1  # signal: should zero out in DB
+    return user.get("credits", 0)
+
 
 def _gen_referral_code() -> str:
     """Generate a unique 8-char alphanumeric referral code."""
@@ -205,6 +295,14 @@ class TemplatesBody(BaseModel):
     templates: List[Any] = []
 
 
+class VerifyEmailBody(BaseModel):
+    token: str
+
+
+class ResendVerifyBody(BaseModel):
+    pass  # auth header carries the identity
+
+
 # ---------------------------------------------------------------------------
 # Auth router  (/api/auth/*)
 # ---------------------------------------------------------------------------
@@ -212,9 +310,16 @@ auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 @auth_router.post("/register")
-async def register(body: RegisterBody):
+async def register(body: RegisterBody, request: Request):
     db = _get_db()
     email_lc = body.email.strip().lower()
+    client_ip = (request.client.host if request.client else None) or "unknown"
+
+    # ── Phase 6: IP signup rate limit ──────────────────────────────────────
+    _check_signup_rate_limit(client_ip)
+
+    # ── Phase 3: Block disposable emails ───────────────────────────────────
+    _check_disposable_email(email_lc)
 
     # Check duplicate
     if await db["users"].find_one({"email": email_lc}):
@@ -229,15 +334,25 @@ async def register(body: RegisterBody):
     if body.security_question and body.security_answer:
         sec_answer_hash = _hash_password(body.security_answer.strip().lower())
 
-    # Validate referral code (not self-referral — can't refer yourself since user doesn't exist yet)
+    # ── Phase 5: Validate referral code + IP self-referral check ───────────
     referrer = None
     referred_by_code = (body.referral_code or "").strip().upper() or None
     if referred_by_code:
         referrer = await db["users"].find_one({"referral_code": referred_by_code})
         if not referrer:
             referred_by_code = None  # invalid code — ignore silently
+        elif referrer.get("signup_ip") and referrer["signup_ip"] == client_ip:
+            # Same IP = likely self-referral
+            log.info("referral.blocked: same-IP self-referral from %s", client_ip)
+            referred_by_code = None
+            referrer = None
 
-    signup_credits = 10 + (REFERRAL_SIGNUP_BONUS if referred_by_code else 0)
+    # ── Phase 1: Credits start at 0 — granted after email verification ─────
+    # ── Phase 2: Signup credits reduced to SIGNUP_CREDITS (5) ─────────────
+    pending_credits = SIGNUP_CREDITS + (REFERRAL_SIGNUP_BONUS if referred_by_code else 0)
+
+    # Generate email verification token
+    verify_token = _gen_verify_token()
 
     user_doc = {
         "id": str(uuid.uuid4()),
@@ -248,20 +363,27 @@ async def register(body: RegisterBody):
         "security_question": body.security_question or None,
         "security_answer_hash": sec_answer_hash,
         "avatar": None,
-        "credits": signup_credits,
+        "credits": 0,                   # Phase 1: no credits until email verified
+        "pending_credits": pending_credits,  # granted on verification
         "plan": "free",
         "created_at": time.time(),
+        "signup_ip": client_ip,
         "referral_code": _gen_referral_code(),
         "referred_by": referred_by_code,
         "referral_reward_given": False,
         "referrals_rewarded_count": 0,
+        # Email verification
+        "email_verified": False,
+        "email_verify_token": verify_token,
+        "email_verify_expires": time.time() + VERIFY_TOKEN_EXPIRY,
+        # Phase 4: credit expiry (set when verification completes)
+        "free_credits_expire_at": None,
     }
     await db["users"].insert_one(user_doc)
 
+    # Notify referrer about signup (non-blocking)
     if referred_by_code and referrer:
-        log.info("referral.signup: new user=%s referred_by=%s +%d signup credits",
-                 user_doc["id"], referred_by_code, REFERRAL_SIGNUP_BONUS)
-        # Email the referrer to let them know someone joined with their link
+        log.info("referral.signup: new user=%s referred_by=%s", user_doc["id"], referred_by_code)
         async def _notify_referrer():
             try:
                 from email_sender import send_referral_signup_email  # noqa: PLC0415
@@ -275,19 +397,16 @@ async def register(body: RegisterBody):
                 )
             except Exception as _e:
                 log.warning("referral signup email failed (non-fatal): %s", _e)
-        import asyncio as _asyncio
-        _asyncio.create_task(_notify_referrer())
+        asyncio.create_task(_notify_referrer())
 
-    # Fire welcome email in background — never blocks the response
-    try:
-        from email_service import send_welcome_email  # noqa: PLC0415
-        threading.Thread(
-            target=send_welcome_email,
-            args=(user_doc["email"], user_doc["name"], user_doc["id"]),
-            daemon=True,
-        ).start()
-    except Exception as _email_exc:
-        log.warning("Could not start welcome email thread: %s", _email_exc)
+    # Send verification email (non-blocking)
+    async def _send_verify():
+        try:
+            from email_service import send_verification_email  # noqa: PLC0415
+            await send_verification_email(email_lc, body.name.strip(), verify_token)
+        except Exception as _e:
+            log.warning("Verification email failed (non-fatal): %s", _e)
+    asyncio.create_task(_send_verify())
 
     token = _make_token(user_doc)
     return {"token": token, "user": _public_user(user_doc)}
@@ -304,6 +423,79 @@ async def login(body: LoginBody):
         raise HTTPException(status_code=401, detail="Incorrect password.")
     token = _make_token(user)
     return {"token": token, "user": _public_user(user)}
+
+
+@auth_router.post("/verify-email")
+async def verify_email(body: VerifyEmailBody):
+    """Verify email using the token from the verification link. Grants signup credits."""
+    db = _get_db()
+    user = await db["users"].find_one({"email_verify_token": body.token})
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification link.")
+    if user.get("email_verified"):
+        # Already verified — just return a fresh token
+        token = _make_token(user)
+        return {"token": token, "user": _public_user(user), "message": "Email already verified."}
+    if user.get("email_verify_expires", 0) < time.time():
+        raise HTTPException(
+            status_code=400,
+            detail="Verification link has expired. Please request a new one.",
+        )
+
+    pending = user.get("pending_credits", SIGNUP_CREDITS)
+    now = time.time()
+    await db["users"].update_one(
+        {"id": user["id"]},
+        {"$set": {
+            "email_verified": True,
+            "credits": pending,
+            "pending_credits": 0,
+            "email_verify_token": None,
+            "email_verify_expires": None,
+            "free_credits_expire_at": now + FREE_CREDIT_TTL,  # Phase 4: 7-day expiry
+        }},
+    )
+    user["email_verified"] = True
+    user["credits"] = pending
+
+    # Send welcome email now that verification is confirmed
+    try:
+        from email_service import send_welcome_email  # noqa: PLC0415
+        threading.Thread(
+            target=send_welcome_email,
+            args=(user["email"], user["name"], user["id"]),
+            daemon=True,
+        ).start()
+    except Exception as _e:
+        log.warning("Welcome email failed (non-fatal): %s", _e)
+
+    token = _make_token(user)
+    return {"token": token, "user": _public_user(user), "message": "Email verified! Credits granted."}
+
+
+@auth_router.post("/resend-verification")
+async def resend_verification(authorization: str = Header(None)):
+    """Resend the email verification link to the authenticated user."""
+    user = await get_current_user(authorization)
+    if user.get("email_verified", True):
+        return {"message": "Email already verified."}
+    db = _get_db()
+    verify_token = _gen_verify_token()
+    await db["users"].update_one(
+        {"id": user["id"]},
+        {"$set": {
+            "email_verify_token": verify_token,
+            "email_verify_expires": time.time() + VERIFY_TOKEN_EXPIRY,
+        }},
+    )
+    async def _send():
+        try:
+            from email_service import send_verification_email  # noqa: PLC0415
+            await send_verification_email(user["email"], user.get("name", ""), verify_token)
+        except Exception as _e:
+            log.warning("Resend verification failed (non-fatal): %s", _e)
+    asyncio.create_task(_send())
+    return {"message": "Verification email sent."}
 
 
 @auth_router.post("/google")
@@ -367,6 +559,7 @@ async def google_login(body: GoogleAuthBody):
         # New user — create account (no password required)
         count = await db["users"].count_documents({})
         role = "admin" if count == 0 else "user"
+        now = time.time()
         user = {
             "id": str(uuid.uuid4()),
             "email": google_email,
@@ -375,13 +568,19 @@ async def google_login(body: GoogleAuthBody):
             "google_sub": google_sub,
             "role": role,
             "avatar": google_pic,
-            "credits": 10,
+            "credits": SIGNUP_CREDITS,   # Phase 2: reduced signup credits
+            "pending_credits": 0,
             "plan": "free",
-            "created_at": time.time(),
+            "created_at": now,
+            "signup_ip": None,
             "referral_code": _gen_referral_code(),
             "referred_by": None,
             "referral_reward_given": False,
             "referrals_rewarded_count": 0,
+            "email_verified": True,      # Google already verified the email
+            "email_verify_token": None,
+            "email_verify_expires": None,
+            "free_credits_expire_at": now + FREE_CREDIT_TTL,  # Phase 4: 7-day expiry
         }
         await db["users"].insert_one(user)
 
@@ -403,33 +602,40 @@ async def google_login(body: GoogleAuthBody):
 @auth_router.get("/me")
 async def me(authorization: str = Header(None)):
     user = await get_current_user(authorization)
+    db = _get_db()
+    updates: dict = {}
     # Backfill starter credits for pre-existing accounts
     if "credits" not in user:
-        db = _get_db()
-        await db["users"].update_one(
-            {"id": user["id"]},
-            {"$set": {"credits": 10, "plan": "free"}},
-        )
-        user["credits"] = 10
-        user["plan"] = "free"
+        updates["credits"] = 10
+        updates["plan"] = "free"
+    # Phase 4: zero out expired free credits
+    effective = _expire_free_credits_if_needed(user)
+    if effective == -1:
+        updates["credits"] = 0
+        user["credits"] = 0
+    if updates:
+        await db["users"].update_one({"id": user["id"]}, {"$set": updates})
+        user.update(updates)
     return _public_user(user)
 
 
 @auth_router.get("/credits")
 async def get_credits(authorization: str = Header(None)):
-    """Return current credit balance and plan for the authenticated user.
-    Auto-grants 10 starter credits to existing accounts that pre-date the credit system."""
+    """Return current credit balance and plan for the authenticated user."""
     user = await get_current_user(authorization)
     db = _get_db()
-
-    # Backfill: existing users have no 'credits' field → grant 10 starter credits
+    updates: dict = {}
+    # Backfill: existing users have no 'credits' field
     if "credits" not in user:
-        await db["users"].update_one(
-            {"id": user["id"]},
-            {"$set": {"credits": 10, "plan": "free"}},
-        )
-        return {"credits": 10, "plan": "free"}
-
+        updates["credits"] = 10
+        updates["plan"] = "free"
+    # Phase 4: zero out expired free credits
+    effective = _expire_free_credits_if_needed(user)
+    if effective == -1:
+        updates["credits"] = 0
+    if updates:
+        await db["users"].update_one({"id": user["id"]}, {"$set": updates})
+        user.update(updates)
     return {"credits": user.get("credits", 0), "plan": user.get("plan", "free")}
 
 

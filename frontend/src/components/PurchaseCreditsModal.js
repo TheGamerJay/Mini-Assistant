@@ -4,44 +4,19 @@
  * Free users see an upgrade prompt instead.
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { X, Zap, Star, ArrowRight, Lock } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { startCheckout, PRICE_IDS } from '../api/checkout';
+import { startCheckout, getPriceId } from '../api/checkout';
 
 // ---------------------------------------------------------------------------
 // Top-up bundles — mirror backend TOPUP_PRICES
+// priceKey is resolved at click time via getPriceId() to avoid '' at module load
 // ---------------------------------------------------------------------------
 const BUNDLES = [
-  {
-    id: 'topup_10',
-    credits: 100,
-    price: 10,
-    label: null,
-    highlight: false,
-    priceId: PRICE_IDS.topup.t10,
-    perCredit: (10 / 100).toFixed(3),
-  },
-  {
-    id: 'topup_25',
-    credits: 300,
-    price: 25,
-    label: 'Most Popular',
-    highlight: false,
-    priceId: PRICE_IDS.topup.t25,
-    perCredit: (25 / 300).toFixed(3),
-    savings: 'Save 17% vs basic',
-  },
-  {
-    id: 'topup_50',
-    credits: 800,
-    price: 50,
-    label: 'Best Value',
-    highlight: true,
-    priceId: PRICE_IDS.topup.t50,
-    perCredit: (50 / 800).toFixed(3),
-    savings: 'Save 47% vs basic',
-  },
+  { id: 'topup_10', priceKey: 't10', credits: 100, price: 10,  label: null,          highlight: false, perCredit: (10 / 100).toFixed(3) },
+  { id: 'topup_25', priceKey: 't25', credits: 300, price: 25,  label: 'Most Popular', highlight: false, perCredit: (25 / 300).toFixed(3), savings: 'Save 17% vs basic' },
+  { id: 'topup_50', priceKey: 't50', credits: 800, price: 50,  label: 'Best Value',   highlight: true,  perCredit: (50 / 800).toFixed(3), savings: 'Save 47% vs basic' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -151,22 +126,30 @@ export default function PurchaseCreditsModal({ onClose }) {
   const { credits, plan, isSubscribed, setPage } = useApp();
   const [loading, setLoading] = useState(null); // bundle id while loading
 
+  // Clear spinner if user presses Back from Stripe (bfcache restore)
+  useEffect(() => {
+    const handler = (e) => { if (e.persisted) setLoading(null); };
+    window.addEventListener('pageshow', handler);
+    return () => window.removeEventListener('pageshow', handler);
+  }, []);
+
   const handleViewPlans = useCallback(() => {
     onClose();
     setPage('pricing');
   }, [onClose, setPage]);
 
   const handleSelectBundle = useCallback(async (bundle) => {
-    if (!bundle.priceId) {
-      // Price not configured — fall back to pricing page
-      onClose();
-      setPage('pricing');
-      return;
-    }
     setLoading(bundle.id);
     try {
-      await startCheckout(bundle.priceId);
-      // If we get here checkout didn't redirect — leave spinner as "loading"
+      const priceId = await getPriceId('topup', bundle.priceKey);
+      if (!priceId) {
+        setLoading(null);
+        onClose();
+        setPage('pricing');
+        return;
+      }
+      await startCheckout(priceId);
+      // If we get here checkout didn't redirect — leave spinner
     } catch (err) {
       console.error('Top-up checkout error:', err);
       setLoading(null);

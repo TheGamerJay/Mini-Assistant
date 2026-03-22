@@ -22,6 +22,7 @@ import MainPanel from './layout/MainPanel';
 // Shared components
 import TopBar from './components/TopBar';
 import UsageLimitBanner from './components/UsageLimitBanner';
+import VerifyEmailBanner from './components/VerifyEmailBanner';
 
 // Pages
 import ChatPage from './pages/ChatPage';
@@ -37,6 +38,7 @@ import MascotAssistant from './components/MascotAssistant';
 import PricingPage from './pages/PricingPage';
 import CheckoutSuccessPage from './pages/CheckoutSuccessPage';
 import SharedPage from './pages/SharedPage';
+import VerifyEmailPage from './pages/VerifyEmailPage';
 
 // Legal pages
 import TermsPage from './pages/legal/TermsPage';
@@ -255,6 +257,7 @@ function AppShell() {
       <Sidebar />
       <MainPanel>
         <TopBar title={pageTitle(page)} serverStatus={serverStatus} />
+        <VerifyEmailBanner />
         <UsageLimitBanner />
         <div className="flex-1 overflow-hidden">
           {renderContent()}
@@ -310,6 +313,12 @@ function AuthGate() {
   const shareMatch = window.location.pathname.match(/^\/s\/([a-f0-9]+)$/);
   if (shareMatch) {
     return <SharedPage shareId={shareMatch[1]} />;
+  }
+
+  // Detect /verify-email?token=... — render without auth
+  if (window.location.pathname === '/verify-email') {
+    const verifyToken = new URLSearchParams(window.location.search).get('token') || '';
+    return <VerifyEmailPage token={verifyToken} />;
   }
 
   // Admin page handles its own auth — render standalone outside of AppShell

@@ -5,7 +5,7 @@
  */
 
 import React, { useState, useCallback, useEffect } from 'react';
-import { startCheckout, getPriceId, PRICE_IDS } from '../api/checkout';
+import { startCheckout, getPriceId } from '../api/checkout';
 // getPriceId is async — call it inside handlers, not at module scope
 import {
   Check, X as XIcon, Zap, Crown, Users, Star, Shield,
@@ -173,10 +173,11 @@ function FaqItem({ q, a }) {
 // ---------------------------------------------------------------------------
 // Top-up bundles
 // ---------------------------------------------------------------------------
+// priceKey resolved at click time via getPriceId() — avoids '' at module load
 const TOPUP_BUNDLES = [
-  { id: 't10', credits: 100, price: 10, priceId: PRICE_IDS.topup.t10, label: null },
-  { id: 't25', credits: 300, price: 25, priceId: PRICE_IDS.topup.t25, label: 'Popular' },
-  { id: 't50', credits: 800, price: 50, priceId: PRICE_IDS.topup.t50, label: 'Best Value' },
+  { id: 't10', priceKey: 't10', credits: 100, price: 10, label: null },
+  { id: 't25', priceKey: 't25', credits: 300, price: 25, label: 'Popular' },
+  { id: 't50', priceKey: 't50', credits: 800, price: 50, label: 'Best Value' },
 ];
 
 export default function PricingPage() {
@@ -217,10 +218,11 @@ export default function PricingPage() {
   const topupsAvailable  = isSubscribed && !creditsRemaining;
 
   const handleTopup = useCallback(async (bundle) => {
-    if (!bundle.priceId) { setPurchaseModalOpen(true); return; }
     setTopupLoading(bundle.id);
     try {
-      await startCheckout(bundle.priceId);
+      const priceId = await getPriceId('topup', bundle.priceKey);
+      if (!priceId) { setTopupLoading(null); setPurchaseModalOpen(true); return; }
+      await startCheckout(priceId);
     } catch (err) {
       console.error('Top-up checkout error:', err);
       setTopupLoading(null);

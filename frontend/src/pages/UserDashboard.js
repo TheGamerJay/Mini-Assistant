@@ -8,7 +8,7 @@ import {
   Zap, MessageSquare, Image, Star, Clock,
   BarChart2, RefreshCw, ChevronRight, Shield,
   TrendingUp, Folder, Calendar, Code2, Cpu,
-  Rocket, GitBranch, Download, Activity, Gift, Copy, Check,
+  Rocket, GitBranch, Download, Activity, Gift, Copy, Check, ArrowLeft,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import api from '../api/client';
@@ -277,7 +277,7 @@ function MonthlyUsagePanel({ data }) {
 // Main component
 // ---------------------------------------------------------------------------
 export default function UserDashboard() {
-  const { user, avatar, credits, plan, isSubscribed, setPage, setPurchaseModalOpen, openUpgradeModal } = useApp();
+  const { user, avatar, credits, plan, isSubscribed, setPage, setPurchaseModalOpen, openUpgradeModal, getPrevPage } = useApp();
   const [data, setData]           = useState(null);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState(null);
@@ -334,6 +334,13 @@ export default function UserDashboard() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => setPage(getPrevPage())}
+              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all flex-shrink-0"
+              title="Back"
+            >
+              <ArrowLeft size={16} />
+            </button>
             <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-500 to-violet-600 flex items-center justify-center overflow-hidden flex-shrink-0">
               {avatar
                 ? <img src={avatar} alt="" className="w-full h-full object-cover" />
@@ -369,7 +376,7 @@ export default function UserDashboard() {
           credits={data?.credits ?? credits ?? 0}
           plan={data?.plan ?? plan}
           isSubscribed={data?.is_subscribed ?? isSubscribed}
-          onBuyCredits={() => openUpgradeModal('credits')}
+          onBuyCredits={() => setPage('pricing')}
           onTopUp={() => setPurchaseModalOpen(true)}
           onUpgrade={() => setPage('pricing')}
         />

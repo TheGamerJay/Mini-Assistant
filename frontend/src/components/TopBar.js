@@ -20,7 +20,7 @@ import { api } from '../api/client';
 const PLAN_LIMITS = { free: 50, standard: 500, pro: 2000, team: 10000, max: 10000 };
 
 function CreditChip() {
-  const { credits, plan, isSubscribed, setPurchaseModalOpen, openUpgradeModal, setPage } = useApp();
+  const { credits, plan, isSubscribed, setPurchaseModalOpen, setPage } = useApp();
 
   if (credits === null) return null; // loading
 
@@ -34,7 +34,8 @@ function CreditChip() {
 
   const handleClick = () => {
     if (!isSubscribed) {
-      openUpgradeModal('credits');
+      // Free users → go to pricing page directly (no intermediate modal)
+      setPage('pricing');
     } else {
       setPurchaseModalOpen(true);
     }
@@ -232,7 +233,7 @@ function MenuItem({ icon: Icon, label, onClick, hint }) {
 // TopBar
 // ---------------------------------------------------------------------------
 function TopBar() {
-  const { setPage, serverStatus, setServerStatus, theme, toggleTheme, user, logout, avatar, setMobileSidebarOpen, isSubscribed, openUpgradeModal } = useApp();
+  const { setPage, serverStatus, setServerStatus, theme, toggleTheme, user, logout, avatar, setMobileSidebarOpen, isSubscribed, openUpgradeModal } = useApp(); // openUpgradeModal kept for ProfileMenu
   const [profileOpen, setProfileOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 

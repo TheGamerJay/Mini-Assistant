@@ -342,6 +342,22 @@ export const api = {
     return get(`${MAIN_API}/auth/me`, 10000);
   },
 
+  /** Verify email using token from verification link. */
+  authVerifyEmail(token) {
+    return request(`${MAIN_API}/auth/verify-email`, {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    }, 10000);
+  },
+
+  /** Resend the verification email to the authenticated user. */
+  authResendVerification() {
+    return request(`${MAIN_API}/auth/resend-verification`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }, 10000);
+  },
+
   /** Get current credit balance and plan. */
   authCredits() {
     return get(`${MAIN_API}/auth/credits`, 10000);
