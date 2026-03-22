@@ -231,14 +231,8 @@ export default function MascotAssistant() {
         {/* ---------------------------------------------------------------- */}
         <button
           onClick={() => setOpen((v) => !v)}
-          className="pointer-events-auto relative w-16 h-16 sm:w-20 sm:h-20
-                     rounded-full focus:outline-none select-none
-                     ring-2 ring-violet-500/50 hover:ring-violet-400/80
-                     transition-all duration-300"
-          style={{
-            background: 'radial-gradient(circle at 60% 40%, rgba(139,92,246,0.25) 0%, rgba(96,165,250,0.15) 60%, rgba(15,15,24,0.9) 100%)',
-            boxShadow: '0 0 20px rgba(139,92,246,0.4), 0 0 40px rgba(96,165,250,0.2)',
-          }}
+          className="pointer-events-auto relative w-20 h-20 sm:w-24 sm:h-24
+                     focus:outline-none select-none"
           aria-label={open ? 'Minimise assistant' : 'Open assistant'}
         >
           {/* Particle drifters */}
@@ -246,16 +240,13 @@ export default function MascotAssistant() {
           <Particle delay="0.8s"  x="75%" />
           <Particle delay="1.6s"  x="45%" />
 
-          {/* Breathing + floating wrapper */}
-          <span className="mascot-float mascot-breathe mascot-glow block w-full h-full">
+          {/* Image only — no animation wrapper for debugging */}
+          <span className="block w-full h-full">
             <img
               src="/mascot.png"
               alt=""
               draggable={false}
-              className="w-full h-full object-cover rounded-full"
-              style={{
-                /* Subtle blink: scale the eye region via clip — easiest is opacity flash overlay */
-              }}
+              className="w-full h-full object-contain"
             />
 
             {/* Blink overlay — covers just the top-half of the face area */}
