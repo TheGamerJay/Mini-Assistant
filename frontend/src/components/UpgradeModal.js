@@ -231,6 +231,13 @@ export default function UpgradeModal() {
     return () => window.removeEventListener('keydown', handler);
   }, [upgradeModalOpen, close]);
 
+  // Clear loading state when user presses Back from Stripe (bfcache restore)
+  useEffect(() => {
+    const handler = (e) => { if (e.persisted) setCheckoutLoading(null); };
+    window.addEventListener('pageshow', handler);
+    return () => window.removeEventListener('pageshow', handler);
+  }, []);
+
   if (!upgradeModalOpen) return null;
 
   const handleSelect = async (plan) => {

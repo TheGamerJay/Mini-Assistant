@@ -4,7 +4,7 @@
  * Accessible via setPage('pricing').
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { startCheckout, getPriceId, PRICE_IDS } from '../api/checkout';
 // getPriceId is async — call it inside handlers, not at module scope
 import {
@@ -184,6 +184,13 @@ export default function PricingPage() {
   const [annual, setAnnual] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState(null); // plan id while loading
   const [topupLoading, setTopupLoading] = useState(null);
+
+  // Clear loading states when user presses Back from Stripe (bfcache restore)
+  useEffect(() => {
+    const handler = (e) => { if (e.persisted) { setCheckoutLoading(null); setTopupLoading(null); } };
+    window.addEventListener('pageshow', handler);
+    return () => window.removeEventListener('pageshow', handler);
+  }, []);
 
   const handleCta = useCallback(async (plan) => {
     if (plan.id === 'free' || plan.id === currentPlan) return;
