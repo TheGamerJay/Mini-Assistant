@@ -244,7 +244,7 @@ export default function MascotAssistant() {
           {/* Breathing + floating wrapper */}
           <span className="mascot-float mascot-breathe mascot-glow block w-full h-full">
             <img
-              src="/mascot.png"
+              src="/mascot.png?v=2"
               alt=""
               draggable={false}
               className="w-full h-full object-contain"

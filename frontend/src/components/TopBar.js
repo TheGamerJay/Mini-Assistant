@@ -168,7 +168,7 @@ function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme, user,
           <p className="text-[10px] font-bold text-violet-300 mb-0.5">Free Plan</p>
           <p className="text-[10px] text-slate-500 mb-2">Unlock code, export &amp; deploy</p>
           <button
-            onClick={() => { openUpgradeModal('generic'); onClose(); }}
+            onClick={() => { setPage('pricing'); onClose(); }}
             className="w-full py-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-cyan-600 text-white text-[10px] font-bold hover:opacity-90 transition-all"
           >
             Upgrade Now →
