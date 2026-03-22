@@ -233,6 +233,7 @@ export default function MascotAssistant() {
           onClick={() => setOpen((v) => !v)}
           className="pointer-events-auto relative w-20 h-20 sm:w-24 sm:h-24
                      focus:outline-none select-none"
+          style={{ filter: 'drop-shadow(0 0 12px rgba(139,92,246,0.5))' }}
           aria-label={open ? 'Minimise assistant' : 'Open assistant'}
         >
           {/* Particle drifters */}
@@ -240,8 +241,8 @@ export default function MascotAssistant() {
           <Particle delay="0.8s"  x="75%" />
           <Particle delay="1.6s"  x="45%" />
 
-          {/* Image only — no animation wrapper for debugging */}
-          <span className="block w-full h-full">
+          {/* Breathing + floating wrapper */}
+          <span className="mascot-float mascot-breathe mascot-glow block w-full h-full">
             <img
               src="/mascot.png"
               alt=""
