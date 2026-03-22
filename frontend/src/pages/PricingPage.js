@@ -49,7 +49,7 @@ const PLANS = [
     icon: Crown,
     color: 'violet',
     monthlyPrice: 50,
-    annualTotal: 504,   // $504/yr = $42/mo
+    annualTotal: 500,   // $500/yr = $41.67/mo
     credits: 4000,
     badge: 'Most Popular',
     description: '4,000 credits per month with priority performance, advanced AI capabilities, and full access to app building, code generation, and export features.',
@@ -61,7 +61,7 @@ const PLANS = [
     icon: Users,
     color: 'amber',
     monthlyPrice: 100,
-    annualTotal: 996,   // $996/yr = $83/mo
+    annualTotal: 1000,  // $1000/yr = $83.33/mo
     credits: 10000,
     badge: null,
     description: '10,000 credits per month with maximum performance, fastest processing, and complete access to every feature — advanced AI, exports, and deployment tools.',
@@ -276,8 +276,7 @@ export default function PricingPage() {
             const c = COLOR[plan.color];
             const Icon = plan.icon;
             const isCurrentPlan = currentPlan === plan.id;
-            const monthlyEquiv  = plan.annualTotal ? (plan.annualTotal / 12).toFixed(2) : '0';
-            const displayPrice  = annual ? (plan.annualTotal ? plan.annualTotal : 0) : plan.monthlyPrice;
+            const monthlyEquiv  = plan.annualTotal ? (plan.annualTotal / 12).toFixed(2) : null;
 
             return (
               <div
@@ -309,15 +308,22 @@ export default function PricingPage() {
                     <div className="text-3xl font-black text-white">Free</div>
                   ) : (
                     <>
-                      <div className="flex items-end gap-1">
-                        <span className="text-3xl font-black text-white">${annual ? monthlyEquiv : displayPrice}</span>
-                        <span className="text-xs text-slate-500 mb-1">/mo</span>
-                      </div>
                       {annual && plan.annualTotal ? (
-                        <p className="text-[10px] text-emerald-400">
-                          ${plan.annualTotal}/yr · Save ${plan.monthlyPrice * 12 - plan.annualTotal}/yr
-                        </p>
-                      ) : null}
+                        <>
+                          <div className="flex items-end gap-1">
+                            <span className="text-3xl font-black text-white">${plan.annualTotal}</span>
+                            <span className="text-xs text-slate-500 mb-1">/year</span>
+                          </div>
+                          <p className="text-[10px] text-emerald-400">
+                            ${monthlyEquiv}/mo billed annually
+                          </p>
+                        </>
+                      ) : (
+                        <div className="flex items-end gap-1">
+                          <span className="text-3xl font-black text-white">${plan.monthlyPrice}</span>
+                          <span className="text-xs text-slate-500 mb-1">/mo</span>
+                        </div>
+                      )}
                     </>
                   )}
                   <p className={`text-[11px] font-semibold mt-1 ${c.text}`}>
