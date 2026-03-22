@@ -45,16 +45,16 @@ def _float(key: str, default: float) -> float:
 
 # Per-user request caps (per plan)
 MAX_RPM: Dict[str, int] = {          # requests per minute
-    "free":     _int("RATE_FREE_RPM",     10),
-    "standard": _int("RATE_STD_RPM",      30),
-    "pro":      _int("RATE_PRO_RPM",      60),
-    "team":     _int("RATE_TEAM_RPM",     120),
+    "free":     _int("RATE_FREE_RPM",     30),
+    "standard": _int("RATE_STD_RPM",      60),
+    "pro":      _int("RATE_PRO_RPM",      120),
+    "team":     _int("RATE_TEAM_RPM",     240),
 }
 MAX_RPH: Dict[str, int] = {          # requests per hour
-    "free":     _int("RATE_FREE_RPH",     60),
-    "standard": _int("RATE_STD_RPH",      300),
-    "pro":      _int("RATE_PRO_RPH",      800),
-    "team":     _int("RATE_TEAM_RPH",     2000),
+    "free":     _int("RATE_FREE_RPH",     200),
+    "standard": _int("RATE_STD_RPH",      600),
+    "pro":      _int("RATE_PRO_RPH",      1500),
+    "team":     _int("RATE_TEAM_RPH",     4000),
 }
 
 # Cost caps
