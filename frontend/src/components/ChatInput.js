@@ -619,11 +619,6 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
         </div>
       </div>
 
-      {/* Supported formats hint */}
-      <p className="mt-1.5 text-center text-[10px] text-slate-700 select-none">
-        📎 PNG · JPG · GIF · WebP · MP4 (≤15s) &nbsp;·&nbsp; 📄 PDF · TXT · MD · CSV &nbsp;·&nbsp; Max 15 MB
-      </p>
-
     </div>
   );
 }
