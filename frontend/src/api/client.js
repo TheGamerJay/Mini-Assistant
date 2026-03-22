@@ -96,13 +96,14 @@ function del(url, timeoutMs) {
 
 export const api = {
   /** Send a chat message with optional conversation history, attached images, and model override */
-  chat(message, sessionId, history = [], imagesBase64 = null, preferredModel = null) {
+  chat(message, sessionId, history = [], imagesBase64 = null, preferredModel = null, requestId = null) {
     const trimmedHistory = history.slice(-10).map(m => ({ role: m.role, content: m.content }));
     const body = { message, session_id: sessionId, history: trimmedHistory };
     const imgs = Array.isArray(imagesBase64) ? imagesBase64.filter(Boolean) : (imagesBase64 ? [imagesBase64] : []);
     if (imgs.length === 1) body.image_base64 = imgs[0];
     else if (imgs.length > 1) body.images_base64 = imgs;
-    if (preferredModel)  body.preferred_model  = preferredModel;
+    if (preferredModel) body.preferred_model = preferredModel;
+    if (requestId)      body.request_id      = requestId;
     return post(`${IMAGE_API}/chat`, body, 120000);
   },
 

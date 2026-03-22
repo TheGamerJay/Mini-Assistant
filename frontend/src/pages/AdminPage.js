@@ -780,12 +780,56 @@ function AdminDashboard({ adminUser, onLogout }) {
               <>
                 {/* P&L summary */}
                 {analytics && (
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <StatCard icon={DollarSign}  label="MRR Estimate"       value={`$${analytics.mrr_estimate_usd?.toFixed(2)}`}       color="emerald" />
-                    <StatCard icon={Activity}     label="AI Cost This Month" value={`$${analytics.ai_cost_this_month_usd?.toFixed(2)}`} color="red" />
-                    <StatCard icon={TrendingUp}   label="Net Profit Est."    value={`$${analytics.net_profit_estimate_usd?.toFixed(2)}`} color={analytics.net_profit_estimate_usd > 0 ? 'emerald' : 'red'} />
-                    <StatCard icon={Percent}      label="Profit Margin"      value={`${analytics.profit_margin_pct}%`}                  color="cyan" />
-                  </div>
+                  <>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <StatCard icon={DollarSign}  label="MRR Estimate"       value={`$${analytics.mrr_estimate_usd?.toFixed(2)}`}       color="emerald" />
+                      <StatCard icon={Activity}     label="AI Cost This Month" value={`$${analytics.ai_cost_this_month_usd?.toFixed(2)}`} color="red" />
+                      <StatCard icon={TrendingUp}   label="Net Profit Est."    value={`$${analytics.net_profit_estimate_usd?.toFixed(2)}`} color={analytics.net_profit_estimate_usd > 0 ? 'emerald' : 'red'} />
+                      <StatCard icon={Percent}      label="Profit Margin"      value={`${analytics.profit_margin_pct}%`}                  color="cyan" />
+                    </div>
+
+                    {/* Cost breakdown cards */}
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      <StatCard icon={DollarSign} label="Cost Today"           value={`$${analytics.cost_today_usd?.toFixed(4)}`}        color="amber" />
+                      <StatCard icon={Users}       label="Avg Cost / User"      value={`$${analytics.avg_cost_per_user_usd?.toFixed(4)}`} sub={`${analytics.active_users_this_month || 0} active users this month`} color="violet" />
+                      <StatCard icon={Activity}    label="Active Users (Month)" value={analytics.active_users_this_month}                 color="slate" />
+                    </div>
+
+                    {/* Cost by plan */}
+                    {analytics.cost_by_plan && Object.keys(analytics.cost_by_plan).length > 0 && (
+                      <div className="rounded-2xl border border-white/10 bg-[#13131f] p-6">
+                        <h2 className="text-sm font-semibold text-slate-200 mb-4 flex items-center gap-2">
+                          <PieChart size={14} className="text-amber-400" /> Cost Breakdown by Plan (This Month)
+                        </h2>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left">
+                            <thead>
+                              <tr className="border-b border-white/5">
+                                <th className="px-3 py-2 text-[10px] font-bold text-slate-600 uppercase">Plan</th>
+                                <th className="px-3 py-2 text-[10px] font-bold text-slate-600 uppercase">Requests</th>
+                                <th className="px-3 py-2 text-[10px] font-bold text-slate-600 uppercase">Cost (USD)</th>
+                                <th className="px-3 py-2 text-[10px] font-bold text-slate-600 uppercase">Avg / Req</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {Object.entries(analytics.cost_by_plan)
+                                .sort((a, b) => b[1].cost_usd - a[1].cost_usd)
+                                .map(([plan, data]) => (
+                                  <tr key={plan} className="border-b border-white/5 hover:bg-white/[0.02]">
+                                    <td className="px-3 py-2.5"><PlanBadge plan={plan} /></td>
+                                    <td className="px-3 py-2.5 text-xs text-slate-400">{fmt(data.requests)}</td>
+                                    <td className="px-3 py-2.5 text-xs text-red-400 font-mono">${data.cost_usd?.toFixed(4)}</td>
+                                    <td className="px-3 py-2.5 text-xs text-slate-500 font-mono">
+                                      ${data.requests > 0 ? (data.cost_usd / data.requests).toFixed(5) : '0.00000'}
+                                    </td>
+                                  </tr>
+                                ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {/* Profit bar */}

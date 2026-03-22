@@ -1357,18 +1357,57 @@ async def admin_analytics(admin: dict = Depends(_require_admin)):
         {"created_at": {"$gte": month_start_ts}}
     )
 
+    # ── Cost today ──────────────────────────────────────────────────────────
+    today_str = now.strftime("%Y-%m-%d")
+    today_start_ts = time.time() - (now.hour * 3600 + now.minute * 60 + now.second)
+    cost_today_agg = await db["activity_logs"].aggregate([
+        {"$match": {"timestamp": {"$gte": today_start_ts}}},
+        {"$group": {"_id": None, "cost": {"$sum": "$estimated_cost_usd"}}},
+    ]).to_list(1)
+    cost_today_usd = round(cost_today_agg[0].get("cost", 0.0), 4) if cost_today_agg else 0.0
+
+    # ── Cost breakdown by plan ───────────────────────────────────────────────
+    cost_by_plan_agg = await db["activity_logs"].aggregate([
+        {"$match": {"month_key": month_key}},
+        {"$group": {
+            "_id":      "$plan",
+            "cost_usd": {"$sum": "$estimated_cost_usd"},
+            "requests": {"$sum": 1},
+        }},
+    ]).to_list(10)
+    cost_by_plan = {
+        row.get("_id") or "unknown": {
+            "cost_usd": round(row.get("cost_usd", 0), 4),
+            "requests": row.get("requests", 0),
+        }
+        for row in cost_by_plan_agg
+    }
+
+    # ── Avg cost per active user this month ─────────────────────────────────
+    active_users_this_month_agg = await db["activity_logs"].aggregate([
+        {"$match": {"month_key": month_key}},
+        {"$group": {"_id": "$user_id"}},
+        {"$count": "count"},
+    ]).to_list(1)
+    active_users_count = active_users_this_month_agg[0]["count"] if active_users_this_month_agg else 0
+    avg_cost_per_user_usd = round(ai_cost_this_month / active_users_count, 4) if active_users_count > 0 else 0.0
+
     return {
-        "users_by_plan":         users_by_plan,
-        "total_users":           total_users,
-        "paying_users":          paying_users,
-        "new_users_this_month":  new_users_this_month,
-        "mrr_estimate_usd":      round(mrr_estimate, 2),
-        "ai_cost_this_month_usd": ai_cost_this_month,
+        "users_by_plan":           users_by_plan,
+        "total_users":             total_users,
+        "paying_users":            paying_users,
+        "new_users_this_month":    new_users_this_month,
+        "mrr_estimate_usd":        round(mrr_estimate, 2),
+        "ai_cost_this_month_usd":  ai_cost_this_month,
+        "cost_today_usd":          cost_today_usd,
+        "cost_by_plan":            cost_by_plan,
+        "avg_cost_per_user_usd":   avg_cost_per_user_usd,
+        "active_users_this_month": active_users_count,
         "net_profit_estimate_usd": net_profit,
-        "profit_margin_pct":     profit_margin_pct,
-        "conversion_rate_pct":   conversion_rate_pct,
-        "daily_usage":           daily_usage,
-        "usage_by_action":       usage_by_action,
+        "profit_margin_pct":       profit_margin_pct,
+        "conversion_rate_pct":     conversion_rate_pct,
+        "daily_usage":             daily_usage,
+        "usage_by_action":         usage_by_action,
     }
 
 

@@ -642,10 +642,15 @@ async def check_image_limit(
 async def log_image_generated(
     authorization: str | None,
     db=None,
+    request_id: str | None = None,
 ) -> None:
     """
     Record an image generation event in activity_logs.
     Does NOT deduct credits — images are a separate cost system.
+
+    Idempotent: if request_id is provided and already exists in the last
+    5 minutes, the log entry is skipped to prevent duplicate counting from
+    rapid retries or network re-sends.
     """
     if db is None:
         db = await _get_db()
@@ -664,15 +669,34 @@ async def log_image_generated(
     if not user:
         return
 
-    await _log_usage(
-        db,
-        uid,
-        user.get("name", ""),
-        user.get("email", ""),
-        action_type         = "image_generated",
-        credits_used        = 0,       # images never cost credits
-        tokens_in           = 0,
-        tokens_out          = 0,
-        estimated_cost_usd  = 0.13,    # real API cost for admin tracking
-        plan                = user.get("plan", "free"),
-    )
+    # ── Deduplication check ─────────────────────────────────────────────────
+    if request_id:
+        recent_cutoff = time.time() - 300  # 5-minute window
+        existing = await db["activity_logs"].find_one({
+            "user_id":    uid,
+            "request_id": request_id,
+            "timestamp":  {"$gte": recent_cutoff},
+        })
+        if existing:
+            log.info("Skipping duplicate image_generated log for uid=%s request_id=%s", uid, request_id)
+            return
+
+    # ── Insert log entry ────────────────────────────────────────────────────
+    try:
+        await db["activity_logs"].insert_one({
+            "user_id":            uid,
+            "user_name":          user.get("name", ""),
+            "user_email":         user.get("email", ""),
+            "type":               "image_generated",
+            "action_type":        "image_generated",
+            "request_id":         request_id,
+            "credits_used":       0,       # images never cost credits
+            "tokens_in":          0,
+            "tokens_out":         0,
+            "estimated_cost_usd": 0.13,    # real API cost for admin tracking
+            "plan":               user.get("plan", "free"),
+            "month_key":          _month_key(),
+            "timestamp":          time.time(),
+        })
+    except Exception as exc:
+        log.warning("image_generated log insert failed: %s", exc)

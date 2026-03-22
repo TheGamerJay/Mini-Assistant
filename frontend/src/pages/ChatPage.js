@@ -328,6 +328,9 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     submittingRef.current = true;
     lastUserTextRef.current = text;
 
+    // Generate a unique request_id for this submission (used for image deduplication)
+    const requestId = crypto.randomUUID();
+
     let chatId = activeChatId;
     if (!chatId) {
       chatId = newChat();
@@ -366,7 +369,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
 
       try {
         const history = nextMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
-        const data = await send(text, sessionIdRef.current, history, imgs.length ? imgs : null, preferredModel);
+        const data = await send(text, sessionIdRef.current, history, imgs.length ? imgs : null, preferredModel, requestId);
         setStreamResponse(data);
 
         const isImg = !!data.image_base64;
@@ -441,7 +444,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
             content: 'Rendering your image...', timestamp: Date.now(), _placeholder: true,
           }]);
           try {
-            const data = await send(text, sessionIdRef.current, history, imgs.length ? imgs : null, preferredModel);
+            const data = await send(text, sessionIdRef.current, history, imgs.length ? imgs : null, preferredModel, requestId);
             setStreamResponse(data);
             const isImg = !!data.image_base64;
             if (isImg) {

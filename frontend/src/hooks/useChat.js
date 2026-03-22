@@ -18,12 +18,12 @@ export function useChat() {
   const [loading, setLoading] = useState(false);
   const abortControllerRef = useRef(null);
 
-  const send = useCallback(async (text, sessionId, history = [], imagesBase64 = null, preferredModel = null) => {
+  const send = useCallback(async (text, sessionId, history = [], imagesBase64 = null, preferredModel = null, requestId = null) => {
     setLoading(true);
     abortControllerRef.current = new AbortController();
 
     try {
-      const data = await api.chat(text, sessionId, history, imagesBase64, preferredModel);
+      const data = await api.chat(text, sessionId, history, imagesBase64, preferredModel, requestId);
       return data;
     } finally {
       setLoading(false);

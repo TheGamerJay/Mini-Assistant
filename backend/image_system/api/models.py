@@ -15,6 +15,7 @@ class GenerateRequest(BaseModel):
     prompt: str = Field(..., description="User image generation request")
     quality: str = Field("balanced", description="fast | balanced | high")
     session_id: Optional[str] = Field(None, description="Session identifier for tracking")
+    request_id: Optional[str] = Field(None, description="Client-generated UUID for deduplication")
     reference_image_base64: Optional[str] = Field(None, description="Base64-encoded reference image")
 
     # dry_run: return routing plan without actually generating
@@ -61,6 +62,7 @@ class ChatRequest(BaseModel):
     images_base64: Optional[List[str]] = None        # multiple attached images (Phase 5+)
     preferred_model: Optional[str] = None            # Ollama model override (Phase 6)
     vibe_mode: bool = False                          # Vibe Code mode: skip Q&A, build immediately
+    request_id: Optional[str] = None                 # client-generated UUID for deduplication
 
 
 class PullModelsRequest(BaseModel):

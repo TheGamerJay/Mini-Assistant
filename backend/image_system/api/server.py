@@ -951,7 +951,7 @@ async def generate_image(req: GenerateRequest, request: Request):
     # ── Log image generation (no credit deduction) ──────────────────────────
     try:
         from mini_credits import log_image_generated as _log_img
-        await _log_img(auth_header)
+        await _log_img(auth_header, request_id=req.request_id)
     except Exception:
         pass
 
@@ -1567,7 +1567,7 @@ async def chat(req: ChatRequest, request: Request):
             _b64 = await _dalle.generate(effective_msg)
             try:
                 from mini_credits import log_image_generated as _log_img
-                await _log_img(request.headers.get("authorization"))
+                await _log_img(request.headers.get("authorization"), request_id=getattr(req, "request_id", None))
             except Exception:
                 pass
             return {
@@ -1609,7 +1609,7 @@ async def chat(req: ChatRequest, request: Request):
             _b64 = await _dalle.generate(dalle_prompt)
             try:
                 from mini_credits import log_image_generated as _log_img
-                await _log_img(request.headers.get("authorization"))
+                await _log_img(request.headers.get("authorization"), request_id=getattr(req, "request_id", None))
             except Exception:
                 pass
             return {
