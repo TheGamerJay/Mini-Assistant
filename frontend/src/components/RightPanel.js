@@ -148,10 +148,22 @@ function CodeViewer({ blocks }) {
 // ---------------------------------------------------------------------------
 // Preview
 // ---------------------------------------------------------------------------
-function PreviewPane({ blocks, previewImage = null }) {
+function PreviewPane({ blocks, previewImage = null, imageSaved = false }) {
   const iframeRef = useRef(null);
   const [key, setKey] = useState(0);
   const html = useMemo(() => buildPreviewHtml(blocks), [blocks]);
+
+  // Show "Saved" badge briefly after a new image arrives
+  const [showSaved, setShowSaved] = useState(false);
+  const prevImageRef = useRef(null);
+  useEffect(() => {
+    if (previewImage && previewImage !== prevImageRef.current) {
+      prevImageRef.current = previewImage;
+      setShowSaved(true);
+      const t = setTimeout(() => setShowSaved(false), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [previewImage]);
 
   useEffect(() => {
     const iframe = iframeRef.current;
@@ -181,12 +193,18 @@ function PreviewPane({ blocks, previewImage = null }) {
             <Download size={12} />
           </a>
         </div>
-        <div className="flex-1 flex items-center justify-center p-4 overflow-auto">
+        <div className="flex-1 flex flex-col items-center justify-center p-4 overflow-auto gap-3">
           <img
             src={`data:image/png;base64,${previewImage}`}
             alt="Generated"
-            className="max-w-full max-h-full object-contain rounded-lg shadow-xl"
+            className="max-w-full max-h-[85%] object-contain rounded-lg shadow-xl"
           />
+          {showSaved && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 animate-fade-in">
+              <CheckSquare size={11} className="text-emerald-400 flex-shrink-0" />
+              <span className="text-[10px] text-emerald-400 font-medium">Saved to your library</span>
+            </div>
+          )}
         </div>
       </div>
     );
