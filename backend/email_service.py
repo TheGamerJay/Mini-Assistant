@@ -46,7 +46,7 @@ def _build_verify_html(name: str, verify_url: str) -> str:
           </h1>
           <p style="margin:0 0 24px;font-size:14px;color:#94a3b8;line-height:1.7;text-align:center;">
             Click the button below to confirm your email address and receive your
-            free credits to get started.
+            5 free credits to get started — valid for 7 days.
           </p>
           <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
             <tr><td align="center">
@@ -185,10 +185,10 @@ def _build_html(name: str) -> str:
                   <td style="background:rgba(6,182,212,0.08);border:1px solid rgba(6,182,212,0.25);
                              border-radius:12px;padding:14px 18px;">
                     <p style="margin:0;font-size:13px;color:#ffffff;font-weight:700;">
-                      ⚡ You have 10 free credits to start
+                      ⚡ You have 5 free credits to start
                     </p>
                     <p style="margin:4px 0 0;font-size:11px;color:#64748b;">
-                      1 chat = 1 credit · 1 image = 3 credits. Upgrade for up to 10,000/month.
+                      1 chat = 1 credit · 1 image = 3 credits · Credits valid 7 days. Upgrade for up to 10,000/month.
                     </p>
                   </td>
                 </tr>

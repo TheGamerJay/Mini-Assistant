@@ -27,7 +27,7 @@ const PLANS = [
     annualTotal: 0,
     credits: 50,
     badge: null,
-    description: 'Try Mini Assistant with no commitment.',
+    description: 'Get 5 free credits after email verification. 50 monthly credits on the free tier — no card required.',
     cta: 'Current Plan',
     ctaDisabled: true,
   },

@@ -60,6 +60,20 @@ export default function TermsPage() {
         not a right. We reserve the right to refuse registration, reclaim usernames, cancel accounts, or
         remove or edit content without advance notice or liability.
       </p>
+      <p>
+        <strong>2.1 Email Verification.</strong> A valid, non-disposable email address is required to
+        register. Free Credits are withheld until your email address is confirmed via the verification
+        link we send at signup. Accounts with unverified email addresses have no access to Credits.
+        Verification links expire after 24 hours; you may request a new link from within the app.
+      </p>
+      <p>
+        <strong>2.2 Anti-Abuse Measures.</strong> To protect the integrity of the free-tier Credit
+        system, we employ automated safeguards including: (a) blocking of known disposable or
+        temporary email address domains; (b) rate-limiting account creation to a maximum of three (3)
+        registrations per IP address per hour; and (c) flagging of referral codes used by accounts
+        sharing the same IP address as the referring account. We reserve the right to void Credits
+        or suspend accounts found to have circumvented these measures.
+      </p>
 
       <h2>3. Description of Service</h2>
       <p>
@@ -135,6 +149,14 @@ export default function TermsPage() {
         If payment has already been collected for an erroneous-price transaction that we elect to cancel,
         we will issue a full refund of the amount paid. We are not obligated to provide the Service at
         an incorrect price and expressly reserve all rights to correct pricing errors at any time.
+      </p>
+      <p>
+        <strong>4.10 Free-Tier Credits.</strong> Upon successful email verification, new accounts on
+        the free plan receive five (5) complimentary Credits ("Free Credits"). Free Credits expire
+        seven (7) days after they are granted and are permanently forfeited upon expiry. Free Credits
+        have no monetary value, cannot be purchased separately, and are subject to all other Credit
+        terms in this section. We reserve the right to modify the amount of Free Credits granted,
+        their expiry period, or their availability at any time without notice.
       </p>
 
       <h2>5. Anti-Chargeback &amp; Payment Dispute Policy</h2>
