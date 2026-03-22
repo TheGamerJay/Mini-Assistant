@@ -18,6 +18,14 @@ const fullImageMap = new Map();
 /** Exported so ChatPage / ImagePage can read the full base64 without context overhead */
 export { fullImageMap as imageFullMap };
 
+/**
+ * Shared gate: returns true only when the user has remaining image quota.
+ * Apply this BEFORE triggering any image generation flow.
+ */
+export function canGenerateImage(imageUsage) {
+  return imageUsage.used < imageUsage.limit;
+}
+
 // ---------------------------------------------------------------------------
 // Utility helpers
 // ---------------------------------------------------------------------------
@@ -322,6 +330,17 @@ export function AppProvider({ children }) {
 
   const incrementImageUsage = useCallback(() => {
     setImageUsage(prev => ({ ...prev, used: prev.used + 1 }));
+    // Resync with server after a short delay so the optimistic count corrects
+    // itself if the backend disagrees (e.g. dedup blocked the log).
+    setTimeout(() => {
+      api.authCredits().then(({ credits: c, plan: p, images_used, images_limit, images_resets_on }) => {
+        setCredits(c);
+        setPlan(p);
+        if (images_used !== undefined) {
+          setImageUsage({ used: images_used, limit: images_limit ?? 2, resetsOn: images_resets_on ?? null });
+        }
+      }).catch(() => {});
+    }, 1500);
   }, []);
 
   // ---- Onboarding build prompt bridge ----

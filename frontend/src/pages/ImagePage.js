@@ -7,7 +7,7 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { Image, Loader2, Zap, Sparkles, XCircle, Square, RectangleVertical, RectangleHorizontal } from 'lucide-react';
 import { toast } from 'sonner';
-import { useApp, makeThumbnail } from '../context/AppContext';
+import { useApp, makeThumbnail, canGenerateImage } from '../context/AppContext';
 import { api } from '../api/client';
 import ImageCard from '../components/ImageCard';
 
@@ -50,9 +50,9 @@ function ImagePage() {
     if (activePrompt.length < 3) { toast.warning('Prompt too short (min 3 characters)'); return; }
     if (generating) return;
 
-    // Image limit gate
-    if (imageUsage.used >= imageUsage.limit) {
-      toast.error(`Image limit reached (${imageUsage.limit}/${imageUsage.limit}). Upgrade for more.`);
+    // Image limit gate (shared helper — single source of truth)
+    if (!canGenerateImage(imageUsage)) {
+      toast.error(`Image limit reached (${imageUsage.used}/${imageUsage.limit}). Upgrade for more.`);
       return;
     }
 

@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { PanelRight, Download, ChevronDown, Zap, Star } from 'lucide-react';
 import { toast } from 'sonner';
-import { useApp, makeThumbnail } from '../context/AppContext';
+import { useApp, makeThumbnail, canGenerateImage } from '../context/AppContext';
 import { useChat } from '../hooks/useChat';
 import HomeHero from '../components/HomeHero';
 import ChatMessage from '../components/ChatMessage';
@@ -319,7 +319,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
 
     // Image generation limit gate — uses server-authoritative imageUsage (not localStorage)
     const _isImgRequest = imgs.length > 0 || isImageIntent(text);
-    if (_isImgRequest && imageUsage.used >= imageUsage.limit) {
+    if (_isImgRequest && !canGenerateImage(imageUsage)) {
       setImageLimitOpen(true);
       submittingRef.current = false;
       return;
