@@ -518,7 +518,7 @@ export default function PricingPage() {
             <MessageSquare className="w-5 h-5 text-slate-500" />
             <div>
               <p className="text-xs font-semibold text-slate-300">Human Support</p>
-              <p className="text-[10px] text-slate-600">Real team, real answers</p>
+              <p className="text-[10px] text-slate-600">Real humans, real answers</p>
             </div>
           </div>
         </div>

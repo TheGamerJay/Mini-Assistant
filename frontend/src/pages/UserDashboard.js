@@ -21,7 +21,6 @@ const PLAN_CONFIG = {
   free:     { label: 'Free',     color: 'text-slate-400',  bg: 'bg-white/5 border-white/10',             dot: 'bg-slate-500',  limit: 50 },
   standard: { label: 'Standard', color: 'text-cyan-400',   bg: 'bg-cyan-500/10 border-cyan-500/20',      dot: 'bg-cyan-400',   limit: 500 },
   pro:      { label: 'Pro',      color: 'text-violet-400', bg: 'bg-violet-500/10 border-violet-500/20',  dot: 'bg-violet-400', limit: 2000 },
-  team:     { label: 'Team',     color: 'text-amber-400',  bg: 'bg-amber-500/10 border-amber-500/20',    dot: 'bg-amber-400',  limit: 10000 },
   max:      { label: 'Max',      color: 'text-amber-400',  bg: 'bg-amber-500/10 border-amber-500/20',    dot: 'bg-amber-400',  limit: 10000 },
 };
 

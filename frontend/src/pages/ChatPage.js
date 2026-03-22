@@ -322,7 +322,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     if (!text && !imgs.length) return;
 
     // Image generation limit gate for free users
-    const _imgLimit = plan === 'standard' ? 50 : plan === 'pro' ? 200 : plan === 'team' || plan === 'max' ? 1000 : FREE_IMAGE_LIMIT;
+    const _imgLimit = plan === 'standard' ? 50 : plan === 'pro' ? 200 : plan === 'max' ? 1000 : FREE_IMAGE_LIMIT;
     const _isImgRequest = imgs.length > 0 || isImageIntent(text);
     if (!isSubscribed && _isImgRequest && (images || []).length >= _imgLimit) {
       setImageLimitOpen(true);

@@ -18,9 +18,9 @@ import AvatarMedia from './AvatarMedia';
 // ---------------------------------------------------------------------------
 // CreditChip — shows remaining credits with color coding + upgrade nudge
 // ---------------------------------------------------------------------------
-const PLAN_LIMITS = { free: 50, standard: 500, pro: 2000, team: 10000, max: 10000 };
+const PLAN_LIMITS = { free: 50, standard: 500, pro: 2000, max: 10000 };
 
-const IMAGE_LIMITS = { free: 2, standard: 50, pro: 200, team: 1000, max: 1000 };
+const IMAGE_LIMITS = { free: 2, standard: 50, pro: 200, max: 1000 };
 
 function CreditChip() {
   const { credits, plan, isSubscribed, setPurchaseModalOpen, setPage, images } = useApp();

@@ -72,8 +72,7 @@ const PLANS = [
     features: [
       { text: '10,000 Mini Credits / month', highlight: true },
       { text: 'Everything in Pro' },
-      { text: 'Up to 10 team seats' },
-      { text: 'Shared credit pool' },
+      { text: 'Unlimited builds & exports' },
       { text: 'Admin dashboard & usage analytics' },
       { text: 'Dedicated support channel' },
       { text: 'Custom onboarding' },

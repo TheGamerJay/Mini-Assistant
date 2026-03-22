@@ -54,7 +54,7 @@ const PLAN_UNLOCKS = {
     icon: Users,
     tagline: 'The full power of Mini Assistant.',
     features: [
-      { icon: Users,    text: 'Up to 10 team seats' },
+      { icon: Users,    text: 'Unlimited builds & exports' },
       { icon: Zap,      text: '10,000 credits every month' },
       { icon: Crown,    text: 'Dedicated support channel' },
       { icon: Sparkles, text: 'Admin dashboard & usage analytics' },
