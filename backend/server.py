@@ -4951,6 +4951,13 @@ if _static_dir.exists():
             return FileResponse(str(logo), media_type="image/png")
         raise HTTPException(status_code=404, detail="Logo not found")
 
+    @app.get("/mascot.png")
+    async def serve_mascot():
+        f = _static_dir / "mascot.png"
+        if f.exists():
+            return FileResponse(str(f), media_type="image/png")
+        raise HTTPException(status_code=404, detail="mascot.png not found")
+
     @app.get("/manifest.json")
     async def serve_manifest():
         manifest = _static_dir / "manifest.json"
