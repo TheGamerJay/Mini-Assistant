@@ -250,16 +250,6 @@ export default function MascotAssistant() {
               className="w-full h-full object-contain"
             />
 
-            {/* Blink overlay — covers just the top-half of the face area */}
-            {blink && (
-              <span
-                className="absolute inset-0 rounded-full pointer-events-none"
-                style={{
-                  background: 'radial-gradient(ellipse 60% 30% at 50% 32%, rgba(15,15,24,0.92) 0%, transparent 100%)',
-                  transition: 'opacity 80ms',
-                }}
-              />
-            )}
           </span>
 
           {/* Online indicator */}
