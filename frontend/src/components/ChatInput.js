@@ -23,7 +23,7 @@ const VideoThumb = memo(function VideoThumb({ src, className }) {
     tryPlay();
     return () => v.removeEventListener('canplay', tryPlay);
   }, [src]);
-  return <video ref={ref} src={src} className={className} loop playsInline preload="auto" />;
+  return <video ref={ref} src={src} className={className} loop playsInline preload="auto" controls />;
 });
 import { Paperclip, Mic, MicOff, Send, Loader2, X, Image, FileText, Zap } from 'lucide-react';
 import { toast } from 'sonner';

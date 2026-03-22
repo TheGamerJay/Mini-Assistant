@@ -198,20 +198,12 @@ function CreditBar({ credits, plan, isSubscribed, onBuyCredits, onTopUp, onUpgra
               </button>
             </>
           ) : (
-            <>
-              <button
-                onClick={onBuyCredits}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold transition-all"
-              >
-                <Zap size={12} /> Buy Credits
-              </button>
-              <button
-                onClick={onUpgrade}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-xs font-medium transition-all"
-              >
-                <TrendingUp size={12} /> Upgrade Plan
-              </button>
-            </>
+            <button
+              onClick={onUpgrade}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-cyan-600 hover:opacity-90 text-white text-xs font-bold transition-all"
+            >
+              <TrendingUp size={12} /> View Plans
+            </button>
           )}
         </div>
       </div>
@@ -352,23 +344,14 @@ export default function UserDashboard() {
               <p className="text-xs text-slate-500">{user?.email}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={isSubscribed ? handleManageBilling : () => setPage('pricing')}
-              disabled={billingLoading}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium text-violet-400 bg-violet-500/10 border border-violet-500/20 hover:bg-violet-500/20 transition-all disabled:opacity-60"
-            >
-              <TrendingUp size={11} /> {billingLoading ? 'Loading…' : isSubscribed ? 'Manage Billing' : 'Upgrade'}
-            </button>
-            <button
-              onClick={load}
-              disabled={loading}
-              className="p-2 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all"
-              title="Refresh"
-            >
-              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-            </button>
-          </div>
+          <button
+            onClick={load}
+            disabled={loading}
+            className="p-2 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all"
+            title="Refresh"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          </button>
         </div>
 
         {/* Plan + credits bar */}

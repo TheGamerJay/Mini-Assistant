@@ -6,8 +6,8 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
-  Settings, Github, User, LogOut, Moon, Sun,
-  HelpCircle, ChevronDown, GitBranch, RefreshCw, ShieldCheck, BarChart2, Menu,
+  Settings, User, LogOut, Moon, Sun,
+  HelpCircle, ChevronDown, RefreshCw, ShieldCheck, BarChart2, Menu,
   Zap, Plus, TrendingUp, CreditCard,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
@@ -118,16 +118,6 @@ function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme, user,
     onClose();
   };
 
-  const handleGitHub = () => {
-    window.open('https://github.com', '_blank', 'noopener');
-    onClose();
-  };
-
-  const handleVSCode = () => {
-    window.open('vscode://file/', '_blank', 'noopener');
-    onClose();
-  };
-
   return (
     <div
       ref={menuRef}
@@ -176,13 +166,6 @@ function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme, user,
           </button>
         </div>
       )}
-
-      {/* Integrations */}
-      <div className="py-1.5 border-b border-white/5">
-        <p className="px-4 py-1 text-[10px] font-mono uppercase tracking-widest text-slate-600">Integrations</p>
-        <MenuItem icon={Github} label="Connect GitHub" onClick={handleGitHub} />
-        <MenuItem icon={GitBranch} label="Connect VS Code" onClick={handleVSCode} />
-      </div>
 
       {/* Preferences + sign out */}
       <div className="py-1.5">
