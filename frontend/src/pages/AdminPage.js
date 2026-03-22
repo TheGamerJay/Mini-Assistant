@@ -55,12 +55,12 @@ function StatCard({ icon: Icon, label, value, sub, color = 'cyan' }) {
     blue:    'text-blue-400 bg-blue-500/10 border-blue-500/20',
   };
   return (
-    <div className={`rounded-2xl border p-5 flex items-center gap-4 ${colors[color]}`}>
-      <Icon size={22} className="flex-shrink-0" />
-      <div>
-        <p className="text-2xl font-bold text-white">{fmt(value)}</p>
-        <p className="text-xs text-slate-500 mt-0.5">{label}</p>
-        {sub && <p className="text-[10px] text-slate-600 mt-0.5">{sub}</p>}
+    <div className={`rounded-2xl border p-4 sm:p-5 flex items-center gap-3 sm:gap-4 ${colors[color]}`}>
+      <Icon size={20} className="flex-shrink-0" />
+      <div className="min-w-0">
+        <p className="text-lg sm:text-2xl font-bold text-white truncate">{fmt(value)}</p>
+        <p className="text-xs text-slate-500 mt-0.5 leading-tight">{label}</p>
+        {sub && <p className="text-[10px] text-slate-600 mt-0.5 leading-tight">{sub}</p>}
       </div>
     </div>
   );
@@ -275,7 +275,7 @@ function AdminDashboard({ adminUser, onLogout }) {
   const loadFunnel = useCallback(async () => {
     setLoadingFunnel(true);
     try {
-      const BASE = process.env.REACT_APP_BACKEND_URL || '/api';
+      const BASE = (process.env.REACT_APP_BACKEND_URL || '') + '/api';
       const tok  = localStorage.getItem('ma_token') || '';
       const headers = { Authorization: `Bearer ${tok}` };
       const [funnelRes, triggerRes, recentRes] = await Promise.all([
@@ -781,7 +781,7 @@ function AdminDashboard({ adminUser, onLogout }) {
                 {/* P&L summary */}
                 {analytics && (
                   <>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       <StatCard icon={DollarSign}  label="MRR Estimate"       value={`$${analytics.mrr_estimate_usd?.toFixed(2)}`}       color="emerald" />
                       <StatCard icon={Activity}     label="AI Cost This Month" value={`$${analytics.ai_cost_this_month_usd?.toFixed(2)}`} color="red" />
                       <StatCard icon={TrendingUp}   label="Net Profit Est."    value={`$${analytics.net_profit_estimate_usd?.toFixed(2)}`} color={analytics.net_profit_estimate_usd > 0 ? 'emerald' : 'red'} />
@@ -789,7 +789,7 @@ function AdminDashboard({ adminUser, onLogout }) {
                     </div>
 
                     {/* Cost breakdown cards */}
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                       <StatCard icon={DollarSign} label="Cost Today"           value={`$${analytics.cost_today_usd?.toFixed(4)}`}        color="amber" />
                       <StatCard icon={Users}       label="Avg Cost / User"      value={`$${analytics.avg_cost_per_user_usd?.toFixed(4)}`} sub={`${analytics.active_users_this_month || 0} active users this month`} color="violet" />
                       <StatCard icon={Activity}    label="Active Users (Month)" value={analytics.active_users_this_month}                 color="slate" />
