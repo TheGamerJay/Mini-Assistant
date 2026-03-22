@@ -636,7 +636,18 @@ async def get_credits(authorization: str = Header(None)):
     if updates:
         await db["users"].update_one({"id": user["id"]}, {"$set": updates})
         user.update(updates)
-    return {"credits": user.get("credits", 0), "plan": user.get("plan", "free")}
+
+    # Include image usage so the frontend can enforce limits without a separate call
+    from mini_credits import check_image_limit as _img_limit  # noqa: PLC0415
+    _img_ok, _img_used, _img_limit_val, _img_resets_on = await _img_limit(authorization, db)
+
+    return {
+        "credits":          user.get("credits", 0),
+        "plan":             user.get("plan", "free"),
+        "images_used":      _img_used,
+        "images_limit":     _img_limit_val,
+        "images_resets_on": _img_resets_on,
+    }
 
 
 @auth_router.patch("/profile")

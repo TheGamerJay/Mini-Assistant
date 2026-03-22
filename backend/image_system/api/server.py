@@ -882,11 +882,32 @@ async def generate_image(req: GenerateRequest, request: Request):
     2. Generate via DALL-E 3 (standard or hd quality).
     3. Return image_base64 + metadata.
     """
+    # Image generation never deducts credits — images and credits are separate systems.
+    auth_header = request.headers.get("authorization")
+
+    # ── Email verification gate ─────────────────────────────────────────────
     try:
-        from mini_credits import check_and_deduct as _deduct
-        _ok, _remaining = await _deduct(request.headers.get("authorization"), cost=3)
-        if not _ok:
-            raise HTTPException(status_code=402, detail="out_of_credits")
+        from mini_credits import _decode_bearer as _dec
+        _payload = _dec(auth_header)
+        if _payload:
+            _uid = _payload.get("sub")
+            _u = await db["users"].find_one({"id": _uid}, {"email_verified": 1}) if db else None
+            if _u and not _u.get("email_verified", True):
+                raise HTTPException(status_code=403, detail="email_not_verified")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
+    # ── Image limit gate ────────────────────────────────────────────────────
+    try:
+        from mini_credits import check_image_limit as _chk_img
+        _img_ok, _img_used, _img_limit, _ = await _chk_img(auth_header)
+        if not _img_ok:
+            raise HTTPException(
+                status_code=403,
+                detail=f"image_limit_reached:{_img_used}/{_img_limit}",
+            )
     except HTTPException:
         raise
     except Exception:
@@ -926,6 +947,13 @@ async def generate_image(req: GenerateRequest, request: Request):
     except Exception as exc:
         logger.error("DALL-E 3 unexpected error: %s", exc, exc_info=True)
         raise HTTPException(status_code=502, detail=f"Image generation error: {exc}")
+
+    # ── Log image generation (no credit deduction) ──────────────────────────
+    try:
+        from mini_credits import log_image_generated as _log_img
+        await _log_img(auth_header)
+    except Exception:
+        pass
 
     elapsed = (time.perf_counter() - start_time) * 1000
     return GenerateResponse(
@@ -1196,15 +1224,7 @@ async def analyze_image(req: AnalyzeRequest, request: Request):
 
     Body: { image_base64: str, question?: str }
     """
-    try:
-        from mini_credits import check_and_deduct as _deduct
-        _ok, _remaining = await _deduct(request.headers.get("authorization"), action_type="image_analyze")
-        if not _ok:
-            raise HTTPException(status_code=402, detail="out_of_credits")
-    except HTTPException:
-        raise
-    except Exception:
-        pass
+    # Image analysis never deducts credits — images and credits are separate systems.
 
     try:
         image_bytes = base64.b64decode(req.image_base64)
@@ -1239,15 +1259,17 @@ async def chat(req: ChatRequest, request: Request):
     Phase 2 adds CEO posture, Manager session context, and Supervisor task tracking.
     """
     from ..utils.prompt_safety import validate as ps_validate
-    try:
-        from mini_credits import check_and_deduct as _deduct
-        _ok, _remaining = await _deduct(request.headers.get("authorization"), cost=1)
-        if not _ok:
-            raise HTTPException(status_code=402, detail="out_of_credits")
-    except HTTPException:
-        raise
-    except Exception:
-        pass  # credit module unavailable — allow through
+    # Images never deduct credits — only deduct for text chat requests.
+    if not getattr(req, "image_base64", None):
+        try:
+            from mini_credits import check_and_deduct as _deduct
+            _ok, _remaining = await _deduct(request.headers.get("authorization"), cost=1)
+            if not _ok:
+                raise HTTPException(status_code=402, detail="out_of_credits")
+        except HTTPException:
+            raise
+        except Exception:
+            pass  # credit module unavailable — allow through
 
     session_id = req.session_id or str(uuid.uuid4())
 
@@ -1510,6 +1532,28 @@ async def chat(req: ChatRequest, request: Request):
     # ── Phase 1 Step 4: Brain Execution ────────────────────────────────────────
     reply = ""
 
+    # ── Image limit gate (for all image-generating intents) ────────────────
+    _is_img_intent = execution_intent in ("image_generation", "image_edit", "image_reference_generate")
+    if _is_img_intent:
+        _chat_auth = request.headers.get("authorization")
+        try:
+            from mini_credits import check_image_limit as _chk_img, _decode_bearer as _dec
+            # Email verification check
+            _pl = _dec(_chat_auth)
+            if _pl:
+                _u = await db["users"].find_one({"id": _pl.get("sub")}, {"email_verified": 1}) if db else None
+                if _u and not _u.get("email_verified", True):
+                    return {"reply": "Please verify your email before generating images.", "error": "email_not_verified"}
+            # Image limit check
+            _img_ok, _img_used, _img_limit_v, _ = await _chk_img(_chat_auth)
+            if not _img_ok:
+                return {
+                    "reply": f"You've reached your image limit ({_img_used}/{_img_limit_v}). Upgrade to generate more.",
+                    "error": "image_limit_reached",
+                }
+        except Exception:
+            pass
+
     # Model: always Claude claude-sonnet-4-6 (no local Ollama)
     _active_model = "claude-sonnet-4-6"
     logger.info("[MODEL ROUTER] chat → Claude %s", _active_model)
@@ -1521,6 +1565,11 @@ async def chat(req: ChatRequest, request: Request):
             from ..services.dalle_client import DalleClient
             _dalle = DalleClient()
             _b64 = await _dalle.generate(effective_msg)
+            try:
+                from mini_credits import log_image_generated as _log_img
+                await _log_img(request.headers.get("authorization"))
+            except Exception:
+                pass
             return {
                 "image_base64": _b64,
                 "reply": "Image generated.",
@@ -1558,6 +1607,11 @@ async def chat(req: ChatRequest, request: Request):
             from ..services.dalle_client import DalleClient
             _dalle = DalleClient()
             _b64 = await _dalle.generate(dalle_prompt)
+            try:
+                from mini_credits import log_image_generated as _log_img
+                await _log_img(request.headers.get("authorization"))
+            except Exception:
+                pass
             return {
                 "image_base64": _b64,
                 "reply": "Image generated from reference.",
@@ -1837,15 +1891,17 @@ async def chat_stream(req: ChatRequest, request: Request):
     """
     import json as _json
 
-    try:
-        from mini_credits import check_and_deduct as _deduct
-        _ok, _remaining = await _deduct(request.headers.get("authorization"), cost=1)
-        if not _ok:
-            raise HTTPException(status_code=402, detail="out_of_credits")
-    except HTTPException:
-        raise
-    except Exception:
-        pass
+    # Images never deduct credits — only deduct for text chat requests.
+    if not getattr(req, "image_base64", None):
+        try:
+            from mini_credits import check_and_deduct as _deduct
+            _ok, _remaining = await _deduct(request.headers.get("authorization"), cost=1)
+            if not _ok:
+                raise HTTPException(status_code=402, detail="out_of_credits")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
 
     session_id = req.session_id or str(uuid.uuid4())
 

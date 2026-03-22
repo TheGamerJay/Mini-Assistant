@@ -317,6 +317,13 @@ export function AppProvider({ children }) {
   const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
+  // ---- Image usage (server-authoritative, separate from credits) ----
+  const [imageUsage, setImageUsage] = useState({ used: 0, limit: 2, resetsOn: null });
+
+  const incrementImageUsage = useCallback(() => {
+    setImageUsage(prev => ({ ...prev, used: prev.used + 1 }));
+  }, []);
+
   // ---- Onboarding build prompt bridge ----
   // OnboardingModal sets this; AppBuilder reads + clears it to auto-fill + build
   const [pendingBuildPrompt, _setPendingBuildPrompt] = useState(null);
@@ -334,9 +341,12 @@ export function AppProvider({ children }) {
   }, []);
 
   const refreshCredits = useCallback(() => {
-    api.authCredits().then(({ credits: c, plan: p }) => {
+    api.authCredits().then(({ credits: c, plan: p, images_used, images_limit, images_resets_on }) => {
       setCredits(c);
       setPlan(p);
+      if (images_used !== undefined) {
+        setImageUsage({ used: images_used, limit: images_limit ?? 2, resetsOn: images_resets_on ?? null });
+      }
     }).catch(() => {});
   }, []);
 
@@ -838,6 +848,8 @@ export function AppProvider({ children }) {
     plan,
     isSubscribed,
     refreshCredits,
+    imageUsage,
+    incrementImageUsage,
     purchaseModalOpen,
     setPurchaseModalOpen,
     mobileSidebarOpen,

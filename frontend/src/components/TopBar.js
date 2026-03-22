@@ -20,26 +20,28 @@ import AvatarMedia from './AvatarMedia';
 // ---------------------------------------------------------------------------
 const PLAN_LIMITS = { free: 50, standard: 500, pro: 2000, max: 10000 };
 
-const IMAGE_LIMITS = { free: 2, standard: 50, pro: 200, max: 1000 };
 
 function CreditChip() {
-  const { credits, plan, isSubscribed, setPurchaseModalOpen, setPage, images } = useApp();
+  const { credits, plan, isSubscribed, setPurchaseModalOpen, setPage, imageUsage } = useApp();
 
   if (credits === null) return null; // loading
 
-  const limit      = PLAN_LIMITS[plan] || 50;
-  const imgLimit   = IMAGE_LIMITS[plan] || 2;
-  const imgCount   = (images || []).length;
-  const pct        = Math.max(0, Math.min(100, (credits / limit) * 100));
-  const low        = pct < 20;
-  const mid        = pct >= 20 && pct < 50;
+  const limit     = PLAN_LIMITS[plan] || 50;
+  const imgCount  = imageUsage.used;
+  const imgLimit  = imageUsage.limit;
+  const resetsOn  = imageUsage.resetsOn; // e.g. "April 1" or null
+  const pct       = Math.max(0, Math.min(100, (credits / limit) * 100));
+  const low       = pct < 20;
+  const mid       = pct >= 20 && pct < 50;
 
   const barColor  = low ? 'bg-red-500'   : mid ? 'bg-amber-400' : 'bg-emerald-400';
   const textColor = low ? 'text-red-400' : mid ? 'text-amber-400' : 'text-emerald-400';
 
+  const imgAtLimit  = imgCount >= imgLimit;
+  const imgNearEnd  = !imgAtLimit && imgCount >= imgLimit - 1;
+
   const handleClick = () => {
     if (!isSubscribed) {
-      // Free users → go to pricing page directly (no intermediate modal)
       setPage('pricing');
     } else {
       setPurchaseModalOpen(true);
@@ -66,21 +68,29 @@ function CreditChip() {
           />
         </div>
         {/* Image usage */}
-        {imgCount >= imgLimit - 1 && imgCount < imgLimit ? (
+        {imgAtLimit ? (
           <span className="text-[9px] font-semibold text-red-400 leading-none mt-0.5">
-            1 image remaining — last one!
+            {imgCount} / {imgLimit} images used — limit reached
+          </span>
+        ) : imgNearEnd ? (
+          <span className="text-[9px] font-semibold text-amber-400 leading-none mt-0.5">
+            {imgCount} / {imgLimit} images used — last one!
           </span>
         ) : (
           <span className="text-[9px] text-slate-600 leading-none mt-0.5">
-            {imgCount} / {imgLimit} imgs
+            {imgCount} / {imgLimit} images used
           </span>
         )}
-        {/* Upgrade nudge */}
-        {!isSubscribed && (
+        {/* Reset indicator */}
+        {isSubscribed && resetsOn ? (
+          <span className="text-[8px] text-slate-700 leading-none mt-0.5">
+            Resets on {resetsOn}
+          </span>
+        ) : !isSubscribed ? (
           <span className="text-[8px] text-slate-700 leading-none mt-0.5 group-hover:text-violet-400/60 transition-colors">
-            Need more? Upgrade
+            {imgAtLimit ? 'Upgrade for more' : 'No reset — upgrade anytime'}
           </span>
-        )}
+        ) : null}
       </div>
       {!isSubscribed ? (
         <TrendingUp className="w-3 h-3 text-slate-600 group-hover:text-violet-400 transition-colors" />

@@ -18,8 +18,6 @@ import RightPanel from '../components/RightPanel';
 import ComparisonBubble from '../components/ComparisonBubble';
 import api from '../api/client';
 
-const FREE_IMAGE_LIMIT = 2;
-
 // ---------------------------------------------------------------------------
 // Image Limit Modal
 // ---------------------------------------------------------------------------
@@ -38,11 +36,8 @@ function ImageLimitModal({ onClose, onUpgrade }) {
 
         <div className="px-8 py-8">
           {/* Heading */}
-          <h2 className="text-xl font-bold text-white mb-1">You've used your free images.</h2>
-          <p className="text-slate-400 text-sm mb-2">
-            You've seen how powerful image generation can be.
-          </p>
-          <p className="text-slate-300 text-sm font-medium mb-6">
+          <h2 className="text-xl font-bold text-white mb-1">You've used your image limit.</h2>
+          <p className="text-slate-400 text-sm mb-6">
             Unlock full access to continue creating.
           </p>
 
@@ -171,9 +166,10 @@ function ChatPage() {
     forkChat,
     setPurchaseModalOpen,
     openUpgradeModal,
-    images,
     isSubscribed,
     plan,
+    imageUsage,
+    incrementImageUsage,
   } = useApp();
 
   const handleExport = useCallback((format = 'md') => {
@@ -321,10 +317,9 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     const imgs = Array.isArray(imagesBase64) ? imagesBase64.filter(Boolean) : (imagesBase64 ? [imagesBase64] : []);
     if (!text && !imgs.length) return;
 
-    // Image generation limit gate for free users
-    const _imgLimit = plan === 'standard' ? 50 : plan === 'pro' ? 200 : plan === 'max' ? 1000 : FREE_IMAGE_LIMIT;
+    // Image generation limit gate — uses server-authoritative imageUsage (not localStorage)
     const _isImgRequest = imgs.length > 0 || isImageIntent(text);
-    if (!isSubscribed && _isImgRequest && (images || []).length >= _imgLimit) {
+    if (_isImgRequest && imageUsage.used >= imageUsage.limit) {
       setImageLimitOpen(true);
       submittingRef.current = false;
       return;
@@ -382,6 +377,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
           updateChatPreviewImage(chatId, data.image_base64);
           const thumb = await makeThumbnail(data.image_base64);
           await addImage(thumb, text, data.image_base64);
+          incrementImageUsage();
         }
 
         const assistantMsg = {
@@ -454,6 +450,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
               updateChatPreviewImage(chatIdRef_local, data.image_base64);
               const thumb = await makeThumbnail(data.image_base64);
               await addImage(thumb, text, data.image_base64);
+              incrementImageUsage();
             }
             const assistantMsg = {
               role: 'assistant', type: 'text',

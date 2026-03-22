@@ -560,3 +560,119 @@ async def rollback_credits(
 
     except Exception as exc:
         log.warning("Credit rollback failed for uid=%s: %s", uid, exc)
+
+
+# ---------------------------------------------------------------------------
+# Image limit system — completely separate from credits
+# ---------------------------------------------------------------------------
+
+IMAGE_LIMITS: dict[str, int] = {
+    "free":     2,
+    "standard": 25,
+    "pro":      50,
+    "max":      100,
+}
+
+_MONTH_NAMES = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+]
+
+
+async def check_image_limit(
+    authorization: str | None,
+    db=None,
+) -> tuple[bool, int, int, str | None]:
+    """
+    Check whether the authenticated user has image quota remaining.
+
+    Returns:
+        (ok, used, limit, resets_on)
+        - ok:         True if the user may generate another image
+        - used:       images generated so far in the current period
+        - limit:      max allowed for their plan
+        - resets_on:  human-readable date string ("April 1") for paid plans, None for free
+    """
+    if db is None:
+        db = await _get_db()
+    if db is None:
+        return True, 0, IMAGE_LIMITS["free"], None  # can't check → allow through
+
+    payload = _decode_bearer(authorization)
+    if not payload:
+        return False, 0, 0, None  # unauthenticated
+
+    uid = payload.get("sub")
+    user = await db["users"].find_one(
+        {"id": uid},
+        {"plan": 1, "email_verified": 1},
+    )
+    if not user:
+        return False, 0, 0, None
+
+    plan  = user.get("plan", "free")
+    limit = IMAGE_LIMITS.get(plan, IMAGE_LIMITS["free"])
+
+    if plan == "free":
+        # Free: count all-time images (no monthly reset)
+        used = await db["activity_logs"].count_documents({
+            "user_id": uid,
+            "type":    "image_generated",
+        })
+        resets_on = None
+    else:
+        # Paid: count only this month
+        mk = _month_key()
+        used = await db["activity_logs"].count_documents({
+            "user_id":   uid,
+            "type":      "image_generated",
+            "month_key": mk,
+        })
+        # First day of next month
+        now = datetime.now(timezone.utc)
+        if now.month == 12:
+            nm = datetime(now.year + 1, 1, 1, tzinfo=timezone.utc)
+        else:
+            nm = datetime(now.year, now.month + 1, 1, tzinfo=timezone.utc)
+        resets_on = f"{_MONTH_NAMES[nm.month - 1]} {nm.day}"
+
+    return used < limit, used, limit, resets_on
+
+
+async def log_image_generated(
+    authorization: str | None,
+    db=None,
+) -> None:
+    """
+    Record an image generation event in activity_logs.
+    Does NOT deduct credits — images are a separate cost system.
+    """
+    if db is None:
+        db = await _get_db()
+    if db is None:
+        return
+
+    payload = _decode_bearer(authorization)
+    if not payload:
+        return
+
+    uid  = payload.get("sub")
+    user = await db["users"].find_one(
+        {"id": uid},
+        {"name": 1, "email": 1, "plan": 1},
+    )
+    if not user:
+        return
+
+    await _log_usage(
+        db,
+        uid,
+        user.get("name", ""),
+        user.get("email", ""),
+        action_type         = "image_generated",
+        credits_used        = 0,       # images never cost credits
+        tokens_in           = 0,
+        tokens_out          = 0,
+        estimated_cost_usd  = 0.13,    # real API cost for admin tracking
+        plan                = user.get("plan", "free"),
+    )
