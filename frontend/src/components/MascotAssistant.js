@@ -15,16 +15,16 @@ import { useApp } from '../context/AppContext';
 // Personality messages — cycle on open + every ~12s while open
 // ---------------------------------------------------------------------------
 const MESSAGES = [
-  "Yo 👋 what are we building today?",
-  "Say less, I got you.",
-  "This one's about to be clean 🔥",
-  "Need help or you cooking solo?",
-  "Drop a prompt and watch the magic.",
-  "Ready when you are ⚡",
-  "Let's ship something sick today.",
-  "I see you. What's the move?",
-  "Full send? Or planning first?",
-  "New idea? Let's break it down.",
+  "Welcome! What are we creating today?",
+  "Ready to help — just say the word.",
+  "Got a new idea? Let's build it together.",
+  "Need help with code, design, or content?",
+  "Drop a prompt and let's get started.",
+  "Here whenever you need me ⚡",
+  "Let's ship something great today.",
+  "What would you like to work on?",
+  "Start with an idea — I'll handle the rest.",
+  "New project? Let's break it down together.",
 ];
 
 function randomMsg(exclude) {

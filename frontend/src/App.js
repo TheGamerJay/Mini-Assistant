@@ -33,7 +33,6 @@ import AdminPage from './pages/AdminPage';
 import UserDashboard from './pages/UserDashboard';
 import PurchaseCreditsModal from './components/PurchaseCreditsModal';
 import UpgradeModal from './components/UpgradeModal';
-import OnboardingModal from './components/OnboardingModal';
 import MascotAssistant from './components/MascotAssistant';
 import PricingPage from './pages/PricingPage';
 import CheckoutSuccessPage from './pages/CheckoutSuccessPage';
@@ -161,17 +160,6 @@ function pageTitle(page) {
 function AppShell() {
   const { page, setPage, getPrevPage, serverStatus, setServerStatus, purchaseModalOpen, setPurchaseModalOpen, upgradeModalOpen, setUpgradeModalOpen, refreshCredits, openUpgradeModal, user, logout } = useApp();
 
-  // Show onboarding once per account — stored in localStorage scoped to user id
-  const [showOnboarding, setShowOnboarding] = React.useState(false);
-  useEffect(() => {
-    if (!user?.id) return;
-    const key = `ma_onboarding_done_${user.id}`;
-    if (!localStorage.getItem(key)) setShowOnboarding(true);
-  }, [user?.id]);
-  const handleOnboardingDone = useCallback(() => {
-    if (user?.id) localStorage.setItem(`ma_onboarding_done_${user.id}`, '1');
-    setShowOnboarding(false);
-  }, [user?.id]);
 
   // Open upgrade modal when any axiosInstance call returns 402
   useEffect(() => {
@@ -285,11 +273,8 @@ function AppShell() {
       {/* Global upgrade modal — triggered from anywhere via openUpgradeModal() */}
       <UpgradeModal />
 
-      {/* First-session onboarding — shown once per account */}
-      {showOnboarding && <OnboardingModal onDone={handleOnboardingDone} />}
-
       {/* Floating mascot assistant — bottom-right, always visible */}
-      {!showOnboarding && <MascotAssistant />}
+      <MascotAssistant />
     </div>
   );
 }
