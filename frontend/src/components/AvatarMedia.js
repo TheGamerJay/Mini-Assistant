@@ -9,7 +9,11 @@ import React, { useState, useRef, useEffect } from 'react';
 
 export default function AvatarMedia({ src, className, fallback = null }) {
   const [videoError, setVideoError] = useState(false);
+  const [imgError, setImgError] = useState(false);
   const videoRef = useRef(null);
+
+  // Reset error state when src changes
+  useEffect(() => { setImgError(false); setVideoError(false); }, [src]);
 
   // Force-play the video — autoPlay attribute is blocked in some browsers
   useEffect(() => {
@@ -22,7 +26,7 @@ export default function AvatarMedia({ src, className, fallback = null }) {
     return () => v.removeEventListener('canplay', tryPlay);
   }, [src]);
 
-  if (!src || videoError) return fallback;
+  if (!src || videoError || imgError) return fallback;
 
   if (src.startsWith('data:video/')) {
     return (
@@ -38,5 +42,5 @@ export default function AvatarMedia({ src, className, fallback = null }) {
     );
   }
 
-  return <img src={src} alt="Avatar" className={className} />;
+  return <img src={src} alt="Avatar" className={className} onError={() => setImgError(true)} />;
 }

@@ -718,9 +718,6 @@ function ChatMessage({ message, onRetry, onRate, onFork, onPin, onSendToBuilder,
             <Bookmark size={10} className="text-amber-400 fill-amber-400" />
           </div>
         )}
-        {role === 'assistant' && route_result && route_result.intent !== 'chat' && (
-          <IntelligencePanel route_result={route_result} generation_time_ms={generation_time_ms} />
-        )}
 
         {isImage ? (
           <>
@@ -732,9 +729,6 @@ function ChatMessage({ message, onRetry, onRate, onFork, onPin, onSendToBuilder,
           renderContent(content)
         )}
 
-        {settings.showRouteInfo && !isError && (
-          <RouteInfo route_result={route_result} generation_time_ms={generation_time_ms} />
-        )}
 
         {prompt_warnings && prompt_warnings.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1">
@@ -742,7 +736,6 @@ function ChatMessage({ message, onRetry, onRate, onFork, onPin, onSendToBuilder,
           </div>
         )}
 
-        {!isError && <MetaBar model_used={model_used} memory_stored={memory_stored} />}
 
         {/* Bottom action bar — copy, thumbs, speaker, share, 3-dot */}
         {!isError && !isImage && content && (

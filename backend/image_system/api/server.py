@@ -1504,13 +1504,46 @@ async def chat(req: ChatRequest, request: Request):
         return image_response
 
     elif execution_intent == "image_analysis" or (execution_intent == "chat" and attached_image_bytes):
-        # User attached an image — route to vision brain
-        try:
-            vision = _get_vision()
-            question = effective_msg or "Describe this image in detail."
-            reply = await vision.analyze(attached_image_bytes, question)
-        except Exception as exc:
-            reply = f"Vision brain error: {exc}"
+        # User attached an image — check if they want analysis only, or want to generate
+        import re as _re
+        _MODIFY_KW = _re.compile(
+            r"\b(make|add|give|draw|generate|create|recreate|render|design|transform|change|turn|style|with|wearing|holding|show|put|place|set|cool|awesome|epic|badass|darker|brighter|angrier|fiercer|stronger|glowing|lightning|fire|flames|smoke|electric|neon|dramatic|intense|powerful)\b",
+            _re.I,
+        )
+        _wants_generation = bool(_MODIFY_KW.search(effective_msg)) if effective_msg else False
+
+        if _wants_generation and attached_image_bytes:
+            # Analyze the reference image, then generate a new image based on the description + user request
+            logger.info("[MODEL ROUTER] image_analysis+generate → GPT-4o analyze → DALL-E 3 generate")
+            try:
+                vision = _get_vision()
+                description = await vision.analyze(
+                    attached_image_bytes,
+                    "Describe this image in precise visual detail: subject appearance, colors, art style, lighting, composition. Be specific and comprehensive for use as an image generation reference."
+                )
+            except Exception as exc:
+                description = "a detailed character or scene"
+                logger.warning("Vision describe failed: %s", exc)
+
+            dalle_prompt = f"Based on this reference: {description}\n\nNow generate: {effective_msg}"
+            try:
+                gen_req = GenerateRequest(prompt=dalle_prompt, session_id=session_id)
+                image_response = await generate_image(gen_req)
+                if isinstance(image_response, dict):
+                    image_response["plan"] = phase1_plan.to_dict() if phase1_plan else {}
+                    image_response["intent"] = "image_generate"
+                    image_response["slash_command"] = parsed_cmd.command if parsed_cmd and parsed_cmd.is_slash else None
+                return image_response
+            except Exception as exc:
+                reply = f"Image generation failed: {exc}"
+        else:
+            # Pure analysis — describe the image
+            try:
+                vision = _get_vision()
+                question = effective_msg or "Describe this image in detail."
+                reply = await vision.analyze(attached_image_bytes, question)
+            except Exception as exc:
+                reply = f"Vision brain error: {exc}"
 
     elif execution_intent == "coding":
         try:
@@ -1812,7 +1845,14 @@ async def chat_stream(req: ChatRequest, request: Request):
             logger.warning("Phase1 failed in stream endpoint: %s", _e)
 
         # Image / coding intents can't stream meaningfully — signal redirect
-        if execution_intent in ("image_generation", "image_edit"):
+        import re as _re_stream
+        _MODIFY_KW_STREAM = _re_stream.compile(
+            r"\b(make|add|give|draw|generate|create|recreate|render|design|transform|change|turn|style|with|wearing|holding|show|put|place|set|cool|awesome|epic|badass|darker|brighter|angrier|fiercer|stronger|glowing|lightning|fire|flames|smoke|electric|neon|dramatic|intense|powerful)\b",
+            _re_stream.I,
+        )
+        _has_attached = bool(req.image_base64)
+        _wants_gen_stream = _has_attached and bool(_MODIFY_KW_STREAM.search(effective_msg or ""))
+        if execution_intent in ("image_generation", "image_edit") or _wants_gen_stream:
             yield f"data: {_json.dumps({'done': True, 'meta': {'type': 'image_redirect'}})}\n\n"
             return
 
