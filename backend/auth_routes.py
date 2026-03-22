@@ -1279,7 +1279,7 @@ async def admin_analytics(admin: dict = Depends(_require_admin)):
     plan_agg = await db["users"].aggregate([
         {"$group": {"_id": "$plan", "count": {"$sum": 1}}},
     ]).to_list(10)
-    users_by_plan = {"free": 0, "standard": 0, "pro": 0, "team": 0}
+    users_by_plan = {"free": 0, "standard": 0, "pro": 0, "max": 0}
     for row in plan_agg:
         p = row.get("_id") or "free"
         users_by_plan[p] = row.get("count", 0)
@@ -1292,6 +1292,12 @@ async def admin_analytics(admin: dict = Depends(_require_admin)):
         count * PLAN_MONTHLY_PRICE_USD.get(plan, 0)
         for plan, count in users_by_plan.items()
     )
+
+    # Revenue per plan
+    revenue_by_plan = {
+        plan: round(count * PLAN_MONTHLY_PRICE_USD.get(plan, 0), 2)
+        for plan, count in users_by_plan.items()
+    }
 
     # ── AI cost this month (from usage_logs) ────────────────────────────────
     cost_agg = await db["activity_logs"].aggregate([
@@ -1392,6 +1398,26 @@ async def admin_analytics(admin: dict = Depends(_require_admin)):
     active_users_count = active_users_this_month_agg[0]["count"] if active_users_this_month_agg else 0
     avg_cost_per_user_usd = round(ai_cost_this_month / active_users_count, 4) if active_users_count > 0 else 0.0
 
+    # ── Per-plan P&L breakdown ───────────────────────────────────────────────
+    all_plans = set(list(users_by_plan.keys()) + list(cost_by_plan.keys()))
+    plan_breakdown = []
+    for p in sorted(all_plans):
+        user_count  = users_by_plan.get(p, 0)
+        revenue     = revenue_by_plan.get(p, 0.0)
+        cost_data   = cost_by_plan.get(p, {"cost_usd": 0.0, "requests": 0})
+        cost        = cost_data["cost_usd"]
+        profit      = round(revenue - cost, 4)
+        profit_per_user = round(profit / user_count, 4) if user_count > 0 else 0.0
+        plan_breakdown.append({
+            "plan":            p,
+            "users":           user_count,
+            "revenue_usd":     revenue,
+            "cost_usd":        cost,
+            "profit_usd":      profit,
+            "profit_per_user": profit_per_user,
+            "requests":        cost_data["requests"],
+        })
+
     return {
         "users_by_plan":           users_by_plan,
         "total_users":             total_users,
@@ -1401,6 +1427,8 @@ async def admin_analytics(admin: dict = Depends(_require_admin)):
         "ai_cost_this_month_usd":  ai_cost_this_month,
         "cost_today_usd":          cost_today_usd,
         "cost_by_plan":            cost_by_plan,
+        "revenue_by_plan":         revenue_by_plan,
+        "plan_breakdown":          plan_breakdown,
         "avg_cost_per_user_usd":   avg_cost_per_user_usd,
         "active_users_this_month": active_users_count,
         "net_profit_estimate_usd": net_profit,

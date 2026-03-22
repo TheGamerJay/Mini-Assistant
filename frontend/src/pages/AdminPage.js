@@ -795,35 +795,44 @@ function AdminDashboard({ adminUser, onLogout }) {
                       <StatCard icon={Activity}    label="Active Users (Month)" value={analytics.active_users_this_month}                 color="slate" />
                     </div>
 
-                    {/* Cost by plan */}
-                    {analytics.cost_by_plan && Object.keys(analytics.cost_by_plan).length > 0 && (
+                    {/* Per-plan P&L breakdown */}
+                    {analytics.plan_breakdown && analytics.plan_breakdown.length > 0 && (
                       <div className="rounded-2xl border border-white/10 bg-[#13131f] p-6">
                         <h2 className="text-sm font-semibold text-slate-200 mb-4 flex items-center gap-2">
-                          <PieChart size={14} className="text-amber-400" /> Cost Breakdown by Plan (This Month)
+                          <PieChart size={14} className="text-amber-400" /> Revenue vs Cost by Plan (This Month)
                         </h2>
                         <div className="overflow-x-auto">
                           <table className="w-full text-left">
                             <thead>
                               <tr className="border-b border-white/5">
                                 <th className="px-3 py-2 text-[10px] font-bold text-slate-600 uppercase">Plan</th>
+                                <th className="px-3 py-2 text-[10px] font-bold text-slate-600 uppercase">Users</th>
+                                <th className="px-3 py-2 text-[10px] font-bold text-slate-600 uppercase">Revenue</th>
+                                <th className="px-3 py-2 text-[10px] font-bold text-slate-600 uppercase">AI Cost</th>
+                                <th className="px-3 py-2 text-[10px] font-bold text-slate-600 uppercase">Profit</th>
+                                <th className="px-3 py-2 text-[10px] font-bold text-slate-600 uppercase">Profit/User</th>
                                 <th className="px-3 py-2 text-[10px] font-bold text-slate-600 uppercase">Requests</th>
-                                <th className="px-3 py-2 text-[10px] font-bold text-slate-600 uppercase">Cost (USD)</th>
-                                <th className="px-3 py-2 text-[10px] font-bold text-slate-600 uppercase">Avg / Req</th>
                               </tr>
                             </thead>
                             <tbody>
-                              {Object.entries(analytics.cost_by_plan)
-                                .sort((a, b) => b[1].cost_usd - a[1].cost_usd)
-                                .map(([plan, data]) => (
-                                  <tr key={plan} className="border-b border-white/5 hover:bg-white/[0.02]">
-                                    <td className="px-3 py-2.5"><PlanBadge plan={plan} /></td>
-                                    <td className="px-3 py-2.5 text-xs text-slate-400">{fmt(data.requests)}</td>
-                                    <td className="px-3 py-2.5 text-xs text-red-400 font-mono">${data.cost_usd?.toFixed(4)}</td>
-                                    <td className="px-3 py-2.5 text-xs text-slate-500 font-mono">
-                                      ${data.requests > 0 ? (data.cost_usd / data.requests).toFixed(5) : '0.00000'}
+                              {analytics.plan_breakdown.map(row => {
+                                const profitable = row.profit_usd >= 0;
+                                return (
+                                  <tr key={row.plan} className="border-b border-white/5 hover:bg-white/[0.02]">
+                                    <td className="px-3 py-2.5"><PlanBadge plan={row.plan} /></td>
+                                    <td className="px-3 py-2.5 text-xs text-slate-400 font-mono">{fmt(row.users)}</td>
+                                    <td className="px-3 py-2.5 text-xs text-emerald-400 font-mono">${row.revenue_usd?.toFixed(2)}</td>
+                                    <td className="px-3 py-2.5 text-xs text-red-400 font-mono">${row.cost_usd?.toFixed(4)}</td>
+                                    <td className={`px-3 py-2.5 text-xs font-bold font-mono ${profitable ? 'text-emerald-400' : 'text-red-400'}`}>
+                                      {profitable ? '+' : ''}${row.profit_usd?.toFixed(4)}
                                     </td>
+                                    <td className={`px-3 py-2.5 text-xs font-mono ${profitable ? 'text-emerald-400' : 'text-red-400'}`}>
+                                      {row.users > 0 ? `${profitable ? '+' : ''}$${row.profit_per_user?.toFixed(4)}` : '—'}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-xs text-slate-500 font-mono">{fmt(row.requests)}</td>
                                   </tr>
-                                ))}
+                                );
+                              })}
                             </tbody>
                           </table>
                         </div>

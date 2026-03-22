@@ -606,7 +606,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         submittingRef.current = false;
       },
     });
-  }, [activeChatId, chats, loading, messages, newChat, renameChat, send, sendStream, updateChatMessages, addImage, setPage, vibeMode, images, isSubscribed, plan]);
+  }, [activeChatId, chats, loading, messages, newChat, renameChat, send, sendStream, updateChatMessages, addImage, setPage, vibeMode, imageUsage, isSubscribed, plan]);
 
   const handleCancel = useCallback(() => {
     cancel(sessionIdRef.current);

@@ -84,7 +84,8 @@ PLAN_MONTHLY_PRICE_USD: dict[str, float] = {
     "free":     0.0,
     "standard": 9.0,
     "pro":      19.0,
-    "team":     49.0,
+    "max":      49.0,
+    "team":     49.0,   # legacy alias for max
 }
 
 
