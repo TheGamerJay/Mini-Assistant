@@ -13,6 +13,67 @@ import { useApp } from '../context/AppContext';
 import { toast } from 'sonner';
 
 // ---------------------------------------------------------------------------
+// Avatar processing helpers
+// ---------------------------------------------------------------------------
+const AVATAR_ACCEPTED = 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm';
+const AVATAR_MAX_MB   = 50; // raw file limit — compressed output will be tiny
+const AVATAR_PX       = 256; // max dimension after compression
+const AVATAR_QUALITY  = 0.85;
+
+/** Compress any image file to a small JPEG data URL (max 256px). */
+function compressToAvatar(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = (e) => {
+      const img = new window.Image();
+      img.onerror = reject;
+      img.onload = () => {
+        const scale = Math.min(1, AVATAR_PX / Math.max(img.naturalWidth, img.naturalHeight));
+        const w = Math.round(img.naturalWidth * scale);
+        const h = Math.round(img.naturalHeight * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', AVATAR_QUALITY));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Extract first frame from a video file as a compressed avatar JPEG. */
+function videoToAvatar(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.muted = true; video.preload = 'metadata';
+    video.onerror = () => { URL.revokeObjectURL(url); reject(new Error('video load failed')); };
+    video.onloadedmetadata = () => { video.currentTime = Math.min(0.5, video.duration * 0.1); };
+    video.onseeked = () => {
+      const scale = Math.min(1, AVATAR_PX / Math.max(video.videoWidth, video.videoHeight));
+      const w = Math.round(video.videoWidth * scale);
+      const h = Math.round(video.videoHeight * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(video, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/jpeg', AVATAR_QUALITY));
+    };
+    video.src = url;
+  });
+}
+
+async function processAvatarFile(file) {
+  const isVideo = file.type.startsWith('video/');
+  const isImage = file.type.startsWith('image/');
+  if (!isImage && !isVideo) throw new Error('Unsupported file type');
+  if (file.size > AVATAR_MAX_MB * 1024 * 1024) throw new Error(`File must be under ${AVATAR_MAX_MB} MB`);
+  return isVideo ? videoToAvatar(file) : compressToAvatar(file);
+}
+
+// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // DeleteConfirmModal
 // ---------------------------------------------------------------------------
@@ -136,17 +197,17 @@ function ProfilePage() {
 
   // Avatar upload
   const handleAvatarClick = () => fileRef.current?.click();
-  const handleFileChange = (e) => {
+  const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 15 * 1024 * 1024) { toast.error('File must be under 15 MB'); return; }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      updateAvatar(ev.target.result);
-      toast.success('Avatar updated');
-    };
-    reader.readAsDataURL(file);
     e.target.value = '';
+    try {
+      const dataUrl = await processAvatarFile(file);
+      updateAvatar(dataUrl);
+      toast.success('Avatar updated');
+    } catch (err) {
+      toast.error(err.message || 'Could not process file');
+    }
   };
 
   // Save display name
@@ -219,7 +280,7 @@ function ProfilePage() {
                 <Camera size={18} className="text-white" />
               </div>
             </div>
-            <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={handleFileChange} />
+            <input ref={fileRef} type="file" accept={AVATAR_ACCEPTED} className="hidden" onChange={handleFileChange} />
 
             {/* Identity */}
             <div className="flex-1 min-w-0">
@@ -241,7 +302,7 @@ function ProfilePage() {
                   </button>
                 )}
               </div>
-              <p className="text-[10px] text-slate-600 mt-2">PNG · JPG · WebP · GIF &nbsp;·&nbsp; Max 15 MB</p>
+              <p className="text-[10px] text-slate-600 mt-2">PNG · JPG · WebP · GIF · MP4 &nbsp;·&nbsp; Max 50 MB</p>
             </div>
           </div>
         </Card>
