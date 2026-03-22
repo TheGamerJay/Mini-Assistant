@@ -92,6 +92,7 @@ const REASON_COPY = {
   credits: {
     headline: "You've used all your Mini Credits.",
     sub: "You can continue by earning more through referrals, or upgrade for full access.",
+    extra: "You're close to finishing your project.",
     icon: Zap,
   },
   export: {
@@ -316,6 +317,9 @@ export default function UpgradeModal() {
             </div>
             <h2 className="text-lg font-bold text-white">{copy.headline}</h2>
           </div>
+          {copy.extra && (
+            <p className="text-sm font-medium text-slate-300 mb-1">{copy.extra}</p>
+          )}
           <p className="text-sm text-slate-400 leading-relaxed max-w-lg">{copy.sub}</p>
         </div>
 
@@ -340,7 +344,7 @@ export default function UpgradeModal() {
         </div>
 
         {/* Plan cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 px-6 pb-5">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 px-6 pb-3">
           {PLANS.map(plan => (
             <PlanCard
               key={plan.id}
@@ -352,14 +356,19 @@ export default function UpgradeModal() {
             />
           ))}
         </div>
+        {upgradeReason === 'credits' && (
+          <p className="text-center text-[10px] text-slate-600 pb-4">Instant access after upgrade</p>
+        )}
 
         {/* Referral path — shown when user is out of credits */}
         {upgradeReason === 'credits' && user?.referral_code && (
           <div className="mx-6 mb-4 rounded-xl border border-white/8 bg-white/[0.03] px-4 py-3 flex items-center gap-3">
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-slate-300">Invite a friend to earn more credits</p>
-              <p className="text-[10px] text-slate-600 mt-0.5">
-                When a friend you refer subscribes, you both earn bonus credits.
+              <p className="text-xs font-semibold text-slate-300">Invite a friend (+5 credits when they join and verify)</p>
+              <p className={`text-[10px] mt-0.5 transition-colors ${referralCopied ? 'text-emerald-500' : 'text-slate-600'}`}>
+                {referralCopied
+                  ? 'Link copied. Share it to earn 5 credits when they join.'
+                  : 'When a friend signs up and verifies their email, you both earn 5 bonus credits.'}
               </p>
             </div>
             <button
@@ -368,7 +377,7 @@ export default function UpgradeModal() {
                 bg-white/5 hover:bg-white/10 border-white/10 text-slate-300"
             >
               <Copy className="w-3 h-3" />
-              {referralCopied ? 'Copied!' : 'Get referral link'}
+              {referralCopied ? 'Link copied!' : 'Copy referral link'}
             </button>
           </div>
         )}
