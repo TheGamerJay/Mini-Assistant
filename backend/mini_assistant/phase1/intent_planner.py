@@ -49,6 +49,7 @@ INTENTS = [
     "web_search",
     "image_generate",
     "image_analysis",
+    "image_reference_generate",   # analyze reference image → generate new via DALL-E
     "code_runner",
     "debugging",
     "planning",
@@ -61,32 +62,34 @@ INTENTS = [
 # Map each intent to the image_system execution intent it translates to.
 # This lets the existing image_system router remain the execution layer.
 INTENT_TO_EXECUTION: dict[str, str] = {
-    "normal_chat":            "chat",
-    "web_search":             "chat",          # handled via search tool
-    "image_generate":         "image_generation",
-    "image_analysis":         "image_analysis",
-    "code_runner":            "coding",
-    "debugging":              "coding",
-    "planning":               "chat",          # research brain in chat mode
-    "file_analysis":          "chat",          # scanner + research brain
-    "app_builder":            "chat",          # App Builder UI handles this
-    "3d_asset_generation":    "chat",          # Phase 9 — not yet implemented
-    "3d_character_generation":"chat",          # Phase 9 — not yet implemented
+    "normal_chat":              "chat",
+    "web_search":               "chat",                    # handled via search tool
+    "image_generate":           "image_generation",
+    "image_analysis":           "image_analysis",
+    "image_reference_generate": "image_reference_generate",# GPT-4o analyze → DALL-E generate
+    "code_runner":              "coding",
+    "debugging":                "coding",
+    "planning":                 "chat",                    # research brain in chat mode
+    "file_analysis":            "chat",                    # scanner + research brain
+    "app_builder":              "chat",                    # App Builder UI handles this
+    "3d_asset_generation":      "chat",                    # Phase 9 — not yet implemented
+    "3d_character_generation":  "chat",                    # Phase 9 — not yet implemented
 }
 
 # Response mode per intent
 _RESPONSE_MODES: dict[str, str] = {
-    "normal_chat":            "chat",
-    "web_search":             "research",
-    "image_generate":         "builder",
-    "image_analysis":         "debug",
-    "code_runner":            "builder",
-    "debugging":              "debug",
-    "planning":               "architect",
-    "file_analysis":          "architect",
-    "app_builder":            "builder",
-    "3d_asset_generation":    "builder",
-    "3d_character_generation":"builder",
+    "normal_chat":              "chat",
+    "web_search":               "research",
+    "image_generate":           "builder",
+    "image_analysis":           "debug",
+    "image_reference_generate": "builder",
+    "code_runner":              "builder",
+    "debugging":                "debug",
+    "planning":                 "architect",
+    "file_analysis":            "architect",
+    "app_builder":              "builder",
+    "3d_asset_generation":      "builder",
+    "3d_character_generation":  "builder",
 }
 
 
@@ -279,6 +282,14 @@ def _build_tasks(intent: str) -> tuple[list, list]:
         seq = [
             {"id": "t1", "task": "analyse_image_with_vision",   "brain": "vision",    "depends_on": []},
             {"id": "t2", "task": "format_answer",               "brain": "fast",      "depends_on": ["t1"]},
+        ]
+
+    elif intent == "image_reference_generate":
+        seq = [
+            {"id": "t1", "task": "analyse_reference_image",     "brain": "vision",    "depends_on": []},
+            {"id": "t2", "task": "build_dalle_prompt",          "brain": "fast",      "depends_on": ["t1"]},
+            {"id": "t3", "task": "generate_image_with_dalle",   "brain": "image_gen", "depends_on": ["t2"]},
+            {"id": "t4", "task": "quality_review",              "brain": "critic",    "depends_on": ["t3"]},
         ]
 
     elif intent == "debugging":

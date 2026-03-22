@@ -1290,19 +1290,40 @@ async def chat(req: ChatRequest, request: Request):
         effective_msg = parsed_cmd.args if parsed_cmd.is_slash else clean_message
 
         # ── Phase 1 Step 2: Planner (ALWAYS RUNS FIRST) ────────────────────────
-        # If an image is attached, force image_analysis intent regardless of text
+        # If an image is attached, route to the correct intent based on message content
+        import re as _re_intent
+        _GENERATE_KW = _re_intent.compile(
+            r"\b(make|add|give|draw|generate|create|recreate|render|design|transform|"
+            r"change|turn|style|wearing|holding|show|put|place|set|cool|awesome|epic|"
+            r"badass|darker|brighter|angrier|fiercer|stronger|glowing|lightning|fire|"
+            r"flames|smoke|electric|neon|dramatic|intense|powerful|look)\b",
+            _re_intent.I,
+        )
         from mini_assistant.phase1.command_parser import ParsedCommand as _PC, SLASH_COMMANDS as _SC
         if attached_image_bytes and not (parsed_cmd and parsed_cmd.is_slash):
-            # Synthesise a /analyze slash command so Planner locks to image_analysis
-            parsed_cmd = _PC(
-                raw=effective_msg,
-                command="analyze",
-                args=effective_msg,
-                intent_override="image_analysis",
-                is_slash=True,
-                is_known=True,
-                help_requested=False,
-            )
+            _wants_gen = bool(_GENERATE_KW.search(effective_msg)) if effective_msg else False
+            if _wants_gen:
+                # User wants a new image generated based on the reference
+                parsed_cmd = _PC(
+                    raw=effective_msg,
+                    command="image",
+                    args=effective_msg,
+                    intent_override="image_reference_generate",
+                    is_slash=True,
+                    is_known=True,
+                    help_requested=False,
+                )
+            else:
+                # Pure analysis — describe the image
+                parsed_cmd = _PC(
+                    raw=effective_msg,
+                    command="analyze",
+                    args=effective_msg,
+                    intent_override="image_analysis",
+                    is_slash=True,
+                    is_known=True,
+                    help_requested=False,
+                )
 
         phase1_plan = make_plan(
             message        = effective_msg,
@@ -1494,56 +1515,69 @@ async def chat(req: ChatRequest, request: Request):
     logger.info("[MODEL ROUTER] chat → Claude %s", _active_model)
 
     if execution_intent in ("image_generation", "image_edit"):
-        gen_req = GenerateRequest(prompt=effective_msg, session_id=session_id)
-        image_response = await generate_image(gen_req)
-        # Image generation returns its own response — inject plan metadata and return
-        if isinstance(image_response, dict):
-            image_response["plan"]         = phase1_plan.to_dict() if phase1_plan else {}
-            image_response["intent"]       = "image_generate"
-            image_response["slash_command"]= parsed_cmd.command if parsed_cmd and parsed_cmd.is_slash else None
-        return image_response
+        # Direct text-to-image via DALL-E 3 (no ComfyUI)
+        logger.info("[MODEL ROUTER] image_generation → DALL-E 3")
+        try:
+            from ..services.dalle_client import DalleClient
+            _dalle = DalleClient()
+            _b64 = await _dalle.generate(effective_msg)
+            return {
+                "image_base64": _b64,
+                "reply": "Image generated.",
+                "intent": "image_generation",
+                "session_id": session_id,
+                "plan": phase1_plan.to_dict() if phase1_plan else {},
+            }
+        except Exception as exc:
+            logger.error("DALL-E generation failed: %s", exc)
+            reply = f"Image generation failed: {exc}"
+
+    elif execution_intent == "image_reference_generate":
+        # Analyze reference image with GPT-4o → build prompt → generate via DALL-E 3
+        logger.info("[MODEL ROUTER] image_reference_generate → GPT-4o vision + DALL-E 3")
+        try:
+            vision = _get_vision()
+            description = await vision.analyze(
+                attached_image_bytes,
+                "Describe this image in precise visual detail: subject appearance, "
+                "colors, art style, lighting, composition, background. Be specific "
+                "and comprehensive — this will be used as an image generation reference.",
+            )
+        except Exception as exc:
+            description = "a character or scene"
+            logger.warning("Vision describe failed: %s", exc)
+
+        dalle_prompt = (
+            f"Reference image description: {description}\n\n"
+            f"User request: {effective_msg}\n\n"
+            f"Generate a new image that fulfills the user request, visually inspired "
+            f"by the reference. Preserve the art style, color palette, and character "
+            f"design from the reference while applying the requested changes."
+        )
+        try:
+            from ..services.dalle_client import DalleClient
+            _dalle = DalleClient()
+            _b64 = await _dalle.generate(dalle_prompt)
+            return {
+                "image_base64": _b64,
+                "reply": "Image generated from reference.",
+                "intent": "image_reference_generate",
+                "session_id": session_id,
+                "plan": phase1_plan.to_dict() if phase1_plan else {},
+            }
+        except Exception as exc:
+            logger.error("DALL-E reference generation failed: %s", exc)
+            reply = f"Image generation failed: {exc}"
 
     elif execution_intent == "image_analysis" or (execution_intent == "chat" and attached_image_bytes):
-        # User attached an image — check if they want analysis only, or want to generate
-        import re as _re
-        _MODIFY_KW = _re.compile(
-            r"\b(make|add|give|draw|generate|create|recreate|render|design|transform|change|turn|style|with|wearing|holding|show|put|place|set|cool|awesome|epic|badass|darker|brighter|angrier|fiercer|stronger|glowing|lightning|fire|flames|smoke|electric|neon|dramatic|intense|powerful)\b",
-            _re.I,
-        )
-        _wants_generation = bool(_MODIFY_KW.search(effective_msg)) if effective_msg else False
-
-        if _wants_generation and attached_image_bytes:
-            # Analyze the reference image, then generate a new image based on the description + user request
-            logger.info("[MODEL ROUTER] image_analysis+generate → GPT-4o analyze → DALL-E 3 generate")
-            try:
-                vision = _get_vision()
-                description = await vision.analyze(
-                    attached_image_bytes,
-                    "Describe this image in precise visual detail: subject appearance, colors, art style, lighting, composition. Be specific and comprehensive for use as an image generation reference."
-                )
-            except Exception as exc:
-                description = "a detailed character or scene"
-                logger.warning("Vision describe failed: %s", exc)
-
-            dalle_prompt = f"Based on this reference: {description}\n\nNow generate: {effective_msg}"
-            try:
-                gen_req = GenerateRequest(prompt=dalle_prompt, session_id=session_id)
-                image_response = await generate_image(gen_req)
-                if isinstance(image_response, dict):
-                    image_response["plan"] = phase1_plan.to_dict() if phase1_plan else {}
-                    image_response["intent"] = "image_generate"
-                    image_response["slash_command"] = parsed_cmd.command if parsed_cmd and parsed_cmd.is_slash else None
-                return image_response
-            except Exception as exc:
-                reply = f"Image generation failed: {exc}"
-        else:
-            # Pure analysis — describe the image
-            try:
-                vision = _get_vision()
-                question = effective_msg or "Describe this image in detail."
-                reply = await vision.analyze(attached_image_bytes, question)
-            except Exception as exc:
-                reply = f"Vision brain error: {exc}"
+        # Pure image analysis — describe/answer questions about the attached image
+        logger.info("[MODEL ROUTER] image_analysis → GPT-4o vision")
+        try:
+            vision = _get_vision()
+            question = effective_msg or "Describe this image in detail."
+            reply = await vision.analyze(attached_image_bytes, question)
+        except Exception as exc:
+            reply = f"Vision brain error: {exc}"
 
     elif execution_intent == "coding":
         try:
@@ -1844,15 +1878,20 @@ async def chat_stream(req: ChatRequest, request: Request):
         except Exception as _e:
             logger.warning("Phase1 failed in stream endpoint: %s", _e)
 
-        # Image / coding intents can't stream meaningfully — signal redirect
+        # Image intents can't stream meaningfully — signal redirect to non-streaming endpoint
         import re as _re_stream
-        _MODIFY_KW_STREAM = _re_stream.compile(
-            r"\b(make|add|give|draw|generate|create|recreate|render|design|transform|change|turn|style|with|wearing|holding|show|put|place|set|cool|awesome|epic|badass|darker|brighter|angrier|fiercer|stronger|glowing|lightning|fire|flames|smoke|electric|neon|dramatic|intense|powerful)\b",
+        _GENERATE_KW_STREAM = _re_stream.compile(
+            r"\b(make|add|give|draw|generate|create|recreate|render|design|transform|"
+            r"change|turn|style|wearing|holding|show|put|place|set|cool|awesome|epic|"
+            r"badass|darker|brighter|angrier|fiercer|stronger|glowing|lightning|fire|"
+            r"flames|smoke|electric|neon|dramatic|intense|powerful|look)\b",
             _re_stream.I,
         )
         _has_attached = bool(req.image_base64)
-        _wants_gen_stream = _has_attached and bool(_MODIFY_KW_STREAM.search(effective_msg or ""))
-        if execution_intent in ("image_generation", "image_edit") or _wants_gen_stream:
+        # If image attached + generation keywords → image_reference_generate (redirect)
+        if _has_attached and bool(_GENERATE_KW_STREAM.search(effective_msg or "")):
+            execution_intent = "image_reference_generate"
+        if execution_intent in ("image_generation", "image_edit", "image_reference_generate"):
             yield f"data: {_json.dumps({'done': True, 'meta': {'type': 'image_redirect'}})}\n\n"
             return
 
