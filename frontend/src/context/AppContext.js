@@ -269,6 +269,11 @@ export function AppProvider({ children }) {
 
   const getFullImage = useCallback((id) => fullImageMap.get(id) || null, []);
 
+  const deleteImage = useCallback((id) => {
+    fullImageMap.delete(id);
+    setImages((prev) => prev.filter((img) => img.id !== id));
+  }, []);
+
   // ---- Settings ----
   const defaultSettings = {
     showRouteInfo: true,
@@ -849,6 +854,7 @@ export function AppProvider({ children }) {
     // images
     images,
     addImage,
+    deleteImage,
     getFullImage,
     // settings
     settings,

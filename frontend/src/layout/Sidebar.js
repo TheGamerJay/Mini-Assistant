@@ -24,6 +24,7 @@ import {
   X,
   Pin,
   BookMarked,
+  Download,
   // Tool icons
   Code,
   Terminal,
@@ -339,8 +340,7 @@ function PromptTemplateRow({ template, collapsed, onUse, onDelete }) {
 // ---------------------------------------------------------------------------
 // ImageLightbox — fullscreen overlay for sidebar thumbnail clicks
 // ---------------------------------------------------------------------------
-function ImageLightbox({ img, onClose }) {
-  // Close on Escape key
+function ImageLightbox({ img, onClose, onDelete }) {
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', handler);
@@ -349,30 +349,67 @@ function ImageLightbox({ img, onClose }) {
 
   if (!img) return null;
 
-  // Prefer the full base64 from the module-level map, fall back to thumbnail
+  // Prefer full base64 from in-memory map; fall back to thumbnail
   const full = imageFullMap.get(img.id);
-  let src = full
+  const src = full
     ? (full.startsWith('data:') ? full : `data:image/png;base64,${full}`)
     : img.thumb;
 
+  const handleDownload = () => {
+    const a = document.createElement('a');
+    a.href = src;
+    a.download = `image-${img.id.slice(0, 8)}.png`;
+    a.click();
+  };
+
+  const handleDelete = () => {
+    onDelete(img.id);
+    onClose();
+  };
+
   return (
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+      className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-black/85 backdrop-blur-sm"
       onClick={onClose}
     >
+      {/* Image — fills most of the viewport */}
       <div
-        className="relative max-w-[90vw] max-h-[90vh] rounded-xl overflow-hidden shadow-2xl border border-white/10"
+        className="relative flex items-center justify-center w-[min(90vw,900px)] h-[min(80vh,900px)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <img src={src} alt={img.prompt} className="max-w-[90vw] max-h-[85vh] object-contain" />
+        <img
+          src={src}
+          alt={img.prompt}
+          className="max-w-full max-h-full rounded-xl shadow-2xl object-contain border border-white/10"
+          style={{ imageRendering: 'auto' }}
+        />
+      </div>
+
+      {/* Toolbar below the image */}
+      <div
+        className="flex items-center gap-3 mt-4 px-4 py-2.5 rounded-xl bg-[#111]/80 border border-white/10 backdrop-blur-sm"
+        onClick={(e) => e.stopPropagation()}
+      >
         {img.prompt && (
-          <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-4 py-2 text-xs text-slate-300 truncate">
-            {img.prompt}
-          </div>
+          <span className="text-xs text-slate-400 max-w-[280px] truncate">{img.prompt}</span>
         )}
         <button
-          className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-slate-400 hover:text-white hover:bg-black/80 transition-colors"
+          onClick={handleDownload}
+          title="Download"
+          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 px-2.5 py-1.5 rounded-lg transition-colors"
+        >
+          <Download size={12} /> Save
+        </button>
+        <button
+          onClick={handleDelete}
+          title="Delete from gallery"
+          className="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 px-2.5 py-1.5 rounded-lg transition-colors"
+        >
+          <Trash2 size={12} /> Delete
+        </button>
+        <button
           onClick={onClose}
+          className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition-colors"
         >
           <X size={14} />
         </button>
@@ -403,6 +440,7 @@ function Sidebar() {
     deleteProject,
     renameProject,
     images,
+    deleteImage,
     serverStatus,
     promptTemplates,
     addPromptTemplate,
@@ -727,7 +765,7 @@ function Sidebar() {
         </div>
       </div>
     </div>
-      {lightboxImg && <ImageLightbox img={lightboxImg} onClose={() => setLightboxImg(null)} />}
+      {lightboxImg && <ImageLightbox img={lightboxImg} onClose={() => setLightboxImg(null)} onDelete={deleteImage} />}
     </>
   );
 }
