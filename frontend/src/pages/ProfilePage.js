@@ -22,6 +22,16 @@ const AVATAR_MAX_VIDEO_MB = 15;  // videos stored as base64 data URL
 const AVATAR_PX           = 256;
 const AVATAR_QUALITY      = 0.85;
 
+/** Read any file as a base64 data URL. */
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 /** Compress any image file to a small JPEG data URL (max 256px). */
 function compressToAvatar(file) {
   return new Promise((resolve, reject) => {
@@ -337,7 +347,7 @@ function ProfilePage() {
                   </button>
                 )}
               </div>
-              <p className="text-[10px] text-slate-600 mt-2">PNG · JPG · JPEG · GIF · WebP · Max 50 MB &nbsp;·&nbsp; MP4 · Max 15 MB</p>
+              <p className="text-[10px] text-slate-600 mt-2">PNG · JPG · JPEG · GIF · WebP &nbsp;·&nbsp; MP4 (max 15 MB)</p>
             </div>
           </div>
         </Card>

@@ -1,25 +1,34 @@
 /**
  * AvatarMedia.js
  * Renders the correct element for any avatar data URL:
- *   data:video/* → <video autoPlay loop muted playsInline>
+ *   data:video/* → <video> with forced-play via useEffect (autoPlay attr alone is unreliable)
  *   everything else (image, GIF) → <img>
- *
- * Usage:
- *   <AvatarMedia src={avatar} className="w-full h-full object-cover" fallback={<Fallback />} />
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
 export default function AvatarMedia({ src, className, fallback = null }) {
   const [videoError, setVideoError] = useState(false);
+  const videoRef = useRef(null);
+
+  // Force-play the video — autoPlay attribute is blocked in some browsers
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.muted = true;
+    const tryPlay = () => v.play().catch(() => {});
+    v.addEventListener('canplay', tryPlay);
+    tryPlay();
+    return () => v.removeEventListener('canplay', tryPlay);
+  }, [src]);
 
   if (!src || videoError) return fallback;
 
   if (src.startsWith('data:video/')) {
     return (
       <video
+        ref={videoRef}
         src={src}
-        autoPlay
         loop
         muted
         playsInline
