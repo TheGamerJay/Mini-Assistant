@@ -533,7 +533,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
               ${attachedImages.length
                 ? 'text-cyan-400 hover:text-cyan-300 hover:bg-white/5'
                 : 'text-slate-600 hover:text-slate-400 hover:bg-white/5'}`}
-            title="Attach image or video — PNG, JPG, GIF, WebP, MP4 · Max 15 MB"
+            title="Attach image or file as reference"
           >
             <Paperclip size={16} />
           </button>
