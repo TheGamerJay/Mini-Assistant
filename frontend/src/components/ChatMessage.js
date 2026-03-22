@@ -12,9 +12,9 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp } from '../context/AppContext';
+import { api } from '../api/client';
 import ImageCard from './ImageCard';
 import IntelligencePanel from './IntelligencePanel';
-import api from '../api/client';
 
 // ---------------------------------------------------------------------------
 // Lightweight syntax tokenizer (no external deps)
@@ -269,12 +269,20 @@ function MessageActions({ content, rating, onRate, onRetry, onFork, onPin, onSen
       .catch(() => {});
   }, [content]);
 
-  const handleShare = useCallback(() => {
-    const text = `Mini Assistant:\n\n${content}`;
-    navigator.clipboard.writeText(text)
-      .then(() => toast.success('Copied to clipboard!'))
-      .catch(() => toast.error('Could not copy'));
-  }, [content]);
+  const [sharing, setSharing] = useState(false);
+  const handleShare = useCallback(async () => {
+    if (sharing) return;
+    setSharing(true);
+    try {
+      const result = await api.createShare('text', content, '', '');
+      await navigator.clipboard.writeText(result.url);
+      toast.success('Share link copied!', { description: result.url });
+    } catch (err) {
+      toast.error('Could not create share link');
+    } finally {
+      setSharing(false);
+    }
+  }, [content, sharing]);
 
   const handleTTS = useCallback(() => {
     if (speaking) { window.speechSynthesis.cancel(); setSpeaking(false); return; }
@@ -326,9 +334,9 @@ function MessageActions({ content, rating, onRate, onRetry, onFork, onPin, onSen
         </ActionBtn>
       )}
 
-      {/* Share (copy as shareable text) */}
-      <ActionBtn onClick={handleShare} title="Copy as shareable text">
-        <Share2 size={12} />
+      {/* Share — create public link */}
+      <ActionBtn onClick={handleShare} title="Create share link" active={sharing} activeClass="text-violet-400">
+        {sharing ? <Loader2 size={12} className="animate-spin" /> : <Share2 size={12} />}
       </ActionBtn>
 
       {/* Pin message */}

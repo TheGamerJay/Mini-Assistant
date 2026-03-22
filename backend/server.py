@@ -4314,6 +4314,14 @@ try:
 except Exception as _stripe_err:
     logging.warning("Stripe routes unavailable: %s", _stripe_err)
 
+# ── Public share routes ────────────────────────────────────────────────────────
+try:
+    from share_routes import share_router
+    app.include_router(share_router)
+    logging.info("✓ Share routes registered (/api/share/*)")
+except Exception as _share_err:
+    logging.warning("Share routes unavailable: %s", _share_err)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Phase 2+3 — Executive + Skill Library diagnostics

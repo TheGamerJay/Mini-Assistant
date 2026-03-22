@@ -457,6 +457,16 @@ export const api = {
     return post(`${MAIN_API}/stripe/billing-portal`, {}, 10000);
   },
 
+  /** Create a public share link. Returns { id, url, created_at }. */
+  createShare(contentType, content, title = '', prompt = '') {
+    return post(`${MAIN_API}/share`, { content_type: contentType, content, title, prompt }, 15000);
+  },
+
+  /** Delete own share. */
+  deleteShare(shareId) {
+    return request(`${MAIN_API}/share/${shareId}`, { method: 'DELETE' }, 10000);
+  },
+
   /** Get full credit breakdown for a user. */
   stripeGetCredits(userId) {
     return get(`${MAIN_API}/stripe/credits/${userId}`, 10000);

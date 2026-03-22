@@ -36,6 +36,7 @@ import UpgradeModal from './components/UpgradeModal';
 import MascotAssistant from './components/MascotAssistant';
 import PricingPage from './pages/PricingPage';
 import CheckoutSuccessPage from './pages/CheckoutSuccessPage';
+import SharedPage from './pages/SharedPage';
 
 // Legal pages
 import TermsPage from './pages/legal/TermsPage';
@@ -304,6 +305,12 @@ function AuthGate() {
       setPage('admin');
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Detect /s/{id} share URL — render publicly without auth
+  const shareMatch = window.location.pathname.match(/^\/s\/([a-f0-9]+)$/);
+  if (shareMatch) {
+    return <SharedPage shareId={shareMatch[1]} />;
+  }
 
   // Admin page handles its own auth — render standalone outside of AppShell
   if (page === 'admin') {
