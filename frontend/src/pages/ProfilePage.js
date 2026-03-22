@@ -219,7 +219,7 @@ function ProfilePage() {
                 <Camera size={18} className="text-white" />
               </div>
             </div>
-            <input ref={fileRef} type="file" accept="image/*,image/gif" className="hidden" onChange={handleFileChange} />
+            <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={handleFileChange} />
 
             {/* Identity */}
             <div className="flex-1 min-w-0">
@@ -241,6 +241,7 @@ function ProfilePage() {
                   </button>
                 )}
               </div>
+              <p className="text-[10px] text-slate-600 mt-2">PNG · JPG · WebP · GIF &nbsp;·&nbsp; Max 15 MB</p>
             </div>
           </div>
         </Card>
