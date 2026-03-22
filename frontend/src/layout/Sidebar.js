@@ -31,7 +31,6 @@ import {
   Layers,
   Shield,
   GitBranch,
-  Github,
   Play,
   Database,
   Package,
@@ -75,8 +74,6 @@ const TOOLS = [
   { id: 'websearch', label: 'Web Search', icon: Globe },
   { id: 'codesearch', label: 'Code Search', icon: FileSearch },
   { id: 'voice', label: 'Voice', icon: Mic },
-  { id: 'github', label: 'Connect GitHub', icon: Github, external: 'https://github.com' },
-  { id: 'vscode', label: 'Connect VS Code', icon: Code, external: 'vscode://file/' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -608,21 +605,7 @@ function Sidebar() {
 
         {/* Tools */}
         <SidebarSection icon={Wrench} label="Tools" collapsed={sidebarCollapsed} defaultOpen={false}>
-          {TOOLS.map(({ id, label, icon: Icon, page: customPage, external }) => {
-            if (external) {
-              return (
-                <button
-                  key={id}
-                  onClick={() => window.open(external, '_blank', 'noopener')}
-                  title={label}
-                  className={`w-full flex items-center gap-2 rounded-lg px-2 py-1.5 mb-0.5 text-xs transition-colors text-slate-500 hover:bg-white/5 hover:text-slate-300 border-l-2 border-transparent
-                    ${sidebarCollapsed ? 'justify-center' : ''}`}
-                >
-                  <Icon size={13} className="flex-shrink-0" />
-                  {!sidebarCollapsed && <span className="truncate">{label}</span>}
-                </button>
-              );
-            }
+          {TOOLS.map(({ id, label, icon: Icon, page: customPage }) => {
             const targetPage = customPage || `tool-${id}`;
             const isActive = customPage ? page === customPage : page === `tool-${id}`;
             return (
