@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/client';
+import AvatarMedia from './AvatarMedia';
 
 
 // ---------------------------------------------------------------------------
@@ -128,7 +129,7 @@ function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme, user,
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center text-white text-sm font-bold flex-shrink-0 select-none overflow-hidden">
             {avatar
-              ? <img src={avatar} alt="Avatar" className="w-full h-full object-contain" />
+              ? <AvatarMedia src={avatar} className="w-full h-full object-cover" />
               : (user?.name ? user.name[0].toUpperCase() : 'U')}
           </div>
           <div className="min-w-0 flex-1">
@@ -294,7 +295,7 @@ function TopBar() {
             flex items-center justify-center text-white text-xs font-bold
             group-hover:opacity-80 transition-opacity select-none overflow-hidden">
             {avatar
-              ? <img src={avatar} alt="Avatar" className="w-full h-full object-contain" />
+              ? <AvatarMedia src={avatar} className="w-full h-full object-cover" />
               : (user?.name ? user.name[0].toUpperCase() : 'U')}
           </div>
           <ChevronDown
