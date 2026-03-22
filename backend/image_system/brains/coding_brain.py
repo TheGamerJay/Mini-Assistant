@@ -1,20 +1,25 @@
 """
 Coding Brain for the Mini Assistant image system.
 
-Wraps qwen2.5-coder:14b for general coding tasks, ComfyUI workflow generation,
+Uses Claude claude-sonnet-4-6 for coding tasks, ComfyUI workflow generation,
 workflow debugging, and prompt improvement suggestions.
+
+[MODEL ROUTER] coding → Claude claude-sonnet-4-6
 """
 
 import json
 import logging
+import os
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+_CODING_MODEL = "claude-sonnet-4-6"
+
 
 class CodingBrain:
     """
-    Specialised brain for code-related tasks using qwen2.5-coder:14b.
+    Specialised brain for code-related tasks using Claude claude-sonnet-4-6.
 
     Methods are async coroutines.
     """
@@ -47,8 +52,11 @@ class CodingBrain:
     )
 
     def __init__(self) -> None:
-        from ..services.ollama_client import OllamaClient
-        self._ollama = OllamaClient()
+        self._api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+
+    def _get_client(self):
+        import anthropic
+        return anthropic.AsyncAnthropic(api_key=self._api_key)
 
     # ------------------------------------------------------------------
     # General coding
@@ -56,7 +64,7 @@ class CodingBrain:
 
     async def run(self, task: str, context: Optional[str] = None) -> str:
         """
-        Run a general coding task through qwen2.5-coder:14b.
+        Run a general coding task through Claude claude-sonnet-4-6.
 
         Args:
             task: Description of the coding task or question.
@@ -69,8 +77,19 @@ class CodingBrain:
         if context:
             prompt = f"Context:\n{context}\n\nTask:\n{task}"
 
-        logger.info("CodingBrain.run task='%s...'", task[:60])
-        return await self._ollama.run_coder(prompt=prompt, system=self._GENERAL_SYSTEM)
+        logger.info(
+            "[MODEL ROUTER] coding → Claude %s | task='%s...'",
+            _CODING_MODEL, task[:60],
+        )
+
+        client = self._get_client()
+        response = await client.messages.create(
+            model=_CODING_MODEL,
+            max_tokens=4096,
+            system=self._GENERAL_SYSTEM,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text
 
     # ------------------------------------------------------------------
     # ComfyUI workflow generation
@@ -79,21 +98,24 @@ class CodingBrain:
     async def generate_comfyui_workflow(self, description: str) -> dict:
         """
         Generate a ComfyUI API-format workflow JSON for the given description.
-
-        Args:
-            description: Natural-language description of the desired workflow
-                         (e.g. "txt2img with DreamShaper for fantasy art, 768x512").
-
-        Returns:
-            Parsed workflow dict, or an empty dict on failure.
         """
         prompt = (
             f"Generate a ComfyUI API-format workflow JSON for:\n{description}\n\n"
             "Return ONLY the JSON object, no explanations."
         )
-        logger.info("Generating ComfyUI workflow for: %s", description[:80])
+        logger.info(
+            "[MODEL ROUTER] workflow_gen → Claude %s | desc='%s...'",
+            _CODING_MODEL, description[:80],
+        )
 
-        raw = await self._ollama.run_coder(prompt=prompt, system=self._WORKFLOW_SYSTEM)
+        client = self._get_client()
+        response = await client.messages.create(
+            model=_CODING_MODEL,
+            max_tokens=2048,
+            system=self._WORKFLOW_SYSTEM,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = response.content[0].text
         return self._parse_json_safe(raw) or {}
 
     # ------------------------------------------------------------------
@@ -103,27 +125,28 @@ class CodingBrain:
     async def debug_workflow(self, workflow_dict: dict, error_message: str) -> dict:
         """
         Diagnose and fix a broken ComfyUI workflow.
-
-        Args:
-            workflow_dict: The workflow that produced an error.
-            error_message: The error string from ComfyUI.
-
-        Returns:
-            Dict with keys ``analysis`` (str) and ``fixed_workflow`` (dict).
-            On failure returns ``{"analysis": "<error>", "fixed_workflow": {}}``.
         """
         prompt = (
             f"Error message:\n{error_message}\n\n"
             f"Broken workflow:\n{json.dumps(workflow_dict, indent=2)}\n\n"
             "Diagnose the issue and return a fixed workflow."
         )
-        logger.info("Debugging workflow, error: %s", error_message[:120])
+        logger.info(
+            "[MODEL ROUTER] workflow_debug → Claude %s | error='%s...'",
+            _CODING_MODEL, error_message[:120],
+        )
 
-        raw = await self._ollama.run_coder(prompt=prompt, system=self._DEBUG_SYSTEM)
+        client = self._get_client()
+        response = await client.messages.create(
+            model=_CODING_MODEL,
+            max_tokens=2048,
+            system=self._DEBUG_SYSTEM,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = response.content[0].text
         parsed = self._parse_json_safe(raw)
         if parsed and "fixed_workflow" in parsed:
             return parsed
-        # If we couldn't parse structured output, return analysis as text
         return {"analysis": raw, "fixed_workflow": {}}
 
     # ------------------------------------------------------------------
@@ -133,13 +156,6 @@ class CodingBrain:
     async def suggest_prompt_improvements(self, prompt: str, issues: list) -> dict:
         """
         Suggest prompt improvements based on image review issues.
-
-        Args:
-            prompt: The original positive prompt used for generation.
-            issues: List of issue strings from the ImageReviewer.
-
-        Returns:
-            Dict with keys ``improved_prompt`` (str) and ``changes`` (list of str).
         """
         issues_text = "\n".join(f"- {i}" for i in issues) if issues else "No specific issues listed."
         user_prompt = (
@@ -147,9 +163,19 @@ class CodingBrain:
             f"Issues detected:\n{issues_text}\n\n"
             "Suggest an improved prompt that addresses these issues."
         )
-        logger.info("Suggesting prompt improvements for %d issues", len(issues))
+        logger.info(
+            "[MODEL ROUTER] prompt_improve → Claude %s | issues=%d",
+            _CODING_MODEL, len(issues),
+        )
 
-        raw = await self._ollama.run_coder(prompt=user_prompt, system=self._PROMPT_IMPROVE_SYSTEM)
+        client = self._get_client()
+        response = await client.messages.create(
+            model=_CODING_MODEL,
+            max_tokens=512,
+            system=self._PROMPT_IMPROVE_SYSTEM,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        raw = response.content[0].text
         parsed = self._parse_json_safe(raw)
         if parsed and "improved_prompt" in parsed:
             return parsed

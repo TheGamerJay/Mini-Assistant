@@ -1,11 +1,4 @@
 {
-  "ollama_models": {
-    "router": { "model": "gemma3:4b", "role": "routing and classification" },
-    "router_fallback": { "model": "gemma3:4b", "role": "fast classifier fallback" },
-    "coder": { "model": "qwen2.5-coder:7b", "role": "coding and integration" },
-    "vision": { "model": "moondream:latest", "role": "vision and image review" },
-    "embeddings": { "model": "nomic-embed-text", "role": "embeddings and memory" }
-  },
   "image_checkpoints": {
     "anime_general": { "file": "animagine-xl-4.0.safetensors", "type": "SDXL", "base_size": 1024 },
     "anime_shonen": { "file": "AbyssOrangeMix2_hard.safetensors", "type": "SD1.5", "base_size": 512 },
@@ -15,5 +8,13 @@
     "realistic": { "file": "Realistic_Vision_V6.0_NV_B1_fp16.safetensors", "type": "SD1.5", "base_size": 512 },
     "fantasy": { "file": "DreamShaper_8_pruned.safetensors", "type": "SD1.5", "base_size": 512 },
     "flux_premium": { "file": "flux1-schnell.safetensors", "type": "FLUX", "base_size": 1024 }
+  },
+  "api_models": {
+    "image_generation": { "provider": "openai", "model": "dall-e-3", "role": "text-to-image generation" },
+    "image_analysis": { "provider": "openai", "model": "gpt-4o", "role": "vision and image analysis" },
+    "routing": { "provider": "openai", "model": "gpt-4o-mini", "role": "intent classification" },
+    "chat": { "provider": "anthropic", "model": "claude-sonnet-4-6", "role": "chat, coding, planning, all text tasks" },
+    "build": { "provider": "anthropic", "model": "claude-sonnet-4-6", "role": "app builder and code generation" },
+    "review": { "provider": "anthropic", "model": "claude-haiku-4-5-20251001", "role": "code review (cheaper, fast)" }
   }
 }

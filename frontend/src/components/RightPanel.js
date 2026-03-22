@@ -148,20 +148,49 @@ function CodeViewer({ blocks }) {
 // ---------------------------------------------------------------------------
 // Preview
 // ---------------------------------------------------------------------------
-function PreviewPane({ blocks }) {
+function PreviewPane({ blocks, previewImage = null }) {
   const iframeRef = useRef(null);
   const [key, setKey] = useState(0);
   const html = useMemo(() => buildPreviewHtml(blocks), [blocks]);
 
   useEffect(() => {
     const iframe = iframeRef.current;
-    if (!iframe || !html) return;
+    if (!iframe || !html || previewImage) return;
     const doc = iframe.contentDocument || iframe.contentWindow?.document;
     if (!doc) return;
     doc.open();
     doc.write(html);
     doc.close();
-  }, [html, key]);
+  }, [html, key, previewImage]);
+
+  // Show generated image if present (image generation takes priority over empty code preview)
+  if (previewImage) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-[#0f111a]">
+          <div className="flex items-center gap-1.5 flex-1 px-2 py-1 rounded bg-white/5 text-[10px] text-slate-600 font-mono">
+            <Monitor size={9} />
+            generated image
+          </div>
+          <a
+            href={`data:image/png;base64,${previewImage}`}
+            download="generated.png"
+            className="p-1 rounded hover:bg-white/5 text-slate-600 hover:text-slate-400 transition-colors"
+            title="Download image"
+          >
+            <Download size={12} />
+          </a>
+        </div>
+        <div className="flex-1 flex items-center justify-center p-4 overflow-auto">
+          <img
+            src={`data:image/png;base64,${previewImage}`}
+            alt="Generated"
+            className="max-w-full max-h-full object-contain rounded-lg shadow-xl"
+          />
+        </div>
+      </div>
+    );
+  }
 
   if (!html) {
     return (
@@ -441,9 +470,19 @@ const TABS = [
   { id: 'tasks',   label: 'Tasks',   icon: ListTodo },
 ];
 
-function RightPanel({ messages = [], streamingText = null, open, onClose }) {
+function RightPanel({ messages = [], streamingText = null, open, onClose, previewImage = null, activeTab = null }) {
   const [tab, setTab] = useState('preview');
   const codeBlocks = useMemo(() => getLatestCode(messages, streamingText), [messages, streamingText]);
+
+  // Auto-switch to preview when a new image arrives
+  useEffect(() => {
+    if (previewImage) setTab('preview');
+  }, [previewImage]);
+
+  // Allow parent to force a tab
+  useEffect(() => {
+    if (activeTab) setTab(activeTab);
+  }, [activeTab]);
 
   if (!open) return null;
 
@@ -467,7 +506,7 @@ function RightPanel({ messages = [], streamingText = null, open, onClose }) {
 
       {/* Body */}
       <div className="flex-1 overflow-hidden">
-        {tab === 'preview' && <PreviewPane blocks={codeBlocks} />}
+        {tab === 'preview' && <PreviewPane blocks={codeBlocks} previewImage={previewImage} />}
         {tab === 'code'    && <CodeViewer  blocks={codeBlocks} />}
         {tab === 'files'   && <FilesPane   blocks={codeBlocks} />}
         {tab === 'diff'    && <DiffPane    messages={messages} />}

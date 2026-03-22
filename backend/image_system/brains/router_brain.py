@@ -1,17 +1,20 @@
 """
 Router Brain for the Mini Assistant image system.
 
-Classifies user requests using qwen3:14b (with qwen2.5:7b fallback) and returns
-a structured RouteResult dict that drives checkpoint and workflow selection.
+Classifies user requests using OpenAI GPT-4o-mini and returns a structured
+RouteResult dict that drives checkpoint and workflow selection.
+
+[MODEL ROUTER] routing/classification → OpenAI GPT-4o-mini
 """
 
+import json
 import logging
+import os
 from typing import Optional
 
 from ..utils.json_validator import (
     ROUTER_SCHEMA,
     parse_and_validate,
-    build_repair_prompt,
 )
 from ..utils.routing_guard import validate_route as _guard_validate_route
 
@@ -34,20 +37,16 @@ VALID_INTENTS = {
     INTENT_IMAGE_EDIT, INTENT_IMAGE_ANALYSIS, INTENT_PLANNING,
 }
 
+_ROUTER_MODEL = "gpt-4o-mini"
+
 
 class RouterBrain:
     """
     Classifies user requests and decides which image checkpoint + workflow to use.
 
-    Routing priority (highest to lowest):
-    1. qwen3:14b LLM classification with JSON mode.
-    2. qwen2.5:7b fallback on parse failure.
-    3. Local keyword matching as final safety net.
+    Uses OpenAI GPT-4o-mini for fast, cheap JSON classification.
+    Falls back to keyword matching if the API is unavailable.
     """
-
-    # ------------------------------------------------------------------
-    # System prompt for the LLM
-    # ------------------------------------------------------------------
 
     SYSTEM_PROMPT: str = """\
 You are the routing brain of an AI assistant with image generation capabilities.
@@ -132,8 +131,7 @@ confidence should reflect how certain you are about the routing decision (0.0-1.
 """
 
     def __init__(self) -> None:
-        from ..services.ollama_client import OllamaClient
-        self._ollama = OllamaClient()
+        self._api_key = os.environ.get("OPENAI_API_KEY", "")
 
     # ------------------------------------------------------------------
     # Public API
@@ -145,78 +143,44 @@ confidence should reflect how certain you are about the routing decision (0.0-1.
         """
         Classify the user request and return a RouteResult dict.
 
-        Tries qwen3:14b first; on failure falls back to qwen2.5:7b; final
-        fallback is local keyword matching.
-
-        Args:
-            user_request: The raw user message.
-            reference_image: Optional image bytes if the user attached one.
-
-        Returns:
-            Validated RouteResult dict.
+        Uses OpenAI GPT-4o-mini with JSON mode. Falls back to keyword matching
+        if the API call fails.
         """
         prompt = self._build_prompt(user_request)
 
-        # --- Primary: qwen3:14b ---
-        raw = None
+        # --- Primary: OpenAI GPT-4o-mini ---
         try:
-            raw = await self._ollama.run_router(prompt=prompt, system=self.SYSTEM_PROMPT)
-            data, errors = parse_and_validate(raw, ROUTER_SCHEMA, "router_primary")
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(api_key=self._api_key)
+            response = await client.chat.completions.create(
+                model=_ROUTER_MODEL,
+                messages=[
+                    {"role": "system", "content": self.SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.1,
+                max_tokens=512,
+            )
+            raw = response.choices[0].message.content or ""
+            data, errors = parse_and_validate(raw, ROUTER_SCHEMA, "router_openai")
             if data and not errors:
                 result = self.validate_route(data)
-                if result.get("confidence", 0) >= 0.3:
-                    logger.info(
-                        "Router (primary): intent=%s checkpoint=%s confidence=%.2f",
-                        result["intent"], result.get("selected_checkpoint"), result["confidence"],
-                    )
-                    return _guard_validate_route(result)
-            elif data is None and raw:
-                # One-shot repair attempt
-                repair_prompt = build_repair_prompt(prompt, raw, ROUTER_SCHEMA, "router")
-                raw2 = await self._ollama.run_router(prompt=repair_prompt, system=self.SYSTEM_PROMPT)
-                data2, _ = parse_and_validate(raw2, ROUTER_SCHEMA, "router_repair")
-                if data2:
-                    result2 = self.validate_route(data2)
-                    logger.info("Router (primary+repair): intent=%s confidence=%.2f",
-                                result2["intent"], result2.get("confidence", 0))
-                    return _guard_validate_route(result2)
-        except Exception as exc:
-            logger.warning("Primary router failed: %s", exc)
-
-        # --- Fallback: qwen2.5:7b ---
-        try:
-            raw_fb = await self._ollama.run_router_fallback(
-                prompt=prompt, system=self.SYSTEM_PROMPT
-            )
-            data_fb, _ = parse_and_validate(raw_fb, ROUTER_SCHEMA, "router_fallback")
-            if data_fb:
-                result_fb = self.validate_route(data_fb)
                 logger.info(
-                    "Router (fallback): intent=%s checkpoint=%s confidence=%.2f",
-                    result_fb["intent"],
-                    result_fb.get("selected_checkpoint"),
-                    result_fb["confidence"],
+                    "[MODEL ROUTER] routing → OpenAI %s | intent=%s checkpoint=%s confidence=%.2f",
+                    _ROUTER_MODEL, result["intent"],
+                    result.get("selected_checkpoint"), result["confidence"],
                 )
-                return _guard_validate_route(result_fb)
+                return _guard_validate_route(result)
         except Exception as exc:
-            logger.warning("Fallback router failed: %s", exc)
+            logger.warning("[MODEL ROUTER] OpenAI router failed: %s", exc)
 
-        # --- Last resort: local keyword matching ---
-        logger.warning("Both LLM routers failed; using keyword matching")
+        # --- Last resort: keyword matching ---
+        logger.warning("[MODEL ROUTER] OpenAI router unavailable; using keyword matching")
         return _guard_validate_route(self._apply_keyword_rules(user_request))
 
     def validate_route(self, data: dict) -> dict:
-        """
-        Validate and normalise a raw router output dict.
-
-        Fills sensible defaults for any missing or invalid fields.
-
-        Args:
-            data: Raw dict from the LLM.
-
-        Returns:
-            Normalised RouteResult dict.
-        """
+        """Validate and normalise a raw router output dict."""
         intent = data.get("intent", INTENT_CHAT)
         if intent not in VALID_INTENTS:
             intent = INTENT_CHAT
@@ -235,7 +199,6 @@ confidence should reflect how certain you are about the routing decision (0.0-1.
         if visual_mode not in valid_modes:
             visual_mode = "portrait"
 
-        # Apply keyword scoring as a second opinion on scores
         kw_scores = self._score_request_text(data.get("_original_request", ""))
 
         def _clamp(v: float) -> float:
@@ -252,7 +215,6 @@ confidence should reflect how certain you are about the routing decision (0.0-1.
         selected_checkpoint = data.get("selected_checkpoint") or None
         selected_workflow = data.get("selected_workflow") or None
 
-        # If checkpoint not provided for image intents, derive from style
         if intent == INTENT_IMAGE_GENERATION and not selected_checkpoint:
             selected_checkpoint, selected_workflow = self._derive_from_style(
                 style_family, anime_genre
@@ -279,7 +241,6 @@ confidence should reflect how certain you are about the routing decision (0.0-1.
     # ------------------------------------------------------------------
 
     def _build_prompt(self, user_request: str) -> str:
-        """Build the full prompt string sent to the LLM."""
         return (
             f"User request: \"{user_request}\"\n\n"
             "Classify this request and return the JSON routing object."
@@ -290,16 +251,9 @@ confidence should reflect how certain you are about the routing decision (0.0-1.
     # ------------------------------------------------------------------
 
     def _apply_keyword_rules(self, user_request: str) -> dict:
-        """
-        Local keyword matching used when LLM routing fails completely.
-
-        Returns a RouteResult dict with intent and checkpoint derived
-        purely from keyword presence.
-        """
         text = user_request.lower()
         scores = self._score_request_text(text)
 
-        # Detect non-image intents first
         intent = INTENT_IMAGE_GENERATION
         if any(kw in text for kw in ["write code", "python", "javascript", "debug", "function", "algorithm", "program"]):
             intent = INTENT_CODING
@@ -310,7 +264,6 @@ confidence should reflect how certain you are about the routing decision (0.0-1.
         elif any(kw in text for kw in ["analyse this image", "describe this image", "what is in this", "identify"]):
             intent = INTENT_IMAGE_ANALYSIS
 
-        # Image routing
         checkpoint, workflow, style_family, anime_genre, visual_mode = (
             "anime_general", "anime_general", "anime", "general", "portrait"
         )
@@ -360,7 +313,7 @@ confidence should reflect how certain you are about the routing decision (0.0-1.
             "anime_score": scores["anime_score"],
             "realism_score": scores["realism_score"],
             "fantasy_score": scores["fantasy_score"],
-            "confidence": 0.6,  # keyword match is moderately confident
+            "confidence": 0.6,
         }
 
     # ------------------------------------------------------------------
@@ -384,19 +337,10 @@ confidence should reflect how certain you are about the routing decision (0.0-1.
     ]
 
     def _score_request_text(self, text: str) -> dict:
-        """
-        Count keyword hits and return normalised scores summing to ~1.
-
-        Args:
-            text: Lower-cased user request.
-
-        Returns:
-            Dict with anime_score, realism_score, fantasy_score.
-        """
         a = sum(1 for kw in self._ANIME_KEYWORDS if kw in text)
         r = sum(1 for kw in self._REALISM_KEYWORDS if kw in text)
         f = sum(1 for kw in self._FANTASY_KEYWORDS if kw in text)
-        total = a + r + f or 1  # avoid division by zero
+        total = a + r + f or 1
         return {
             "anime_score": round(a / total, 3),
             "realism_score": round(r / total, 3),
@@ -411,12 +355,10 @@ confidence should reflect how certain you are about the routing decision (0.0-1.
     def _derive_from_style(
         style_family: Optional[str], anime_genre: Optional[str]
     ) -> tuple:
-        """Return (checkpoint, workflow) defaults for the given style."""
         if style_family == "realistic":
             return "realistic", "realistic_photo"
         if style_family == "fantasy":
             return "fantasy", "fantasy_cinematic"
-        # anime fallback by genre
         genre_map = {
             "shonen": ("anime_shonen", "anime_shonen_action"),
             "seinen": ("anime_seinen", "anime_seinen_cinematic"),

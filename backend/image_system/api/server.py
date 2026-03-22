@@ -1489,9 +1489,9 @@ async def chat(req: ChatRequest, request: Request):
     # ── Phase 1 Step 4: Brain Execution ────────────────────────────────────────
     reply = ""
 
-    # Model override from request (Phase 6 model selector)
-    from ..services.ollama_client import _model_name as _reg_model_name
-    _active_model = req.preferred_model or os.environ.get("FAST_MODEL") or _reg_model_name("router")
+    # Model: always Claude claude-sonnet-4-6 (no local Ollama)
+    _active_model = "claude-sonnet-4-6"
+    logger.info("[MODEL ROUTER] chat → Claude %s", _active_model)
 
     if execution_intent in ("image_generation", "image_edit"):
         gen_req = GenerateRequest(prompt=effective_msg, session_id=session_id)
@@ -1571,12 +1571,9 @@ async def chat(req: ChatRequest, request: Request):
             reply = f"Tool brain error: {exc}"
 
     else:
-        # General chat / research / planning / file_analysis / web_search
+        # General chat / research / planning / file_analysis / web_search — Claude claude-sonnet-4-6
         try:
-            ollama_client = _get_ollama()
-
             # Engineering context covers file_analysis + app_builder + code_runner
-            # Fall back to legacy project context for plain file_analysis without engineering ctx
             system_prefix = engineering_ctx.system_prefix if engineering_ctx and engineering_ctx.system_prefix else ""
             if not system_prefix and phase1_plan and phase1_plan.intent == "file_analysis":
                 try:
@@ -1591,14 +1588,17 @@ async def chat(req: ChatRequest, request: Request):
                 except Exception:
                     pass
 
-            # System message always first — inject lyrics specialist prompt if needed
+            # Build system prompt
             _sys_prompt = _MINI_SYSTEM_PROMPT
             if _LYRICS_INTENT.search(effective_msg):
                 _sys_prompt = _MINI_SYSTEM_PROMPT + "\n\n" + _LYRICS_SYSTEM_PROMPT
-            history_msgs: list[dict] = [{"role": "system", "content": _sys_prompt}]
+
+            # Build conversation history for Claude (no system role in messages list)
+            claude_msgs: list[dict] = []
             if req.history:
                 for h in req.history[-10:]:
-                    history_msgs.append({"role": h.role, "content": h.content})
+                    if h.role in ("user", "assistant") and h.content:
+                        claude_msgs.append({"role": h.role, "content": h.content})
 
             # Real-time weather injection
             rt_context = ""
@@ -1617,17 +1617,22 @@ async def chat(req: ChatRequest, request: Request):
                         "Tell the user you couldn't retrieve the weather right now — do NOT guess or make up any values.\n\n"
                     )
 
-            # Prepend Phase 9 self-improvement context (lessons + long-term memory)
+            # Prepend Phase 9 self-improvement context
             phase9_prefix = phase9_ctx.prefix if phase9_ctx else ""
             combined_prefix = rt_context + phase9_prefix + (system_prefix or "")
             user_content = (combined_prefix + effective_msg) if combined_prefix else effective_msg
-            history_msgs.append({"role": "user", "content": user_content})
+            claude_msgs.append({"role": "user", "content": user_content})
 
-            reply = await ollama_client.run_chat(
-                model       = _active_model,
-                messages    = history_msgs,
-                temperature = 0.7,
+            import anthropic as _am
+            _ac = _am.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+            logger.info("[MODEL ROUTER] chat → Claude claude-sonnet-4-6")
+            _resp = await _ac.messages.create(
+                model      = "claude-sonnet-4-6",
+                max_tokens = 4096,
+                system     = _sys_prompt,
+                messages   = claude_msgs,
             )
+            reply = _resp.content[0].text
         except Exception as exc:
             reply = _friendly_error(exc)
 
@@ -1811,8 +1816,7 @@ async def chat_stream(req: ChatRequest, request: Request):
             yield f"data: {_json.dumps({'done': True, 'meta': {'type': 'image_redirect'}})}\n\n"
             return
 
-        # ── Model selection ───────────────────────────────────────────────────
-        from ..services.ollama_client import _model_name as _reg_model_name
+        # ── Model selection — always Claude claude-sonnet-4-6 ─────────────────
         _is_build_intent = execution_intent == "app_builder"
 
         # Vibe Code mode — user toggled ⚡ in the UI, skip all Q&A, build immediately
@@ -1854,16 +1858,9 @@ async def chat_stream(req: ChatRequest, request: Request):
         )
         _is_code_intent = _has_code_in_msg or execution_intent == "coding" or bool(_CODE_ERRORS.search(effective_msg))
 
-        if _is_build_intent:
-            # App building: use deepseek-coder. Keepalive loop above handles
-            # the model-load wait so Cloudflare won't drop the connection.
-            _active_model = _reg_model_name("coder")
-        elif _is_code_intent and not req.preferred_model:
-            # Explicit code paste or error: use deepseek-coder.
-            # User initiated this intentionally so the load wait is acceptable.
-            _active_model = _reg_model_name("coder")
-        else:
-            _active_model = req.preferred_model or os.environ.get("FAST_MODEL") or _reg_model_name("router")
+        # All tasks use Claude claude-sonnet-4-6 — no local models
+        _active_model = "claude-sonnet-4-6"
+        logger.info("[MODEL ROUTER] stream/%s → Claude %s", execution_intent, _active_model)
 
         # ── Real-time weather injection ───────────────────────────────────────
         rt_context = ""
@@ -2029,8 +2026,6 @@ async def chat_stream(req: ChatRequest, request: Request):
         if all_images and not (_is_build_intent and not _has_prior_code):
             # Normal image analysis (not the image-to-code pipeline)
             user_msg["images"] = all_images
-            if not req.preferred_model:
-                _active_model = _reg_model_name("vision")
         history_msgs.append(user_msg)
 
         # ── Image-to-Code pipeline (Vision → Builder → Reviewer loop) ─────────
@@ -2051,19 +2046,14 @@ async def chat_stream(req: ChatRequest, request: Request):
             execution_intent = "app_builder"
 
         _api_key_claude = os.environ.get("ANTHROPIC_API_KEY", "")
-        _use_claude     = bool(_api_key_claude)
+        _use_claude     = True  # Always use Claude — no local models
         reply_text      = ""
-        ollama_client   = _get_ollama()
 
         if _is_build_intent and all_images and not _has_prior_code:
             from .pipeline import image_to_code_pipeline
             async for _sse in image_to_code_pipeline(
                 images=all_images,
                 user_request=effective_msg,
-                ollama_client=ollama_client,
-                vision_model=_reg_model_name("vision"),
-                builder_model=_reg_model_name("coder"),
-                reviewer_model=_reg_model_name("router"),
                 session_id=session_id,
             ):
                 yield _sse
@@ -2168,45 +2158,31 @@ async def chat_stream(req: ChatRequest, request: Request):
                 # Fall through isn't possible in elif — emit error and continue to done event
 
         else:
-            # ── Local Ollama stream ───────────────────────────────────────────
-            # Simple chat stays local — free, fast enough for conversation.
-            # Complex tasks (builds, vision, code) routed to Claude above.
-            _fallback_model = _reg_model_name("router")
-            _model_to_try = _active_model
-            for _attempt in range(2):  # Try primary model first, fall back to router on model error
-                try:
-                    _stream = ollama_client.run_chat_stream(
-                        model=_model_to_try,
-                        messages=history_msgs,
-                        temperature=0.7,
-                    )
-                    _aiter = _stream.__aiter__()
-                    # Use ensure_future to wrap the coroutine in a Task, then shield the Task.
-                    # A Task can be shielded multiple times across keepalive timeouts;
-                    # a raw coroutine cannot — re-shielding it raises RuntimeError.
-                    _next_task = asyncio.ensure_future(_aiter.__anext__())
-                    while True:
-                        try:
-                            token = await asyncio.wait_for(asyncio.shield(_next_task), timeout=3.0)
-                            reply_text += token
-                            yield f"data: {_json.dumps({'t': token})}\n\n"
-                            _next_task = asyncio.ensure_future(_aiter.__anext__())
-                        except asyncio.TimeoutError:
-                            # No token yet — keepalive ping, same Task still running
-                            yield ": keepalive\n\n"
-                        except StopAsyncIteration:
-                            break
-                    break  # success — don't retry
-                except Exception as exc:
-                    _exc_s = str(exc).lower()
-                    _is_model_err = any(kw in _exc_s for kw in ("not found", "pull", "404", "no such", "unknown model"))
-                    if _attempt == 0 and _is_model_err and _model_to_try != _fallback_model:
-                        logger.warning("Model %s unavailable, falling back to %s: %s", _model_to_try, _fallback_model, exc)
-                        _model_to_try = _fallback_model
-                        continue  # retry with fallback router model
-                    err = _friendly_error(exc)
-                yield f"data: {_json.dumps({'t': err})}\n\n"
+            # ── Claude stream — all chat/planning/research ─────────────────────
+            # Build Claude-format messages (no system role in messages list)
+            _c_msgs_plain = []
+            for _hm in history_msgs:
+                _hr, _hc = _hm.get("role"), _hm.get("content", "")
+                if _hr in ("user", "assistant") and _hc:
+                    _c_msgs_plain.append({"role": _hr, "content": _hc})
+
+            logger.info("[MODEL ROUTER] chat/stream → Claude claude-sonnet-4-6")
+            try:
+                import anthropic as _am_plain
+                _ac_plain = _am_plain.AsyncAnthropic(api_key=_api_key_claude)
+                async with _ac_plain.messages.stream(
+                    model="claude-sonnet-4-6",
+                    max_tokens=4096,
+                    system=_sys_prompt_stream,
+                    messages=_c_msgs_plain,
+                ) as _cs_plain:
+                    async for _ct in _cs_plain.text_stream:
+                        reply_text += _ct
+                        yield f"data: {_json.dumps({'t': _ct})}\n\n"
+            except Exception as _plain_err:
+                err = _friendly_error(_plain_err)
                 reply_text = err
+                yield f"data: {_json.dumps({'t': err})}\n\n"
 
         # ── Observability: log this brain call (non-fatal) ────────────────────
         try:

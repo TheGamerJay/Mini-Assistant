@@ -1,23 +1,28 @@
 """
 Vision Brain for the Mini Assistant image system.
 
-Wraps qwen2.5vl:7b for image understanding, style comparison, and issue detection.
+Uses OpenAI GPT-4o for image understanding, style comparison, and issue detection.
+
+[MODEL ROUTER] image_analysis → OpenAI GPT-4o
 """
 
 import base64
 import logging
+import os
 from typing import Optional
 
 from ..utils.json_validator import extract_json_from_text
 
 logger = logging.getLogger(__name__)
 
+_VISION_MODEL = "gpt-4o"
+
 
 class VisionBrain:
     """
-    Provides image-understanding capabilities via qwen2.5vl:7b.
+    Provides image-understanding capabilities via OpenAI GPT-4o.
 
-    Images are sent as base64-encoded strings inside Ollama's message format.
+    Images are sent as base64-encoded data URLs in the OpenAI message format.
     """
 
     _ANALYSIS_SYSTEM = (
@@ -44,8 +49,11 @@ class VisionBrain:
     )
 
     def __init__(self) -> None:
-        from ..services.ollama_client import OllamaClient
-        self._ollama = OllamaClient()
+        self._api_key = os.environ.get("OPENAI_API_KEY", "")
+
+    def _get_client(self):
+        from openai import AsyncOpenAI
+        return AsyncOpenAI(api_key=self._api_key)
 
     # ------------------------------------------------------------------
     # Public API
@@ -58,7 +66,7 @@ class VisionBrain:
         detail_level: str = "standard",
     ) -> str:
         """
-        Answer a question about an image.
+        Answer a question about an image using GPT-4o vision.
 
         Args:
             image_bytes: Raw image bytes (PNG/JPEG).
@@ -71,10 +79,27 @@ class VisionBrain:
         system = self._analysis_system_for_detail(detail_level)
         image_b64 = self._encode_image(image_bytes)
 
-        logger.info("VisionBrain.analyze detail=%s question='%s...'", detail_level, question[:60])
-        return await self._ollama.run_vision(
-            prompt=question, system=system, images=[image_b64]
+        logger.info(
+            "[MODEL ROUTER] image_analysis → OpenAI %s | detail=%s question='%s...'",
+            _VISION_MODEL, detail_level, question[:60],
         )
+
+        client = self._get_client()
+        response = await client.chat.completions.create(
+            model=_VISION_MODEL,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{image_b64}", "detail": "high"},
+                    },
+                    {"type": "text", "text": question},
+                ]},
+            ],
+            max_tokens=1500,
+        )
+        return response.choices[0].message.content or ""
 
     async def compare_style(
         self, reference_bytes: bytes, generated_bytes: bytes
@@ -82,33 +107,32 @@ class VisionBrain:
         """
         Compare a reference image against a generated image for style similarity.
 
-        Args:
-            reference_bytes: Raw bytes of the reference image.
-            generated_bytes: Raw bytes of the generated image.
-
         Returns:
             Dict with similarity_score, style_match, differences, recommendations.
         """
         ref_b64 = self._encode_image(reference_bytes)
         gen_b64 = self._encode_image(generated_bytes)
 
-        prompt = (
-            "Compare these two images. The first is the reference; the second is the generated result. "
-            "Return your JSON evaluation."
-        )
+        logger.info("[MODEL ROUTER] image_compare → OpenAI %s", _VISION_MODEL)
 
-        logger.info("VisionBrain.compare_style")
-        raw = await self._ollama.run_vision(
-            prompt=prompt,
-            system=self._COMPARE_SYSTEM,
-            images=[ref_b64, gen_b64],
+        client = self._get_client()
+        response = await client.chat.completions.create(
+            model=_VISION_MODEL,
+            messages=[
+                {"role": "system", "content": self._COMPARE_SYSTEM},
+                {"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{ref_b64}"}},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{gen_b64}"}},
+                    {"type": "text", "text": "Compare these two images. The first is the reference; the second is the generated result. Return your JSON evaluation."},
+                ]},
+            ],
+            max_tokens=800,
         )
-
+        raw = response.choices[0].message.content or ""
         parsed = self._parse_json_safe(raw)
         if parsed:
             return parsed
 
-        # Graceful degradation
         return {
             "similarity_score": 0.5,
             "style_match": "Comparison unavailable",
@@ -120,22 +144,26 @@ class VisionBrain:
         """
         Detect anatomy, composition, and technical issues in an image.
 
-        Args:
-            image_bytes: Raw image bytes.
-
         Returns:
             Dict with anatomy_issues, composition_issues, technical_issues, severity.
         """
         image_b64 = self._encode_image(image_bytes)
-        prompt = "Analyse this image for defects and issues. Return your JSON report."
 
-        logger.info("VisionBrain.detect_issues")
-        raw = await self._ollama.run_vision(
-            prompt=prompt,
-            system=self._ISSUES_SYSTEM,
-            images=[image_b64],
+        logger.info("[MODEL ROUTER] image_detect_issues → OpenAI %s", _VISION_MODEL)
+
+        client = self._get_client()
+        response = await client.chat.completions.create(
+            model=_VISION_MODEL,
+            messages=[
+                {"role": "system", "content": self._ISSUES_SYSTEM},
+                {"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
+                    {"type": "text", "text": "Analyse this image for defects and issues. Return your JSON report."},
+                ]},
+            ],
+            max_tokens=600,
         )
-
+        raw = response.choices[0].message.content or ""
         parsed = self._parse_json_safe(raw)
         if parsed:
             return parsed
@@ -170,7 +198,6 @@ class VisionBrain:
                 "subject matter, composition, lighting, colour palette, mood, artistic style, "
                 "technical quality, and notable details. Be thorough."
             )
-        # standard
         return VisionBrain._ANALYSIS_SYSTEM
 
     @staticmethod

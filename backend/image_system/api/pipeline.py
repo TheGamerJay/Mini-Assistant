@@ -2,16 +2,14 @@
 Image-to-Code Chain Orchestrator
 =================================
 Four specialized brains, each with its own role and system prompt.
-All powered by Claude when ANTHROPIC_API_KEY is present.
-Falls back to local Ollama models when no API key.
+All powered by Claude — no local models.
 
   👁  Vision Brain  — reads the screenshot, produces a precise UI spec
   🔨  Builder Brain — builds complete HTML/CSS/JS from the spec (streaming)
   🔍  Reviewer Brain — scores the build 0-100, lists any gaps
   🔧  Fixer Brain   — fixes reviewer issues, re-reviewed up to N times
 
-Claude path  (~$0.01-0.02/build):  Vision→Build→Review→Fix  all via Claude API
-Local path   (free, slower):        moondream→qwen2.5-coder→gemma3→fix loop
+[MODEL ROUTER] image_to_code → Claude claude-sonnet-4-6 (vision+build+fix) + Claude Haiku (review)
 """
 from __future__ import annotations
 
@@ -31,7 +29,7 @@ _FIX_MODEL      = "claude-sonnet-4-6"
 
 try:
     import anthropic as _anthropic_lib
-    _CLAUDE_AVAILABLE = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    _CLAUDE_AVAILABLE = True  # Always require Claude — no local fallback
 except ImportError:
     _anthropic_lib    = None  # type: ignore
     _CLAUDE_AVAILABLE = False
@@ -260,89 +258,48 @@ async def _claude_fix_stream(
             yield text
 
 
-# ── Local brain helpers (fallback when no API key) ────────────────────────────
-
-async def _local_vision(ollama_client, vision_model: str, images: list[str]) -> str:
-    """moondream fallback — two focused queries, filter garbage."""
-    colors_t = asyncio.ensure_future(ollama_client.run_chat(
-        vision_model,
-        [{"role": "user", "content": "What colors do you see? List background, text, button, input colors. Use hex if readable.", "images": images}],
-        timeout=90,
-    ))
-    layout_t = asyncio.ensure_future(ollama_client.run_chat(
-        vision_model,
-        [{"role": "user", "content": "Describe the layout. What elements are visible and where?", "images": images}],
-        timeout=90,
-    ))
-    results = []
-    for task, label in [(colors_t, "COLORS"), (layout_t, "LAYOUT")]:
-        try:
-            val = await asyncio.wait_for(task, timeout=95)
-            if val and len(val.strip()) > 5 and val.strip() not in ("?", "...", "N/A"):
-                results.append(f"{label}: {val.strip()}")
-        except Exception as exc:
-            logger.warning("Local vision %s failed: %s", label, exc)
-    return "\n".join(results) or "No visual details extracted."
-
 
 # ── Main pipeline ─────────────────────────────────────────────────────────────
 
 async def image_to_code_pipeline(
-    images:         list,
-    user_request:   str,
-    ollama_client,
-    vision_model:   str,
-    builder_model:  str,
-    reviewer_model: str,
-    session_id:     str = "",
+    images:       list,
+    user_request: str,
+    session_id:   str = "",
 ):
     """
     Async generator — yields SSE strings.
 
-    Claude path (API key present):
-      👁 Vision Brain (Claude) → 🔨 Builder Brain (Claude, streaming)
-        → 🔍 Reviewer Brain (Claude Haiku) → 🔧 Fixer Brain (Claude, streaming) × N
+    👁 Vision Brain (Claude) → 🔨 Builder Brain (Claude, streaming)
+      → 🔍 Reviewer Brain (Claude Haiku) → 🔧 Fixer Brain (Claude, streaming) × N
 
-    Local path (no API key):
-      👁 moondream → 🔨 qwen2.5-coder (streaming) → 🔍 gemma3 → 🔧 fix loop
+    [MODEL ROUTER] image_to_code → Claude claude-sonnet-4-6
     """
     import time
 
-    api_key     = os.environ.get("ANTHROPIC_API_KEY", "")
-    use_claude  = _CLAUDE_AVAILABLE and bool(api_key)
-    skill_ctx   = _get_skill_context(user_request)
+    api_key    = os.environ.get("ANTHROPIC_API_KEY", "")
+    use_claude = _CLAUDE_AVAILABLE and bool(api_key)
+    skill_ctx  = _get_skill_context(user_request)
+
+    if not use_claude:
+        yield _tok("❌ ANTHROPIC_API_KEY is not set. Image-to-code requires Claude API.\n\n")
+        return
 
     # ── STEP 1: Vision Brain ─────────────────────────────────────────────────
     yield _tok("👁 **Vision Brain** analyzing your image...\n\n")
     t0 = time.perf_counter()
 
-    if use_claude:
-        try:
-            ui_spec = await _claude_vision(api_key, images)
-            logger.info("Claude Vision OK — %d chars", len(ui_spec))
-            _obs_record(
-                brain="vision", model=_VISION_MODEL, task="vision_analysis",
-                session_id=session_id, latency_ms=(time.perf_counter() - t0) * 1000,
-                outcome="success", tokens_out=len(ui_spec.split()),
-            )
-        except Exception as exc:
-            logger.warning("Claude Vision failed: %s — falling back to local", exc)
-            yield _tok(f"⚠️ Vision fallback (Claude unavailable)...\n\n")
-            ui_spec = await _local_vision(ollama_client, vision_model, images)
-    else:
-        ui_spec = ""
-        _t_local = asyncio.ensure_future(_local_vision(ollama_client, vision_model, images))
-        while not _t_local.done():
-            try:
-                ui_spec = await asyncio.wait_for(asyncio.shield(_t_local), timeout=3.0)
-            except asyncio.TimeoutError:
-                yield ": keepalive\n\n"
-        if not ui_spec:
-            try:
-                ui_spec = _t_local.result()
-            except Exception as exc:
-                logger.warning("Local vision failed: %s", exc)
-                ui_spec = "Could not analyze image."
+    try:
+        ui_spec = await _claude_vision(api_key, images)
+        logger.info("[MODEL ROUTER] image_vision → Claude %s | %d chars", _VISION_MODEL, len(ui_spec))
+        _obs_record(
+            brain="vision", model=_VISION_MODEL, task="vision_analysis",
+            session_id=session_id, latency_ms=(time.perf_counter() - t0) * 1000,
+            outcome="success", tokens_out=len(ui_spec.split()),
+        )
+    except Exception as exc:
+        logger.error("Claude Vision failed: %s", exc)
+        yield _tok(f"❌ Vision Brain error: {exc}\n\n")
+        return
 
     yield _tok("✅ **Vision Brain** done.\n\n")
 
@@ -352,50 +309,21 @@ async def image_to_code_pipeline(
     built_raw  = ""
     built_code = ""
 
-    if use_claude:
-        try:
-            async for text in _claude_build_stream(api_key, user_request, ui_spec, skill_ctx):
-                built_raw += text
-                yield _tok(text)
-            built_code = _extract_html(built_raw)
-            _obs_record(
-                brain="builder", model=_BUILD_MODEL, task="build",
-                session_id=session_id, latency_ms=(time.perf_counter() - t0) * 1000,
-                tokens_out=len(built_raw.split()), outcome="success" if built_code else "fail",
-            )
-        except Exception as exc:
-            logger.warning("Claude Builder failed: %s", exc)
-            yield _tok(f"\n\n⚠️ Builder error: {exc}\n")
-            return
-    else:
-        # Local builder (qwen2.5-coder)
-        _build_msg = (
-            f"[USER REQUIREMENTS — TOP PRIORITY]\n{user_request}\n\n"
-            f"[VISUAL ANALYSIS]\n{ui_spec}{skill_ctx}\n\n"
-            "Build the complete HTML/CSS/JS app. Start with ```html"
-        )
-        try:
-            _b_stream = ollama_client.run_chat_stream(
-                model=builder_model,
-                messages=[{"role": "system", "content": _BUILD_SYSTEM}, {"role": "user", "content": _build_msg}],
-                temperature=0.3,
-            )
-            _b_aiter = _b_stream.__aiter__()
-            _b_next  = asyncio.ensure_future(_b_aiter.__anext__())
-            while True:
-                try:
-                    token = await asyncio.wait_for(asyncio.shield(_b_next), timeout=3.0)
-                    built_raw += token
-                    yield _tok(token)
-                    _b_next = asyncio.ensure_future(_b_aiter.__anext__())
-                except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
-                except StopAsyncIteration:
-                    break
-        except Exception as exc:
-            yield _tok(f"\n\n⚠️ Builder error: {exc}\n")
-            return
+    try:
+        async for text in _claude_build_stream(api_key, user_request, ui_spec, skill_ctx):
+            built_raw += text
+            yield _tok(text)
         built_code = _extract_html(built_raw)
+        logger.info("[MODEL ROUTER] image_build → Claude %s | %d chars", _BUILD_MODEL, len(built_code))
+        _obs_record(
+            brain="builder", model=_BUILD_MODEL, task="build",
+            session_id=session_id, latency_ms=(time.perf_counter() - t0) * 1000,
+            tokens_out=len(built_raw.split()), outcome="success" if built_code else "fail",
+        )
+    except Exception as exc:
+        logger.error("Claude Builder failed: %s", exc)
+        yield _tok(f"\n\n⚠️ Builder error: {exc}\n")
+        return
 
     logger.info("Builder OK — %d chars", len(built_code))
 
@@ -407,32 +335,11 @@ async def image_to_code_pipeline(
         yield _tok(f"\n\n🔍 **Reviewer Brain** checking the build...\n\n")
         t0 = time.perf_counter()
 
-        if use_claude:
-            try:
-                review_text = await _claude_review(api_key, user_request, ui_spec, built_code)
-            except Exception as exc:
-                logger.warning("Claude Reviewer failed: %s — accepting build", exc)
-                review_text = "PASS"
-        else:
-            _r_task = asyncio.ensure_future(
-                ollama_client.run_chat(
-                    reviewer_model,
-                    [{"role": "system", "content": _REVIEW_SYSTEM},
-                     {"role": "user", "content": f"[USER REQUIREMENTS]\n{user_request}\n\n[SPEC]\n{ui_spec}\n\n[CODE]\n```html\n{built_code}\n```"}],
-                    timeout=90,
-                )
-            )
-            review_text = ""
-            while not _r_task.done():
-                try:
-                    review_text = await asyncio.wait_for(asyncio.shield(_r_task), timeout=3.0)
-                except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
-            if not review_text:
-                try:
-                    review_text = _r_task.result()
-                except Exception:
-                    review_text = "PASS"
+        try:
+            review_text = await _claude_review(api_key, user_request, ui_spec, built_code)
+        except Exception as exc:
+            logger.warning("Claude Reviewer failed: %s — accepting build", exc)
+            review_text = "PASS"
 
         is_pass, score, issues = _parse_review(review_text)
         last_review  = review_text
@@ -459,42 +366,14 @@ async def image_to_code_pipeline(
         t0 = time.perf_counter()
         fixed_raw = ""
 
-        if use_claude:
-            try:
-                async for text in _claude_fix_stream(api_key, user_request, ui_spec, built_code, review_text):
-                    fixed_raw += text
-                    yield _tok(text)
-            except Exception as exc:
-                logger.warning("Claude Fixer failed: %s", exc)
-                yield _tok(f"\n\n⚠️ Fixer error: {exc} — keeping previous build.\n\n")
-                break
-        else:
-            _fix_msg = (
-                f"[USER REQUIREMENTS]\n{user_request}\n\n[SPEC]\n{ui_spec}\n\n"
-                f"[PREVIOUS CODE]\n```html\n{built_code}\n```\n\n"
-                f"[ISSUES TO FIX]\n{review_text}\n\nOutput the COMPLETE fixed file. Start with ```html"
-            )
-            try:
-                _f_stream = ollama_client.run_chat_stream(
-                    model=builder_model,
-                    messages=[{"role": "system", "content": _FIX_SYSTEM}, {"role": "user", "content": _fix_msg}],
-                    temperature=0.2,
-                )
-                _f_aiter = _f_stream.__aiter__()
-                _f_next  = asyncio.ensure_future(_f_aiter.__anext__())
-                while True:
-                    try:
-                        token = await asyncio.wait_for(asyncio.shield(_f_next), timeout=3.0)
-                        fixed_raw += token
-                        yield _tok(token)
-                        _f_next = asyncio.ensure_future(_f_aiter.__anext__())
-                    except asyncio.TimeoutError:
-                        yield ": keepalive\n\n"
-                    except StopAsyncIteration:
-                        break
-            except Exception as exc:
-                logger.warning("Local Fixer failed: %s", exc)
-                break
+        try:
+            async for text in _claude_fix_stream(api_key, user_request, ui_spec, built_code, review_text):
+                fixed_raw += text
+                yield _tok(text)
+        except Exception as exc:
+            logger.warning("Claude Fixer failed: %s", exc)
+            yield _tok(f"\n\n⚠️ Fixer error: {exc} — keeping previous build.\n\n")
+            break
 
         _obs_record(
             brain="fixer", model=_FIX_MODEL if use_claude else builder_model,

@@ -149,6 +149,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
   const [pendingApproval, setPendingApproval] = useState(null);
   const [rightPanelOpen, setRightPanelOpen]   = useState(false);
   const [vibeMode, setVibeMode]               = useState(false);
+  const [previewImage, setPreviewImage]       = useState(null); // latest generated image → shown in RightPanel
 
   // Streaming text state (non-image responses)
   const [streamingText, setStreamingText] = useState(null); // null = not streaming
@@ -189,6 +190,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
       responseCountRef.current = 0;
       setCompareData(null);
       setCompareLoading(false);
+      setPreviewImage(null);
     }
   }, [activeChatId, chats]);
 
@@ -293,20 +295,21 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
 
         const isImg = !!data.image_base64;
         if (isImg) {
+          // Show image in Preview panel, not in chat
+          setPreviewImage(data.image_base64);
+          setRightPanelOpen(true);
           const thumb = await makeThumbnail(data.image_base64);
           await addImage(thumb, text, data.image_base64);
         }
 
         const assistantMsg = {
           role: 'assistant',
-          type: isImg ? 'image' : 'text',
-          content: data.reply || (isImg ? '' : 'Done.'),
-          image_base64: data.image_base64 || null,
-          prompt: text,
+          type: 'text',
+          content: isImg
+            ? '🎨 Image generated! Check the **Preview** panel →'
+            : (data.reply || 'Done.'),
           route_result: data.route_result || null,
           generation_time_ms: data.generation_time_ms || null,
-          retry_used: data.retry_used || false,
-          prompt_warnings: data.prompt_warnings || [],
           model_used: data.model_used || null,
           memory_stored: data.memory_stored || [],
           timestamp: Date.now(),
@@ -360,13 +363,17 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
             setStreamResponse(data);
             const isImg = !!data.image_base64;
             if (isImg) {
+              setPreviewImage(data.image_base64);
+              setRightPanelOpen(true);
               const thumb = await makeThumbnail(data.image_base64);
               await addImage(thumb, text, data.image_base64);
             }
             const assistantMsg = {
-              role: 'assistant', type: isImg ? 'image' : 'text',
-              content: data.reply || '', image_base64: data.image_base64 || null,
-              prompt: text, route_result: data.route_result || null,
+              role: 'assistant', type: 'text',
+              content: isImg
+                ? '🎨 Image generated! Check the **Preview** panel →'
+                : (data.reply || ''),
+              route_result: data.route_result || null,
               generation_time_ms: data.generation_time_ms || null,
               model_used: data.model_used || null, memory_stored: data.memory_stored || [],
               timestamp: Date.now(),
@@ -746,6 +753,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         streamingText={streamingText}
         open={rightPanelOpen}
         onClose={() => setRightPanelOpen(false)}
+        previewImage={previewImage}
       />
     </div>
   );

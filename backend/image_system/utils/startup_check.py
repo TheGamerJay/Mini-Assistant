@@ -2,10 +2,11 @@
 Startup availability checker for the image system.
 
 Verifies:
-  - Every required Ollama model is available
+  - Required API keys are set (ANTHROPIC_API_KEY, OPENAI_API_KEY)
   - Every ComfyUI checkpoint file exists (via API and/or local filesystem)
   - Every workflow JSON file exists on disk
 
+No Ollama dependency — all AI tasks use OpenAI and Claude APIs.
 Returns a structured readiness report. Never raises — always fails gracefully.
 """
 import asyncio
@@ -24,28 +25,17 @@ WORKFLOW_DIR = CONFIG_DIR / "workflows"
 
 # ── Individual checks ─────────────────────────────────────────────────────────
 
-async def check_ollama_models(
-    base_url: str, required_models: List[str]
-) -> Dict[str, Any]:
-    """Check which of the required Ollama models are available."""
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.get(f"{base_url}/api/tags")
-            r.raise_for_status()
-            models_data = r.json().get("models", [])
-            available_full = {m["name"] for m in models_data}
-            available_base = {m["name"].split(":")[0] for m in models_data}
-    except Exception as exc:
-        logger.warning("Could not reach Ollama at %s: %s", base_url, exc)
-        return {m: {"available": False, "error": str(exc)} for m in required_models}
+import os as _os
 
+def check_api_keys() -> Dict[str, Any]:
+    """Check that required API keys are set."""
     results: Dict[str, Any] = {}
-    for model in required_models:
-        base = model.split(":")[0]
-        ok = model in available_full or base in available_base
-        results[model] = {
+    for key_name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
+        val = _os.environ.get(key_name, "")
+        ok = bool(val)
+        results[key_name] = {
             "available": ok,
-            "error": None if ok else f"'{model}' not found in Ollama (run: ollama pull {model})",
+            "error": None if ok else f"{key_name} is not set in environment variables",
         }
     return results
 
@@ -121,9 +111,6 @@ async def run_full_check(
     checkpoint_local_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run all availability checks and return a structured report."""
-    ollama_models = [
-        v["model"] for v in model_registry.get("ollama_models", {}).values()
-    ]
     checkpoints = [
         v["file"] for v in model_registry.get("image_checkpoints", {}).values()
     ]
@@ -133,26 +120,24 @@ async def run_full_check(
         if isinstance(v, dict) and v.get("file")
     ]
 
-    ollama_results, ckpt_results = await asyncio.gather(
-        check_ollama_models(ollama_url, ollama_models),
-        check_comfyui_checkpoints(comfyui_url, checkpoints, checkpoint_local_path),
-    )
+    api_key_results = check_api_keys()
+    ckpt_results = await check_comfyui_checkpoints(comfyui_url, checkpoints, checkpoint_local_path)
     wf_results = check_workflow_files(workflows)
 
     all_ok = (
-        all(v["available"] for v in ollama_results.values())
+        all(v["available"] for v in api_key_results.values())
         and all(v["available"] for v in ckpt_results.values())
         and all(v["available"] for v in wf_results.values())
     )
 
     return {
         "ready": all_ok,
-        "ollama_models": ollama_results,
+        "api_keys": api_key_results,
         "checkpoints": ckpt_results,
         "workflows": wf_results,
         "summary": {
-            "ollama_ok": sum(1 for v in ollama_results.values() if v["available"]),
-            "ollama_total": len(ollama_results),
+            "api_keys_ok": sum(1 for v in api_key_results.values() if v["available"]),
+            "api_keys_total": len(api_key_results),
             "checkpoints_ok": sum(1 for v in ckpt_results.values() if v["available"]),
             "checkpoints_total": len(ckpt_results),
             "workflows_ok": sum(1 for v in wf_results.values() if v["available"]),
@@ -171,9 +156,9 @@ def print_report(report: Dict[str, Any]):
     print("  IMAGE SYSTEM — READINESS REPORT")
     print("=" * 62)
 
-    ollama_ok = s["ollama_ok"] == s["ollama_total"]
-    print(f"\n  Ollama Models   [{icon(ollama_ok)}]  {s['ollama_ok']}/{s['ollama_total']} available")
-    for name, v in report["ollama_models"].items():
+    keys_ok = s["api_keys_ok"] == s["api_keys_total"]
+    print(f"\n  API Keys        [{icon(keys_ok)}]  {s['api_keys_ok']}/{s['api_keys_total']} set")
+    for name, v in report.get("api_keys", {}).items():
         suffix = f"  ← {v['error']}" if not v["available"] else ""
         print(f"    {icon(v['available'])} {name}{suffix}")
 
