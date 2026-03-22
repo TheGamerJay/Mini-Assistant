@@ -371,84 +371,95 @@ function ImageLightbox({ img, onClose, onDelete }) {
 
   return (
     <div
-      className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-black/88 backdrop-blur-sm"
+      className="fixed inset-0 z-[200] flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.92)' }}
       onClick={() => { if (zoomed) setZoomed(false); else onClose(); }}
     >
-      {/* Image area */}
-      {zoomed ? (
-        /* Zoomed: scrollable full-size view */
+      {/* Close button — top right, always visible */}
+      {!zoomed && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onClose(); }}
+          className="absolute top-4 right-4 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white/60 hover:text-white transition-all"
+        >
+          <X size={15} />
+        </button>
+      )}
+
+      {/* ── NORMAL VIEW ── */}
+      {!zoomed && (
+        <div className="flex flex-col items-center gap-4 w-full px-4">
+          {/* Image */}
+          <div
+            className="relative w-[min(86vw,820px)] h-[min(76vh,820px)] cursor-zoom-in group"
+            onClick={(e) => { e.stopPropagation(); setZoomed(true); }}
+          >
+            <img
+              src={src}
+              alt={img.prompt}
+              className="w-full h-full object-contain rounded-2xl select-none"
+              style={{ filter: 'drop-shadow(0 0 40px rgba(99,102,241,0.15))' }}
+            />
+            {/* Zoom hint — fades in on hover */}
+            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+              <div className="flex items-center gap-1.5 bg-black/60 backdrop-blur-sm text-white/80 text-xs font-medium px-3 py-1.5 rounded-full border border-white/10">
+                <ZoomIn size={12} /> Zoom
+              </div>
+            </div>
+          </div>
+
+          {/* Floating action bar */}
+          <div
+            className="flex items-center gap-1 p-1 rounded-2xl backdrop-blur-xl border border-white/8"
+            style={{ background: 'rgba(15,15,25,0.85)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {img.prompt && (
+              <>
+                <span className="text-[11px] text-slate-500 max-w-[200px] truncate px-3">{img.prompt}</span>
+                <div className="w-px h-4 bg-white/10 flex-shrink-0" />
+              </>
+            )}
+            <button
+              onClick={() => setZoomed(true)}
+              title="Zoom in"
+              className="flex items-center gap-1.5 text-[11px] font-medium text-slate-400 hover:text-white px-3 py-2 rounded-xl hover:bg-white/8 transition-all"
+            >
+              <ZoomIn size={13} /> Zoom
+            </button>
+            <button
+              onClick={handleDownload}
+              title="Save image"
+              className="flex items-center gap-1.5 text-[11px] font-medium text-slate-400 hover:text-white px-3 py-2 rounded-xl hover:bg-white/8 transition-all"
+            >
+              <Download size={13} /> Save
+            </button>
+            <div className="w-px h-4 bg-white/10 flex-shrink-0" />
+            <button
+              onClick={handleDelete}
+              title="Remove from gallery"
+              className="flex items-center gap-1.5 text-[11px] font-medium text-red-500/80 hover:text-red-400 px-3 py-2 rounded-xl hover:bg-red-500/10 transition-all"
+            >
+              <Trash2 size={13} /> Delete
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── ZOOMED VIEW ── */}
+      {zoomed && (
         <div
-          className="w-screen h-screen overflow-auto flex items-start justify-center p-8 cursor-zoom-out"
+          className="w-screen h-screen overflow-auto flex items-start justify-center p-10 cursor-zoom-out"
           onClick={() => setZoomed(false)}
         >
           <img
             src={src}
             alt={img.prompt}
-            className="rounded-xl shadow-2xl border border-white/10 select-none"
-            style={{ maxWidth: 'none', width: '100%', maxWidth: '1800px' }}
+            className="rounded-2xl select-none"
+            style={{ width: '100%', maxWidth: '1800px' }}
           />
-        </div>
-      ) : (
-        /* Normal: image fills the bounding box */
-        <div
-          className="relative w-[min(88vw,860px)] h-[min(78vh,860px)] cursor-zoom-in"
-          onClick={(e) => { e.stopPropagation(); setZoomed(true); }}
-        >
-          <img
-            src={src}
-            alt={img.prompt}
-            className="w-full h-full object-contain rounded-xl shadow-2xl border border-white/10 select-none"
-          />
-          {/* Zoom hint */}
-          <div className="absolute top-2 right-2 flex items-center gap-1 bg-black/60 text-slate-400 text-[10px] px-2 py-1 rounded-lg pointer-events-none">
-            <ZoomIn size={11} /> click to zoom
+          <div className="fixed bottom-5 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-black/70 backdrop-blur-sm text-white/50 text-[11px] px-3 py-1.5 rounded-full border border-white/10 pointer-none">
+            <ZoomOut size={11} /> Click or Esc to exit
           </div>
-        </div>
-      )}
-
-      {/* Toolbar */}
-      {!zoomed && (
-        <div
-          className="flex items-center gap-3 mt-4 px-4 py-2.5 rounded-xl bg-[#0d0d14]/90 border border-white/10 backdrop-blur-sm"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {img.prompt && (
-            <span className="text-xs text-slate-400 max-w-[260px] truncate">{img.prompt}</span>
-          )}
-          <button
-            onClick={() => setZoomed(true)}
-            title="Zoom in"
-            className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 px-2.5 py-1.5 rounded-lg transition-colors"
-          >
-            <ZoomIn size={12} /> Zoom
-          </button>
-          <button
-            onClick={handleDownload}
-            title="Download"
-            className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 px-2.5 py-1.5 rounded-lg transition-colors"
-          >
-            <Download size={12} /> Save
-          </button>
-          <button
-            onClick={handleDelete}
-            title="Delete from gallery"
-            className="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 px-2.5 py-1.5 rounded-lg transition-colors"
-          >
-            <Trash2 size={12} /> Delete
-          </button>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition-colors"
-          >
-            <X size={14} />
-          </button>
-        </div>
-      )}
-
-      {/* Zoom exit hint */}
-      {zoomed && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/70 text-slate-400 text-xs px-3 py-1.5 rounded-full pointer-events-none">
-          <ZoomOut size={12} /> Click or Esc to exit zoom
         </div>
       )}
     </div>
