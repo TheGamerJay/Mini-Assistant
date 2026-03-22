@@ -20,15 +20,19 @@ import AvatarMedia from './AvatarMedia';
 // ---------------------------------------------------------------------------
 const PLAN_LIMITS = { free: 50, standard: 500, pro: 2000, team: 10000, max: 10000 };
 
+const IMAGE_LIMITS = { free: 5, standard: 50, pro: 200, team: 1000, max: 1000 };
+
 function CreditChip() {
-  const { credits, plan, isSubscribed, setPurchaseModalOpen, setPage } = useApp();
+  const { credits, plan, isSubscribed, setPurchaseModalOpen, setPage, images } = useApp();
 
   if (credits === null) return null; // loading
 
-  const limit = PLAN_LIMITS[plan] || 50;
-  const pct   = Math.max(0, Math.min(100, (credits / limit) * 100));
-  const low   = pct < 20;
-  const mid   = pct >= 20 && pct < 50;
+  const limit      = PLAN_LIMITS[plan] || 50;
+  const imgLimit   = IMAGE_LIMITS[plan] || 5;
+  const imgCount   = (images || []).length;
+  const pct        = Math.max(0, Math.min(100, (credits / limit) * 100));
+  const low        = pct < 20;
+  const mid        = pct >= 20 && pct < 50;
 
   const barColor  = low ? 'bg-red-500'   : mid ? 'bg-amber-400' : 'bg-emerald-400';
   const textColor = low ? 'text-red-400' : mid ? 'text-amber-400' : 'text-emerald-400';
@@ -61,6 +65,10 @@ function CreditChip() {
             style={{ width: `${pct}%` }}
           />
         </div>
+        {/* Image usage */}
+        <span className="text-[9px] text-slate-600 leading-none mt-0.5">
+          {imgCount} / {imgLimit} imgs
+        </span>
       </div>
       {!isSubscribed ? (
         <TrendingUp className="w-3 h-3 text-slate-600 group-hover:text-violet-400 transition-colors" />

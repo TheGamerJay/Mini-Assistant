@@ -36,9 +36,9 @@ def _int(key: str, default: int) -> int:
         return default
 
 _ENABLED        = os.environ.get("RATE_LIMIT_ENABLED", "1").strip() != "0"
-_IP_LIMIT       = _int("RATE_LIMIT_IP_RPS", 120)
+_IP_LIMIT       = _int("RATE_LIMIT_IP_RPS", 600)    # 600/60s = 10 req/s per IP
 _IP_WINDOW      = _int("RATE_LIMIT_IP_WINDOW", 60)
-_HEAVY_LIMIT    = _int("RATE_LIMIT_HEAVY_RPS", 20)
+_HEAVY_LIMIT    = _int("RATE_LIMIT_HEAVY_RPS", 120)  # 120/60s = 2 image gen/s per IP
 
 # Paths that count as "heavy" (image gen + raw chat + app builder)
 _HEAVY_PATHS = (

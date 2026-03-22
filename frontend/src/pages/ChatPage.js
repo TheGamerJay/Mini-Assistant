@@ -323,9 +323,13 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         updateChatMessages(chatId, withAssistant);
       } catch (err) {
         setStreamActive(false);
+        const _isRL = err.status === 429 || err.message?.includes('rate limit');
         const withErr = [...nextMessages, {
           role: 'assistant', type: 'error',
-          content: err.message || 'Something went wrong.', timestamp: Date.now(),
+          content: _isRL
+            ? 'Slow down a little! Too many requests. Try again in a moment.'
+            : (err.message || 'Something went wrong.'),
+          timestamp: Date.now(),
         }];
         setMessages(withErr);
         updateChatMessages(chatId, withErr);
@@ -504,10 +508,16 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
 
       onError(err) {
         const isOutOfCredits = err.message === 'out_of_credits';
+        const isRateLimit = err.message?.startsWith('rate_limit:') || err.status === 429 || err.message?.includes('rate limit');
+        const retryAfter = isRateLimit
+          ? (err.message?.startsWith('rate_limit:') ? parseInt(err.message.split(':')[1], 10) : 30)
+          : null;
         const withErr = [...nextMessages, {
           role: 'assistant', type: 'error',
           content: isOutOfCredits
             ? '⚡ You\'ve used all your Mini Credits. Subscribe to keep building.'
+            : isRateLimit
+            ? `Slow down a little! Too many requests. Try again in ${retryAfter}s.`
             : (err.message || 'Something went wrong.'),
           timestamp: Date.now(),
           _outOfCredits: isOutOfCredits,
