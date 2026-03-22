@@ -350,6 +350,18 @@ async def _on_startup():
         except Exception as _idx4_err:
             logging.warning("email_ab_weights index warning (non-fatal): %s", _idx4_err)
 
+    # user_events: fast per-user and per-event queries
+    if db is not None:
+        try:
+            await db["user_events"].create_index(
+                [("user_id", 1), ("timestamp", -1)], background=True, name="user_events_user_ts"
+            )
+            await db["user_events"].create_index(
+                [("event", 1), ("timestamp", -1)], background=True, name="user_events_event_ts"
+            )
+        except Exception as _ue_err:
+            logging.warning("user_events index warning (non-fatal): %s", _ue_err)
+
     # Start safety background maintenance tasks + run startup security checks
     try:
         import safety as _safety   # noqa: PLC0415
@@ -5036,6 +5048,50 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# ── Event Tracking ────────────────────────────────────────────────────────────
+
+class _TrackEventRequest(BaseModel):
+    event: str
+    metadata: dict = {}
+
+@app.post("/api/events", tags=["analytics"])
+async def track_event(req: _TrackEventRequest, authorization: str = Header(None)):
+    """Append a user event record. Non-blocking — errors never surface to client."""
+    if db is None:
+        return {"ok": True}
+    try:
+        user_id = None
+        if authorization:
+            try:
+                from auth_routes import get_current_user
+                u = await get_current_user(authorization)
+                user_id = u.get("id") or u.get("_id")
+            except Exception:
+                pass
+        await db["user_events"].insert_one({
+            "user_id":    user_id,
+            "event":      req.event,
+            "metadata":   req.metadata,
+            "timestamp":  __import__("datetime").datetime.utcnow().isoformat(),
+        })
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+@app.get("/api/admin/events/summary", tags=["analytics"])
+async def events_summary():
+    """Return per-event counts for the admin dashboard."""
+    if db is None:
+        return {}
+    pipeline = [
+        {"$group": {"_id": "$event", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    rows = await db["user_events"].aggregate(pipeline).to_list(100)
+    return {r["_id"]: r["count"] for r in rows}
+
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

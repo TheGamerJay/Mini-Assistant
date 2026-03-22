@@ -7,6 +7,7 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { api, getToken, setToken, clearToken } from '../api/client';
+import { trackEvent } from '../utils/trackEvent';
 
 // ---------------------------------------------------------------------------
 // Module-level Map: stores full base64 images keyed by image id
@@ -316,6 +317,8 @@ export function AppProvider({ children }) {
   const openUpgradeModal = useCallback((reason = 'generic') => {
     setUpgradeReason(reason);
     setUpgradeModalOpen(true);
+    trackEvent('upgrade_modal_opened', { trigger_type: reason });
+    if (reason === 'credits') trackEvent('credits_exhausted', { trigger_type: reason });
   }, []);
 
   const refreshCredits = useCallback(() => {

@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { axiosInstance } from '../../App';
 import { useApp } from '../../context/AppContext';
 import { toast } from 'sonner';
+import { trackEvent } from '../../utils/trackEvent';
 import {
   reconstructHtmlFromProject,
   getContent as ptGetContent,
@@ -727,6 +728,7 @@ const AppBuilder = () => {
     setBuildJustCompleted(false);
     setProjectBrief(null);
     startLoadingCycle(BUILD_LOADING_MSGS, setBuildMsg, setBuildStep);
+    trackEvent('build_started', { description: description.slice(0, 120) });
     try {
       const response = await axiosInstance.post('/app-builder/generate', {
         description, framework: 'react',
@@ -742,6 +744,7 @@ const AppBuilder = () => {
       setGeneratedApp(data);
       setBuildJustCompleted(true);
       setTimeout(() => setBuildJustCompleted(false), 4000);
+      trackEvent('build_completed', { project_id: data.build_id || data.name });
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to generate app');
     } finally {
@@ -1115,7 +1118,7 @@ const AppBuilder = () => {
   const handleSaveProject = () => {
     if (!isSubscribed) { openUpgradeModal('save'); return; }
     // Auto-save already runs via useEffect; just confirm to the user
-    toast.success('Project saved!');
+    toast.success('Project saved.');
   };
 
   const exportZip = async () => {
@@ -2634,10 +2637,11 @@ const AppBuilder = () => {
                         <CheckCircle className="w-4 h-4 text-cyan-400 flex-shrink-0" />
                         <div className="flex-1 min-w-0">
                           <p className="text-xs font-bold text-cyan-300 leading-none">Your project is ready.</p>
-                          <p className="text-[10px] text-cyan-700 mt-0.5 leading-none">Continue building or take it live.</p>
+                          <p className="text-[10px] text-cyan-700 mt-0.5 leading-none">Continue building or deploy when you're ready.</p>
                         </div>
                         <button
                           onClick={() => { setIsResumed(false); if (!isSubscribed) { openUpgradeModal('deploy'); } else { setShowVercelModal(true); setVercelResult(null); } }}
+                          title={!isSubscribed ? 'Deployment requires an active plan' : 'Deploy to Vercel'}
                           className="flex-shrink-0 flex items-center gap-1 px-2.5 py-1 bg-violet-500/20 border border-violet-500/40 text-violet-300 text-[10px] font-mono uppercase rounded-sm hover:bg-violet-500/30 transition-colors">
                           <Globe className="w-3 h-3" /> Deploy
                         </button>

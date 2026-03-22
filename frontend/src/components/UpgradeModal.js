@@ -112,7 +112,7 @@ const REASON_COPY = {
   },
   save: {
     headline: 'Save your project',
-    sub: "Store your project and continue anytime. Upgrade to save and manage your builds.",
+    sub: "You've built a working project. Store it, manage it, and return anytime.",
     icon: Bookmark,
   },
   generic: {
@@ -358,6 +358,9 @@ export default function UpgradeModal() {
         </div>
         {upgradeReason === 'credits' && (
           <p className="text-center text-[10px] text-slate-600 pb-4">Instant access after upgrade</p>
+        )}
+        {upgradeReason === 'save' && (
+          <p className="text-center text-[10px] text-slate-600 pb-4">Upgrade to keep your work.</p>
         )}
 
         {/* Referral path — shown when user is out of credits */}
