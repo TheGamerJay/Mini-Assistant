@@ -433,6 +433,11 @@ export const api = {
     return request(`${MAIN_API}/admin/users/${userId}/credits`, { method: 'PATCH', body: JSON.stringify({ credits }) }, 10000);
   },
 
+  /** Set a user's bonus image allowance on top of their plan limit — admin only */
+  adminSetImages(userId, images) {
+    return request(`${MAIN_API}/admin/users/${userId}/images`, { method: 'PATCH', body: JSON.stringify({ images }) }, 10000);
+  },
+
   /** Get recent activity logs — admin only */
   adminGetActivity(limit = 100) { return get(`${MAIN_API}/admin/activity?limit=${limit}`, 15000); },
 

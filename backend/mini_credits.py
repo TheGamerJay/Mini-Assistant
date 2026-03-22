@@ -606,13 +606,13 @@ async def check_image_limit(
     uid = payload.get("sub")
     user = await db["users"].find_one(
         {"id": uid},
-        {"plan": 1, "email_verified": 1},
+        {"plan": 1, "email_verified": 1, "bonus_images": 1},
     )
     if not user:
         return False, 0, 0, None
 
     plan  = user.get("plan", "free")
-    limit = IMAGE_LIMITS.get(plan, IMAGE_LIMITS["free"])
+    limit = IMAGE_LIMITS.get(plan, IMAGE_LIMITS["free"]) + user.get("bonus_images", 0)
 
     if plan == "free":
         # Free: count all-time images (no monthly reset)

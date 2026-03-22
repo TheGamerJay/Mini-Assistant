@@ -206,6 +206,8 @@ function AdminDashboard({ adminUser, onLogout }) {
   const [togglingId, setTogglingId]     = useState(null);
   const [grantingId, setGrantingId]     = useState(null);
   const [grantInput, setGrantInput]     = useState({}); // { [userId]: string }
+  const [grantingImageId, setGrantingImageId] = useState(null);
+  const [grantImageInput, setGrantImageInput] = useState({}); // { [userId]: string }
   const [activeTab, setActiveTab]       = useState('overview'); // 'overview' | 'users' | 'activity' | 'analytics'
   const [funnel, setFunnel]             = useState(null);
   const [byTrigger, setByTrigger]       = useState(null);
@@ -366,6 +368,26 @@ function AdminDashboard({ adminUser, onLogout }) {
       toast.error(err.message || 'Failed to set credits.');
     } finally {
       setGrantingId(null);
+    }
+  }
+
+  async function handleGrantImages(u) {
+    const raw = grantImageInput[u.id];
+    const images = parseInt(raw, 10);
+    if (isNaN(images) || images < 0) {
+      toast.error('Enter a valid image amount (0 or more).');
+      return;
+    }
+    setGrantingImageId(u.id);
+    try {
+      await api.adminSetImages(u.id, images);
+      setUsers(prev => prev.map(x => x.id === u.id ? { ...x, bonus_images: images } : x));
+      setGrantImageInput(prev => ({ ...prev, [u.id]: '' }));
+      toast.success(`Set ${u.name}'s bonus images to ${images}.`);
+    } catch (err) {
+      toast.error(err.message || 'Failed to set bonus images.');
+    } finally {
+      setGrantingImageId(null);
     }
   }
 
@@ -536,7 +558,7 @@ function AdminDashboard({ adminUser, onLogout }) {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-white/5">
-                      {['User', 'Email', 'Auth', 'Role', 'Plan', 'Credits', 'Grant Credits', 'Joined', 'Actions'].map(h => (
+                      {['User', 'Email', 'Auth', 'Role', 'Plan', 'Credits', 'Grant Credits', 'Bonus Images', 'Grant Images', 'Joined', 'Actions'].map(h => (
                         <th key={h} className="px-4 py-3 text-left text-[11px] font-mono uppercase tracking-widest text-slate-600 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -620,6 +642,34 @@ function AdminDashboard({ adminUser, onLogout }) {
                               className="px-2 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-[10px] font-mono hover:bg-cyan-500/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                               {grantingId === u.id ? '…' : 'Set'}
+                            </button>
+                          </div>
+                        </td>
+
+                        {/* Bonus images current value */}
+                        <td className="px-4 py-3">
+                          <span className={`text-sm font-mono font-semibold ${(u.bonus_images || 0) > 0 ? 'text-violet-400' : 'text-slate-600'}`}>
+                            +{u.bonus_images || 0}
+                          </span>
+                        </td>
+
+                        {/* Grant images input */}
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="number"
+                              min="0"
+                              placeholder="bonus"
+                              value={grantImageInput[u.id] || ''}
+                              onChange={e => setGrantImageInput(prev => ({ ...prev, [u.id]: e.target.value }))}
+                              className="w-20 px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-slate-200 text-xs font-mono outline-none focus:border-violet-500/40 transition-all"
+                            />
+                            <button
+                              disabled={grantingImageId === u.id || !grantImageInput[u.id]}
+                              onClick={() => handleGrantImages(u)}
+                              className="px-2 py-1 rounded-lg bg-violet-500/10 border border-violet-500/20 text-violet-400 text-[10px] font-mono hover:bg-violet-500/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              {grantingImageId === u.id ? '…' : 'Set'}
                             </button>
                           </div>
                         </td>

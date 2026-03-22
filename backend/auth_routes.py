@@ -972,6 +972,7 @@ async def admin_list_users(admin: dict = Depends(_require_admin)):
                 "avatar": u.get("avatar"),
                 "credits": u.get("credits", 0),
                 "plan": u.get("plan", "free"),
+                "bonus_images": u.get("bonus_images", 0),
                 "created_at": u.get("created_at"),
                 "google_linked": bool(u.get("google_sub")),
             }
@@ -1082,6 +1083,22 @@ async def admin_grant_credits(user_id: str, body: GrantCreditsBody, admin: dict 
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found.")
     return {"ok": True, "credits": body.credits}
+
+
+class GrantImagesBody(BaseModel):
+    images: int
+
+
+@admin_router.patch("/users/{user_id}/images")
+async def admin_grant_images(user_id: str, body: GrantImagesBody, admin: dict = Depends(_require_admin)):
+    """Set a user's bonus image allowance on top of their plan limit (admin override)."""
+    if body.images < 0:
+        raise HTTPException(status_code=400, detail="Bonus images cannot be negative.")
+    db = _get_db()
+    result = await db["users"].update_one({"id": user_id}, {"$set": {"bonus_images": body.images}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return {"ok": True, "bonus_images": body.images}
 
 
 @auth_router.get("/dashboard")
