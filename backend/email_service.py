@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 SENDER      = os.environ.get("EMAIL_FROM", "Mini Assistant AI <noreply@miniassistantai.com>")
 FRONTEND    = os.environ.get("FRONTEND_URL", "https://miniassistantai.com")
 PRICING_URL = f"{FRONTEND}/pricing"
-LOGO_URL    = "https://miniassistantai.com/logo.png"
+LOGO_URL    = "https://miniassistantai.com/Logo.png"
 
 
 # ---------------------------------------------------------------------------
