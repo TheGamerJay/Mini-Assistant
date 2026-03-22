@@ -83,29 +83,63 @@ function readFileAsDataUrl(file) {
   });
 }
 
-/** Extract first frame from a video file as a JPEG data URL. */
+const MAX_VIDEO_DURATION_S = 15;
+
+/** Extract a frame from a video file as a JPEG data URL. */
 function extractVideoFrame(file) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const video = document.createElement('video');
-    video.crossOrigin = 'anonymous';
     video.muted = true;
-    video.preload = 'metadata';
-    video.onerror = () => { URL.revokeObjectURL(url); reject(new Error('video load failed')); };
-    video.onloadedmetadata = () => { video.currentTime = Math.min(0.5, video.duration * 0.1); };
-    video.onseeked = () => {
-      const maxW = 800;
-      const scale = Math.min(1, maxW / video.videoWidth);
-      const w = Math.round(video.videoWidth * scale);
-      const h = Math.round(video.videoHeight * scale);
-      const canvas = document.createElement('canvas');
-      canvas.width = w; canvas.height = h;
-      canvas.getContext('2d').drawImage(video, 0, 0, w, h);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
-      URL.revokeObjectURL(url);
-      resolve({ base64: dataUrl.split(',')[1], preview: dataUrl });
+    video.playsInline = true;
+    video.preload = 'auto';
+    let settled = false;
+
+    const cleanup = () => URL.revokeObjectURL(url);
+    const fail = (msg) => { if (settled) return; settled = true; cleanup(); reject(new Error(msg)); };
+
+    const capture = () => {
+      if (settled) return;
+      settled = true;
+      try {
+        const maxW = 800;
+        const scale = Math.min(1, maxW / (video.videoWidth || 640));
+        const w = Math.max(1, Math.round((video.videoWidth || 640) * scale));
+        const h = Math.max(1, Math.round((video.videoHeight || 480) * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(video, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+        cleanup();
+        resolve({ base64: dataUrl.split(',')[1], preview: dataUrl });
+      } catch (e) {
+        cleanup();
+        reject(new Error('Could not capture frame'));
+      }
     };
+
+    // Timeout fallback — capture whatever is rendered after 4s
+    const timer = setTimeout(capture, 4000);
+
+    video.onerror = () => { clearTimeout(timer); fail('Video format not supported by browser'); };
+
+    video.onloadedmetadata = () => {
+      if (video.duration > MAX_VIDEO_DURATION_S) {
+        clearTimeout(timer);
+        fail(`Video must be ${MAX_VIDEO_DURATION_S} seconds or less`);
+        return;
+      }
+      video.currentTime = 0;
+    };
+
+    // onseeked fires after currentTime is set — most reliable capture point
+    video.onseeked = () => { clearTimeout(timer); capture(); };
+
+    // oncanplay fallback for browsers that don't fire onseeked on t=0
+    video.oncanplay = () => { if (!settled && video.readyState >= 3) capture(); };
+
     video.src = url;
+    video.load();
   });
 }
 
@@ -562,7 +596,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
 
       {/* Supported formats hint */}
       <p className="mt-1.5 text-center text-[10px] text-slate-700 select-none">
-        📎 PNG · JPG · GIF · WebP · MP4 · MOV &nbsp;·&nbsp; 📄 PDF · TXT · MD · CSV &nbsp;·&nbsp; Max 15 MB
+        📎 PNG · JPG · GIF · WebP · MP4 (≤15s) &nbsp;·&nbsp; 📄 PDF · TXT · MD · CSV &nbsp;·&nbsp; Max 15 MB
       </p>
 
     </div>
