@@ -214,6 +214,12 @@ export function AppProvider({ children }) {
     );
   }, []);
 
+  const updateChatPreviewImage = useCallback((id, image_base64) => {
+    setChats((prev) =>
+      prev.map((c) => c.id === id ? { ...c, previewImage: image_base64 } : c)
+    );
+  }, []);
+
   // ---- Projects ----
   const [projects, setProjects] = useState(() => migrateLS('ma_v2_projects', getSessionId(), []));
 
@@ -802,6 +808,7 @@ export function AppProvider({ children }) {
     deleteChat,
     renameChat,
     updateChatMessages,
+    updateChatPreviewImage,
     // projects
     projects,
     newProject,

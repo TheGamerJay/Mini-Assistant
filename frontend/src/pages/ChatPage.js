@@ -99,6 +99,7 @@ function ChatPage() {
     newChat,
     renameChat,
     updateChatMessages,
+    updateChatPreviewImage,
     addImage,
     setPage,
     rateMessage,
@@ -190,7 +191,9 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
       responseCountRef.current = 0;
       setCompareData(null);
       setCompareLoading(false);
-      setPreviewImage(null);
+      // Restore this chat's preview image (null if none was generated yet)
+      const chat = chats.find((c) => c.id === activeChatId);
+      setPreviewImage(chat?.previewImage || null);
     }
   }, [activeChatId, chats]);
 
@@ -295,9 +298,10 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
 
         const isImg = !!data.image_base64;
         if (isImg) {
-          // Show image in Preview panel, not in chat
+          // Show image in Preview panel, not in chat — persist per-chat
           setPreviewImage(data.image_base64);
           setRightPanelOpen(true);
+          updateChatPreviewImage(chatId, data.image_base64);
           const thumb = await makeThumbnail(data.image_base64);
           await addImage(thumb, text, data.image_base64);
         }
@@ -365,6 +369,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
             if (isImg) {
               setPreviewImage(data.image_base64);
               setRightPanelOpen(true);
+              updateChatPreviewImage(chatIdRef_local, data.image_base64);
               const thumb = await makeThumbnail(data.image_base64);
               await addImage(thumb, text, data.image_base64);
             }
