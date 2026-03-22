@@ -15,7 +15,7 @@ import {
   Code2, Rocket, GitBranch, Download,
 } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
-import { api, setToken, clearToken } from '../api/client';
+import { api, setToken, clearToken, IMAGE_API } from '../api/client';
 import { useApp } from '../context/AppContext';
 
 // ---------------------------------------------------------------------------
@@ -277,13 +277,13 @@ function AdminDashboard({ adminUser, onLogout }) {
   const loadFunnel = useCallback(async () => {
     setLoadingFunnel(true);
     try {
-      const BASE = (process.env.REACT_APP_BACKEND_URL || '') + '/api';
+      // Funnel endpoints live on the image server (server.py), not the main API
       const tok  = localStorage.getItem('ma_token') || '';
       const headers = { Authorization: `Bearer ${tok}` };
       const [funnelRes, triggerRes, recentRes] = await Promise.all([
-        fetch(`${BASE}/admin/events/funnel`,      { headers }).then(r => r.json()),
-        fetch(`${BASE}/admin/events/by-trigger`,  { headers }).then(r => r.json()),
-        fetch(`${BASE}/admin/events/recent?limit=50`, { headers }).then(r => r.json()),
+        fetch(`${IMAGE_API}/admin/events/funnel`,          { headers }).then(r => r.json()),
+        fetch(`${IMAGE_API}/admin/events/by-trigger`,      { headers }).then(r => r.json()),
+        fetch(`${IMAGE_API}/admin/events/recent?limit=50`, { headers }).then(r => r.json()),
       ]);
       setFunnel(funnelRes);
       setByTrigger(triggerRes);
