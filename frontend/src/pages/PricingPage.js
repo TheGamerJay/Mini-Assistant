@@ -6,6 +6,7 @@
 
 import React, { useState, useCallback } from 'react';
 import { startCheckout, getPriceId, PRICE_IDS } from '../api/checkout';
+// getPriceId is async — call it inside handlers, not at module scope
 import {
   Check, X as XIcon, Zap, Crown, Users, Star, Shield,
   Code2, Download, Github, Rocket, MessageSquare, Image,
@@ -41,8 +42,6 @@ const PLANS = [
     badge: null,
     description: '1,000 credits per month for AI app building, chat, and code generation. Includes full access to core features with standard performance.',
     cta: 'Upgrade to Standard',
-    priceMonthly: getPriceId('standard', 'monthly'),
-    priceAnnual:  getPriceId('standard', 'yearly'),
   },
   {
     id: 'pro',
@@ -55,8 +54,6 @@ const PLANS = [
     badge: 'Most Popular',
     description: '4,000 credits per month with priority performance, advanced AI capabilities, and full access to app building, code generation, and export features.',
     cta: 'Upgrade to Pro',
-    priceMonthly: getPriceId('pro', 'monthly'),
-    priceAnnual:  getPriceId('pro', 'yearly'),
   },
   {
     id: 'max',
@@ -69,8 +66,6 @@ const PLANS = [
     badge: null,
     description: '10,000 credits per month with maximum performance, fastest processing, and complete access to every feature — advanced AI, exports, and deployment tools.',
     cta: 'Upgrade to Max',
-    priceMonthly: getPriceId('max', 'monthly'),
-    priceAnnual:  getPriceId('max', 'yearly'),
   },
 ];
 
@@ -193,7 +188,7 @@ export default function PricingPage() {
   const handleCta = useCallback(async (plan) => {
     if (plan.id === 'free' || plan.id === currentPlan) return;
 
-    const priceId = annual ? plan.priceAnnual : plan.priceMonthly;
+    const priceId = await getPriceId(plan.id, annual ? 'yearly' : 'monthly');
     if (!priceId) {
       openUpgradeModal('generic');
       return;

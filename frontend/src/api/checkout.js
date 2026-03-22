@@ -2,65 +2,67 @@
  * checkout.js
  * Complete Stripe checkout + billing portal integration for Mini Assistant AI.
  *
- * Usage:
- *   import { startCheckout, openBillingPortal, PRICE_IDS } from './api/checkout';
- *
- *   // Redirect user to Stripe Checkout:
- *   await startCheckout(PRICE_IDS.pro.monthly);
- *
- *   // Open Stripe Billing Portal (manage/cancel subscription):
- *   await openBillingPortal();
+ * Price IDs are fetched from the backend (/api/stripe/prices) so no
+ * REACT_APP_PRICE_* env vars are needed — the backend reads PRICE_* directly.
  */
 
 import api from './client';
 
 // ---------------------------------------------------------------------------
-// Price ID map — matches the env vars set in Railway
-// These are the REACT_APP_ versions of the PRICE_* backend env vars
+// Price cache — populated on module load
+// ---------------------------------------------------------------------------
+
+let _prices = null;
+
+async function _fetchPrices() {
+  try {
+    const BASE = process.env.REACT_APP_API_URL || '';
+    const res = await fetch(`${BASE}/api/stripe/prices`);
+    if (res.ok) _prices = await res.json();
+  } catch (e) {
+    console.warn('Could not fetch Stripe prices:', e);
+  }
+  if (!_prices) _prices = { standard: {}, pro: {}, max: {}, topup: {} };
+}
+
+// Pre-fetch immediately so prices are ready before user interaction
+const _ready = _fetchPrices();
+
+// ---------------------------------------------------------------------------
+// Sync accessor (uses cache — returns '' if prices not loaded yet)
+// ---------------------------------------------------------------------------
+function _get(plan, period) {
+  return _prices?.[plan]?.[period] || '';
+}
+
+// ---------------------------------------------------------------------------
+// getPriceId — async (waits for prices to load)
+// ---------------------------------------------------------------------------
+export async function getPriceId(plan, period = 'monthly') {
+  await _ready;
+  return _get(plan, period);
+}
+
+// ---------------------------------------------------------------------------
+// PRICE_IDS — lazy proxy so module-level references resolve after load
+// PricingPage uses this at module scope; values will be '' until _ready,
+// but by the time a user clicks, prices are loaded.
 // ---------------------------------------------------------------------------
 export const PRICE_IDS = {
-  standard: {
-    monthly: process.env.REACT_APP_PRICE_STANDARD_MONTHLY || '',
-    yearly:  process.env.REACT_APP_PRICE_STANDARD_YEARLY  || '',
-  },
-  pro: {
-    monthly: process.env.REACT_APP_PRICE_PRO_MONTHLY || '',
-    yearly:  process.env.REACT_APP_PRICE_PRO_YEARLY  || '',
-  },
-  max: {
-    monthly: process.env.REACT_APP_PRICE_MAX_MONTHLY || '',
-    yearly:  process.env.REACT_APP_PRICE_MAX_YEARLY  || '',
-  },
-  topup: {
-    t10: process.env.REACT_APP_PRICE_TOPUP_10 || '',   // $10 → 100 credits
-    t25: process.env.REACT_APP_PRICE_TOPUP_25 || '',   // $25 → 300 credits
-    t50: process.env.REACT_APP_PRICE_TOPUP_50 || '',   // $50 → 800 credits
-  },
-};
-
-// Credit amounts for top-up display
-export const TOPUP_CREDITS = {
-  [PRICE_IDS.topup.t10]: 100,
-  [PRICE_IDS.topup.t25]: 300,
-  [PRICE_IDS.topup.t50]: 800,
+  get standard() { return { monthly: _get('standard', 'monthly'), yearly: _get('standard', 'yearly') }; },
+  get pro()      { return { monthly: _get('pro', 'monthly'),      yearly: _get('pro', 'yearly')      }; },
+  get max()      { return { monthly: _get('max', 'monthly'),      yearly: _get('max', 'yearly')       }; },
+  get topup()    { return { t10: _get('topup', 't10'), t25: _get('topup', 't25'), t50: _get('topup', 't50') }; },
 };
 
 // ---------------------------------------------------------------------------
 // startCheckout — redirect to Stripe Checkout
 // ---------------------------------------------------------------------------
-
-/**
- * Start a Stripe Checkout session for any price ID.
- * Redirects the current tab to Stripe's hosted checkout page.
- *
- * @param {string} priceId — Stripe price ID (from PRICE_IDS above)
- * @throws {Error}        — if API call fails or priceId is empty
- */
 export async function startCheckout(priceId) {
   if (!priceId) {
     throw new Error(
       'Stripe price ID is not configured. ' +
-      'Set REACT_APP_PRICE_* env vars and redeploy.'
+      'Set PRICE_* env vars in Railway and redeploy.'
     );
   }
 
@@ -70,20 +72,12 @@ export async function startCheckout(priceId) {
     throw new Error('No checkout URL returned from server.');
   }
 
-  // Redirect the current tab (Stripe Checkout)
   window.location.href = checkout_url;
 }
 
 // ---------------------------------------------------------------------------
 // openBillingPortal — open Stripe Customer Portal
 // ---------------------------------------------------------------------------
-
-/**
- * Open the Stripe Billing Portal in a new tab.
- * Allows users to manage/cancel their subscription, update payment method, etc.
- *
- * @throws {Error} if the API call fails
- */
 export async function openBillingPortal() {
   const { portal_url } = await api.stripeOpenPortal();
 
@@ -95,19 +89,8 @@ export async function openBillingPortal() {
 }
 
 // ---------------------------------------------------------------------------
-// handleCheckoutReturn — call on app mount to detect Stripe redirects
+// handleCheckoutReturn — detect Stripe redirect params on app mount
 // ---------------------------------------------------------------------------
-
-/**
- * Detect Stripe redirect params (?checkout=success|cancelled, ?portal=return)
- * and clean the URL. Returns the detected state string or null.
- *
- * Call once in your App root useEffect:
- *   const result = handleCheckoutReturn();
- *   if (result === 'success') { refreshUserData(); }
- *
- * @returns {'success' | 'cancelled' | 'portal_return' | null}
- */
 export function handleCheckoutReturn() {
   const params   = new URLSearchParams(window.location.search);
   const checkout = params.get('checkout');
@@ -115,7 +98,6 @@ export function handleCheckoutReturn() {
 
   if (!checkout && !portal) return null;
 
-  // Clean the URL immediately so refreshing doesn't re-trigger
   window.history.replaceState({}, '', window.location.pathname);
 
   if (checkout === 'success')   return 'success';
@@ -125,36 +107,14 @@ export function handleCheckoutReturn() {
 }
 
 // ---------------------------------------------------------------------------
-// Convenience: plan → price ID lookup
+// isTopUp / getTopUpCredits
 // ---------------------------------------------------------------------------
-
-/**
- * Get the price ID for a plan + billing period.
- *
- * @param {'standard'|'pro'|'max'} plan
- * @param {'monthly'|'yearly'} period
- * @returns {string} price ID or ''
- */
-export function getPriceId(plan, period = 'monthly') {
-  return PRICE_IDS[plan]?.[period] || '';
-}
-
-/**
- * Check if a given price ID is a top-up (one-time payment).
- *
- * @param {string} priceId
- * @returns {boolean}
- */
 export function isTopUp(priceId) {
-  return Object.values(PRICE_IDS.topup).includes(priceId);
+  return Object.values(_prices?.topup || {}).includes(priceId);
 }
 
-/**
- * Get credit amount for a top-up price ID.
- *
- * @param {string} priceId
- * @returns {number} credit amount or 0
- */
 export function getTopUpCredits(priceId) {
-  return TOPUP_CREDITS[priceId] || 0;
+  const t = _prices?.topup || {};
+  const map = { [t.t10]: 100, [t.t25]: 300, [t.t50]: 800 };
+  return map[priceId] || 0;
 }

@@ -348,6 +348,30 @@ async def billing_portal(
         raise HTTPException(502, f"Stripe error: {exc.user_message or str(exc)}")
 
 
+@stripe_router.get("/prices")
+async def get_prices():
+    """Return all configured Stripe price IDs for the frontend."""
+    return {
+        "standard": {
+            "monthly": _pid("PRICE_STANDARD_MONTHLY", "STRIPE_PRICE_STANDARD_MONTHLY"),
+            "yearly":  _pid("PRICE_STANDARD_YEARLY",  "STRIPE_PRICE_STANDARD_YEARLY"),
+        },
+        "pro": {
+            "monthly": _pid("PRICE_PRO_MONTHLY", "STRIPE_PRICE_PRO_MONTHLY"),
+            "yearly":  _pid("PRICE_PRO_YEARLY",  "STRIPE_PRICE_PRO_YEARLY"),
+        },
+        "max": {
+            "monthly": _pid("PRICE_MAX_MONTHLY", "STRIPE_PRICE_MAX_MONTHLY"),
+            "yearly":  _pid("PRICE_MAX_YEARLY",  "STRIPE_PRICE_MAX_YEARLY"),
+        },
+        "topup": {
+            "t10": _pid("PRICE_TOPUP_10", "STRIPE_PRICE_TOPUP_10"),
+            "t25": _pid("PRICE_TOPUP_25", "STRIPE_PRICE_TOPUP_25"),
+            "t50": _pid("PRICE_TOPUP_50", "STRIPE_PRICE_TOPUP_50"),
+        },
+    }
+
+
 @stripe_router.get("/credits/{user_id}")
 async def get_credits(user_id: str, authorization: str = Header(None)):
     """Return full credit breakdown for a user."""

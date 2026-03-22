@@ -129,14 +129,15 @@ export function AppProvider({ children }) {
   // ---- Navigation ----
   const [page, _setPage] = useState(() => {
     const saved = localStorage.getItem('ma_active_page');
-    return (saved && saved !== 'settings') ? saved : 'chat';
+    const invalid = !saved || saved === 'settings' || saved === 'admin';
+    return invalid ? 'chat' : saved;
   });
   const prevPageRef = useRef('chat');
 
   const setPage = useCallback((p) => {
     _setPage((prev) => {
       if (prev !== 'settings' || p.startsWith('legal-')) prevPageRef.current = prev;
-      try { localStorage.setItem('ma_active_page', p); } catch {}
+      try { if (p !== 'admin') localStorage.setItem('ma_active_page', p); } catch {}
       return p;
     });
   }, []);

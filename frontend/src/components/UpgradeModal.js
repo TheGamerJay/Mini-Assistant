@@ -235,7 +235,7 @@ export default function UpgradeModal() {
 
   const handleSelect = async (plan) => {
     const period = annual ? 'yearly' : 'monthly';
-    const priceId = getPriceId(plan.id, period);
+    const priceId = await getPriceId(plan.id, period);
 
     if (!priceId) {
       // Price not configured — fall back to pricing page
