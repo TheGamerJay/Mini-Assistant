@@ -23,7 +23,7 @@ const PLANS = [
     icon: Zap,
     color: 'cyan',
     monthlyPrice: 20,
-    annualPrice: 17,
+    annualTotal: 200,   // $200/yr = $16.67/mo
     credits: 1000,
     badge: null,
     description: '1,000 credits per month for AI app building, chat, and code generation. Includes full access to core features with standard performance.',
@@ -44,7 +44,7 @@ const PLANS = [
     icon: Crown,
     color: 'violet',
     monthlyPrice: 50,
-    annualPrice: 42,
+    annualTotal: 504,   // $504/yr = $42/mo
     credits: 4000,
     badge: 'Most Popular',
     description: '4,000 credits per month with priority performance, advanced AI capabilities, and full access to app building, code generation, and export features.',
@@ -65,7 +65,7 @@ const PLANS = [
     icon: Users,
     color: 'amber',
     monthlyPrice: 100,
-    annualPrice: 83,
+    annualTotal: 996,   // $996/yr = $83/mo
     credits: 10000,
     badge: null,
     description: '10,000 credits per month with maximum performance, fastest processing, and complete access to all features including advanced AI, exports, and deployment tools.',
@@ -121,7 +121,8 @@ const REASON_COPY = {
 // ---------------------------------------------------------------------------
 function PlanCard({ plan, annual, currentPlan, onSelect, checkoutLoading }) {
   const Icon = plan.icon;
-  const price = annual ? plan.annualPrice : plan.monthlyPrice;
+  const monthlyEquiv = annual ? (plan.annualTotal / 12).toFixed(2) : null;
+  const price = annual ? monthlyEquiv : plan.monthlyPrice;
   const isCurrentPlan = currentPlan === plan.id;
   const isLoading = checkoutLoading === plan.id;
 
@@ -164,11 +165,11 @@ function PlanCard({ plan, annual, currentPlan, onSelect, checkoutLoading }) {
           <span className="text-3xl font-black text-white">${price}</span>
           <span className="text-xs text-slate-500 mb-1">/mo</span>
         </div>
-        {annual && (
+        {annual ? (
           <p className="text-[10px] text-emerald-400 mt-0.5">
-            Billed annually · Save ${(plan.monthlyPrice - plan.annualPrice) * 12}/yr
+            ${plan.annualTotal}/yr · Save ${plan.monthlyPrice * 12 - plan.annualTotal}/yr
           </p>
-        )}
+        ) : null}
         <p className={`text-[11px] font-semibold mt-1 ${c.text}`}>
           {plan.credits.toLocaleString()} credits / month
         </p>
