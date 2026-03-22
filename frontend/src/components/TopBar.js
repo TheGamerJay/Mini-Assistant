@@ -20,7 +20,7 @@ import AvatarMedia from './AvatarMedia';
 // ---------------------------------------------------------------------------
 const PLAN_LIMITS = { free: 50, standard: 500, pro: 2000, team: 10000, max: 10000 };
 
-const IMAGE_LIMITS = { free: 5, standard: 50, pro: 200, team: 1000, max: 1000 };
+const IMAGE_LIMITS = { free: 2, standard: 50, pro: 200, team: 1000, max: 1000 };
 
 function CreditChip() {
   const { credits, plan, isSubscribed, setPurchaseModalOpen, setPage, images } = useApp();
@@ -28,7 +28,7 @@ function CreditChip() {
   if (credits === null) return null; // loading
 
   const limit      = PLAN_LIMITS[plan] || 50;
-  const imgLimit   = IMAGE_LIMITS[plan] || 5;
+  const imgLimit   = IMAGE_LIMITS[plan] || 2;
   const imgCount   = (images || []).length;
   const pct        = Math.max(0, Math.min(100, (credits / limit) * 100));
   const low        = pct < 20;

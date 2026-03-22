@@ -18,6 +18,70 @@ import RightPanel from '../components/RightPanel';
 import ComparisonBubble from '../components/ComparisonBubble';
 import api from '../api/client';
 
+const FREE_IMAGE_LIMIT = 2;
+
+// ---------------------------------------------------------------------------
+// Image Limit Modal
+// ---------------------------------------------------------------------------
+function ImageLimitModal({ onClose, onUpgrade }) {
+  return (
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-md rounded-2xl bg-[#0f1020] border border-white/10 shadow-2xl overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Gradient top bar */}
+        <div className="h-1 w-full bg-gradient-to-r from-violet-500 via-cyan-400 to-violet-500" />
+
+        <div className="px-8 py-8">
+          {/* Heading */}
+          <h2 className="text-xl font-bold text-white mb-1">You've used your free images.</h2>
+          <p className="text-slate-400 text-sm mb-2">
+            You've seen how powerful image generation can be.
+          </p>
+          <p className="text-slate-300 text-sm font-medium mb-6">
+            Unlock full access to continue creating.
+          </p>
+
+          {/* Value highlights */}
+          <div className="bg-white/[0.04] border border-white/[0.06] rounded-xl px-5 py-4 mb-6">
+            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-widest mb-3">With a plan, you can:</p>
+            <ul className="space-y-2">
+              {[
+                'Generate unlimited images',
+                'Refine and iterate freely',
+                'Build and export complete projects',
+              ].map(item => (
+                <li key={item} className="flex items-center gap-2.5 text-sm text-slate-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-violet-400 flex-shrink-0" />
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* CTAs */}
+          <button
+            onClick={onUpgrade}
+            className="w-full py-3 rounded-xl bg-gradient-to-r from-violet-600 to-cyan-500 text-white text-sm font-bold hover:opacity-90 active:scale-[0.98] transition-all mb-3"
+          >
+            Unlock Full Access
+          </button>
+          <button
+            onClick={onClose}
+            className="w-full py-2 text-slate-500 text-xs hover:text-slate-300 transition-colors"
+          >
+            Learn more about plans
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Detect if a message looks like an image generation request */
 function isImageIntent(text) {
   if (!text) return false;
@@ -107,6 +171,9 @@ function ChatPage() {
     forkChat,
     setPurchaseModalOpen,
     openUpgradeModal,
+    images,
+    isSubscribed,
+    plan,
   } = useApp();
 
   const handleExport = useCallback((format = 'md') => {
@@ -149,6 +216,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
   const [messages, setMessages]       = useState([]);
   const [pendingApproval, setPendingApproval] = useState(null);
   const [rightPanelOpen, setRightPanelOpen]   = useState(false);
+  const [imageLimitOpen, setImageLimitOpen]   = useState(false);
   const [vibeMode, setVibeMode]               = useState(false);
   const [previewImage, setPreviewImage]       = useState(null); // latest generated image → shown in RightPanel
 
@@ -252,6 +320,16 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     }
     const imgs = Array.isArray(imagesBase64) ? imagesBase64.filter(Boolean) : (imagesBase64 ? [imagesBase64] : []);
     if (!text && !imgs.length) return;
+
+    // Image generation limit gate for free users
+    const _imgLimit = plan === 'standard' ? 50 : plan === 'pro' ? 200 : plan === 'team' || plan === 'max' ? 1000 : FREE_IMAGE_LIMIT;
+    const _isImgRequest = imgs.length > 0 || isImageIntent(text);
+    if (!isSubscribed && _isImgRequest && (images || []).length >= _imgLimit) {
+      setImageLimitOpen(true);
+      submittingRef.current = false;
+      return;
+    }
+
     submittingRef.current = true;
     lastUserTextRef.current = text;
 
@@ -528,7 +606,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         submittingRef.current = false;
       },
     });
-  }, [activeChatId, chats, loading, messages, newChat, renameChat, send, sendStream, updateChatMessages, addImage, setPage, vibeMode]);
+  }, [activeChatId, chats, loading, messages, newChat, renameChat, send, sendStream, updateChatMessages, addImage, setPage, vibeMode, images, isSubscribed, plan]);
 
   const handleCancel = useCallback(() => {
     cancel(sessionIdRef.current);
@@ -610,6 +688,14 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
           approval={pendingApproval}
           onApprove={handleApprove}
           onDeny={handleDeny}
+        />
+      )}
+
+      {/* Image limit reached modal */}
+      {imageLimitOpen && (
+        <ImageLimitModal
+          onClose={() => setImageLimitOpen(false)}
+          onUpgrade={() => { setImageLimitOpen(false); setPage('pricing'); }}
         />
       )}
 
