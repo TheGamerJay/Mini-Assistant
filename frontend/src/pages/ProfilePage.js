@@ -15,10 +15,11 @@ import { toast } from 'sonner';
 // ---------------------------------------------------------------------------
 // Avatar processing helpers
 // ---------------------------------------------------------------------------
-const AVATAR_ACCEPTED = 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm';
-const AVATAR_MAX_MB   = 50; // raw file limit — compressed output will be tiny
-const AVATAR_PX       = 256; // max dimension after compression
-const AVATAR_QUALITY  = 0.85;
+const AVATAR_ACCEPTED   = 'image/jpeg,image/png,image/webp,image/gif,video/mp4';
+const AVATAR_MAX_MB     = 50;
+const AVATAR_MAX_VIDEO_S = 15;
+const AVATAR_PX         = 256;
+const AVATAR_QUALITY    = 0.85;
 
 /** Compress any image file to a small JPEG data URL (max 256px). */
 function compressToAvatar(file) {
@@ -43,25 +44,47 @@ function compressToAvatar(file) {
   });
 }
 
-/** Extract first frame from a video file as a compressed avatar JPEG. */
+/** Extract first frame from an MP4 as a compressed avatar JPEG. */
 function videoToAvatar(file) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const video = document.createElement('video');
-    video.muted = true; video.preload = 'metadata';
-    video.onerror = () => { URL.revokeObjectURL(url); reject(new Error('video load failed')); };
-    video.onloadedmetadata = () => { video.currentTime = Math.min(0.5, video.duration * 0.1); };
-    video.onseeked = () => {
-      const scale = Math.min(1, AVATAR_PX / Math.max(video.videoWidth, video.videoHeight));
-      const w = Math.round(video.videoWidth * scale);
-      const h = Math.round(video.videoHeight * scale);
-      const canvas = document.createElement('canvas');
-      canvas.width = w; canvas.height = h;
-      canvas.getContext('2d').drawImage(video, 0, 0, w, h);
-      URL.revokeObjectURL(url);
-      resolve(canvas.toDataURL('image/jpeg', AVATAR_QUALITY));
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'auto';
+    let settled = false;
+
+    const cleanup = () => { URL.revokeObjectURL(url); };
+    const fail = (msg) => { if (settled) return; settled = true; cleanup(); reject(new Error(msg)); };
+    const capture = () => {
+      if (settled) return;
+      settled = true;
+      try {
+        const scale = Math.min(1, AVATAR_PX / Math.max(video.videoWidth || 256, video.videoHeight || 256));
+        const w = Math.round((video.videoWidth || 256) * scale);
+        const h = Math.round((video.videoHeight || 256) * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(video, 0, 0, w, h);
+        cleanup();
+        resolve(canvas.toDataURL('image/jpeg', AVATAR_QUALITY));
+      } catch { fail('Could not capture frame'); }
     };
+
+    const timer = setTimeout(capture, 5000); // fallback if events don't fire
+
+    video.onerror = () => { clearTimeout(timer); fail('Could not load video — use MP4 format'); };
+    video.onloadedmetadata = () => {
+      if (video.duration > AVATAR_MAX_VIDEO_S) {
+        clearTimeout(timer); fail(`Video must be ${AVATAR_MAX_VIDEO_S} seconds or less`); return;
+      }
+      video.currentTime = 0;
+    };
+    video.onseeked  = () => { clearTimeout(timer); capture(); };
+    video.oncanplay = () => { if (!settled) { clearTimeout(timer); capture(); } };
+
     video.src = url;
+    video.load();
   });
 }
 
@@ -302,7 +325,7 @@ function ProfilePage() {
                   </button>
                 )}
               </div>
-              <p className="text-[10px] text-slate-600 mt-2">PNG · JPG · WebP · GIF · MP4 &nbsp;·&nbsp; Max 50 MB</p>
+              <p className="text-[10px] text-slate-600 mt-2">PNG · JPG · JPEG · GIF · WebP · MP4 (≤15s) &nbsp;·&nbsp; Max 50 MB</p>
             </div>
           </div>
         </Card>
