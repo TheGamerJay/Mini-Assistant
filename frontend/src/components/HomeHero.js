@@ -99,7 +99,7 @@ function HomeHero({ onSubmit, loading, lastTopic }) {
         {/* Mascot + greeting */}
         <div className="flex flex-col items-center gap-4">
           <img
-            src="/mascot.png"
+            src="/Logo.png"
             alt="Mini Assistant"
             className="w-24 h-24 sm:w-28 sm:h-28 object-contain drop-shadow-[0_0_24px_rgba(139,92,246,0.5)]"
           />
