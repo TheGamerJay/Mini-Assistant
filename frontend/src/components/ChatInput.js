@@ -216,25 +216,6 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
     textareaRef.current?.focus();
   }, [processImageFile, value]);
 
-  const handleFileChange = useCallback((e) => {
-    const files = e.target.files;
-    if (!files?.length) return;
-    // Route each file: media → image pipeline, docs → doc pipeline
-    const mediaFiles = [];
-    for (const f of files) {
-      const ext = '.' + (f.name.split('.').pop() || '').toLowerCase();
-      if (ACCEPTED_DOC_TYPES.includes(f.type) || ACCEPTED_DOC_EXTS.includes(ext)) {
-        processDocFile(f);
-      } else {
-        mediaFiles.push(f);
-      }
-    }
-    if (mediaFiles.length) addImages(mediaFiles);
-    e.target.value = '';
-  }, [addImages, processDocFile]);
-
-  const openFilePicker = useCallback(() => { fileInputRef.current?.click(); }, []);
-
   const processDocFile = useCallback(async (file) => {
     const ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
     const okType = ACCEPTED_DOC_TYPES.includes(file.type) || ACCEPTED_DOC_EXTS.includes(ext);
@@ -255,6 +236,24 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
       textareaRef.current?.focus();
     }
   }, []);
+
+  const handleFileChange = useCallback((e) => {
+    const files = e.target.files;
+    if (!files?.length) return;
+    const mediaFiles = [];
+    for (const f of files) {
+      const ext = '.' + (f.name.split('.').pop() || '').toLowerCase();
+      if (ACCEPTED_DOC_TYPES.includes(f.type) || ACCEPTED_DOC_EXTS.includes(ext)) {
+        processDocFile(f);
+      } else {
+        mediaFiles.push(f);
+      }
+    }
+    if (mediaFiles.length) addImages(mediaFiles);
+    e.target.value = '';
+  }, [addImages, processDocFile]);
+
+  const openFilePicker = useCallback(() => { fileInputRef.current?.click(); }, []);
 
   const removeDoc = useCallback(() => {
     setAttachedDoc(null);
