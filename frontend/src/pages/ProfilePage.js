@@ -90,10 +90,14 @@ function videoToAvatar(file) {
 
 async function processAvatarFile(file) {
   const isVideo = file.type.startsWith('video/');
+  const isGif   = file.type === 'image/gif';
   const isImage = file.type.startsWith('image/');
   if (!isImage && !isVideo) throw new Error('Unsupported file type');
   if (file.size > AVATAR_MAX_MB * 1024 * 1024) throw new Error(`File must be under ${AVATAR_MAX_MB} MB`);
-  return isVideo ? videoToAvatar(file) : compressToAvatar(file);
+  if (isVideo) return videoToAvatar(file);
+  // Preserve GIF as-is so animation plays in the avatar
+  if (isGif) return readFileAsDataUrl(file);
+  return compressToAvatar(file);
 }
 
 // ---------------------------------------------------------------------------
@@ -296,7 +300,7 @@ function ProfilePage() {
             <div className="relative flex-shrink-0 group cursor-pointer" onClick={handleAvatarClick}>
               <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center text-white text-2xl font-bold select-none overflow-hidden">
                 {avatar
-                  ? <img src={avatar} alt="Avatar" className="w-24 h-24 rounded-2xl object-cover" />
+                  ? <img src={avatar} alt="Avatar" className="w-24 h-24 rounded-2xl object-contain" />
                   : initial}
               </div>
               <div className="absolute inset-0 rounded-2xl bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">

@@ -335,7 +335,7 @@ export default function UserDashboard() {
             </button>
             <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-500 to-violet-600 flex items-center justify-center overflow-hidden flex-shrink-0">
               {avatar
-                ? <img src={avatar} alt="" className="w-full h-full object-cover" />
+                ? <img src={avatar} alt="" className="w-full h-full object-contain" />
                 : <span className="text-lg font-bold text-white">{(user?.name?.[0] || '?').toUpperCase()}</span>
               }
             </div>
