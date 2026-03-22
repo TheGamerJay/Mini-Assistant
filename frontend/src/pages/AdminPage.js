@@ -310,15 +310,15 @@ function AdminDashboard({ adminUser, onLogout }) {
   useEffect(() => {
     loadStats();
     loadUsers();
+    loadAnalytics(); // needed by Overview summary row too
     checkStatus();
-  }, [loadStats, loadUsers, checkStatus]);
+  }, [loadStats, loadUsers, loadAnalytics, checkStatus]);
 
   // Load tab data when first opened
   useEffect(() => {
     if (activeTab === 'activity' && activity.length === 0) loadActivity();
-    if (activeTab === 'revenue' && !analytics) loadAnalytics();
+    if ((activeTab === 'revenue' || activeTab === 'profit') && !analytics) loadAnalytics();
     if (activeTab === 'profit' && !optimizer) loadOptimizer();
-    if (activeTab === 'profit' && !analytics) loadAnalytics();
     if (activeTab === 'analytics' && !funnel) loadFunnel();
   }, [activeTab, activity.length, analytics, optimizer, funnel, loadActivity, loadAnalytics, loadOptimizer, loadFunnel]);
 
@@ -416,10 +416,10 @@ function AdminDashboard({ adminUser, onLogout }) {
           </div>
           <button
             onClick={() => {
-            loadStats(); loadUsers(); checkStatus();
+            loadStats(); loadUsers(); loadAnalytics(); checkStatus();
             if (activeTab === 'activity') loadActivity();
-            if (activeTab === 'revenue') loadAnalytics();
-            if (activeTab === 'profit') { loadAnalytics(); loadOptimizer(); }
+            if (activeTab === 'profit') loadOptimizer();
+            if (activeTab === 'analytics') loadFunnel();
           }}
             className="p-2 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all"
             title="Refresh"
@@ -481,6 +481,16 @@ function AdminDashboard({ adminUser, onLogout }) {
                 <StatCard icon={Activity}      label="Total Activity"      value={stats?.total_activity_events}   color="slate" />
                 <StatCard icon={ThumbsUp}      label="Thumbs Up"           value={stats?.thumbs_up}               color="emerald" />
                 <StatCard icon={ThumbsDown}    label="Thumbs Down"         value={stats?.thumbs_down}             color="red" />
+              </div>
+            )}
+
+            {/* Financial summary — pulls from analytics (same data as Revenue/Profit tabs) */}
+            {analytics && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <StatCard icon={DollarSign}  label="MRR Estimate"       value={`$${analytics.mrr_estimate_usd?.toFixed(2)}`}        color="emerald" />
+                <StatCard icon={Activity}    label="AI Cost This Month" value={`$${analytics.ai_cost_this_month_usd?.toFixed(2)}`}  color="red" />
+                <StatCard icon={TrendingUp}  label="Net Profit Est."    value={`$${analytics.net_profit_estimate_usd?.toFixed(2)}`} color={analytics.net_profit_estimate_usd > 0 ? 'emerald' : 'red'} />
+                <StatCard icon={CreditCard}  label="Paying Users"       value={analytics.paying_users}                              color="violet" />
               </div>
             )}
 
