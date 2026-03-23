@@ -417,11 +417,17 @@ function PreviewPane({ blocks, previewImage = null, onClearImage, isStreaming = 
       }
 
       // Extract fixed HTML from Claude's response
-      const fenceMatch = /```html\s*\n([\s\S]+?)```/.exec(accumulated);
+      // Use greedy match so we capture to the LAST closing ```, not the first
+      const fenceMatch = /```html\s*\n([\s\S]+)```/.exec(accumulated);
       const rawMatch = /<!DOCTYPE\s+html/i.exec(accumulated);
       let newHtml = null;
-      if (fenceMatch) newHtml = fenceMatch[1];
-      else if (rawMatch) newHtml = accumulated.slice(rawMatch.index);
+      if (fenceMatch) newHtml = fenceMatch[1].trim();
+      else if (rawMatch) {
+        // Strip anything after the closing </html> tag
+        const slice = accumulated.slice(rawMatch.index);
+        const endTag = /(<\/html\s*>)/i.exec(slice);
+        newHtml = endTag ? slice.slice(0, endTag.index + endTag[1].length) : slice;
+      }
 
       if (newHtml) {
         workingHtml = newHtml;
@@ -444,6 +450,9 @@ function PreviewPane({ blocks, previewImage = null, onClearImage, isStreaming = 
 
     // Notify parent with final code so it can add to chat history
     if (onFixedHtml && workingHtml !== startHtml) onFixedHtml(workingHtml);
+
+    // Remount iframe so fixed code runs from a clean state (clears stale JS)
+    if (workingHtml !== startHtml) setKey(k => k + 1);
 
     fixingRef.current = false;
     setFixing(false);
@@ -649,17 +658,27 @@ function PreviewPane({ blocks, previewImage = null, onClearImage, isStreaming = 
               </div>
             )}
             {!fixing && fixLog.length > 0 && (
-              <span
-                className="ml-auto text-[9px] font-mono px-2 py-0.5 rounded-full"
-                style={{
-                  background: fixLog[fixLog.length-1]?.allClear
-                    ? 'rgba(16,185,129,0.15)' : 'rgba(139,92,246,0.15)',
-                  color: fixLog[fixLog.length-1]?.allClear ? '#34d399' : '#a78bfa',
-                  border: `1px solid ${fixLog[fixLog.length-1]?.allClear ? 'rgba(16,185,129,0.3)' : 'rgba(139,92,246,0.3)'}`,
-                }}
-              >
-                {fixLog[fixLog.length-1]?.allClear ? '✓ clean' : `${fixLog.length} pass${fixLog.length > 1 ? 'es' : ''}`}
-              </span>
+              <>
+                <span
+                  className="text-[9px] font-mono px-2 py-0.5 rounded-full"
+                  style={{
+                    background: fixLog[fixLog.length-1]?.allClear
+                      ? 'rgba(16,185,129,0.15)' : 'rgba(139,92,246,0.15)',
+                    color: fixLog[fixLog.length-1]?.allClear ? '#34d399' : '#a78bfa',
+                    border: `1px solid ${fixLog[fixLog.length-1]?.allClear ? 'rgba(16,185,129,0.3)' : 'rgba(139,92,246,0.3)'}`,
+                  }}
+                >
+                  {fixLog[fixLog.length-1]?.allClear ? '✓ clean' : `${fixLog.length} pass${fixLog.length > 1 ? 'es' : ''}`}
+                </span>
+                <button
+                  onClick={() => setFixLog([])}
+                  className="ml-auto p-0.5 rounded hover:bg-white/10 transition-colors"
+                  title="Dismiss"
+                  style={{ color: '#475569' }}
+                >
+                  <X size={11} />
+                </button>
+              </>
             )}
           </div>
 
@@ -689,16 +708,19 @@ function PreviewPane({ blocks, previewImage = null, onClearImage, isStreaming = 
                   : 'linear-gradient(90deg, transparent, rgba(245,158,11,0.6), transparent)',
               }} />
               <div className="flex items-center gap-1.5 mb-1">
-                {log.allClear
+                {(log.allClear && log.fixed)
                   ? <CheckCircle size={10} style={{ color: '#34d399', filter: 'drop-shadow(0 0 3px rgba(52,211,153,0.6))' }} />
                   : log.fixed
                   ? <Zap size={10} style={{ color: '#a78bfa', filter: 'drop-shadow(0 0 3px rgba(167,139,250,0.6))' }} />
+                  : log.allClear
+                  ? <CheckCircle size={10} style={{ color: '#64748b' }} />
                   : <AlertTriangle size={10} style={{ color: '#fbbf24', filter: 'drop-shadow(0 0 3px rgba(251,191,36,0.6))' }} />}
-                <span style={{ color: log.allClear ? '#6ee7b7' : log.fixed ? '#c4b5fd' : '#fcd34d', fontWeight: 600 }}>
+                <span style={{ color: log.fixed ? '#c4b5fd' : log.allClear ? '#94a3b8' : '#fcd34d', fontWeight: 600 }}>
                   Pass {log.pass}
                 </span>
-                {log.allClear && <span style={{ color: '#34d399' }}> — All clear!</span>}
+                {log.allClear && log.fixed && <span style={{ color: '#34d399' }}> — Patched & clean</span>}
                 {log.fixed && !log.allClear && <span style={{ color: '#a78bfa' }}> — Patched</span>}
+                {log.allClear && !log.fixed && <span style={{ color: '#94a3b8' }}> — No issues found</span>}
                 {!log.fixed && !log.allClear && <span style={{ color: '#fbbf24' }}> — No output</span>}
               </div>
               <div className="text-slate-500 line-clamp-2">
