@@ -124,11 +124,20 @@ function AppBuilderCard({ code }) {
               {code}
             </pre>
           ) : (
-            <div className="px-4 py-3 flex items-center gap-2">
-              <span className="text-[11px] text-slate-500">Full code view is a</span>
-              <span className="text-[9px] text-amber-400/80 border border-amber-400/20 bg-amber-400/5 px-1.5 py-0.5 rounded font-mono">PRO</span>
-              <span className="text-[11px] text-slate-500">feature — preview it in the panel →</span>
-            </div>
+            <>
+              <pre className="px-4 py-3 text-[11px] leading-[1.7] font-mono text-slate-500 overflow-hidden select-none">
+                {lines.slice(0, 4).map((l, i) => (
+                  <div key={i}>{l.length > 48 ? l.slice(0, 48) + ' …' : l || ' '}</div>
+                ))}
+                {lineCount > 4 && (
+                  <div className="text-slate-700 mt-0.5">… {lineCount - 4} more lines hidden</div>
+                )}
+              </pre>
+              <div className="px-4 py-2 border-t border-white/[0.04] flex items-center gap-2">
+                <span className="text-[9px] text-amber-400/80 border border-amber-400/20 bg-amber-400/5 px-1.5 py-0.5 rounded font-mono">PRO</span>
+                <span className="text-[11px] text-slate-500">Upgrade to see the full code</span>
+              </div>
+            </>
           )}
         </div>
       )}
