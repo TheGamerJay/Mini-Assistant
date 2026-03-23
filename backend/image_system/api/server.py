@@ -151,6 +151,71 @@ def _compress_image_b64(b64: str, max_px: int = 512, quality: int = 65) -> str:
         return b64
 
 # ---------------------------------------------------------------------------
+# Watermark — applied to generated images for free-plan users
+# ---------------------------------------------------------------------------
+
+def _apply_watermark(b64: str) -> str:
+    """Stamp 'Mini Assistant AI' at the bottom-right of a base64 image."""
+    if not _PIL_AVAILABLE or not b64:
+        return b64
+    try:
+        from PIL import ImageDraw, ImageFont
+        raw = base64.b64decode(b64)
+        img = _PILImage.open(io.BytesIO(raw)).convert("RGBA")
+        w, h = img.size
+
+        # Transparent overlay layer
+        overlay = _PILImage.new("RGBA", img.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+
+        label = "Built with Mini Assistant AI"
+        font_size = max(12, int(h * 0.022))  # ~2% of image height
+
+        # Try system fonts, fall back to PIL default
+        font = None
+        for font_path in [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "C:/Windows/Fonts/arial.ttf",
+        ]:
+            try:
+                font = ImageFont.truetype(font_path, font_size)
+                break
+            except Exception:
+                pass
+        if font is None:
+            font = ImageFont.load_default()
+
+        # Measure text
+        bbox = draw.textbbox((0, 0), label, font=font)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+        # Position: bottom-right with padding
+        pad = int(h * 0.018)
+        x = w - tw - pad
+        y = h - th - pad
+
+        # Semi-transparent dark pill behind text
+        pill_pad = 4
+        draw.rounded_rectangle(
+            [x - pill_pad, y - pill_pad, x + tw + pill_pad, y + th + pill_pad],
+            radius=4, fill=(0, 0, 0, 140)
+        )
+        # White text with slight shadow
+        draw.text((x + 1, y + 1), label, font=font, fill=(0, 0, 0, 100))
+        draw.text((x, y), label, font=font, fill=(255, 255, 255, 200))
+
+        # Composite and return as PNG
+        watermarked = _PILImage.alpha_composite(img, overlay).convert("RGB")
+        buf = io.BytesIO()
+        watermarked.save(buf, format="PNG", optimize=True)
+        return base64.b64encode(buf.getvalue()).decode()
+    except Exception as _wm_err:
+        logger.debug("Watermark failed (non-fatal): %s", _wm_err)
+        return b64
+
+
+# ---------------------------------------------------------------------------
 # Active generation tracking (for cancellation)
 # ---------------------------------------------------------------------------
 
@@ -1003,6 +1068,22 @@ async def generate_image(req: GenerateRequest, request: Request):
         await _log_img(auth_header, request_id=req.request_id)
     except Exception:
         pass
+
+    # ── Watermark for free-plan users ────────────────────────────────────────
+    try:
+        _wm_payload = None
+        try:
+            from mini_credits import _decode_bearer as _dec_wm
+            _wm_payload = _dec_wm(auth_header)
+        except Exception:
+            pass
+        _wm_uid  = (_wm_payload or {}).get("sub")
+        _wm_user = await db["users"].find_one({"id": _wm_uid}, {"plan": 1}) if (db and _wm_uid) else None
+        _wm_plan = (_wm_user or {}).get("plan", "free")
+        if _wm_plan not in ("standard", "pro", "max"):
+            image_b64 = _apply_watermark(image_b64)
+    except Exception as _wm_e:
+        logger.debug("Watermark check failed (non-fatal): %s", _wm_e)
 
     elapsed = (time.perf_counter() - start_time) * 1000
     return GenerateResponse(
