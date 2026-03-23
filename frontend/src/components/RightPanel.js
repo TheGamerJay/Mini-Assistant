@@ -515,10 +515,10 @@ function RightPanel({ messages = [], streamingText = null, open, onClose, previe
         </div>
         <button
           onClick={onClose}
-          className="p-1 rounded hover:bg-white/5 text-slate-600 hover:text-slate-400 transition-colors flex-shrink-0 ml-1"
-          title="Close panel"
+          className="p-1 rounded hover:bg-red-500/20 text-slate-500 hover:text-red-400 transition-colors flex-shrink-0 ml-1"
+          title="Close preview"
         >
-          <X size={13} />
+          <X size={14} />
         </button>
       </div>
 
