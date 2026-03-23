@@ -680,7 +680,7 @@ function Sidebar() {
                   style={sidebarCollapsed ? { width: 36, height: 36 } : {}}
                 >
                   {img.thumb
-                    ? <img src={img.thumb} alt={img.prompt} className="w-full h-full object-cover" />
+                    ? <img src={img.thumb} alt={img.prompt} className="w-full h-full object-contain" />
                     : <div className="w-full h-full flex items-center justify-center text-slate-600"><Image size={10} /></div>}
                 </button>
               ))}
