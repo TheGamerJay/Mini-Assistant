@@ -5062,17 +5062,17 @@ async def posthog_proxy(path: str, request: StarletteRequest):
                 headers=fwd_headers,
                 content=body,
             )
-        # Swallow upstream errors — analytics must not surface to the SDK
-        if ph_resp.status_code >= 400:
-            logging.debug("PostHog upstream %s for %s (swallowed)", ph_resp.status_code, path)
-            return Response(status_code=204)
+        # Forward response as-is — SDK reads these bodies (feature flags,
+        # config, etc.) and uses the status code to decide whether to retry.
         return Response(
             content=ph_resp.content,
             status_code=ph_resp.status_code,
             headers=dict(ph_resp.headers),
         )
     except Exception as _exc:
-        logging.debug("PostHog proxy failed (non-fatal): %s", _exc)
+        # Network failure (timeout, connection error) — no body to forward,
+        # return 204 so the SDK doesn't log an unhandled fetch error.
+        logging.debug("PostHog proxy network error (non-fatal): %s", _exc)
         return Response(status_code=204)
 
 
