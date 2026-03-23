@@ -384,9 +384,12 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
   const { send, sendStream, cancel, loading } = useChat();
   const [messages, setMessages]       = useState([]);
   const [pendingApproval, setPendingApproval] = useState(null);
-  const [rightPanelOpen, setRightPanelOpen]   = useState(false);
+  const [rightPanelOpen, setRightPanelOpen]   = useState(() => localStorage.getItem('rightPanelOpen') === 'true');
   const [imageLimitOpen, setImageLimitOpen]   = useState(false);
-  const [chatMode, setChatMode]               = useState(null); // null | 'image' | 'build'
+  const [chatMode, setChatMode]               = useState(() => {
+    const saved = localStorage.getItem('chatMode');
+    return ['image', 'build', 'chat'].includes(saved) ? saved : null;
+  }); // null | 'image' | 'build' | 'chat' — persisted across refreshes
   const vibeMode = chatMode === 'build'; // legacy compat — still used in sendStream body
   const [previewImage, setPreviewImage]       = useState(null); // latest generated image → shown in RightPanel
 
@@ -454,6 +457,11 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     el.addEventListener('scroll', onScroll, { passive: true });
     return () => el.removeEventListener('scroll', onScroll);
   }, []);
+
+  // Persist right panel open/closed state across refreshes
+  useEffect(() => {
+    localStorage.setItem('rightPanelOpen', rightPanelOpen ? 'true' : 'false');
+  }, [rightPanelOpen]);
 
   // Keyboard shortcuts: Ctrl+K = new chat, Esc = cancel generation
   useEffect(() => {
@@ -859,7 +867,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         loading={loading}
         lastTopic={lastUserTextRef.current || null}
         chatMode={chatMode}
-        onChatModeChange={setChatMode}
+        onChatModeChange={mode => { setChatMode(mode); if (mode) localStorage.setItem('chatMode', mode); else localStorage.removeItem('chatMode'); }}
       />
     );
   }
@@ -1022,7 +1030,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
                 'Message Mini Assistant…'
               }
               chatMode={chatMode}
-              onChatModeChange={setChatMode}
+              onChatModeChange={mode => { setChatMode(mode); if (mode) localStorage.setItem('chatMode', mode); else localStorage.removeItem('chatMode'); }}
             />
           </div>
           <div className="flex items-center justify-between mt-2">
