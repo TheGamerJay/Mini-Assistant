@@ -5187,22 +5187,71 @@ async def send_expiry_reminders():
 # PostHog reverse proxy — avoids CORS errors from us.i.posthog.com/s/
 # All /ingest/* requests are forwarded to us.i.posthog.com with the same
 # method, headers (minus host), body, and query string.
+#
+# Protection:
+#   • Allowlisted paths only — unknown paths return 404
+#   • Per-IP sliding-window rate limit (100 req/min, reuses _mem from safety.py)
+#   • Payload size cap (512 KB)
 # ---------------------------------------------------------------------------
 _POSTHOG_HOST = "https://us.i.posthog.com"
 
+# Paths that PostHog clients legitimately hit. Anything else is rejected.
+_POSTHOG_ALLOWED_PREFIXES = (
+    "e/",       # event capture
+    "batch/",   # batch event capture
+    "decide/",  # feature flags
+    "s/",       # session recording
+    "static/",  # SDK asset bundle fetched at init
+    "array.js", # legacy SDK path
+    "engage/",  # person properties
+    "t/",       # toolbar
+    "surveys/", # surveys
+)
+
+_INGEST_RPM   = 100      # per-IP requests per minute
+_INGEST_MAX_B = 512_000  # 512 KB max body
+
+
+def _client_ip(request: StarletteRequest) -> str:
+    """Best-effort real IP (Railway sets X-Forwarded-For)."""
+    xff = request.headers.get("x-forwarded-for", "")
+    return xff.split(",")[0].strip() or request.client.host or "unknown"
+
+
 @app.api_route("/ingest/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
 async def posthog_proxy(path: str, request: StarletteRequest):
+    from fastapi.responses import Response
+    from safety import _mem  # reuse the existing sliding-window counter
+
+    # ── 1. Path allowlist ────────────────────────────────────────────────────
+    if not any(path.startswith(p) for p in _POSTHOG_ALLOWED_PREFIXES):
+        return Response(content="Not found", status_code=404)
+
+    # ── 2. Per-IP rate limit ─────────────────────────────────────────────────
+    ip  = _client_ip(request)
+    key = f"ph_proxy:{ip}"
+    if not _mem.check_and_record(key, _INGEST_RPM, 60):
+        retry = _mem.retry_after(key, 60)
+        return Response(
+            content="Too Many Requests",
+            status_code=429,
+            headers={"Retry-After": str(retry)},
+        )
+
+    # ── 3. Payload size cap ──────────────────────────────────────────────────
+    body = await request.body()
+    if len(body) > _INGEST_MAX_B:
+        return Response(content="Payload Too Large", status_code=413)
+
+    # ── 4. Forward to PostHog ────────────────────────────────────────────────
     url = f"{_POSTHOG_HOST}/{path}"
     if request.query_params:
         url += "?" + str(request.query_params)
 
-    # Forward all headers except Host (which httpx sets automatically)
     fwd_headers = {
         k: v for k, v in request.headers.items()
         if k.lower() not in ("host", "content-length")
     }
-
-    body = await request.body()
 
     async with httpx.AsyncClient(timeout=15) as client_ph:
         ph_resp = await client_ph.request(
@@ -5212,7 +5261,6 @@ async def posthog_proxy(path: str, request: StarletteRequest):
             content=body,
         )
 
-    from fastapi.responses import Response
     return Response(
         content=ph_resp.content,
         status_code=ph_resp.status_code,
