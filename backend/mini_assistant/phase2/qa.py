@@ -78,12 +78,19 @@ def should_run_qa(execution_intent: str, priority: str) -> bool:
     """
     Return True if this request warrants a QA review pass.
 
+    Auto-enables when OPENAI_REASONING_MODEL + OPENAI_API_KEY are set
+    and the CEO determined this is a quality-priority request.
+    Can be explicitly disabled with ENABLE_QA_LOOP=false.
+
     Checks:
-      1. ENABLE_QA_LOOP env var must be "true"
-      2. CEO priority must be "quality"
-      3. Intent must be a code/builder intent
+      1. ENABLE_QA_LOOP != "false"  (opt-out, not opt-in)
+      2. OPENAI_REASONING_MODEL + OPENAI_API_KEY must be set
+      3. CEO priority must be "quality"
+      4. Intent must be a code/builder intent
     """
-    if os.getenv("ENABLE_QA_LOOP", "false").lower() != "true":
+    if os.getenv("ENABLE_QA_LOOP", "true").lower() == "false":
+        return False
+    if not (os.getenv("OPENAI_REASONING_MODEL") and os.getenv("OPENAI_API_KEY")):
         return False
     if priority != "quality":
         return False

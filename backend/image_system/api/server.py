@@ -1584,11 +1584,14 @@ async def chat(req: ChatRequest, request: Request):
 
     if execution_intent == "image_edit":
         # ── TRUE IMAGE EDIT: minimal prompt — model already has the image ──
-        # Do NOT send a text description of the image. gpt-image-1 can see the
-        # image directly; a long description tells it to recreate from text
-        # rather than make a targeted pixel-level change.
         logger.info("[MODEL ROUTER] image_edit → gpt-image-1 edit()")
-        _edit_instruction = effective_msg.strip()
+        # GPT-5.4 converts the vague user request into a precise, unambiguous
+        # edit instruction before hitting gpt-image-1.
+        try:
+            from mini_assistant.phase2.prompt_enhancer import enhance_edit_instruction
+            _edit_instruction = await enhance_edit_instruction(effective_msg.strip())
+        except Exception:
+            _edit_instruction = effective_msg.strip()
         _edit_prompt = (
             f"Apply ONLY this change: {_edit_instruction}\n\n"
             "Rules:\n"
@@ -1629,8 +1632,15 @@ async def chat(req: ChatRequest, request: Request):
         logger.info("[MODEL ROUTER] image_generation → DALL-E 3")
         try:
             from ..services.dalle_client import DalleClient
+            # GPT-5.4 enriches the raw user prompt with art style, lighting,
+            # composition, and quality modifiers before hitting DALL-E 3.
+            try:
+                from mini_assistant.phase2.prompt_enhancer import enhance_image_prompt
+                _gen_prompt = await enhance_image_prompt(effective_msg)
+            except Exception:
+                _gen_prompt = effective_msg
             _dalle = DalleClient()
-            _b64 = await _dalle.generate(effective_msg)
+            _b64 = await _dalle.generate(_gen_prompt)
             try:
                 from mini_credits import log_image_generated as _log_img
                 await _log_img(request.headers.get("authorization"), request_id=getattr(req, "request_id", None))
@@ -1775,10 +1785,23 @@ async def chat(req: ChatRequest, request: Request):
                 except Exception:
                     pass
 
+            # GPT-5.4 enriches the system context for complex coding/builder requests
+            _gpt_code_ctx = ""
+            if ceo_posture and ceo_posture.priority == "quality":
+                try:
+                    from mini_assistant.phase2.prompt_enhancer import enhance_code_context
+                    _gpt_code_ctx = await enhance_code_context(
+                        effective_msg, execution_intent or "chat"
+                    ) or ""
+                except Exception:
+                    _gpt_code_ctx = ""
+
             # Build system prompt
             _sys_prompt = _MINI_SYSTEM_PROMPT
             if _LYRICS_INTENT.search(effective_msg):
                 _sys_prompt = _MINI_SYSTEM_PROMPT + "\n\n" + _LYRICS_SYSTEM_PROMPT
+            if _gpt_code_ctx:
+                _sys_prompt = _sys_prompt + "\n\n[TASK CONTEXT — GPT-5.4 ANALYSIS]\n" + _gpt_code_ctx
 
             # Build conversation history for Claude (no system role in messages list)
             claude_msgs: list[dict] = []

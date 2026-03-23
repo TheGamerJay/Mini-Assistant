@@ -24,9 +24,10 @@ Public surface:
 from .ceo        import assess as ceo_assess,  CEOPosture
 from .manager    import prepare as mgr_prepare, ManagerPacket, get_session_summary
 from .supervisor import Supervisor, SupervisorResult
-from .models     import MODEL_CONFIG, get_model
-from .router     import call_model
-from .qa         import review as qa_review, should_run_qa
+from .models          import MODEL_CONFIG, get_model
+from .router          import call_model
+from .qa              import review as qa_review, should_run_qa
+from .prompt_enhancer import enhance_image_prompt, enhance_edit_instruction, enhance_code_context
 
 __all__ = [
     # Phase 2 core
@@ -44,4 +45,8 @@ __all__ = [
     # QA feedback loop
     "qa_review",
     "should_run_qa",
+    # Prompt enhancement
+    "enhance_image_prompt",
+    "enhance_edit_instruction",
+    "enhance_code_context",
 ]
