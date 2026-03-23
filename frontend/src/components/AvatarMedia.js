@@ -36,8 +36,13 @@ export default function AvatarMedia({ src, className, fallback = null }) {
         loop
         muted
         playsInline
+        disablePictureInPicture
+        disableRemotePlayback
+        controlsList="nopictureinpicture nodownload noremoteplayback"
         className={className}
         onError={() => setVideoError(true)}
+        onContextMenu={(e) => e.preventDefault()}
+        style={{ pointerEvents: 'none' }}
       />
     );
   }
