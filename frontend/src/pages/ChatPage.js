@@ -108,48 +108,75 @@ function LoadingBubble() {
   );
 }
 
+// Syntax colour for a single code line
+function lineColor(line) {
+  if (/^\s*(\/\/|\/\*|#)/.test(line))                                                          return 'text-slate-600';
+  if (/^\s*(function|const|let|var|if|else|for|while|return|class|import|export|async|await|def|self)\b/.test(line)) return 'text-violet-400';
+  if (/^\s*[\w-]+\s*\(/.test(line))                                                            return 'text-yellow-300/80';
+  if (/^\s*[\w-]+\s*[:=]/.test(line))                                                          return 'text-cyan-300';
+  if (/[<>{}]/.test(line))                                                                     return 'text-amber-300/70';
+  return 'text-slate-400';
+}
+
+// Clip a line to max N chars — intentionally short so nothing is grab-able
+const CLIP = 36;
+function clip(line) {
+  const trimmed = line.trimStart();
+  return trimmed.length > CLIP ? trimmed.slice(0, CLIP) + ' …' : trimmed;
+}
+
 /** Live code-terminal shown while the app builder streams */
 function BuildingTerminal({ codeText, linesBuilt }) {
-  const termRef = useRef(null);
+  // Sample 4 lines: newest 2 + 2 from middle of what's built (gives variety)
+  const allLines = codeText.split('\n').filter(l => l.trim());
+  const mid = Math.floor(allLines.length / 2);
+  const sample = [
+    ...(allLines.length > 6 ? allLines.slice(mid - 1, mid + 1) : []),
+    ...allLines.slice(-2),
+  ].slice(-4); // max 4 lines shown at once
 
-  // Grab the last 5 non-empty lines of code as they arrive
-  const liveLines = codeText
-    .split('\n')
-    .filter(l => l.trim())
-    .slice(-5);
-
-  // Auto-scroll the terminal to the bottom on every update
-  useEffect(() => {
-    if (termRef.current) termRef.current.scrollTop = termRef.current.scrollHeight;
-  });
+  // Progress bar width — caps at 95% (we don't know total lines ahead of time)
+  const progress = Math.min(95, Math.round((linesBuilt / 7) * 10) / 10);
 
   return (
-    <div className="rounded-lg border border-cyan-500/20 bg-[#0a0b14] overflow-hidden w-full">
-      {/* Title bar */}
-      <div className="flex items-center gap-2 px-3 py-1.5 bg-[#0f1120] border-b border-white/[0.05]">
-        <span className="inline-block w-0.5 h-3 bg-cyan-400 animate-pulse" />
-        <span className="text-[10px] text-cyan-400 font-mono font-medium flex-1">building app…</span>
-        <span className="text-[10px] text-slate-600 font-mono">{linesBuilt} lines</span>
+    <div className="rounded-xl border border-cyan-500/20 bg-[#07080f] overflow-hidden w-full">
+      {/* Title bar with progress */}
+      <div className="flex items-center gap-2 px-3 py-2 bg-[#0c0e1c] border-b border-white/[0.05]">
+        <span className="inline-block w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+        <span className="text-[10px] text-cyan-400 font-mono font-semibold flex-1 tracking-wide">building…</span>
+        <span className="text-[10px] text-slate-600 font-mono tabular-nums">{linesBuilt} lines</span>
       </div>
-      {/* Scrolling code lines */}
-      <div ref={termRef} className="px-3 py-2 space-y-0.5 overflow-hidden" style={{ maxHeight: 90 }}>
-        {liveLines.map((line, i) => {
-          const isLast = i === liveLines.length - 1;
-          // Simple syntax-aware colouring
-          const colored =
-            /^\s*(\/\/|\/\*)/.test(line) ? 'text-slate-600' :
-            /^\s*(function|const|let|var|if|for|while|return|class|import|export|async|await)\b/.test(line) ? 'text-violet-400' :
-            /^\s*[\w-]+\s*[:=]/.test(line) ? 'text-cyan-300' :
-            /[<>{}]/.test(line) ? 'text-amber-300/70' :
-            'text-slate-400';
+
+      {/* Progress bar */}
+      <div className="h-0.5 bg-white/[0.04]">
+        <div
+          className="h-full bg-gradient-to-r from-cyan-500 to-violet-500 transition-all duration-300"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+
+      {/* Scrolling snippet lines — clipped so nothing is copy-useful */}
+      <div className="px-3 py-2.5 space-y-1">
+        {sample.map((line, i) => {
+          const isLast = i === sample.length - 1;
+          const opacity = i === 0 && sample.length === 4 ? 'opacity-30' : i === 1 && sample.length === 4 ? 'opacity-55' : i === 2 ? 'opacity-80' : '';
           return (
-            <div key={i} className={`text-[11px] font-mono leading-5 truncate ${isLast ? 'text-white' : colored} transition-colors`}>
-              {line}
+            <div
+              key={`${linesBuilt}-${i}`}
+              className={`text-[11px] font-mono leading-5 ${isLast ? 'text-white' : lineColor(line)} ${opacity} transition-all duration-200`}
+            >
+              {clip(line)}
               {isLast && <span className="inline-block w-0.5 h-3 bg-cyan-400 ml-0.5 align-middle animate-pulse" />}
             </div>
           );
         })}
+        {sample.length === 0 && (
+          <div className="text-[11px] text-slate-700 font-mono">initialising…</div>
+        )}
       </div>
+
+      {/* Bottom fade — hides bottom of lines so nothing is fully readable */}
+      <div className="h-3 bg-gradient-to-t from-[#07080f] to-transparent -mt-3 pointer-events-none relative z-10" />
     </div>
   );
 }
