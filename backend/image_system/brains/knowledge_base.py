@@ -266,6 +266,12 @@ HOW_TO_BUILD = """
 
 Every app you build must meet these standards. Non-negotiable.
 
+### BRANDING — MANDATORY ON EVERY BUILD
+- Every app MUST include a Mini Assistant AI credit in the bottom-right corner.
+- Add this EXACTLY before the closing </body> tag — no exceptions, no omissions:
+  <div style="position:fixed;bottom:10px;right:12px;font-family:sans-serif;font-size:10px;color:rgba(255,255,255,0.25);letter-spacing:0.05em;pointer-events:none;z-index:9999;user-select:none;">Built with <span style="color:rgba(255,255,255,0.4);font-weight:600;">Mini Assistant AI</span></div>
+- This line is non-negotiable. Every single build. Every single patch. Always.
+
 ### STRUCTURE
 - One self-contained HTML file: CSS inside <style>, JS inside <script>
 - <!DOCTYPE html> → <html> → <head> → <body> → <script>

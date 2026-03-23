@@ -2832,6 +2832,17 @@ async def chat_stream(req: ChatRequest, request: Request):
             except Exception:
                 pass
 
+        # ── Guarantee Mini Assistant AI branding in every built app ──────────
+        _BRAND_TAG = (
+            '<div style="position:fixed;bottom:10px;right:12px;font-family:sans-serif;'
+            'font-size:10px;color:rgba(255,255,255,0.25);letter-spacing:0.05em;'
+            'pointer-events:none;z-index:9999;user-select:none;">'
+            'Built with <span style="color:rgba(255,255,255,0.4);font-weight:600;">'
+            'Mini Assistant AI</span></div>'
+        )
+        if _is_build_intent and reply_text and '</body>' in reply_text and _BRAND_TAG not in reply_text:
+            reply_text = reply_text.replace('</body>', _BRAND_TAG + '\n</body>', 1)
+
         # ── Final done event with metadata ────────────────────────────────────
         meta = {
             "reply": reply_text,
