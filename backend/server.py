@@ -4965,16 +4965,23 @@ except Exception as _orch_err:
 # Protection : allowlisted paths · per-IP rate limit · 512 KB payload cap
 # Reliability: fire-and-forget for data paths, 3 s timeout, silent 204 on fail
 # ---------------------------------------------------------------------------
-_POSTHOG_HOST = "https://us.i.posthog.com"
+_POSTHOG_API_HOST   = "https://us.i.posthog.com"
+_POSTHOG_ASSET_HOST = "https://us-assets.i.posthog.com"
+
+# Paths that route to the asset CDN (static JS plugins loaded by the SDK).
+# All other allowed paths route to the API host.
+_POSTHOG_ASSET_PREFIXES = ("static/",)
 
 _POSTHOG_ALLOWED_PREFIXES = (
+    # Data & config paths → us.i.posthog.com
     "e/",       # event capture
     "batch/",   # batch event capture
-    "decide/",  # feature flags / feature flag payloads
     "s/",       # session recording
-    # static/, array.js, engage/, t/, surveys/ excluded intentionally:
-    # SDK assets load directly via asset_host (no CORS needed for <script>);
-    # other paths are unused and increase attack surface.
+    "decide/",  # feature flags (legacy)
+    "flags/",   # feature flags (v1.36+)
+    "array/",   # project config (v1.36+: array/{key}/config and config.js)
+    # Asset paths → us-assets.i.posthog.com
+    "static/",  # plugin JS: posthog-recorder.js, web-vitals.js, etc.
 )
 
 # Paths whose response the SDK ignores — safe to acknowledge immediately
@@ -5026,7 +5033,13 @@ async def posthog_proxy(path: str, request: StarletteRequest):
     if len(body) > _INGEST_MAX_B:
         return Response(content="Payload Too Large", status_code=413)
 
-    url = f"{_POSTHOG_HOST}/{path}"
+    # Route static plugin assets to the CDN; everything else to the API host
+    _ph_host = (
+        _POSTHOG_ASSET_HOST
+        if any(path.startswith(p) for p in _POSTHOG_ASSET_PREFIXES)
+        else _POSTHOG_API_HOST
+    )
+    url = f"{_ph_host}/{path}"
     if request.query_params:
         url += "?" + str(request.query_params)
 
