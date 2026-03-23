@@ -84,6 +84,7 @@ class SummarizeRequest(BaseModel):
 
 class ShareRequest(BaseModel):
     html: str                       # full app HTML to share
+    thumbnail_base64: Optional[str] = None  # JPEG thumbnail captured from the app preview
 
 
 class CommunityRequest(BaseModel):

@@ -10,7 +10,7 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Paperclip, Mic, MicOff, Send, Loader2, X, Image, FileText, Hammer, MessageSquare } from 'lucide-react';
+import { Paperclip, Mic, MicOff, Send, Loader2, X, Image, FileText, Hammer, MessageSquare, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../api/client';
 import { useApp } from '../context/AppContext';
@@ -94,6 +94,20 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
   const [value, setValue]           = useState('');
   const [slashHints, setSlashHints] = useState([]);
 
+  // Prompt history — last 10 non-slash prompts, persisted to localStorage
+  const [showHistory, setShowHistory] = useState(false);
+  const [promptHistory, setPromptHistory] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ma_prompt_history') || '[]'); } catch { return []; }
+  });
+  const saveToHistory = useCallback((text) => {
+    if (!text || text.startsWith('/') || text.length < 4) return;
+    setPromptHistory(prev => {
+      const next = [text, ...prev.filter(p => p !== text)].slice(0, 10);
+      try { localStorage.setItem('ma_prompt_history', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
+
   // Image attach state — supports multiple images
   const [attachedImages, setAttachedImages] = useState([]); // [{ base64, preview, name }, ...]
   // Document attach state
@@ -174,12 +188,13 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
       finalText = finalText ? docPrefix + finalText : docPrefix.trimEnd();
     }
     const imagesBase64 = attachedImages.length ? attachedImages.map(i => i.base64) : null;
+    saveToHistory(text);
     onSubmit(finalText, imagesBase64, null);
     setValue('');
     setAttachedImages([]);
     setAttachedDoc(null);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-  }, [value, loading, attachedImages, attachedDoc, onSubmit]);
+  }, [value, loading, attachedImages, attachedDoc, onSubmit, saveToHistory]);
 
   const handleKeyDown = useCallback((e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
@@ -357,6 +372,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
       className="relative w-full"
       onDrop={handleDrop}
       onDragOver={handleDragOver}
+      onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setShowHistory(false); }}
     >
       {/* Single hidden file input — handles images, videos, and documents */}
       <input
@@ -367,6 +383,31 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
         className="hidden"
         onChange={handleFileChange}
       />
+
+      {/* Prompt history dropdown */}
+      {showHistory && promptHistory.length > 0 && (
+        <div className="absolute bottom-full mb-2 left-0 right-0 z-50 rounded-xl bg-[#13131f] border border-white/10 overflow-hidden shadow-xl">
+          <div className="flex items-center gap-2 px-4 py-2 border-b border-white/5">
+            <Clock size={10} className="text-slate-600" />
+            <span className="text-[10px] text-slate-600 font-mono uppercase tracking-widest">Recent prompts</span>
+            <button
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); setPromptHistory([]); localStorage.removeItem('ma_prompt_history'); setShowHistory(false); }}
+              className="ml-auto text-[10px] text-slate-700 hover:text-red-400 transition-colors"
+            >clear</button>
+          </div>
+          {promptHistory.map((p, i) => (
+            <button
+              key={i}
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); setValue(p); setShowHistory(false); textareaRef.current?.focus(); }}
+              className="w-full text-left px-4 py-2.5 text-sm text-slate-400 hover:bg-white/5 hover:text-slate-200 transition-colors truncate"
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Slash command hints dropdown */}
       {slashHints.length > 0 && (
@@ -438,6 +479,17 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
 
         {/* Input row */}
         <div className="flex items-end gap-2 px-5 py-3.5">
+          {/* Prompt history */}
+          {promptHistory.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowHistory(h => !h)}
+              className={`flex-shrink-0 p-1.5 rounded-lg transition-colors mb-0.5 ${showHistory ? 'text-cyan-400 bg-cyan-500/10' : 'text-slate-600 hover:text-slate-400 hover:bg-white/5'}`}
+              title="Recent prompts"
+            >
+              <Clock size={16} />
+            </button>
+          )}
           {/* Attach image */}
           <button
             type="button"

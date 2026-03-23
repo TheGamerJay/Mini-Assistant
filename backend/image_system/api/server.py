@@ -3313,15 +3313,22 @@ async def autofix_stream(req: AutoFixRequest, request: Request):
 import json as _share_json
 
 _SHARES_FILE = Path(__file__).parent.parent.parent / "memory_store" / "shares.json"
+_THUMBNAILS_FILE = Path(__file__).parent.parent.parent / "memory_store" / "thumbnails.json"
 _shares: Dict[str, str] = {}
+_thumbnails: Dict[str, str] = {}  # share_id → base64 JPEG thumbnail
 
 def _load_shares():
-    global _shares
+    global _shares, _thumbnails
     try:
         if _SHARES_FILE.exists():
             _shares = _share_json.loads(_SHARES_FILE.read_text(encoding="utf-8"))
     except Exception:
         _shares = {}
+    try:
+        if _THUMBNAILS_FILE.exists():
+            _thumbnails = _share_json.loads(_THUMBNAILS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        _thumbnails = {}
 
 def _save_shares():
     try:
@@ -3329,6 +3336,13 @@ def _save_shares():
         _SHARES_FILE.write_text(_share_json.dumps(_shares), encoding="utf-8")
     except Exception as e:
         logger.warning("Could not persist shares: %s", e)
+
+def _save_thumbnails():
+    try:
+        _THUMBNAILS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _THUMBNAILS_FILE.write_text(_share_json.dumps(_thumbnails), encoding="utf-8")
+    except Exception as e:
+        logger.warning("Could not persist thumbnails: %s", e)
 
 _load_shares()
 
@@ -3363,6 +3377,9 @@ async def share_app(req: ShareRequest, request: Request):
     share_id = str(uuid.uuid4())[:8]
     _shares[share_id] = req.html
     _save_shares()
+    if req.thumbnail_base64:
+        _thumbnails[share_id] = req.thumbnail_base64
+        _save_thumbnails()
 
     # Build share URL — account for /image-api mount prefix
     scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
@@ -3440,6 +3457,7 @@ async def add_to_community(req: CommunityRequest, request: Request):
         "author_name": req.author_name[:40],
         "timestamp": int(time.time()),
         "play_url": play_url,
+        "thumbnail": _thumbnails.get(req.share_id),  # base64 JPEG, may be None
     }
     _community.insert(0, entry)  # newest first
     _community[:] = _community[:200]  # cap at 200
@@ -3451,6 +3469,59 @@ async def add_to_community(req: CommunityRequest, request: Request):
 async def get_community():
     """Return the community showcase list."""
     return {"apps": _community}
+
+
+# ---------------------------------------------------------------------------
+# Session Memory / Lessons endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/userprefs")
+async def get_user_prefs():
+    """Return the learned user preference profile."""
+    try:
+        from ..brains.user_memory import load_prefs
+        return load_prefs()
+    except Exception as e:
+        logger.warning("UserPrefs read error: %s", e)
+        return {}
+
+
+@app.get("/api/memory")
+async def get_all_memory():
+    """Return all learned memory facts across all sessions."""
+    try:
+        from mini_assistant.phase6.session_memory import get_memory
+        mem = get_memory()
+        facts = [
+            f.to_dict()
+            for facts_list in mem._store.values()
+            for f in facts_list
+        ]
+        facts.sort(key=lambda f: f.get("updated_at", ""), reverse=True)
+        return {"facts": facts}
+    except Exception as e:
+        logger.warning("Memory read error: %s", e)
+        return {"facts": []}
+
+
+@app.delete("/api/memory/{fact_id}")
+async def delete_memory_fact(fact_id: str):
+    """Delete a specific memory fact by ID."""
+    try:
+        from mini_assistant.phase6.session_memory import get_memory
+        mem = get_memory()
+        # Search all sessions for this fact
+        for sid, facts_list in mem._store.items():
+            if any(f.id == fact_id for f in facts_list):
+                deleted = mem.delete_fact(sid, fact_id)
+                if deleted:
+                    return {"ok": True}
+        raise HTTPException(status_code=404, detail="Fact not found.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("Memory delete error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/chat/suggestions")

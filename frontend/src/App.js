@@ -41,6 +41,7 @@ import CheckoutSuccessPage from './pages/CheckoutSuccessPage';
 import SharedPage from './pages/SharedPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
 import CommunityPage from './pages/CommunityPage';
+import LessonsPage from './pages/LessonsPage';
 
 // Legal pages
 import TermsPage from './pages/legal/TermsPage';
@@ -154,6 +155,7 @@ function pageTitle(page) {
   if (page === 'chat') return 'Chat';
   if (page === 'images') return 'Image Generation';
   if (page === 'community') return 'Community';
+  if (page === 'lessons') return 'What I\'ve Learned';
   if (page === 'settings') return 'Settings';
   if (page === 'checkout-success') return 'Payment Confirmed';
   if (LEGAL_PAGES[page]) return LEGAL_PAGES[page].title;
@@ -267,6 +269,7 @@ function AppShell() {
     if (page === 'checkout-success') return <CheckoutSuccessPage />;
     if (page === 'images') return <ImagePage />;
     if (page === 'community') return <CommunityPage />;
+    if (page === 'lessons') return <LessonsPage />;
     if (page === 'profile') return <ProfilePage />;
     if (page === 'dashboard') return <UserDashboard />;
     if (page === 'admin') return <AdminPage />;

@@ -49,6 +49,7 @@ import {
   FileSearch,
   Wand2,
   Users,
+  BookOpen,
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -680,7 +681,7 @@ function Sidebar() {
         <button
           onClick={() => navTo('community')}
           title="Community Showcase"
-          className={`w-full flex items-center gap-2 rounded-lg px-2 py-2 mb-1 text-xs transition-colors
+          className={`w-full flex items-center gap-2 rounded-lg px-2 py-2 text-xs transition-colors
             ${page === 'community'
               ? 'bg-indigo-500/10 border border-indigo-500/20 text-indigo-300'
               : 'text-slate-500 hover:bg-white/5 hover:text-slate-300'}
@@ -688,6 +689,20 @@ function Sidebar() {
         >
           <Users size={14} className="flex-shrink-0" />
           {!sidebarCollapsed && <span className="font-medium">Community</span>}
+        </button>
+
+        {/* Lessons */}
+        <button
+          onClick={() => navTo('lessons')}
+          title="What Mini Assistant learned from you"
+          className={`w-full flex items-center gap-2 rounded-lg px-2 py-2 mb-1 text-xs transition-colors
+            ${page === 'lessons'
+              ? 'bg-violet-500/10 border border-violet-500/20 text-violet-300'
+              : 'text-slate-500 hover:bg-white/5 hover:text-slate-300'}
+            ${sidebarCollapsed ? 'justify-center' : ''}`}
+        >
+          <BookOpen size={14} className="flex-shrink-0" />
+          {!sidebarCollapsed && <span className="font-medium">What I Know</span>}
         </button>
 
         {/* Images */}

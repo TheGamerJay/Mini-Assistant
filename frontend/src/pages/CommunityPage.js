@@ -77,10 +77,22 @@ export default function CommunityPage() {
             onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(99,102,241,0.3)'; e.currentTarget.style.background = 'rgba(99,102,241,0.06)'; }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)'; e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
           >
-            {/* Preview placeholder */}
-            <div className="h-32 flex items-center justify-center"
+            {/* Preview thumbnail or placeholder */}
+            <div className="h-36 overflow-hidden relative flex items-center justify-center flex-shrink-0"
               style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.08), rgba(34,211,238,0.05))' }}>
-              <span className="text-3xl">⚡</span>
+              {app.thumbnail ? (
+                <img
+                  src={`data:image/jpeg;base64,${app.thumbnail}`}
+                  alt={app.title}
+                  className="w-full h-full object-cover"
+                  style={{ opacity: 0.92 }}
+                />
+              ) : (
+                <span className="text-3xl">⚡</span>
+              )}
+              {/* Subtle gradient overlay at bottom */}
+              <div className="absolute inset-x-0 bottom-0 h-8 pointer-events-none"
+                style={{ background: 'linear-gradient(to bottom, transparent, rgba(10,11,20,0.7))' }} />
             </div>
 
             {/* Info */}

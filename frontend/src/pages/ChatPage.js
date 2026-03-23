@@ -396,6 +396,20 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
   // Streaming text state (non-image responses)
   const [streamingText, setStreamingText] = useState(null); // null = not streaming
 
+  // Reasoning timer — elapsed seconds while extended thinking runs (streamingText === '')
+  const [thinkingSeconds, setThinkingSeconds] = useState(0);
+  const thinkingTimerRef = useRef(null);
+  useEffect(() => {
+    if (streamingText === '' && loading) {
+      setThinkingSeconds(0);
+      thinkingTimerRef.current = setInterval(() => setThinkingSeconds(s => s + 1), 1000);
+    } else {
+      clearInterval(thinkingTimerRef.current);
+      thinkingTimerRef.current = null;
+    }
+    return () => clearInterval(thinkingTimerRef.current);
+  }, [streamingText, loading]);
+
   // Cognitive stream state (image / loading visual)
   const [streamActive, setStreamActive]     = useState(false);
   const [streamPrompt, setStreamPrompt]     = useState('');
@@ -1043,6 +1057,11 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
               </div>
               <span className="text-[11px] font-medium" style={{ color: '#a5b4fc' }}>
                 Reasoning through your request…
+                {thinkingSeconds > 0 && (
+                  <span style={{ color: '#7c3aed', marginLeft: 6, fontVariantNumeric: 'tabular-nums', fontSize: 10 }}>
+                    {thinkingSeconds}s
+                  </span>
+                )}
               </span>
             </div>
           )}
@@ -1212,6 +1231,16 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
           const withFix = [...messages, fixMsg];
           setMessages(withFix);
           if (activeChatId) updateChatMessages(activeChatId, withFix);
+        }}
+        onRestoreCode={(restoredHtml) => {
+          const restoreMsg = {
+            role: 'assistant', type: 'text',
+            content: `↩️ Restored to previous version:\n\`\`\`html\n${restoredHtml}\n\`\`\``,
+            timestamp: Date.now(),
+          };
+          const withRestore = [...messages, restoreMsg];
+          setMessages(withRestore);
+          if (activeChatId) updateChatMessages(activeChatId, withRestore);
         }}
       />
     </div>

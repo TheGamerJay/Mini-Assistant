@@ -14,6 +14,7 @@ import {
   Monitor, Code2, FolderOpen, X, RefreshCw,
   ChevronRight, File, Download, ListTodo, Diff, Plus, Trash2, CheckSquare, Square,
   Bug, Zap, CheckCircle, AlertTriangle, StopCircle, Share2, Copy, ExternalLink, Users,
+  Smartphone, Tablet,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/client';
@@ -264,6 +265,151 @@ function CodeViewer({ blocks }) {
 }
 
 // ---------------------------------------------------------------------------
+// Phone / Tablet frame components
+// ---------------------------------------------------------------------------
+function PhoneFrame({ children, clockTime }) {
+
+  return (
+    <div style={{ position: 'relative', width: 252, flexShrink: 0 }}>
+      {/* Volume up */}
+      <div style={{ position: 'absolute', left: -4, top: 84, width: 4, height: 26, background: '#111122', borderRadius: '2px 0 0 2px', boxShadow: 'inset 1px 0 1px rgba(255,255,255,0.06)' }} />
+      {/* Volume down */}
+      <div style={{ position: 'absolute', left: -4, top: 118, width: 4, height: 26, background: '#111122', borderRadius: '2px 0 0 2px', boxShadow: 'inset 1px 0 1px rgba(255,255,255,0.06)' }} />
+      {/* Power */}
+      <div style={{ position: 'absolute', right: -4, top: 100, width: 4, height: 40, background: '#111122', borderRadius: '0 2px 2px 0', boxShadow: 'inset -1px 0 1px rgba(255,255,255,0.06)' }} />
+
+      {/* Chassis */}
+      <div style={{
+        background: 'linear-gradient(145deg, #1e1e30 0%, #0e0e1a 100%)',
+        borderRadius: 42,
+        padding: '10px 5px 8px',
+        boxShadow: [
+          '0 0 0 1px rgba(255,255,255,0.13)',
+          '0 0 0 3px #050508',
+          '0 0 0 4px rgba(255,255,255,0.05)',
+          '0 28px 80px rgba(0,0,0,0.75)',
+          'inset 0 1px 0 rgba(255,255,255,0.08)',
+          'inset 1px 0 0 rgba(255,255,255,0.04)',
+        ].join(', '),
+      }}>
+        {/* Screen */}
+        <div style={{ background: '#050508', borderRadius: 34, overflow: 'hidden' }}>
+          {/* Status bar */}
+          <div style={{
+            height: 32, display: 'flex', alignItems: 'center',
+            justifyContent: 'space-between', padding: '0 16px',
+            background: 'rgba(0,0,0,0.92)', position: 'relative', flexShrink: 0,
+          }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.3px' }}>
+              {clockTime}
+            </span>
+            {/* Dynamic Island */}
+            <div style={{
+              position: 'absolute', top: 5, left: '50%', transform: 'translateX(-50%)',
+              width: 76, height: 22, background: '#000', borderRadius: 20, zIndex: 3,
+            }} />
+            {/* Right icons */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              {/* Signal bars */}
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1.5 }}>
+                {[4, 6, 8, 10].map((h, i) => (
+                  <div key={i} style={{
+                    width: 3, height: h,
+                    background: i < 3 ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.28)',
+                    borderRadius: 1.5,
+                  }} />
+                ))}
+              </div>
+              {/* WiFi arcs */}
+              <svg width="13" height="10" viewBox="0 0 13 10" fill="none">
+                <circle cx="6.5" cy="8.5" r="1" fill="rgba(255,255,255,0.9)" />
+                <path d="M4.2 6.3C4.9 5.5 5.7 5.1 6.5 5.1s1.6.4 2.3 1.2" stroke="rgba(255,255,255,0.9)" strokeWidth="1.2" strokeLinecap="round" fill="none"/>
+                <path d="M2 3.8C3.3 2.3 4.8 1.5 6.5 1.5s3.2.8 4.5 2.3" stroke="rgba(255,255,255,0.45)" strokeWidth="1.2" strokeLinecap="round" fill="none"/>
+              </svg>
+              {/* Battery */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <div style={{ width: 20, height: 10, borderRadius: 2.5, border: '1.5px solid rgba(255,255,255,0.7)', position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', top: '15%', bottom: '15%', left: '5%', width: '72%', background: '#4ade80', borderRadius: 1 }} />
+                </div>
+                <div style={{ width: 2, height: 5, background: 'rgba(255,255,255,0.5)', borderRadius: 1 }} />
+              </div>
+            </div>
+          </div>
+          {/* App content */}
+          <div style={{ height: 452, overflow: 'hidden', position: 'relative' }}>
+            {children}
+          </div>
+          {/* Home indicator */}
+          <div style={{ height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.92)' }}>
+            <div style={{ width: 80, height: 4, background: 'rgba(255,255,255,0.28)', borderRadius: 3 }} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TabletFrame({ children, clockTime }) {
+
+  return (
+    <div style={{ position: 'relative', width: 316, flexShrink: 0 }}>
+      {/* Top buttons */}
+      <div style={{ position: 'absolute', top: -4, right: 64, width: 32, height: 4, background: '#111122', borderRadius: '2px 2px 0 0' }} />
+      <div style={{ position: 'absolute', top: -4, right: 112, width: 20, height: 4, background: '#111122', borderRadius: '2px 2px 0 0' }} />
+      <div style={{ position: 'absolute', top: -4, right: 138, width: 20, height: 4, background: '#111122', borderRadius: '2px 2px 0 0' }} />
+
+      {/* Chassis */}
+      <div style={{
+        background: 'linear-gradient(145deg, #1e1e30 0%, #0e0e1a 100%)',
+        borderRadius: 22,
+        padding: '6px 4px',
+        boxShadow: [
+          '0 0 0 1px rgba(255,255,255,0.1)',
+          '0 0 0 2px #050508',
+          '0 0 0 3px rgba(255,255,255,0.04)',
+          '0 20px 60px rgba(0,0,0,0.7)',
+          'inset 0 1px 0 rgba(255,255,255,0.07)',
+        ].join(', '),
+      }}>
+        <div style={{ background: '#050508', borderRadius: 16, overflow: 'hidden' }}>
+          {/* Status bar */}
+          <div style={{
+            height: 26, display: 'flex', alignItems: 'center',
+            justifyContent: 'space-between', padding: '0 14px',
+            background: 'rgba(0,0,0,0.92)',
+          }}>
+            <span style={{ fontSize: 9, fontWeight: 700, color: '#fff', letterSpacing: '-0.2px' }}>{clockTime}</span>
+            {/* Front camera dot */}
+            <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#111122', border: '1px solid rgba(255,255,255,0.1)' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1 }}>
+                {[3, 5, 7, 9].map((h, i) => (
+                  <div key={i} style={{ width: 2.5, height: h, background: i < 3 ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.25)', borderRadius: 1 }} />
+                ))}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <div style={{ width: 18, height: 9, border: '1.5px solid rgba(255,255,255,0.6)', borderRadius: 2, position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', top: '15%', bottom: '15%', left: '5%', width: '68%', background: '#4ade80', borderRadius: 1 }} />
+                </div>
+                <div style={{ width: 2, height: 4, background: 'rgba(255,255,255,0.4)', borderRadius: 1 }} />
+              </div>
+            </div>
+          </div>
+          {/* Content */}
+          <div style={{ height: 432, overflow: 'hidden', position: 'relative' }}>
+            {children}
+          </div>
+          {/* Home bar */}
+          <div style={{ height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.92)' }}>
+            <div style={{ width: 60, height: 3, background: 'rgba(255,255,255,0.25)', borderRadius: 2 }} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Preview
 // ---------------------------------------------------------------------------
 const MAX_AUTOFIX_ITERATIONS = 5;
@@ -372,11 +518,26 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
     });
   }, []);
 
-  // ── Share state ────────────────────────────────────────────────────────
+  // ── Preview mode (phone / tablet / desktop) ────────────────────────────
+  const [previewMode, setPreviewMode] = useState('desktop');
+  const [clockTime, setClockTime] = useState(() =>
+    new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  );
+  useEffect(() => {
+    const t = setInterval(() =>
+      setClockTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })),
+      30000
+    );
+    return () => clearInterval(t);
+  }, []);
+
+  // ── Deploy / Share modal ───────────────────────────────────────────────
   const [shareLoading, setShareLoading] = useState(false);
-  const [shareToast, setShareToast] = useState(null); // { url, copied }
+  const [deployModal, setDeployModal] = useState(null); // { url, qrDataUrl } | null
+  const [copiedUrl, setCopiedUrl]       = useState(false);
   const [communityLoading, setCommunityLoading] = useState(false);
   const [communityToast, setCommunityToast] = useState(null); // 'success' | 'error' | null
+  const [communityPrompt, setCommunityPrompt] = useState(false); // show name/anon picker
 
   const handleShare = useCallback(async () => {
     const shareHtml = currentFixHtml || html;
@@ -392,39 +553,67 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
       if (!res.ok) throw new Error('Share failed');
       const data = await res.json();
       const url = data.url;
+      // Generate QR code locally
+      let qrDataUrl = null;
+      try {
+        const QRCode = (await import('qrcode')).default;
+        qrDataUrl = await QRCode.toDataURL(url, {
+          width: 160, margin: 2,
+          color: { dark: '#e2e8f0', light: '#0b0d16' },
+        });
+      } catch { /* QR is optional */ }
       try { await navigator.clipboard.writeText(url); } catch {}
-      setShareToast({ url, copied: true });
-      setTimeout(() => setShareToast(null), 6000);
-    } catch (e) {
-      setShareToast({ url: null, copied: false, error: true });
-      setTimeout(() => setShareToast(null), 4000);
+      setDeployModal({ url, qrDataUrl });
+      setCopiedUrl(true);
+      setTimeout(() => setCopiedUrl(false), 3000);
+    } catch {
+      // simple fallback toast on error
+      setDeployModal({ url: null, error: true });
+      setTimeout(() => setDeployModal(null), 3000);
     } finally {
       setShareLoading(false);
     }
   }, [currentFixHtml, html, shareLoading]);
 
-  const handleCommunity = useCallback(async () => {
+  const submitCommunity = useCallback(async (useRealName) => {
     const shareHtml = currentFixHtml || html;
-    if (!shareHtml || communityLoading) return;
+    if (!shareHtml) return;
+    setCommunityPrompt(false);
     setCommunityLoading(true);
     try {
+      // Capture thumbnail from iframe (fail silently — optional)
+      let thumbnailBase64 = null;
+      try {
+        const iframeDoc = iframeRef.current?.contentDocument;
+        if (iframeDoc?.body) {
+          const h2c = (await import('html2canvas')).default;
+          const canvas = await h2c(iframeDoc.body, {
+            useCORS: true, allowTaint: true, scale: 0.4,
+            width: iframeDoc.body.scrollWidth || 400,
+            height: iframeDoc.body.scrollHeight || 300,
+          });
+          thumbnailBase64 = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
+        }
+      } catch { /* thumbnail is optional */ }
+
       const { IMAGE_API } = await import('../api/client');
-      // First share to get an ID
       const shareRes = await fetch(`${IMAGE_API}/share`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ html: shareHtml }),
+        body: JSON.stringify({ html: shareHtml, thumbnail_base64: thumbnailBase64 }),
       });
       if (!shareRes.ok) throw new Error('Share failed');
       const shareData = await shareRes.json();
-      // Then add to community
+      const authorName = useRealName
+        ? (user?.name || user?.email?.split('@')[0] || 'Anonymous')
+        : 'Anonymous';
       const comRes = await fetch(`${IMAGE_API}/community`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           share_id: shareData.id,
           title: extractAppTitle(messages),
-          author_name: user?.name || user?.email?.split('@')[0] || 'Anonymous',
+          author_name: authorName,
         }),
       });
       if (!comRes.ok) throw new Error('Community post failed');
@@ -436,6 +625,12 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
     } finally {
       setCommunityLoading(false);
     }
+  }, [currentFixHtml, html, user, messages]);
+
+  const handleCommunity = useCallback(() => {
+    const shareHtml = currentFixHtml || html;
+    if (!shareHtml || communityLoading) return;
+    setCommunityPrompt(true);
   }, [currentFixHtml, html, communityLoading]);
 
   // ── Auto-Fix loop state ────────────────────────────────────────────────
@@ -627,6 +822,27 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
             </span>
           )}
         </div>
+        {/* Preview mode toggle */}
+        <div className="flex items-center gap-0.5 rounded-lg p-0.5 flex-shrink-0" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+          {[
+            { id: 'phone',   Icon: Smartphone, title: 'Phone' },
+            { id: 'tablet',  Icon: Tablet,     title: 'Tablet' },
+            { id: 'desktop', Icon: Monitor,    title: 'Desktop' },
+          ].map(({ id, Icon, title }) => (
+            <button
+              key={id}
+              onClick={() => setPreviewMode(id)}
+              title={title}
+              className="p-1 rounded transition-all"
+              style={{
+                color: previewMode === id ? '#22d3ee' : '#475569',
+                background: previewMode === id ? 'rgba(34,211,238,0.13)' : 'transparent',
+              }}
+            >
+              <Icon size={11} />
+            </button>
+          ))}
+        </div>
         {fixing && (
           <button
             onClick={stopFix}
@@ -646,7 +862,7 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
           {shareLoading
             ? <RefreshCw size={10} className="animate-spin" />
             : <Share2 size={10} />}
-          Share
+          Deploy
         </button>
         <button
           onClick={handleCommunity}
@@ -665,39 +881,146 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
         </button>
       </div>
 
-      {/* Share toast */}
-      {shareToast && (
+      {/* Deploy modal */}
+      {deployModal && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center p-4"
+          style={{ background: 'rgba(5,6,12,0.85)', backdropFilter: 'blur(6px)', animation: 'ma-slide-up 0.22s cubic-bezier(.22,1,.36,1) forwards' }}
+          onClick={() => setDeployModal(null)}
+        >
+          {deployModal.error ? (
+            <div className="flex items-center gap-2 px-4 py-3 rounded-xl"
+              style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)' }}>
+              <AlertTriangle size={13} className="text-red-400" />
+              <span className="text-[11px] text-red-300">Couldn't create deploy link</span>
+            </div>
+          ) : (
+            <div
+              className="w-full max-w-xs rounded-2xl overflow-hidden"
+              style={{ background: '#0d0f1e', border: '1px solid rgba(34,211,238,0.2)', boxShadow: '0 0 60px rgba(34,211,238,0.08), 0 24px 80px rgba(0,0,0,0.6)' }}
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="px-5 pt-5 pb-3 flex items-start justify-between">
+                <div>
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+                    <span className="text-[13px] font-bold text-white">App is Live</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500">Anyone with this link can play — source code is hidden</p>
+                </div>
+                <button onClick={() => setDeployModal(null)}
+                  className="p-1 rounded-lg hover:bg-white/10 text-slate-600 hover:text-slate-400 transition-colors flex-shrink-0">
+                  <X size={13} />
+                </button>
+              </div>
+
+              {/* QR + URL */}
+              <div className="px-5 pb-4 flex gap-4 items-start">
+                {deployModal.qrDataUrl && (
+                  <div className="flex-shrink-0 rounded-xl overflow-hidden" style={{ border: '1px solid rgba(34,211,238,0.15)' }}>
+                    <img src={deployModal.qrDataUrl} alt="QR code" style={{ width: 88, height: 88, display: 'block' }} />
+                  </div>
+                )}
+                <div className="flex-1 min-w-0 space-y-2">
+                  <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl"
+                    style={{ background: 'rgba(34,211,238,0.06)', border: '1px solid rgba(34,211,238,0.15)' }}>
+                    <span className="flex-1 text-[10px] font-mono text-cyan-300/80 truncate">{deployModal.url}</span>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={async () => {
+                        try { await navigator.clipboard.writeText(deployModal.url); setCopiedUrl(true); setTimeout(() => setCopiedUrl(false), 2000); } catch {}
+                      }}
+                      className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-[10px] font-medium transition-all"
+                      style={{ background: copiedUrl ? 'rgba(52,211,153,0.15)' : 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: copiedUrl ? '#34d399' : '#94a3b8' }}
+                    >
+                      {copiedUrl ? <><CheckCircle size={9} /> Copied!</> : <><Copy size={9} /> Copy</>}
+                    </button>
+                    <a href={deployModal.url} target="_blank" rel="noreferrer"
+                      className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-[10px] font-medium transition-all"
+                      style={{ background: 'rgba(34,211,238,0.1)', border: '1px solid rgba(34,211,238,0.2)', color: '#22d3ee' }}
+                      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(34,211,238,0.2)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'rgba(34,211,238,0.1)'; }}
+                    >
+                      <ExternalLink size={9} /> Open
+                    </a>
+                  </div>
+                </div>
+              </div>
+
+              {/* Community CTA */}
+              <div className="px-5 pb-5">
+                <button
+                  onClick={() => { setDeployModal(null); setCommunityPrompt(true); }}
+                  className="w-full py-2 rounded-xl text-[11px] font-medium transition-all"
+                  style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', color: '#818cf8' }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(99,102,241,0.16)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'rgba(99,102,241,0.08)'; }}
+                >
+                  <Users size={10} style={{ display: 'inline', marginRight: 5 }} />
+                  Also share to community showcase
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Community name/anon picker */}
+      {communityPrompt && (
         <div
           className="absolute top-12 right-3 z-20 rounded-xl border shadow-2xl overflow-hidden"
           style={{
-            background: shareToast.error ? 'rgba(239,68,68,0.12)' : 'rgba(6,182,212,0.10)',
-            borderColor: shareToast.error ? 'rgba(239,68,68,0.3)' : 'rgba(6,182,212,0.25)',
-            backdropFilter: 'blur(10px)',
-            minWidth: 240,
-            animation: 'ma-slide-up 0.25s cubic-bezier(.22,1,.36,1) forwards',
+            background: 'rgba(15,17,30,0.97)',
+            borderColor: 'rgba(99,102,241,0.35)',
+            backdropFilter: 'blur(12px)',
+            minWidth: 220,
+            animation: 'ma-slide-up 0.22s cubic-bezier(.22,1,.36,1) forwards',
           }}
         >
-          {shareToast.error ? (
-            <div className="flex items-center gap-2 px-4 py-3">
-              <AlertTriangle size={13} className="text-red-400 flex-shrink-0" />
-              <span className="text-[11px] text-red-300">Couldn't create share link</span>
+          <div className="px-4 py-3 space-y-2.5">
+            <div className="flex items-center gap-2">
+              <Users size={12} className="text-indigo-400 flex-shrink-0" />
+              <span className="text-[11px] text-slate-300 font-medium">Post to Community</span>
+              <button
+                onClick={() => setCommunityPrompt(false)}
+                className="ml-auto p-0.5 rounded hover:bg-white/10 text-slate-600 hover:text-slate-400 transition-colors"
+              >
+                <X size={11} />
+              </button>
             </div>
-          ) : (
-            <div className="px-4 py-3 space-y-2">
-              <div className="flex items-center gap-2">
-                <CheckCircle size={13} style={{ color: '#34d399' }} className="flex-shrink-0" />
-                <span className="text-[11px] text-emerald-300 font-medium">Link copied to clipboard!</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="flex-1 text-[10px] font-mono text-cyan-300/70 truncate">{shareToast.url}</span>
-                <a href={shareToast.url} target="_blank" rel="noreferrer"
-                  className="p-1 rounded hover:bg-white/10 text-cyan-400 flex-shrink-0" title="Open in new tab">
-                  <ExternalLink size={10} />
-                </a>
-              </div>
-              <p className="text-[9px] text-slate-500">Viewers see the game — source code is hidden.</p>
+            <p className="text-[10px] text-slate-500 leading-relaxed">
+              Anyone can play your app in the community showcase.
+            </p>
+            <div className="flex flex-col gap-1.5 pt-0.5">
+              <button
+                onClick={() => submitCommunity(true)}
+                className="w-full text-left text-[11px] px-3 py-2 rounded-lg transition-all font-medium"
+                style={{
+                  background: 'rgba(99,102,241,0.12)',
+                  border: '1px solid rgba(99,102,241,0.25)',
+                  color: '#a5b4fc',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(99,102,241,0.22)'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(99,102,241,0.12)'; }}
+              >
+                Post as {user?.name || user?.email?.split('@')[0] || 'me'}
+              </button>
+              <button
+                onClick={() => submitCommunity(false)}
+                className="w-full text-left text-[11px] px-3 py-2 rounded-lg transition-all"
+                style={{
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  color: '#64748b',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; e.currentTarget.style.color = '#94a3b8'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = '#64748b'; }}
+              >
+                Post Anonymously
+              </button>
             </div>
-          )}
+          </div>
         </div>
       )}
 
@@ -967,15 +1290,46 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
         </div>
       )}
 
-      {/* iframe */}
-      <iframe
-        key={key}
-        ref={iframeRef}
-        srcDoc={srcDoc}
-        className="flex-1 w-full bg-white"
-        sandbox="allow-scripts allow-same-origin allow-modals allow-pointer-lock allow-forms"
-        title="App Preview"
-      />
+      {/* iframe — desktop / phone / tablet */}
+      {previewMode === 'desktop' ? (
+        <iframe
+          key={key}
+          ref={iframeRef}
+          srcDoc={srcDoc}
+          className="flex-1 w-full bg-white"
+          sandbox="allow-scripts allow-same-origin allow-modals allow-pointer-lock allow-forms"
+          title="App Preview"
+        />
+      ) : (
+        <div
+          className="flex-1 overflow-auto flex items-center justify-center py-6 px-3"
+          style={{ background: 'radial-gradient(ellipse at 50% 40%, rgba(30,30,60,0.6) 0%, #080a12 70%)' }}
+        >
+          {previewMode === 'phone' ? (
+            <PhoneFrame clockTime={clockTime}>
+              <iframe
+                key={key}
+                ref={iframeRef}
+                srcDoc={srcDoc}
+                style={{ width: '100%', height: '100%', border: 'none', background: '#fff' }}
+                sandbox="allow-scripts allow-same-origin allow-modals allow-pointer-lock allow-forms"
+                title="App Preview"
+              />
+            </PhoneFrame>
+          ) : (
+            <TabletFrame clockTime={clockTime}>
+              <iframe
+                key={key}
+                ref={iframeRef}
+                srcDoc={srcDoc}
+                style={{ width: '100%', height: '100%', border: 'none', background: '#fff' }}
+                sandbox="allow-scripts allow-same-origin allow-modals allow-pointer-lock allow-forms"
+                title="App Preview"
+              />
+            </TabletFrame>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1150,7 +1504,7 @@ function computeDiff(oldLines, newLines) {
   return diff;
 }
 
-function DiffPane({ messages }) {
+function DiffPane({ messages, onRestoreCode }) {
   // Find last two assistant messages with code blocks
   const [blockA, blockB] = useMemo(() => {
     const withCode = [];
@@ -1192,23 +1546,45 @@ function DiffPane({ messages }) {
   }
 
   return (
-    <pre className="h-full overflow-auto p-3 text-[11px] font-mono leading-5">
-      {diff.map((d, i) => (
-        <div
-          key={i}
-          className={
-            d.type === 'add'    ? 'bg-emerald-500/10 text-emerald-400' :
-            d.type === 'remove' ? 'bg-red-500/10 text-red-400' :
-            'text-slate-600'
-          }
-        >
-          <span className="select-none mr-2 w-4 inline-block text-right">
-            {d.type === 'add' ? '+' : d.type === 'remove' ? '−' : ' '}
+    <div className="flex flex-col h-full">
+      {/* Restore bar */}
+      {blockA && onRestoreCode && (
+        <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5 flex-shrink-0"
+          style={{ background: 'rgba(255,255,255,0.02)' }}>
+          <span className="text-[10px] text-slate-600 font-mono">
+            {diff.filter(d => d.type === 'add').length}+ &nbsp;
+            {diff.filter(d => d.type === 'remove').length}−
           </span>
-          {d.line}
+          <button
+            onClick={() => onRestoreCode(blockA)}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all"
+            style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.25)', color: '#fbbf24' }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(245,158,11,0.2)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(245,158,11,0.1)'; }}
+            title="Restore to previous version"
+          >
+            <RefreshCw size={9} /> Restore v1
+          </button>
         </div>
-      ))}
-    </pre>
+      )}
+      <pre className="flex-1 overflow-auto p-3 text-[11px] font-mono leading-5">
+        {diff.map((d, i) => (
+          <div
+            key={i}
+            className={
+              d.type === 'add'    ? 'bg-emerald-500/10 text-emerald-400' :
+              d.type === 'remove' ? 'bg-red-500/10 text-red-400' :
+              'text-slate-600'
+            }
+          >
+            <span className="select-none mr-2 w-4 inline-block text-right">
+              {d.type === 'add' ? '+' : d.type === 'remove' ? '−' : ' '}
+            </span>
+            {d.line}
+          </div>
+        ))}
+      </pre>
+    </div>
   );
 }
 
@@ -1223,7 +1599,7 @@ const TABS = [
   { id: 'tasks',   label: 'Tasks',   icon: ListTodo },
 ];
 
-function RightPanel({ messages = [], streamingText = null, open, onClose, previewImage = null, onClearImage, activeTab = null, sessionId = null, onFixedHtml = null }) {
+function RightPanel({ messages = [], streamingText = null, open, onClose, previewImage = null, onClearImage, activeTab = null, sessionId = null, onFixedHtml = null, onRestoreCode = null }) {
   const [tab, setTab] = useState('preview');
   const { isSubscribed } = useApp();
   const codeBlocks = useMemo(() => getLatestCode(messages, streamingText), [messages, streamingText]);
@@ -1278,7 +1654,7 @@ function RightPanel({ messages = [], streamingText = null, open, onClose, previe
         {tab === 'preview' && <PreviewPane blocks={codeBlocks} messages={messages} previewImage={previewImage} onClearImage={onClearImage} isStreaming={!!streamingText} sessionId={sessionId} onFixedHtml={onFixedHtml} />}
         {tab === 'code'    && isSubscribed && <CodeViewer  blocks={codeBlocks} />}
         {tab === 'files'   && isSubscribed && <FilesPane   blocks={codeBlocks} />}
-        {tab === 'diff'    && isSubscribed && <DiffPane    messages={messages} />}
+        {tab === 'diff'    && isSubscribed && <DiffPane    messages={messages} onRestoreCode={onRestoreCode} />}
         {tab === 'tasks'   && <TasksPane />}
       </div>
     </div>
