@@ -2742,12 +2742,18 @@ async def chat_stream(req: ChatRequest, request: Request):
                         if not _first_token_received:
                             yield f": ping\n\n"  # SSE comment — ignored by client, keeps TCP alive
 
-                # Stream Claude response; collect keep-alive pings alongside
+                # Stream Claude response with extended thinking enabled.
+                # Extended thinking gives Claude a private scratchpad to fully reason
+                # through the problem before streaming any text — dramatically improves
+                # debugging accuracy and eliminates mid-response contradictions.
+                # text_stream automatically filters out thinking blocks; only text reaches user.
                 async with _ac.messages.stream(
                     model="claude-sonnet-4-6",
-                    max_tokens=8192,
+                    max_tokens=16000,
+                    thinking={"type": "enabled", "budget_tokens": 8000},
                     system=_c_sys,
                     messages=_c_msgs,
+                    betas=["interleaved-thinking-2025-05-14"],
                 ) as _cs:
                     _ping_task = asyncio.create_task(asyncio.sleep(0))  # dummy
                     _last_ping = asyncio.get_event_loop().time()
@@ -3248,9 +3254,11 @@ async def autofix_stream(req: AutoFixRequest, request: Request):
         try:
             async with _ac.messages.stream(
                 model="claude-sonnet-4-6",
-                max_tokens=8192,
+                max_tokens=16000,
+                thinking={"type": "enabled", "budget_tokens": 8000},
                 system=_autofix_system,
                 messages=[{"role": "user", "content": user_msg}],
+                betas=["interleaved-thinking-2025-05-14"],
             ) as _cs:
                 async for _ct in _cs.text_stream:
                     _first = True
