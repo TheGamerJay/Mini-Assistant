@@ -1027,8 +1027,28 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
             );
           })}
 
+          {/* Extended thinking indicator — shown while Claude reasons before first token */}
+          {streamingText === '' && loading && (
+            <div className="flex items-center gap-3 px-4 py-3 rounded-2xl max-w-xs"
+              style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.18)' }}>
+              <div className="flex items-center gap-[5px]">
+                {[0,1,2,3].map(i => (
+                  <div key={i} style={{
+                    width: 5, height: 5, borderRadius: '50%',
+                    background: 'linear-gradient(135deg,#818cf8,#a78bfa)',
+                    animation: `pulse 1.4s ease-in-out ${i * 0.18}s infinite`,
+                    opacity: 0.8,
+                  }} />
+                ))}
+              </div>
+              <span className="text-[11px] font-medium" style={{ color: '#a5b4fc' }}>
+                Reasoning through your request…
+              </span>
+            </div>
+          )}
+
           {/* Live streaming text bubble */}
-          {streamingText !== null && (
+          {streamingText !== null && streamingText !== '' && (
             <StreamingBubble
               text={streamingText}
               existingCode={(() => {

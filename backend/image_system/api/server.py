@@ -2749,8 +2749,8 @@ async def chat_stream(req: ChatRequest, request: Request):
                 # text_stream automatically filters out thinking blocks; only text reaches user.
                 async with _ac.messages.stream(
                     model="claude-sonnet-4-6",
-                    max_tokens=16000,
-                    thinking={"type": "enabled", "budget_tokens": 8000},
+                    max_tokens=24000,
+                    thinking={"type": "enabled", "budget_tokens": 16000},
                     system=_c_sys,
                     messages=_c_msgs,
                     betas=["interleaved-thinking-2025-05-14"],
@@ -3254,8 +3254,8 @@ async def autofix_stream(req: AutoFixRequest, request: Request):
         try:
             async with _ac.messages.stream(
                 model="claude-sonnet-4-6",
-                max_tokens=16000,
-                thinking={"type": "enabled", "budget_tokens": 8000},
+                max_tokens=24000,
+                thinking={"type": "enabled", "budget_tokens": 16000},
                 system=_autofix_system,
                 messages=[{"role": "user", "content": user_msg}],
                 betas=["interleaved-thinking-2025-05-14"],
