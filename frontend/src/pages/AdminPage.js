@@ -17,6 +17,7 @@ import {
 import { toast, Toaster } from 'sonner';
 import { api, setToken, clearToken, IMAGE_API } from '../api/client';
 import { useApp } from '../context/AppContext';
+import AvatarMedia from '../components/AvatarMedia';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -582,7 +583,7 @@ function AdminDashboard({ adminUser, onLogout }) {
                           <div className="flex items-center gap-2.5">
                             <div className="w-7 h-7 rounded-full overflow-hidden flex-shrink-0 bg-gradient-to-br from-violet-500 to-blue-500 flex items-center justify-center text-white text-xs font-bold">
                               {u.avatar
-                                ? <img src={u.avatar} alt="" className="w-full h-full object-cover" />
+                                ? <AvatarMedia src={u.avatar} className="w-full h-full object-cover" fallback={<span>{(u.name?.[0] || '?').toUpperCase()}</span>} />
                                 : (u.name?.[0] || '?').toUpperCase()}
                             </div>
                             <span className="text-slate-200 font-medium text-sm whitespace-nowrap">{u.name}</span>

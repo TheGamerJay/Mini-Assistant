@@ -13,6 +13,7 @@ import {
 import { toast } from 'sonner';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/client';
+import AvatarMedia from './AvatarMedia';
 import ImageCard from './ImageCard';
 import IntelligencePanel from './IntelligencePanel';
 
@@ -676,7 +677,7 @@ function ChatMessage({ message, onRetry, onRate, onFork, onPin, onSendToBuilder,
           )}
         </div>
         <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-blue-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-1 select-none overflow-hidden">
-          {avatar ? <img src={avatar} alt="avatar" className="w-full h-full object-cover" /> : initial}
+          {avatar ? <AvatarMedia src={avatar} className="w-full h-full object-cover" fallback={<span>{initial}</span>} /> : initial}
         </div>
       </div>
     );
