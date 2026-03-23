@@ -358,37 +358,42 @@ async def check_and_deduct(
     cost_usd   = _compute_cost_usd(action_type, tokens_in, tokens_out)
 
     # ── Safety checks (ordered: cheapest → most expensive) ────────────────
-    try:
-        import safety as _safety   # noqa: PLC0415
-        from fastapi import HTTPException as _HTTPEx   # noqa: PLC0415
+    import os as _os
+    _safety_disabled = _os.environ.get("DISABLE_RATE_LIMIT", "0") == "1"
+    if _safety_disabled:
+        log.warning("DISABLE_RATE_LIMIT=1 — skipping all safety checks for uid=%s", uid)
+    else:
+        try:
+            import safety as _safety   # noqa: PLC0415
+            from fastapi import HTTPException as _HTTPEx   # noqa: PLC0415
 
-        # 1. Maintenance mode (sync, zero-cost)
-        _safety.check_maintenance_mode(role=user.get("role", ""))
+            # 1. Maintenance mode (sync, zero-cost)
+            _safety.check_maintenance_mode(role=user.get("role", ""))
 
-        # 2. Hard block (DB read, but only if prior flags exist)
-        await _safety.enforce_hard_block(uid, db)
+            # 2. Hard block (DB read, but only if prior flags exist)
+            await _safety.enforce_hard_block(uid, db)
 
-        # 3. Feature gate (sync, zero-cost)
-        _safety.require_plan(action_type, plan)
+            # 3. Feature gate (sync, zero-cost)
+            _safety.require_plan(action_type, plan)
 
-        # 4. Global circuit breaker (cached DB read every 60s)
-        await _safety.check_global_circuit_breaker(db)
+            # 4. Global circuit breaker (cached DB read every 60s)
+            await _safety.check_global_circuit_breaker(db)
 
-        # 5. Per-user rate limits (Redis or in-memory)
-        await _safety.enforce_rate_limit(uid, plan, action_type)
+            # 5. Per-user rate limits (Redis or in-memory)
+            await _safety.enforce_rate_limit(uid, plan, action_type)
 
-        # 6. Per-request + daily cost caps (DB aggregate)
-        await _safety.enforce_cost_limit(uid, db, plan, cost_usd)
+            # 6. Per-request + daily cost caps (DB aggregate)
+            await _safety.enforce_cost_limit(uid, db, plan, cost_usd)
 
-    except Exception as exc:
-        from fastapi import HTTPException   # noqa: PLC0415
-        if isinstance(exc, HTTPException):
-            raise
-        log.error("SAFETY SYSTEM FAILURE — blocking request (fail closed): %s", exc)
-        raise HTTPException(
-            status_code=503,
-            detail={"error": "safety_unavailable", "message": "Service temporarily unavailable. Please try again."},
-        )
+        except Exception as exc:
+            from fastapi import HTTPException   # noqa: PLC0415
+            if isinstance(exc, HTTPException):
+                raise
+            log.error("SAFETY SYSTEM FAILURE — blocking request (fail closed): %s", exc)
+            raise HTTPException(
+                status_code=503,
+                detail={"error": "safety_unavailable", "message": "Service temporarily unavailable. Please try again."},
+            )
 
     # ── Determine credit pool ──────────────────────────────────────────────
     sub_c   = user.get("subscription_credits")
