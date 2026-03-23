@@ -4972,11 +4972,11 @@ _POSTHOG_ALLOWED_PREFIXES = (
     "batch/",   # batch event capture
     "decide/",  # feature flags
     "s/",       # session recording
-    "static/",  # SDK asset bundle fetched at init (fallback; asset_host handles normally)
-    "array.js", # legacy SDK path
     "engage/",  # person properties
     "t/",       # toolbar
     "surveys/", # surveys
+    # static/ and array.js intentionally excluded — SDK assets load directly
+    # from us-assets.i.posthog.com via asset_host; script tags need no CORS
 )
 
 # Paths whose response the SDK ignores — safe to acknowledge immediately
