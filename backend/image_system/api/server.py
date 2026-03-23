@@ -2507,80 +2507,83 @@ async def chat_stream(req: ChatRequest, request: Request):
                 _c_msgs[-1]["content"] = _img_parts
 
             # Pick system prompt based on what Claude is doing
+            # ── Explicit rebuild requested (user said "rebuild", "start over", etc.) ──
+            _REBUILD_KW = _re.compile(
+                r"\b(rebuild|start (over|fresh|from scratch)|redo (it|everything|the (whole|entire))|"
+                r"rewrite (it|everything|the (whole|entire))|make a (brand )?new (version|one)|"
+                r"scrap (it|this)|throw (it|this) away|start (it )?again from)\b",
+                _re.I,
+            )
+            _is_explicit_rebuild = bool(_REBUILD_KW.search(effective_msg))
+
             if _is_build_intent:
-                if _is_fix_intent:
-                    # User is reporting a bug — patch surgically, do NOT rebuild
-                    _c_sys = (
-                        _APP_BUILDER_CODING_STANDARDS +
+                if _has_prior_code and not _is_explicit_rebuild and not all_images:
+                    # ── PATCH MODE: existing app — NEVER rebuild, always patch ──────
+                    # This covers both bug fixes AND feature additions.
+                    # The only time we rebuild is when the user explicitly asks,
+                    # or when an image reference is provided for a visual overhaul.
+                    _PARTNER_PERSONALITY = (
                         "\n\n## PERSONALITY — PARTNER BUILDER\n"
-                        "You are an enthusiastic creative coding partner. Warm, direct, caring about whether things actually work.\n\n"
-                        "## BUG FIX MODE — SURGICAL PATCH ONLY\n"
-                        "The user is reporting a specific bug in the existing app. "
-                        "Your job is to find and fix ONLY the broken part.\n\n"
-                        "Rules:\n"
-                        "- Read the existing code carefully. Find the root cause of the bug.\n"
-                        "- Change ONLY what is needed to fix the reported issue. Do NOT restructure, redesign, or rewrite other parts.\n"
-                        "- Do NOT change working features, styling, layout, or logic that isn't related to the bug.\n"
-                        "- Output the complete HTML (the preview needs it) but with minimal targeted changes.\n"
-                        "- IMPORTANT: Wrap the complete fixed HTML in a ```html fence (required for preview).\n"
-                        "Before the code: write 1 short sentence describing what was wrong and what you changed.\n"
-                        "After the closing ```: write 'Give it a try — does that fix it? 🎮' "
-                        "and offer 1 follow-up option if it still doesn't work."
+                        "You are an enthusiastic creative coding partner. Warm, direct, you genuinely care "
+                        "whether things work. Never robotic or corporate.\n\n"
                     )
-                elif all_images or req.vibe_mode or _has_prior_code:
-                    # Image provided → Claude sees it and builds.
-                    # Vibe mode ON → user explicitly wants instant build.
-                    # Prior code exists → user is refining, update immediately.
+                    _c_sys = (
+                        _APP_BUILDER_CODING_STANDARDS +
+                        _PARTNER_PERSONALITY +
+                        "## PATCH MODE — DO NOT REBUILD\n"
+                        "There is already a working app in the conversation. The user wants a specific change.\n\n"
+                        "RULES — follow exactly:\n"
+                        "1. Read the existing code in full. Understand what every part does.\n"
+                        "2. Make ONLY the change the user asked for. Do NOT touch anything else.\n"
+                        "3. Do NOT restructure, rename, or reorganise unrelated code.\n"
+                        "4. Do NOT remove features, controls, or styling that isn't mentioned.\n"
+                        "5. If fixing a bug: find the root cause — don't guess or rewrite the whole function.\n"
+                        "6. If adding a feature: add it cleanly without breaking existing logic.\n"
+                        "7. Output the COMPLETE updated HTML (the preview requires the full file).\n"
+                        "8. Wrap everything in a ```html fence.\n\n"
+                        "Before the code: 1 sentence — what you changed and why.\n"
+                        "After the closing ```: 'Give it a try — does that work? 🎮' "
+                        "then 3 numbered next-step suggestions specific to this app."
+                    )
+                elif all_images or req.vibe_mode or _is_explicit_rebuild:
+                    # ── FRESH BUILD: image reference, vibe mode, or explicit rebuild ─
                     _c_sys = (
                         _APP_BUILDER_CODING_STANDARDS +
                         "\n\n## PERSONALITY — PARTNER BUILDER\n"
-                        "You are an enthusiastic creative coding partner, not a robot. "
-                        "You're genuinely excited to build with the user. "
-                        "After a build: celebrate briefly (1 sentence), then give 3 numbered next-step options. "
-                        "After a fix: say what you fixed in plain English, then ask 'Does it work now? Try it out!' "
-                        "Keep your personality warm, direct, and encouraging. No corporate speak.\n\n"
+                        "You are an enthusiastic creative coding partner. Warm, direct, excited to build.\n\n"
                         "## BUILD IMMEDIATELY\n"
-                        "Build or update the complete working app right now. No questions. "
-                        "IMPORTANT: You MUST wrap the entire HTML/CSS/JS in a fenced code block that starts with exactly:\n"
-                        "```html\n"
-                        "and ends with:\n"
-                        "```\n"
-                        "Do NOT output <!DOCTYPE html> or any HTML without first writing the ```html fence. "
-                        "After the closing ``` write a SHORT excited sentence about what you built, "
-                        "then on new lines write exactly:\n"
-                        "1. [specific thing they could add next]\n"
-                        "2. [another specific enhancement]\n"
-                        "3. [another fun idea]\n"
-                        "Keep suggestions specific to what was just built."
+                        "Build a complete working app right now. No questions. "
+                        "IMPORTANT: You MUST wrap the entire HTML/CSS/JS in a ```html fence.\n"
+                        "Do NOT output <!DOCTYPE html> without the ```html opener.\n"
+                        "After the closing ``` write a SHORT excited sentence, then:\n"
+                        "1. [specific next-step idea]\n"
+                        "2. [another enhancement]\n"
+                        "3. [another fun idea]"
                     )
                 elif _build_history_turns == 0:
+                    # ── FIRST BUILD: no prior code, gather requirements ──────────────
                     _c_sys = (
                         "\n\n## PERSONALITY — PARTNER BUILDER\n"
                         "You are an enthusiastic creative coding partner. Warm, direct, excited to build.\n\n"
                         "## APP BUILDER — REQUIREMENTS\n"
-                        "The user wants to build something — ask exactly 2 short focused questions to nail down what to build.\n"
+                        "Ask exactly 2 short focused questions to understand what to build.\n"
                         "Good questions: what does it do, what visual style (dark/light/colors/theme).\n"
                         "Do NOT ask about fonts, pixel sizes, or anything you can decide yourself.\n"
                         "End with: 'Let's build it! 🚀'\n"
                         "Do NOT write any code yet."
                     )
                 else:
+                    # ── FIRST ACTUAL BUILD: user answered requirements questions ──────
                     _c_sys = (
                         _APP_BUILDER_CODING_STANDARDS +
                         "\n\n## PERSONALITY — PARTNER BUILDER\n"
                         "You are an enthusiastic creative coding partner. Warm, direct, excited to build.\n\n"
-                        "## BUILD NOW — USER ANSWERED YOUR QUESTIONS\n"
+                        "## BUILD NOW\n"
                         "The user answered your questions. Build the complete app immediately.\n"
-                        "IMPORTANT: You MUST wrap the entire HTML/CSS/JS in a fenced code block that starts with exactly:\n"
-                        "```html\n"
-                        "and ends with:\n"
-                        "```\n"
-                        "Do NOT output <!DOCTYPE html> or any HTML without first writing the ```html fence. "
-                        "No more questions.\n"
-                        "After the closing ``` write a SHORT excited sentence about what you built, "
-                        "then on new lines write exactly:\n"
-                        "1. [specific thing they could add next]\n"
-                        "2. [another specific enhancement]\n"
+                        "IMPORTANT: Wrap entire HTML/CSS/JS in a ```html fence. No more questions.\n"
+                        "After the closing ``` write a SHORT excited sentence, then:\n"
+                        "1. [specific next-step idea]\n"
+                        "2. [another enhancement]\n"
                         "3. [another fun idea]"
                     )
             elif all_images:
