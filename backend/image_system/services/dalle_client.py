@@ -17,6 +17,12 @@ import os
 import re
 from typing import Literal
 
+try:
+    from PIL import Image as _PILImage
+    _PIL_AVAILABLE = True
+except ImportError:
+    _PIL_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 # DALL-E 3 valid sizes
@@ -222,6 +228,59 @@ class DalleClient:
             raise RuntimeError("DALL-E 3 returned an empty image response")
 
         logger.info("DALL-E 3 generation complete (%d bytes b64)", len(b64))
+        return b64
+
+    async def edit(
+        self,
+        image_bytes: bytes,
+        prompt: str,
+        size: str = DEFAULT_SIZE,
+    ) -> str:
+        """
+        Edit an existing image using gpt-image-1 and return result as base64.
+
+        Unlike generate(), this passes the actual image to the model so it
+        can make targeted changes while preserving everything else.
+        """
+        import io as _io
+
+        if size not in VALID_SIZES:
+            size = DEFAULT_SIZE
+
+        if len(prompt) > _PROMPT_MAX:
+            prompt = _compress_prompt(prompt)
+
+        client = self._get_client()
+        logger.info(
+            "gpt-image-1 edit: size=%s len=%d prompt=%.80s",
+            size, len(prompt), prompt,
+        )
+
+        # Ensure PNG format — gpt-image-1 accepts PNG/JPEG/WEBP but PNG is safest
+        img_data = image_bytes
+        if _PIL_AVAILABLE:
+            try:
+                buf = _io.BytesIO()
+                _PILImage.open(_io.BytesIO(image_bytes)).convert("RGBA").save(buf, format="PNG")
+                img_data = buf.getvalue()
+            except Exception as _e:
+                logger.warning("PIL PNG conversion failed, passing raw bytes: %s", _e)
+
+        image_file = _io.BytesIO(img_data)
+        image_file.name = "image.png"
+
+        response = await client.images.edit(
+            model="gpt-image-1",
+            image=image_file,
+            prompt=prompt,
+            size=size,  # type: ignore[arg-type]
+        )
+
+        b64 = response.data[0].b64_json
+        if not b64:
+            raise RuntimeError("gpt-image-1 returned an empty edit response")
+
+        logger.info("gpt-image-1 edit complete (%d bytes b64)", len(b64))
         return b64
 
     async def health(self) -> dict:

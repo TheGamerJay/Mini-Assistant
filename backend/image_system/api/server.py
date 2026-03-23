@@ -1621,7 +1621,12 @@ async def chat(req: ChatRequest, request: Request):
         try:
             from ..services.dalle_client import DalleClient
             _dalle = DalleClient()
-            _b64 = await _dalle.generate(_edit_prompt)
+            # Use gpt-image-1 edit() when we have the source image bytes
+            # so the model actually modifies the image instead of text-to-image
+            if attached_image_bytes:
+                _b64 = await _dalle.edit(attached_image_bytes, _edit_prompt)
+            else:
+                _b64 = await _dalle.generate(_edit_prompt)
             try:
                 from mini_credits import log_image_generated as _log_img
                 await _log_img(request.headers.get("authorization"), request_id=getattr(req, "request_id", None))
