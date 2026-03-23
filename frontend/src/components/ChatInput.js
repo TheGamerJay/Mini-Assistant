@@ -85,7 +85,8 @@ function readFileAsDataUrl(file) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, chatMode = null, onChatModeChange }) {
-  const { pendingTemplate, pendingAutoSubmit, clearPendingTemplate, clearPendingAutoSubmit } = useApp();
+  const { pendingTemplate, pendingAutoSubmit, clearPendingTemplate, clearPendingAutoSubmit,
+          pendingChatMode, clearPendingChatMode } = useApp();
 
   // Always-current ref so the auto-submit path doesn't need onSubmit as a dep
   const onSubmitRef = useRef(onSubmit);
@@ -116,6 +117,11 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
   // Consume pending template — fills input, or auto-submits for onboarding
   useEffect(() => {
     if (!pendingTemplate) return;
+    // Apply pending chat mode before submitting (set by onboarding)
+    if (pendingChatMode && onChatModeChange) {
+      onChatModeChange(pendingChatMode);
+      clearPendingChatMode();
+    }
     if (pendingAutoSubmit) {
       // Fire directly without going through state — instant, no extra render
       onSubmitRef.current(pendingTemplate, null, null);
@@ -126,7 +132,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
       clearPendingTemplate();
       textareaRef.current?.focus();
     }
-  }, [pendingTemplate, pendingAutoSubmit, clearPendingTemplate, clearPendingAutoSubmit]);
+  }, [pendingTemplate, pendingAutoSubmit, clearPendingTemplate, clearPendingAutoSubmit, pendingChatMode, clearPendingChatMode, onChatModeChange]);
 
   // Auto-resize textarea
   useEffect(() => {

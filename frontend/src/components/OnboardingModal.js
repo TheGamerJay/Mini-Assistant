@@ -103,7 +103,7 @@ const CATEGORIES = [
 // OnboardingModal
 // ---------------------------------------------------------------------------
 export default function OnboardingModal({ onDone }) {
-  const { firePendingTemplate, firePendingBuildPrompt, setPage } = useApp();
+  const { firePendingTemplate, firePendingBuildPrompt, setPendingChatMode, setPage } = useApp();
   const [step, setStep]           = useState(1);
   const [category, setCategory]   = useState(null);
   const [customText, setCustomText] = useState('');
@@ -171,6 +171,7 @@ export default function OnboardingModal({ onDone }) {
     if (firedRef.current) return;
     firedRef.current = true;
     if (category?.builder) {
+      setPendingChatMode('build'); // activate Build Mode in ChatInput before submitting
       firePendingBuildPrompt(prompt);
     } else {
       firePendingTemplate(prompt, true);

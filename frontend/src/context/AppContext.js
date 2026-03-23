@@ -416,6 +416,11 @@ export function AppProvider({ children }) {
   const firePendingBuildPrompt = useCallback((text) => { _setPendingBuildPrompt(text); }, []);
   const clearPendingBuildPrompt = useCallback(() => { _setPendingBuildPrompt(null); }, []);
 
+  // ---- Pending chat mode (set by onboarding so ChatInput activates the right mode) ----
+  const [pendingChatMode, _setPendingChatMode] = useState(null); // 'image' | 'build' | null
+  const setPendingChatMode = useCallback((mode) => { _setPendingChatMode(mode); }, []);
+  const clearPendingChatMode = useCallback(() => { _setPendingChatMode(null); }, []);
+
   // ---- Global upgrade modal ----
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [upgradeReason, setUpgradeReason]       = useState('generic');
@@ -982,6 +987,10 @@ export function AppProvider({ children }) {
     pendingBuildPrompt,
     firePendingBuildPrompt,
     clearPendingBuildPrompt,
+    // pending chat mode — set by onboarding, consumed by ChatInput
+    pendingChatMode,
+    setPendingChatMode,
+    clearPendingChatMode,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

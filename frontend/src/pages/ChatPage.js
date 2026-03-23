@@ -710,6 +710,8 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         onSubmit={handleSubmit}
         loading={loading}
         lastTopic={lastUserTextRef.current || null}
+        chatMode={chatMode}
+        onChatModeChange={setChatMode}
       />
     );
   }

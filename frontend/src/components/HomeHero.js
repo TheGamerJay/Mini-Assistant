@@ -65,7 +65,7 @@ const getSuggestions = (lastTopic) => {
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
-function HomeHero({ onSubmit, loading, lastTopic }) {
+function HomeHero({ onSubmit, loading, lastTopic, chatMode = null, onChatModeChange }) {
   const { user } = useApp();
   const suggestions = getSuggestions(lastTopic);
 
@@ -134,7 +134,7 @@ function HomeHero({ onSubmit, loading, lastTopic }) {
 
         {/* Input */}
         <div className="w-full max-w-2xl">
-          <ChatInput variant="home" onSubmit={handleSubmit} loading={loading} />
+          <ChatInput variant="home" onSubmit={handleSubmit} loading={loading} chatMode={chatMode} onChatModeChange={onChatModeChange} />
           <p className="text-center mt-3 text-xs font-mono text-slate-700">
             Powered by Mini Assistant
           </p>
@@ -168,7 +168,7 @@ function HomeHero({ onSubmit, loading, lastTopic }) {
 
       {/* Input */}
       <div className="w-full max-w-2xl">
-        <ChatInput variant="home" onSubmit={onSubmit} loading={loading} />
+        <ChatInput variant="home" onSubmit={onSubmit} loading={loading} chatMode={chatMode} onChatModeChange={onChatModeChange} />
         <p className="text-center mt-3 text-xs font-mono text-slate-700">
           Powered by Mini Assistant
         </p>
