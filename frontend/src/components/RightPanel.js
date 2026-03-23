@@ -268,7 +268,31 @@ function CodeViewer({ blocks }) {
 // ---------------------------------------------------------------------------
 const MAX_AUTOFIX_ITERATIONS = 5;
 
-function PreviewPane({ blocks, previewImage = null, onClearImage, isStreaming = false, sessionId = null, onFixedHtml = null }) {
+/** Extract a short app title from conversation messages */
+function extractAppTitle(messages) {
+  if (!messages?.length) return 'Community App';
+  // Walk backwards to find the last user message that triggered a build
+  const buildKw = /\b(build|make|create|generate|design|write)\b/i;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== 'user') continue;
+    const txt = (m.content || '').trim();
+    if (!buildKw.test(txt)) continue;
+    // Strip common prefixes and grab the noun phrase
+    let title = txt
+      .replace(/^(build|make|create|generate|design|write)\s+(me\s+)?(a\s+|an\s+)?/i, '')
+      .replace(/\s+(with|using|that|which|and|in|for|from).*/i, '')
+      .trim()
+      .slice(0, 60);
+    if (title.length > 3) {
+      return title.charAt(0).toUpperCase() + title.slice(1);
+    }
+  }
+  return 'Community App';
+}
+
+function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage, isStreaming = false, sessionId = null, onFixedHtml = null }) {
+  const { user } = useApp();
   const [key, setKey] = useState(0);
   const iframeRef = useRef(null);
   const rawHtml = useMemo(() => buildPreviewHtml(blocks), [blocks]);
@@ -399,8 +423,8 @@ function PreviewPane({ blocks, previewImage = null, onClearImage, isStreaming = 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           share_id: shareData.id,
-          title: 'Community App',
-          author_name: 'Mini Assistant User',
+          title: extractAppTitle(messages),
+          author_name: user?.name || user?.email?.split('@')[0] || 'Anonymous',
         }),
       });
       if (!comRes.ok) throw new Error('Community post failed');
@@ -1251,7 +1275,7 @@ function RightPanel({ messages = [], streamingText = null, open, onClose, previe
 
       {/* Body */}
       <div className="flex-1 overflow-hidden">
-        {tab === 'preview' && <PreviewPane blocks={codeBlocks} previewImage={previewImage} onClearImage={onClearImage} isStreaming={!!streamingText} sessionId={sessionId} onFixedHtml={onFixedHtml} />}
+        {tab === 'preview' && <PreviewPane blocks={codeBlocks} messages={messages} previewImage={previewImage} onClearImage={onClearImage} isStreaming={!!streamingText} sessionId={sessionId} onFixedHtml={onFixedHtml} />}
         {tab === 'code'    && isSubscribed && <CodeViewer  blocks={codeBlocks} />}
         {tab === 'files'   && isSubscribed && <FilesPane   blocks={codeBlocks} />}
         {tab === 'diff'    && isSubscribed && <DiffPane    messages={messages} />}

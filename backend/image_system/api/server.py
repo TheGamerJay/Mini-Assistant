@@ -2793,12 +2793,33 @@ async def chat_stream(req: ChatRequest, request: Request):
                         import anthropic as _rev_am
                         _rev_client = _rev_am.AsyncAnthropic(api_key=_api_key_claude)
 
-                        # Non-streaming Haiku review — fast, cheap
+                        # Non-streaming Haiku review — raised to 1024 tokens for thorough checks
                         _rev_content = "[USER REQUEST]\n" + effective_msg + "\n\n[GENERATED CODE]\n```html\n" + _rev_html + "\n```"
                         _rev_resp = await _rev_client.messages.create(
                             model="claude-haiku-4-5-20251001",
-                            max_tokens=512,
-                            system=_kb_review(),
+                            max_tokens=1024,
+                            system=_kb_review() + """
+
+## EXTENDED REVIEW CHECKS — VERIFY ALL OF THESE
+
+### GAME/INTERACTIVE APP CHECKS
+- Does the game actually START when loaded or when a start button is pressed?
+- Do ALL buttons have working event listeners (not just onclick="undefined")?
+- Is the game loop running and updating the display every frame/tick?
+- Do keyboard controls have `if (e.repeat) return;` as first line?
+- Is score/lives/timer updating in the DOM (not just in a variable)?
+- Does restart reset ALL state (not just some)?
+- Are setInterval/setTimeout IDs stored so they can be cleared on restart?
+
+### FATAL BUG CHECKS
+- Any querySelector that could return null crashing on .addEventListener?
+- Any variable used before it's declared?
+- Any infinite loop (while(true) without a break path)?
+- Canvas: is ctx = canvas.getContext('2d') actually called?
+
+If ANY of these fail: FAIL with SCORE below 70.
+If all pass: PASS.
+""",
                             messages=[{"role": "user", "content": _rev_content}],
                         )
                         _rev_text = _rev_resp.content[0].text.strip()
@@ -2824,9 +2845,11 @@ async def chat_stream(req: ChatRequest, request: Request):
                             try:
                                 async with _rev_client.messages.stream(
                                     model="claude-sonnet-4-6",
-                                    max_tokens=8192,
+                                    max_tokens=16000,
+                                    thinking={"type": "enabled", "budget_tokens": 8000},
                                     system=_fix_sys,
                                     messages=[{"role": "user", "content": _fix_user}],
+                                    betas=["interleaved-thinking-2025-05-14"],
                                 ) as _fix_stream:
                                     _fix_last_ping = asyncio.get_event_loop().time()
                                     async for _fix_tok in _fix_stream.text_stream:
