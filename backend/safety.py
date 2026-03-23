@@ -216,7 +216,10 @@ async def enforce_rate_limit(uid: str, plan: str, action_type: str = "chat_messa
     Check per-user rate limits (per minute and per hour).
     Raises HTTP 429 if exceeded.
     Stage-2 throttled users get 50% of their normal limits.
+    Set DISABLE_RATE_LIMIT=1 to bypass entirely (debug only).
     """
+    if os.environ.get("DISABLE_RATE_LIMIT", "0") == "1":
+        return
     plan = plan if plan in MAX_RPM else "free"
     rpm_limit = MAX_RPM[plan]
     rph_limit = MAX_RPH[plan]
