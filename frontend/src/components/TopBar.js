@@ -157,7 +157,7 @@ function ProfileMenu({ onClose, setPage, serverStatus, theme, toggleTheme, user,
       {/* User info + status */}
       <div className="px-4 py-3 border-b border-white/5">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center text-white text-sm font-bold flex-shrink-0 select-none overflow-hidden">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center text-white text-sm font-bold flex-shrink-0 select-none overflow-hidden">
             {avatar
               ? <AvatarMedia src={avatar} className="w-full h-full object-cover" fallback={<span>{user?.name ? user.name[0].toUpperCase() : 'U'}</span>} />
               : (user?.name ? user.name[0].toUpperCase() : 'U')}
@@ -321,7 +321,7 @@ function TopBar() {
           className="flex items-center gap-1.5 group pl-2"
           title="Profile & settings"
         >
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-cyan-500
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-cyan-500
             flex items-center justify-center text-white text-xs font-bold
             group-hover:opacity-80 transition-opacity select-none overflow-hidden">
             {avatar
