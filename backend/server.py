@@ -5077,7 +5077,17 @@ if _static_dir.exists():
         raise HTTPException(status_code=404, detail="favicon not found")
 
     @app.get("/{full_path:path}")
-    async def serve_frontend(full_path: str):
+    async def serve_frontend(full_path: str, request: StarletteRequest):
+        # Only serve the SPA shell for browser navigation requests.
+        # Programmatic requests (JS/CSS asset loads, API fetches, proxy
+        # calls) send Accept: */* or application/json — not text/html.
+        # Returning index.html for those produces "Unexpected token '<'" errors.
+        _NEVER_HTML = ("api/", "ingest/", "image-api/")
+        if any(full_path.startswith(p) for p in _NEVER_HTML):
+            raise HTTPException(status_code=404)
+        accept = request.headers.get("accept", "")
+        if "text/html" not in accept:
+            raise HTTPException(status_code=404)
         index = _static_dir / "index.html"
         return FileResponse(str(index))
 
