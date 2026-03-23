@@ -2672,7 +2672,7 @@ const AppBuilder = () => {
                     />
                     {/* Return experience banner — shown when resuming an existing session */}
                     {isResumed && !buildJustCompleted && (
-                      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2.5 bg-[#0d0d16]/95 border border-cyan-500/30 rounded-xl px-4 py-2.5 shadow-2xl backdrop-blur-sm"
+                      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2.5 bg-[#0d0d16]/95 border border-cyan-500/30 rounded-xl px-4 py-2.5 shadow-2xl backdrop-blur-sm pointer-events-none"
                         style={{ animation: 'fadeInDown 0.3s ease-out' }}>
                         <CheckCircle className="w-4 h-4 text-cyan-400 flex-shrink-0" />
                         <div className="flex-1 min-w-0">
@@ -2682,11 +2682,11 @@ const AppBuilder = () => {
                         <button
                           onClick={() => { setIsResumed(false); if (!isSubscribed) { openUpgradeModal('deploy'); } else { setShowVercelModal(true); setVercelResult(null); } }}
                           title={!isSubscribed ? 'Deployment requires an active plan' : 'Deploy to Vercel'}
-                          className="flex-shrink-0 flex items-center gap-1 px-2.5 py-1 bg-violet-500/20 border border-violet-500/40 text-violet-300 text-[10px] font-mono uppercase rounded-sm hover:bg-violet-500/30 transition-colors">
+                          className="pointer-events-auto flex-shrink-0 flex items-center gap-1 px-2.5 py-1 bg-violet-500/20 border border-violet-500/40 text-violet-300 text-[10px] font-mono uppercase rounded-sm hover:bg-violet-500/30 transition-colors">
                           <Globe className="w-3 h-3" /> Deploy
                         </button>
                         <button onClick={() => setIsResumed(false)}
-                          className="flex-shrink-0 p-1 text-slate-600 hover:text-slate-300 transition-colors rounded">
+                          className="pointer-events-auto flex-shrink-0 p-1 text-slate-600 hover:text-slate-300 transition-colors rounded">
                           <X className="w-3.5 h-3.5" />
                         </button>
                       </div>
