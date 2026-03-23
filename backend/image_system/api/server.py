@@ -1672,13 +1672,19 @@ async def chat(req: ChatRequest, request: Request):
             description = "a character or scene"
             logger.warning("Vision describe failed: %s", exc)
 
-        dalle_prompt = (
-            f"Reference image description: {description}\n\n"
-            f"User request: {effective_msg}\n\n"
-            f"Generate a new image that fulfills the user request, visually inspired "
-            f"by the reference. Preserve the art style, color palette, and character "
-            f"design from the reference while applying the requested changes."
-        )
+        # GPT-5.4 fuses the vision description + user request into the
+        # optimal DALL-E 3 prompt, preserving style while applying the request.
+        try:
+            from mini_assistant.phase2.prompt_enhancer import enhance_reference_prompt
+            dalle_prompt = await enhance_reference_prompt(description, effective_msg)
+        except Exception:
+            dalle_prompt = (
+                f"Reference image description: {description}\n\n"
+                f"User request: {effective_msg}\n\n"
+                "Generate a new image that fulfills the user request, visually inspired "
+                "by the reference. Preserve the art style, color palette, and character "
+                "design from the reference while applying the requested changes."
+            )
         try:
             from ..services.dalle_client import DalleClient
             _dalle = DalleClient()

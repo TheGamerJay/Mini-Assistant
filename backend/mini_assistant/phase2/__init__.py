@@ -27,7 +27,7 @@ from .supervisor import Supervisor, SupervisorResult
 from .models          import MODEL_CONFIG, get_model
 from .router          import call_model
 from .qa              import review as qa_review, should_run_qa
-from .prompt_enhancer import enhance_image_prompt, enhance_edit_instruction, enhance_code_context
+from .prompt_enhancer import enhance_image_prompt, enhance_edit_instruction, enhance_code_context, enhance_reference_prompt
 
 __all__ = [
     # Phase 2 core
@@ -48,5 +48,6 @@ __all__ = [
     # Prompt enhancement
     "enhance_image_prompt",
     "enhance_edit_instruction",
+    "enhance_reference_prompt",
     "enhance_code_context",
 ]

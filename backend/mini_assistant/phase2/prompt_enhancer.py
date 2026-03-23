@@ -125,6 +125,68 @@ async def enhance_edit_instruction(user_msg: str) -> str:
     return user_msg
 
 
+# ── Image reference-generate prompt enhancer ─────────────────────────────────
+
+_REF_GEN_SYSTEM = (
+    "You are an expert AI image prompt engineer specializing in style-faithful generation. "
+    "Given a visual description of a reference image and a user request, write the optimal "
+    "DALL-E 3 generation prompt that: "
+    "(1) faithfully preserves the art style, color palette, and character design of the reference, "
+    "(2) fulfills the user's specific request, "
+    "(3) includes rich visual detail — lighting, composition, quality modifiers. "
+    "Return ONLY the final generation prompt. No explanations, no labels, no quotes."
+)
+
+_REF_GEN_USER = """\
+Reference image visual description:
+{description}
+
+User request: {msg}
+
+Write the optimal image generation prompt."""
+
+
+async def enhance_reference_prompt(description: str, user_msg: str) -> str:
+    """
+    Use GPT-5.4 to fuse the vision description + user request into the
+    best possible DALL-E 3 prompt for reference-based generation.
+
+    Returns the enhanced prompt, or the raw combined fallback if enhancement fails.
+    """
+    if not _enhancer_available():
+        return (
+            f"Reference image description: {description}\n\n"
+            f"User request: {user_msg}\n\n"
+            "Generate a new image that fulfills the user request, visually inspired "
+            "by the reference. Preserve the art style, color palette, and character "
+            "design from the reference while applying the requested changes."
+        )
+
+    from .router import call_model
+    try:
+        enhanced = await call_model(
+            "CEO",
+            _REF_GEN_USER.format(description=description[:2000], msg=user_msg),
+            context=_REF_GEN_SYSTEM,
+        )
+        if enhanced:
+            logger.info(
+                "enhance_reference_prompt | description=%d chars → prompt=%d chars",
+                len(description), len(enhanced),
+            )
+            return enhanced.strip()
+    except Exception as exc:
+        logger.warning("enhance_reference_prompt failed (using fallback): %s", exc)
+
+    return (
+        f"Reference image description: {description}\n\n"
+        f"User request: {user_msg}\n\n"
+        "Generate a new image that fulfills the user request, visually inspired "
+        "by the reference. Preserve the art style, color palette, and character "
+        "design from the reference while applying the requested changes."
+    )
+
+
 # ── Code / chat context enhancer ─────────────────────────────────────────────
 
 _CODE_SYSTEM = (
