@@ -250,7 +250,7 @@ export default function MascotAssistant() {
           <button
             onClick={handleOpen}
             title="Open Mini Assistant"
-            className="pill-pulse pointer-events-auto relative w-10 h-10 rounded-full
+            className="pill-pulse pointer-events-auto relative w-10 h-10 rounded-xl
                        flex items-center justify-center
                        bg-[#0f0f1a] border border-violet-500/40
                        hover:border-violet-400/70 hover:scale-110
