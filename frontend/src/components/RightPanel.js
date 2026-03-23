@@ -531,6 +531,9 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
     return () => clearInterval(t);
   }, []);
 
+  // ── currentFixHtml declared early so callbacks below can reference it ──
+  const [currentFixHtml, setCurrentFixHtml] = useState(null); // live patched HTML
+
   // ── Deploy / Share modal ───────────────────────────────────────────────
   const [shareLoading, setShareLoading] = useState(false);
   const [deployModal, setDeployModal] = useState(null); // { url, qrDataUrl } | null
@@ -637,7 +640,6 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
   const [fixing, setFixing] = useState(false);
   const [fixLog, setFixLog] = useState([]);          // [{pass, text, allClear}]
   const [fixIteration, setFixIteration] = useState(0);
-  const [currentFixHtml, setCurrentFixHtml] = useState(null); // live patched HTML
   const [liveToken, setLiveToken] = useState('');
   const fixAbortRef = useRef(null);
   const fixingRef = useRef(false);
