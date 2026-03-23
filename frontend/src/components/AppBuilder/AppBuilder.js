@@ -2672,7 +2672,7 @@ const AppBuilder = () => {
                     />
                     {/* Return experience banner — shown when resuming an existing session */}
                     {isResumed && !buildJustCompleted && (
-                      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2.5 bg-[#0d0d16]/95 border border-cyan-500/30 rounded-xl px-4 py-2.5 shadow-2xl backdrop-blur-sm pointer-events-none"
+                      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 w-max max-w-[90%] flex items-center gap-2.5 bg-[#0d0d16]/80 border border-cyan-500/25 rounded-xl px-4 py-2.5 shadow-2xl backdrop-blur-md pointer-events-none"
                         style={{ animation: 'fadeInDown 0.3s ease-out' }}>
                         <CheckCircle className="w-4 h-4 text-cyan-400 flex-shrink-0" />
                         <div className="flex-1 min-w-0">
@@ -2694,7 +2694,7 @@ const AppBuilder = () => {
 
                     {/* Build complete notification */}
                     {buildJustCompleted && (
-                      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2.5 bg-emerald-950/95 border border-emerald-500/40 rounded-xl px-4 py-2.5 shadow-2xl backdrop-blur-sm pointer-events-none"
+                      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 w-max max-w-[90%] flex items-center gap-2.5 bg-emerald-950/80 border border-emerald-500/30 rounded-xl px-4 py-2.5 shadow-2xl backdrop-blur-md pointer-events-none"
                         style={{ animation: 'fadeInDown 0.3s ease-out' }}>
                         <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
                         <div>
