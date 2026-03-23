@@ -69,6 +69,7 @@ class ChatRequest(BaseModel):
 class AutoFixRequest(BaseModel):
     html: str                                        # current full app HTML
     errors: Optional[List[str]] = []                # JS errors captured from iframe
+    dom_report: Optional[str] = None                # DOM inspector snapshot (buttons, state, hidden els)
     iteration: int = 1                              # which pass (1-5)
     session_id: Optional[str] = None
 

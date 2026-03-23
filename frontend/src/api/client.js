@@ -130,7 +130,7 @@ export const api = {
   },
 
   /** One autonomous bug-fix pass. Returns raw fetch Response (SSE). */
-  autofixStream(html, errors, iteration, sessionId, signal) {
+  autofixStream(html, errors, domReport, iteration, sessionId, signal) {
     const _token = getToken();
     const authHeaders = {
       ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
@@ -139,7 +139,7 @@ export const api = {
     return fetch(`${IMAGE_API}/autofix/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders },
-      body: JSON.stringify({ html, errors, iteration, session_id: sessionId }),
+      body: JSON.stringify({ html, errors, dom_report: domReport || null, iteration, session_id: sessionId }),
       signal,
     });
   },

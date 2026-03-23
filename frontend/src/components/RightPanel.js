@@ -90,24 +90,75 @@ function getLatestCode(messages, streamingText) {
   return [];
 }
 
-/** Script injected into every iframe to relay JS errors to the parent window */
+/** Script injected into every iframe — error capture + DOM visual inspector */
 const ERROR_CAPTURE_SCRIPT = `<script>
 (function(){
-  var send = function(level, msg) {
-    try { window.parent.postMessage({ __maType: 'iframe_error', level: level, msg: String(msg).slice(0, 500) }, '*'); } catch(e) {}
+  // ── Error relay ──────────────────────────────────────────────────────────
+  var send = function(type, payload) {
+    try { window.parent.postMessage(Object.assign({ __maType: type }, payload), '*'); } catch(e) {}
   };
   var _ce = console.error.bind(console);
   var _cw = console.warn.bind(console);
-  console.error = function() { send('error', Array.prototype.join.call(arguments,' ')); _ce.apply(console, arguments); };
-  console.warn  = function() { send('warn',  Array.prototype.join.call(arguments,' ')); _cw.apply(console, arguments); };
+  console.error = function() { send('iframe_error', { level:'error', msg: Array.prototype.join.call(arguments,' ').slice(0,500) }); _ce.apply(console, arguments); };
+  console.warn  = function() { send('iframe_error', { level:'warn',  msg: Array.prototype.join.call(arguments,' ').slice(0,500) }); _cw.apply(console, arguments); };
   window.onerror = function(msg, src, line, col, err) {
-    send('error', msg + (err ? ' | ' + (err.stack||'').split('\\n')[0] : '') + ' [line ' + line + ']');
+    send('iframe_error', { level:'error', msg: msg + (err ? ' | ' + (err.stack||'').split('\\n')[0] : '') + ' [line '+line+']' });
     return false;
   };
   window.addEventListener('unhandledrejection', function(e) {
-    send('error', 'Unhandled promise: ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason)));
+    send('iframe_error', { level:'error', msg: 'Unhandled promise: ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason)) });
   });
-  window.parent.postMessage({ __maType: 'iframe_ready' }, '*');
+
+  // ── DOM Visual Inspector — runs on request ───────────────────────────────
+  function buildDOMReport() {
+    var lines = [];
+    // 1. Buttons & clickable elements
+    var btns = document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]');
+    btns.forEach(function(el) {
+      var label = (el.textContent || el.value || el.id || '?').trim().slice(0, 40);
+      var hasHandler = !!(el.onclick || el._hasListener);
+      var evData = el.__maListeners;
+      lines.push('BUTTON "' + label + '": ' + (hasHandler || evData ? 'has handler' : 'NO HANDLER DETECTED'));
+    });
+    // 2. State display elements (score, lives, timer, level)
+    var stateEls = document.querySelectorAll('[id*="score"],[id*="count"],[id*="life"],[id*="lives"],[id*="timer"],[id*="level"],[id*="hp"],[id*="health"],[id*="point"],[class*="score"],[class*="lives"],[class*="timer"]');
+    stateEls.forEach(function(el) {
+      lines.push('STATE "' + (el.id || el.className).slice(0,30) + '": "' + el.textContent.trim().slice(0,30) + '"');
+    });
+    // 3. Hidden elements that look like screens/modals
+    var hidden = document.querySelectorAll('[style*="display:none"],[style*="display: none"],[hidden],.hidden,.game-over,.start-screen,.menu');
+    hidden.forEach(function(el) {
+      var id = el.id || el.className.toString().slice(0,30);
+      lines.push('HIDDEN: ' + id);
+    });
+    // 4. Canvas elements
+    var canvases = document.querySelectorAll('canvas');
+    canvases.forEach(function(c) {
+      lines.push('CANVAS: ' + c.width + 'x' + c.height + (c.id ? ' id=' + c.id : ''));
+    });
+    // 5. Inputs
+    var inputs = document.querySelectorAll('input:not([type="hidden"]), textarea, select');
+    inputs.forEach(function(el) {
+      lines.push('INPUT "' + (el.id || el.name || el.type) + '": value="' + String(el.value).slice(0,30) + '"');
+    });
+    return lines.join('\\n') || 'No interactive elements found';
+  }
+
+  // Patch addEventListener to track listeners
+  var _origAddEL = EventTarget.prototype.addEventListener;
+  EventTarget.prototype.addEventListener = function(type, fn, opts) {
+    if (type === 'click' || type === 'touchstart') this.__maListeners = true;
+    return _origAddEL.call(this, type, fn, opts);
+  };
+
+  // Listen for inspection requests from parent
+  window.addEventListener('message', function(e) {
+    if (e.data && e.data.__maCmd === 'inspect') {
+      send('dom_report', { report: buildDOMReport() });
+    }
+  });
+
+  send('iframe_ready', {});
 })();
 <\/script>`;
 
@@ -219,6 +270,7 @@ const MAX_AUTOFIX_ITERATIONS = 5;
 
 function PreviewPane({ blocks, previewImage = null, onClearImage, isStreaming = false, sessionId = null, onFixedHtml = null }) {
   const [key, setKey] = useState(0);
+  const iframeRef = useRef(null);
   const rawHtml = useMemo(() => buildPreviewHtml(blocks), [blocks]);
   const lastHtmlRef = useRef(null);
   if (rawHtml) lastHtmlRef.current = rawHtml;
@@ -262,6 +314,31 @@ function PreviewPane({ blocks, previewImage = null, onClearImage, isStreaming = 
   // Clear errors when new code loads (key changes = iframe remounted)
   useEffect(() => { setIframeErrors([]); }, [key]);
 
+  // ── DOM Visual Inspector — request a snapshot from iframe ─────────────
+  const requestDomReport = useCallback(() => {
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        window.removeEventListener('message', handler);
+        resolve('');
+      }, 2000);
+      const handler = (e) => {
+        if (e.data?.__maType === 'dom_report') {
+          clearTimeout(timeout);
+          window.removeEventListener('message', handler);
+          resolve(e.data.report || '');
+        }
+      };
+      window.addEventListener('message', handler);
+      try {
+        iframeRef.current?.contentWindow?.postMessage({ __maCmd: 'inspect' }, '*');
+      } catch {
+        clearTimeout(timeout);
+        window.removeEventListener('message', handler);
+        resolve('');
+      }
+    });
+  }, []);
+
   // ── Auto-Fix loop state ────────────────────────────────────────────────
   const [fixing, setFixing] = useState(false);
   const [fixLog, setFixLog] = useState([]);          // [{pass, text, allClear}]
@@ -303,7 +380,9 @@ function PreviewPane({ blocks, previewImage = null, onClearImage, isStreaming = 
       try {
         const ctrl = new AbortController();
         fixAbortRef.current = ctrl;
-        const res = await api.autofixStream(workingHtml, errors, pass, sessionId, ctrl.signal);
+        // Capture DOM snapshot before sending to Claude
+        const domReport = await requestDomReport();
+        const res = await api.autofixStream(workingHtml, errors, domReport, pass, sessionId, ctrl.signal);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
         const reader = res.body.getReader();
@@ -533,6 +612,7 @@ function PreviewPane({ blocks, previewImage = null, onClearImage, isStreaming = 
       {/* iframe */}
       <iframe
         key={key}
+        ref={iframeRef}
         srcDoc={srcDoc}
         className="flex-1 w-full bg-white"
         sandbox="allow-scripts allow-same-origin allow-modals allow-pointer-lock allow-forms"

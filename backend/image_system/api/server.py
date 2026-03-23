@@ -192,6 +192,19 @@ except ImportError:
     _kb_requirements  = lambda: ""
     _kb_debug_agent   = lambda: ""
 
+try:
+    from .brains.lesson_memory import (
+        format_lessons_for_prompt  as _lessons_for_prompt,
+        save_lesson                as _save_lesson,
+        extract_lessons_from_fix_report as _extract_lessons,
+    )
+    _LESSONS_LOADED = True
+except ImportError:
+    _LESSONS_LOADED = False
+    _lessons_for_prompt   = lambda: ""
+    _save_lesson          = lambda *a, **kw: None
+    _extract_lessons      = lambda r: []
+
 _APP_BUILDER_CODING_STANDARDS = """
 ## CODING STANDARDS (follow these exactly when building apps)
 
@@ -2565,6 +2578,12 @@ async def chat_stream(req: ChatRequest, request: Request):
                     "Be warm and direct, like a senior dev pair-programming with a friend."
                 )
 
+            # ── Inject lesson memory into build/patch prompts ─────────────────
+            if _is_build_intent and _LESSONS_LOADED:
+                _lessons_block = _lessons_for_prompt()
+                if _lessons_block:
+                    _c_sys = _c_sys + _lessons_block
+
             try:
                 import anthropic as _am_lib
                 _ac = _am_lib.AsyncAnthropic(api_key=_api_key_claude)
@@ -2939,14 +2958,12 @@ class SuggestionsRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Auto-Fix endpoint — one pass of autonomous bug detection + patching
 # ---------------------------------------------------------------------------
-# _AUTOFIX_SYSTEM loaded from knowledge base (debug_agent_prompt)
-_AUTOFIX_SYSTEM = _kb_debug_agent()
-
 @app.post("/api/autofix/stream")
 async def autofix_stream(req: AutoFixRequest, request: Request):
     """
     One autonomous bug-fix pass. Streams Claude's analysis + patched code.
     Done event includes { all_clear: bool }.
+    Injects: lesson memory (past bug patterns) + DOM snapshot (live inspector).
     """
     import json as _json
     import re as _re
@@ -2955,7 +2972,12 @@ async def autofix_stream(req: AutoFixRequest, request: Request):
     if not _api_key_claude:
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not set")
 
-    # Build the user message with code + errors
+    # Build system prompt: base + lessons learned from past sessions
+    _base_system = _kb_debug_agent()
+    _lessons_block = _lessons_for_prompt()  # empty string if no lessons yet
+    _autofix_system = _base_system + _lessons_block
+
+    # Build user message: errors + DOM snapshot + code
     error_block = ""
     if req.errors:
         unique_errors = list(dict.fromkeys(req.errors))[:10]  # dedupe, cap at 10
@@ -2963,9 +2985,13 @@ async def autofix_stream(req: AutoFixRequest, request: Request):
     else:
         error_block = "\n\n## JavaScript Errors From Running App\nNone captured — check for silent/visual bugs."
 
+    dom_block = ""
+    if req.dom_report and req.dom_report.strip():
+        dom_block = f"\n\n## DOM Snapshot (live runtime state)\n{req.dom_report.strip()}"
+
     user_msg = (
         f"## Auto-Debug Pass {req.iteration}\n\n"
-        f"Analyse and fix all bugs in this app.{error_block}\n\n"
+        f"Analyse and fix all bugs in this app.{error_block}{dom_block}\n\n"
         f"## Current App Code\n```html\n{req.html}\n```"
     )
 
@@ -2975,26 +3001,29 @@ async def autofix_stream(req: AutoFixRequest, request: Request):
         reply = ""
         _first = False
 
-        async def _keepalive():
-            while not _first:
-                await asyncio.sleep(8)
-                if not _first:
-                    yield f": ping\n\n"
-
         try:
             async with _ac.messages.stream(
                 model="claude-sonnet-4-6",
                 max_tokens=8192,
-                system=_AUTOFIX_SYSTEM,
+                system=_autofix_system,
                 messages=[{"role": "user", "content": user_msg}],
             ) as _cs:
-                _ka = _keepalive()
                 async for _ct in _cs.text_stream:
                     _first = True
                     reply += _ct
                     yield f"data: {_json.dumps({'t': _ct})}\n\n"
 
             all_clear = bool(_re.search(r'✅\s*ALL CLEAR', reply))
+
+            # Save bug patterns to lesson memory for future sessions
+            if not all_clear and _LESSONS_LOADED:
+                try:
+                    lessons = _extract_lessons(reply)
+                    for lesson in lessons:
+                        _save_lesson(lesson["pattern"], lesson["root_cause"], lesson["fix"])
+                except Exception as _le:
+                    logger.debug("[LessonMemory] extraction failed (non-fatal): %s", _le)
+
             yield f"data: {_json.dumps({'done': True, 'meta': {'all_clear': all_clear, 'reply': reply}})}\n\n"
 
         except Exception as exc:
