@@ -676,7 +676,7 @@ function ChatMessage({ message, onRetry, onRate, onFork, onPin, onSendToBuilder,
             </div>
           )}
         </div>
-        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-blue-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-1 select-none overflow-hidden">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-blue-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-1 select-none overflow-hidden">
           {avatar ? <AvatarMedia src={avatar} className="w-full h-full object-cover" fallback={<span>{initial}</span>} /> : initial}
         </div>
       </div>
@@ -686,8 +686,8 @@ function ChatMessage({ message, onRetry, onRate, onFork, onPin, onSendToBuilder,
   if (type === 'image_generating') {
     return (
       <div className="flex items-start gap-3 msg-enter">
-        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 via-violet-500 to-violet-600 flex items-center justify-center overflow-hidden flex-shrink-0 mt-1">
-          <img src="/Logo.png" alt="Mini Assistant" className="w-full h-full object-contain" onError={e => { e.target.style.display = 'none'; }} />
+        <div className="w-10 h-10 rounded-xl bg-[#0d0d18] flex items-center justify-center overflow-hidden flex-shrink-0 mt-1 border border-violet-500/20">
+          <img src="/mascot.png?v=2" alt="Mini Assistant" className="w-full h-full object-contain" onError={e => { e.target.style.display = 'none'; }} />
         </div>
         <div className="max-w-[80%] w-72 px-5 py-4 rounded-2xl rounded-tl-sm border bg-[#151520] border-white/5">
           <p className="text-xs text-violet-400/80 font-mono mb-3 flex items-center gap-2">
@@ -705,8 +705,8 @@ function ChatMessage({ message, onRetry, onRate, onFork, onPin, onSendToBuilder,
 
   return (
     <div className="flex items-start gap-3 msg-enter">
-      <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 via-violet-500 to-violet-600 flex items-center justify-center overflow-hidden flex-shrink-0 mt-1">
-        <img src="/Logo.png" alt="Mini Assistant" className="w-full h-full object-contain"
+      <div className="w-10 h-10 rounded-xl bg-[#0d0d18] flex items-center justify-center overflow-hidden flex-shrink-0 mt-1 border border-violet-500/20">
+        <img src="/mascot.png?v=2" alt="Mini Assistant" className="w-full h-full object-contain"
           onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }} />
         <span style={{display:'none'}} className="text-white text-xs font-bold w-full h-full items-center justify-center">MA</span>
       </div>
