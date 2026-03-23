@@ -2252,6 +2252,16 @@ async def chat_stream(req: ChatRequest, request: Request):
             if _assistant_has_code or (_first_user and _BUILD_KW.search(_first_user.content or "")):
                 _is_build_intent = True
 
+        # ── Detect fix/debug intent — surgical patch, NOT a full rebuild ─────
+        _FIX_KW = _re.compile(
+            r"\b(fix|debug|broken|not work|doesn.t work|won.t work|isn.t work|"
+            r"bug|error|crash|freezes?|glitch|stuck|nothing happen|not respond|"
+            r"button.*(not|doesn.t|won.t)|play.*(not|doesn.t|won.t)|"
+            r"can.t (click|press|start|play)|doesn.t (start|load|move|respond))\b",
+            _re.I,
+        )
+        _is_fix_intent = _has_prior_code and _FIX_KW.search(effective_msg)
+
         # Detect if the user pasted code (``` in their message or coding intent from router)
         _has_code_in_msg = "```" in effective_msg or execution_intent == "coding"
         # Also check if their message looks like a code question even without fences
@@ -2498,7 +2508,26 @@ async def chat_stream(req: ChatRequest, request: Request):
 
             # Pick system prompt based on what Claude is doing
             if _is_build_intent:
-                if all_images or req.vibe_mode or _has_prior_code:
+                if _is_fix_intent:
+                    # User is reporting a bug — patch surgically, do NOT rebuild
+                    _c_sys = (
+                        _APP_BUILDER_CODING_STANDARDS +
+                        "\n\n## PERSONALITY — PARTNER BUILDER\n"
+                        "You are an enthusiastic creative coding partner. Warm, direct, caring about whether things actually work.\n\n"
+                        "## BUG FIX MODE — SURGICAL PATCH ONLY\n"
+                        "The user is reporting a specific bug in the existing app. "
+                        "Your job is to find and fix ONLY the broken part.\n\n"
+                        "Rules:\n"
+                        "- Read the existing code carefully. Find the root cause of the bug.\n"
+                        "- Change ONLY what is needed to fix the reported issue. Do NOT restructure, redesign, or rewrite other parts.\n"
+                        "- Do NOT change working features, styling, layout, or logic that isn't related to the bug.\n"
+                        "- Output the complete HTML (the preview needs it) but with minimal targeted changes.\n"
+                        "- IMPORTANT: Wrap the complete fixed HTML in a ```html fence (required for preview).\n"
+                        "Before the code: write 1 short sentence describing what was wrong and what you changed.\n"
+                        "After the closing ```: write 'Give it a try — does that fix it? 🎮' "
+                        "and offer 1 follow-up option if it still doesn't work."
+                    )
+                elif all_images or req.vibe_mode or _has_prior_code:
                     # Image provided → Claude sees it and builds.
                     # Vibe mode ON → user explicitly wants instant build.
                     # Prior code exists → user is refining, update immediately.
