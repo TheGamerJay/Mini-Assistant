@@ -2254,8 +2254,8 @@ async def chat_stream(req: ChatRequest, request: Request):
             for h in (req.history or [])
         )
         if _is_build_intent:
-            if not _has_images and not _has_prior_code and _build_history_turns == 0:
-                # First contact, no image, no prior code — ask 3 questions then stop
+            if not _has_images and not _has_prior_code and _build_history_turns == 0 and not req.vibe_mode:
+                # First contact, no image, no prior code, not vibe mode — ask 3 questions then stop
                 _build_mode_addendum = (
                     "\n\n## APP BUILDER — TURN 1\n"
                     "This is the FIRST message about building. Ask exactly 3 short, focused questions as a numbered list.\n"
