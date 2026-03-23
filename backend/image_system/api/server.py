@@ -2618,20 +2618,40 @@ async def chat_stream(req: ChatRequest, request: Request):
             try:
                 import anthropic as _am_lib
                 _ac = _am_lib.AsyncAnthropic(api_key=_api_key_claude)
+
+                # ── Keep-alive pings while waiting for first token ────────────────
+                # Railway drops SSE connections with no activity after ~30s.
+                # Send invisible ping events every 8s until Claude starts streaming.
+                _first_token_received = False
+
+                async def _keepalive():
+                    while not _first_token_received:
+                        await asyncio.sleep(8)
+                        if not _first_token_received:
+                            yield f": ping\n\n"  # SSE comment — ignored by client, keeps TCP alive
+
+                # Stream Claude response; collect keep-alive pings alongside
                 async with _ac.messages.stream(
                     model="claude-sonnet-4-6",
                     max_tokens=8192,
                     system=_c_sys,
                     messages=_c_msgs,
                 ) as _cs:
+                    _ping_task = asyncio.create_task(asyncio.sleep(0))  # dummy
+                    _last_ping = asyncio.get_event_loop().time()
                     async for _ct in _cs.text_stream:
+                        # Send a keep-alive ping if 8s have passed without a token
+                        _now = asyncio.get_event_loop().time()
+                        if _now - _last_ping > 8 and not _first_token_received:
+                            yield f": ping\n\n"
+                            _last_ping = _now
+                        _first_token_received = True
                         reply_text += _ct
                         yield f"data: {_json.dumps({'t': _ct})}\n\n"
             except Exception as _ce:
-                logger.warning("Claude stream failed, falling back to Ollama: %s", _ce)
-                _err_msg = f"⚠️ Claude unavailable: {_ce}. Retrying with local model...\n\n"
+                logger.warning("Claude stream failed: %s", _ce)
+                _err_msg = f"⚠️ Claude hit an issue: {_ce}. Please try again.\n\n"
                 yield f"data: {_json.dumps({'t': _err_msg})}\n\n"
-                # Fall through isn't possible in elif — emit error and continue to done event
 
         else:
             # ── Claude stream — all chat/planning/research ─────────────────────
@@ -2652,7 +2672,12 @@ async def chat_stream(req: ChatRequest, request: Request):
                     system=_sys_prompt_stream,
                     messages=_c_msgs_plain,
                 ) as _cs_plain:
+                    _plain_last_ping = asyncio.get_event_loop().time()
                     async for _ct in _cs_plain.text_stream:
+                        _plain_now = asyncio.get_event_loop().time()
+                        if _plain_now - _plain_last_ping > 8:
+                            yield f": ping\n\n"
+                            _plain_last_ping = _plain_now
                         reply_text += _ct
                         yield f"data: {_json.dumps({'t': _ct})}\n\n"
             except Exception as _plain_err:
