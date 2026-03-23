@@ -2,9 +2,8 @@
  * MascotAssistant.js
  * Floating animated mascot — bottom-right corner.
  *
- * Animations: float, breathe, glow-pulse, random blink — pure CSS.
- * GPU-safe: only transform + opacity used.
- * State (open/closed) persisted to localStorage.
+ * Collapsed: tiny glowing pill button that stays out of the way.
+ * Expanded:  full mascot sprite + quick-action panel springs in.
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -12,7 +11,7 @@ import { X, ChevronDown, Sparkles } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 // ---------------------------------------------------------------------------
-// Personality messages — cycle on open + every ~12s while open
+// Personality messages
 // ---------------------------------------------------------------------------
 const MESSAGES = [
   "Welcome! What are we creating today?",
@@ -33,13 +32,13 @@ function randomMsg(exclude) {
 }
 
 // ---------------------------------------------------------------------------
-// Quick-action chips shown in expanded panel
+// Quick-action chips
 // ---------------------------------------------------------------------------
 const CHIPS = [
-  { label: 'Build an app', prompt: 'Build me a modern web app with a clean UI' },
-  { label: 'Generate image', prompt: 'Generate a futuristic cityscape at night with neon lights' },
-  { label: 'Explain code', prompt: 'Explain this code to me step by step' },
-  { label: 'Write a script', prompt: 'Write a Python script that' },
+  { label: 'Build an app',    prompt: 'Build me a modern web app with a clean UI' },
+  { label: 'Generate image',  prompt: 'Generate a futuristic cityscape at night with neon lights' },
+  { label: 'Explain code',    prompt: 'Explain this code to me step by step' },
+  { label: 'Write a script',  prompt: 'Write a Python script that' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -48,13 +47,14 @@ const CHIPS = [
 export default function MascotAssistant() {
   const { firePendingTemplate, setPage } = useApp();
 
-  const [open, setOpen]       = useState(() => {
+  const [open, setOpen] = useState(() => {
     try { return localStorage.getItem('ma_mascot_open') === '1'; } catch { return false; }
   });
-  const [visible, setVisible] = useState(false); // slide-in guard
-  const [msg, setMsg]         = useState(MESSAGES[0]);
-  const [blink, setBlink]     = useState(false);
-  const msgTimer  = useRef(null);
+  const [visible, setVisible]   = useState(false);
+  const [popping, setPopping]   = useState(false); // trigger pop-in animation
+  const [msg, setMsg]           = useState(MESSAGES[0]);
+  const [blink, setBlink]       = useState(false);  // eslint-disable-line no-unused-vars
+  const msgTimer   = useRef(null);
   const blinkTimer = useRef(null);
 
   // Slide in after mount
@@ -72,21 +72,16 @@ export default function MascotAssistant() {
   useEffect(() => {
     if (!open) return;
     setMsg(randomMsg(null));
-    msgTimer.current = setInterval(() => {
-      setMsg((prev) => randomMsg(prev));
-    }, 12000);
+    msgTimer.current = setInterval(() => setMsg((p) => randomMsg(p)), 12000);
     return () => clearInterval(msgTimer.current);
   }, [open]);
 
-  // Random blink loop — always running
+  // Random blink loop
   const scheduleBlink = useCallback(() => {
-    const delay = 3000 + Math.random() * 3000; // 3–6s
+    const delay = 3000 + Math.random() * 3000;
     blinkTimer.current = setTimeout(() => {
       setBlink(true);
-      setTimeout(() => {
-        setBlink(false);
-        scheduleBlink();
-      }, 180);
+      setTimeout(() => { setBlink(false); scheduleBlink(); }, 180);
     }, delay);
   }, []);
 
@@ -94,6 +89,14 @@ export default function MascotAssistant() {
     scheduleBlink();
     return () => clearTimeout(blinkTimer.current);
   }, [scheduleBlink]);
+
+  const handleOpen = () => {
+    setPopping(true);
+    setOpen(true);
+    setTimeout(() => setPopping(false), 600);
+  };
+
+  const handleClose = () => setOpen(false);
 
   const handleChip = (chip) => {
     setPage('chat');
@@ -103,9 +106,7 @@ export default function MascotAssistant() {
 
   return (
     <>
-      {/* ------------------------------------------------------------------ */}
-      {/* Pure CSS keyframe animations                                        */}
-      {/* ------------------------------------------------------------------ */}
+      {/* ── CSS animations ── */}
       <style>{`
         @keyframes mascot-float {
           0%, 100% { transform: translateY(0px); }
@@ -121,52 +122,52 @@ export default function MascotAssistant() {
           50%       { filter: drop-shadow(0 0 16px rgba(96,165,250,0.90))
                              drop-shadow(0 0 36px rgba(139,92,246,0.55)); }
         }
-        @keyframes mascot-eye-glow {
-          0%, 100% { opacity: 0.7; }
-          50%       { opacity: 1; }
-        }
-        @keyframes mascot-slide-in {
-          0%   { opacity: 0; transform: translateY(24px) scale(0.92); }
-          100% { opacity: 1; transform: translateY(0)    scale(1); }
-        }
         @keyframes mascot-panel-in {
           0%   { opacity: 0; transform: translateY(12px) scale(0.96); }
           100% { opacity: 1; transform: translateY(0)    scale(1); }
         }
+        @keyframes mascot-pop-in {
+          0%   { opacity: 0; transform: scale(0.3) translateY(30px); }
+          60%  { opacity: 1; transform: scale(1.12) translateY(-6px); }
+          80%  { transform: scale(0.95) translateY(2px); }
+          100% { transform: scale(1)    translateY(0); }
+        }
         @keyframes mascot-particle {
-          0%   { opacity: 0; transform: translateY(0)    scale(0.5); }
+          0%   { opacity: 0; transform: translateY(0)     scale(0.5); }
           30%  { opacity: 0.7; }
           100% { opacity: 0; transform: translateY(-40px) scale(1.2); }
+        }
+        @keyframes pill-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(139,92,246,0.4), 0 0 12px rgba(96,165,250,0.3); }
+          50%       { box-shadow: 0 0 0 5px rgba(139,92,246,0), 0 0 20px rgba(96,165,250,0.5); }
         }
         .mascot-float    { animation: mascot-float   2.8s ease-in-out infinite; }
         .mascot-breathe  { animation: mascot-breathe 2.8s ease-in-out infinite; }
         .mascot-glow     { animation: mascot-glow    2.8s ease-in-out infinite; }
-        .mascot-slide-in { animation: mascot-slide-in 380ms cubic-bezier(0.34,1.4,0.64,1) both; }
         .mascot-panel-in { animation: mascot-panel-in 260ms cubic-bezier(0.34,1.4,0.64,1) both; }
+        .mascot-pop-in   { animation: mascot-pop-in   540ms cubic-bezier(0.34,1.56,0.64,1) both; }
         .mascot-particle { animation: mascot-particle 2.4s ease-out infinite; }
+        .pill-pulse      { animation: pill-pulse 2.6s ease-in-out infinite; }
         @media (prefers-reduced-motion: reduce) {
           .mascot-float, .mascot-breathe, .mascot-glow,
-          .mascot-slide-in, .mascot-panel-in, .mascot-particle {
+          .mascot-panel-in, .mascot-pop-in, .mascot-particle, .pill-pulse {
             animation: none;
           }
         }
       `}</style>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Wrapper — slides in on mount                                        */}
-      {/* ------------------------------------------------------------------ */}
+      {/* ── Outer fade/slide-in wrapper ── */}
       <div
-        className="fixed bottom-5 right-16 z-40 flex flex-col items-end gap-2 pointer-events-none"
+        className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2"
         style={{
           opacity: visible ? 1 : 0,
           transform: visible ? 'none' : 'translateY(20px)',
           transition: 'opacity 380ms ease, transform 380ms cubic-bezier(0.34,1.4,0.64,1)',
+          pointerEvents: 'none',
         }}
       >
 
-        {/* ---------------------------------------------------------------- */}
-        {/* Expanded panel                                                    */}
-        {/* ---------------------------------------------------------------- */}
+        {/* ── EXPANDED: panel ── */}
         {open && (
           <div
             className="mascot-panel-in pointer-events-auto
@@ -182,7 +183,7 @@ export default function MascotAssistant() {
                 <span className="text-xs font-semibold text-white">Mini Assistant</span>
               </div>
               <button
-                onClick={() => setOpen(false)}
+                onClick={handleClose}
                 className="w-6 h-6 flex items-center justify-center rounded-full text-slate-500
                            hover:text-slate-300 hover:bg-white/5 transition-colors"
               >
@@ -190,7 +191,7 @@ export default function MascotAssistant() {
               </button>
             </div>
 
-            {/* Message bubble */}
+            {/* Message */}
             <div className="px-4 py-3">
               <p className="text-sm text-slate-200 leading-relaxed min-h-[40px] transition-all duration-500">
                 {msg}
@@ -206,8 +207,7 @@ export default function MascotAssistant() {
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl
                              bg-white/[0.05] border border-white/[0.08] text-xs text-slate-300
                              hover:bg-violet-500/15 hover:border-violet-500/30 hover:text-white
-                             active:bg-violet-500/20
-                             transition-all duration-150"
+                             active:bg-violet-500/20 transition-all duration-150"
                 >
                   <Sparkles size={11} className="text-violet-400 flex-shrink-0" />
                   {chip.label}
@@ -215,9 +215,9 @@ export default function MascotAssistant() {
               ))}
             </div>
 
-            {/* Collapse handle */}
+            {/* Collapse */}
             <button
-              onClick={() => setOpen(false)}
+              onClick={handleClose}
               className="flex items-center justify-center gap-1 py-2 text-xs text-slate-600
                          hover:text-slate-400 border-t border-white/[0.05] transition-colors"
             >
@@ -226,39 +226,51 @@ export default function MascotAssistant() {
           </div>
         )}
 
-        {/* ---------------------------------------------------------------- */}
-        {/* Mascot button — always visible                                   */}
-        {/* ---------------------------------------------------------------- */}
-        <button
-          onClick={() => setOpen((v) => !v)}
-          className="pointer-events-auto relative w-20 h-20 sm:w-24 sm:h-24
-                     focus:outline-none select-none"
-          style={{ filter: 'drop-shadow(0 0 12px rgba(139,92,246,0.5))' }}
-          aria-label={open ? 'Minimise assistant' : 'Open assistant'}
-        >
-          {/* Particle drifters */}
-          <Particle delay="0s"    x="10%" />
-          <Particle delay="0.8s"  x="75%" />
-          <Particle delay="1.6s"  x="45%" />
+        {/* ── EXPANDED: full mascot sprite ── */}
+        {open && (
+          <div className={`${popping ? 'mascot-pop-in' : ''} pointer-events-auto relative w-20 h-20 sm:w-24 sm:h-24 cursor-pointer select-none`}
+            onClick={handleClose}
+            title="Minimise"
+            style={{ filter: 'drop-shadow(0 0 12px rgba(139,92,246,0.5))' }}
+          >
+            <Particle delay="0s"   x="10%" />
+            <Particle delay="0.8s" x="75%" />
+            <Particle delay="1.6s" x="45%" />
+            <span className="mascot-float mascot-breathe mascot-glow block w-full h-full">
+              <img src="/mascot.png?v=2" alt="" draggable={false} className="w-full h-full object-contain" />
+            </span>
+            <span className="absolute bottom-0.5 right-0.5 w-3.5 h-3.5 rounded-full
+                             bg-emerald-400 border-2 border-[#0d0d12]
+                             shadow-[0_0_8px_rgba(52,211,153,0.9)] animate-pulse" />
+          </div>
+        )}
 
-          {/* Breathing + floating wrapper */}
-          <span className="mascot-float mascot-breathe mascot-glow block w-full h-full">
+        {/* ── COLLAPSED: tiny pill button ── */}
+        {!open && (
+          <button
+            onClick={handleOpen}
+            title="Open Mini Assistant"
+            className="pill-pulse pointer-events-auto relative w-10 h-10 rounded-full
+                       flex items-center justify-center
+                       bg-[#0f0f1a] border border-violet-500/40
+                       hover:border-violet-400/70 hover:scale-110
+                       transition-all duration-200 active:scale-95 select-none overflow-hidden"
+            style={{ boxShadow: '0 0 12px rgba(139,92,246,0.35)' }}
+          >
             <img
               src="/mascot.png?v=2"
-              alt=""
+              alt="Mini Assistant"
               draggable={false}
-              className="w-full h-full object-contain"
+              className="w-8 h-8 object-contain"
+              style={{ filter: 'drop-shadow(0 0 4px rgba(96,165,250,0.7))' }}
             />
+            {/* Green dot */}
+            <span className="absolute bottom-0.5 right-0.5 w-2.5 h-2.5 rounded-full
+                             bg-emerald-400 border border-[#0d0d12]
+                             shadow-[0_0_5px_rgba(52,211,153,0.9)] animate-pulse" />
+          </button>
+        )}
 
-          </span>
-
-          {/* Online indicator */}
-          <span
-            className="absolute bottom-0.5 right-0.5 w-3.5 h-3.5 rounded-full
-                       bg-emerald-400 border-2 border-[#0d0d12]
-                       shadow-[0_0_8px_rgba(52,211,153,0.9)] animate-pulse"
-          />
-        </button>
       </div>
     </>
   );
