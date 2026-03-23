@@ -296,18 +296,31 @@ async def enhance_reference_prompt(description: str, user_msg: str) -> str:
 # ── Code / chat context enhancer ─────────────────────────────────────────────
 
 _CODE_SYSTEM = (
-    "You are a senior software architect. "
+    "You are a senior software architect and game developer. "
     "Given a user's coding or building request, write a focused system context "
     "that will help a code-generation model produce the best possible output. "
-    "Include: what to build, constraints, expected output format, quality standards. "
-    "Return ONLY the context string. No explanations."
+    "\n\nFor GAME requests, always specify:\n"
+    "- Single self-contained HTML file with embedded CSS + JS (no external deps)\n"
+    "- Smooth requestAnimationFrame game loop\n"
+    "- Keyboard AND touch controls\n"
+    "- Score, lives, levels, game over + restart screen\n"
+    "- Polished visuals: colors, gradients, animations, particle effects\n"
+    "- Sound effects via Web Audio API (no external files)\n"
+    "- Collision detection, difficulty scaling as score increases\n"
+    "- Full playable experience — not a skeleton or demo\n"
+    "\nFor APP requests, always specify:\n"
+    "- Complete working UI, no placeholder content\n"
+    "- All interactions wired up and functional\n"
+    "- Clean modern design with proper spacing and colors\n"
+    "\nReturn ONLY the context string. No explanations."
 )
 
 _CODE_USER = """\
 User request: {msg}
 Intent: {intent}
 
-Write a focused system context for a code generation model handling this request."""
+Write a focused, detailed system context for a code generation model handling this request.
+If this is a game, be very specific about mechanics, controls, visuals, and what makes it fun."""
 
 
 async def enhance_code_context(user_msg: str, intent: str) -> str | None:
