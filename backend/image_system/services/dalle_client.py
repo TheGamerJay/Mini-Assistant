@@ -235,12 +235,16 @@ class DalleClient:
         image_bytes: bytes,
         prompt: str,
         size: str = DEFAULT_SIZE,
+        mask_bytes: bytes | None = None,
     ) -> str:
         """
         Edit an existing image using gpt-image-1 and return result as base64.
 
         Unlike generate(), this passes the actual image to the model so it
         can make targeted changes while preserving everything else.
+
+        mask_bytes: optional PNG mask where transparent pixels (alpha=0) mark
+                    the region to edit; opaque pixels are preserved unchanged.
         """
         import io as _io
 
@@ -252,8 +256,8 @@ class DalleClient:
 
         client = self._get_client()
         logger.info(
-            "gpt-image-1 edit: size=%s len=%d prompt=%.80s",
-            size, len(prompt), prompt,
+            "gpt-image-1 edit: size=%s len=%d mask=%s prompt=%.80s",
+            size, len(prompt), mask_bytes is not None, prompt,
         )
 
         # Ensure PNG format — gpt-image-1 accepts PNG/JPEG/WEBP but PNG is safest
@@ -269,12 +273,19 @@ class DalleClient:
         image_file = _io.BytesIO(img_data)
         image_file.name = "image.png"
 
-        response = await client.images.edit(
+        kwargs: dict = dict(
             model="gpt-image-1",
             image=image_file,
             prompt=prompt,
             size=size,  # type: ignore[arg-type]
         )
+
+        if mask_bytes is not None:
+            mask_file = _io.BytesIO(mask_bytes)
+            mask_file.name = "mask.png"
+            kwargs["mask"] = mask_file
+
+        response = await client.images.edit(**kwargs)
 
         b64 = response.data[0].b64_json
         if not b64:

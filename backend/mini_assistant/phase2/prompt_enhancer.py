@@ -8,8 +8,10 @@ All functions fail silently — if the CEO model is unavailable or slow,
 the original user prompt is returned unchanged so nothing breaks.
 
 Functions:
+  analyze_edit_request(user_msg)      → structured edit plan (color vs structural)
   enhance_image_prompt(user_msg)      → enriched DALL-E generation prompt
   enhance_edit_instruction(user_msg)  → precise pixel-level edit instruction
+  enhance_reference_prompt(desc, msg) → fused reference + request prompt
   enhance_code_context(user_msg, intent) → enriched system context for coding
 """
 
@@ -27,6 +29,92 @@ def _enhancer_available() -> bool:
         os.getenv("OPENAI_API_KEY") and
         os.getenv("OPENAI_REASONING_MODEL")
     )
+
+
+# ── Edit request analyzer (routes to PIL vs AI inpainting) ───────────────────
+
+_EDIT_ANALYZER_SYSTEM = """\
+You are an image-editing assistant that chooses the correct editing method based on the user's request.
+
+RULE 1 — COLOR-BASED EDITS (hair color, eye color, skin color, fur color, shirt color, shoe color):
+- Do NOT use AI inpainting.
+- Use the PIL color-replacement pipeline.
+- Identify the exact source color name and target color name.
+- Output edit_type: "color_change"
+
+RULE 2 — STRUCTURAL EDITS (remove object, add object, change background, add/remove accessories, change pose, add hat, change clothing pattern or style):
+- Use vision analysis to locate the object or region.
+- Produce a tight bounding box description (top/left/width/height as % of image).
+- Pass the original image + mask + instruction to the AI inpainting model.
+- Output edit_type: "structural_edit"
+
+RULE 3 — DECISION LOGIC:
+- If the edit is purely about changing a COLOR → RULE 1
+- If the edit changes shape, structure, or adds/removes elements → RULE 2
+- If ambiguous, prefer RULE 1 for any request mentioning a color word
+
+OUTPUT: Return ONLY valid JSON, no explanation, no markdown.
+
+For color_change:
+{
+  "edit_type": "color_change",
+  "region_description": "<what body part/area>",
+  "from_color": "<exact color name to replace>",
+  "to_color": "<exact color name to apply>",
+  "confidence": 0.0-1.0
+}
+
+For structural_edit:
+{
+  "edit_type": "structural_edit",
+  "region_description": "<what object/area>",
+  "mask_box": {"top": 0-100, "left": 0-100, "width": 0-100, "height": 0-100},
+  "final_instruction": "<precise instruction for gpt-image-1>",
+  "confidence": 0.0-1.0
+}
+"""
+
+_EDIT_ANALYZER_USER = "User edit request: {msg}\n\nAnalyze and output the edit plan as JSON."
+
+
+async def analyze_edit_request(user_msg: str) -> dict | None:
+    """
+    Use GPT-5.4 to classify the edit request and return a structured routing plan.
+
+    Returns a dict with edit_type + routing data, or None if unavailable/failed.
+
+    color_change → PIL hue rotation (pixel-perfect, no AI)
+    structural_edit → vision mask + gpt-image-1 inpainting
+
+    Never raises — returns None on any failure so caller falls back to old path.
+    """
+    if not _enhancer_available():
+        return None
+
+    import json as _json
+    from .router import call_model
+
+    try:
+        raw = await call_model(
+            "CEO",
+            _EDIT_ANALYZER_USER.format(msg=user_msg),
+            context=_EDIT_ANALYZER_SYSTEM,
+        )
+        # Strip markdown code fences if model added them
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        plan = _json.loads(raw.strip())
+        logger.info(
+            "analyze_edit_request | type=%s confidence=%.2f region=%s",
+            plan.get("edit_type"), plan.get("confidence", 0), plan.get("region_description", "")[:50],
+        )
+        return plan
+    except Exception as exc:
+        logger.warning("analyze_edit_request failed (non-fatal): %s", exc)
+        return None
 
 
 # ── Image generation prompt enhancer ─────────────────────────────────────────

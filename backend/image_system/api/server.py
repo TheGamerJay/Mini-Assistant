@@ -1585,37 +1585,29 @@ async def chat(req: ChatRequest, request: Request):
     if execution_intent == "image_edit":
         logger.info("[MODEL ROUTER] image_edit")
 
-        # ── Color-change detector ────────────────────────────────────────────
-        # Pattern: "make (him/her/the) <FROM_COLOR> <thing> <TO_COLOR>"
-        # or "change <FROM_COLOR> to <TO_COLOR>" or "make (him/her) <TO_COLOR>"
-        import re as _re_color
-        _COLORS = (
-            r"red|orange|yellow|green|cyan|teal|blue|navy|indigo|"
-            r"violet|purple|magenta|pink|rose|white|black|grey|gray|brown"
-        )
-        _COLOR_CHANGE_RE = _re_color.compile(
-            rf"(?:make(?:\s+(?:him|her|it|the|his|her))?\s+)?(?P<from>{_COLORS})"
-            rf"(?:\s+\w+){{0,3}}\s+(?:into|to|as)\s+(?P<to>{_COLORS})"
-            rf"|change\s+(?:the\s+)?(?P<from2>{_COLORS})(?:\s+\w+){{0,2}}\s+(?:to|into)\s+(?P<to2>{_COLORS})"
-            rf"|make\s+(?:him|her|it|the\s+\w+)\s+(?P<to3>{_COLORS})(?:\s+skin|\s+fur|\s+color)?",
-            _re_color.IGNORECASE,
-        )
-        _color_match = _COLOR_CHANGE_RE.search(effective_msg)
-        _from_color = (
-            _color_match.group("from") or
-            _color_match.group("from2")
-        ).lower() if _color_match and (_color_match.group("from") or _color_match.group("from2")) else None
-        _to_color = (
-            _color_match.group("to") or
-            _color_match.group("to2") or
-            _color_match.group("to3")
-        ).lower() if _color_match else None
+        # ── Smart edit routing via GPT analyzer ──────────────────────────────
+        # Uses GPT to classify the edit as color_change (→ PIL) or structural_edit (→ gpt-image-1)
+        _edit_plan = None
+        try:
+            from mini_assistant.phase2.prompt_enhancer import analyze_edit_request
+            _edit_plan = await analyze_edit_request(effective_msg.strip())
+            logger.info("[MODEL ROUTER] analyze_edit_request → %s", _edit_plan)
+        except Exception as _ae:
+            logger.warning("analyze_edit_request failed (%s) — using fallback routing", _ae)
 
-        # ── Route 1: PIL color replacement (pure color change, lossless) ─────
-        if attached_image_bytes and _from_color and _to_color:
+        # ── Route 1: PIL color replacement (pixel-perfect, lossless) ─────────
+        _route1_triggered = (
+            attached_image_bytes and
+            _edit_plan and
+            _edit_plan.get("edit_type") == "color_change" and
+            _edit_plan.get("to_color")
+        )
+        if _route1_triggered:
+            _from_color = (_edit_plan.get("from_color") or "").lower() or None
+            _to_color = (_edit_plan.get("to_color") or "").lower()
             logger.info(
-                "[MODEL ROUTER] image_edit → PIL color_replace: %s → %s",
-                _from_color, _to_color,
+                "[MODEL ROUTER] image_edit → PIL color_replace: %s → %s (confidence=%.2f)",
+                _from_color, _to_color, _edit_plan.get("confidence", 0),
             )
             try:
                 from ..services.dalle_client import DalleClient
@@ -1638,13 +1630,56 @@ async def chat(req: ChatRequest, request: Request):
             except Exception as _pil_exc:
                 logger.warning("PIL color_replace failed (%s) — falling through to gpt-image-1", _pil_exc)
 
-        # ── Route 2: gpt-image-1 edit (complex / non-color edits) ────────────
+        # ── Route 2: gpt-image-1 edit (structural edits + color fallback) ────
         logger.info("[MODEL ROUTER] image_edit → gpt-image-1 edit()")
-        try:
-            from mini_assistant.phase2.prompt_enhancer import enhance_edit_instruction
-            _edit_instruction = await enhance_edit_instruction(effective_msg.strip())
-        except Exception:
-            _edit_instruction = effective_msg.strip()
+
+        # Use the GPT-analyzed final_instruction if available (structural edit),
+        # otherwise enhance the raw user message
+        if _edit_plan and _edit_plan.get("edit_type") == "structural_edit" and _edit_plan.get("final_instruction"):
+            _edit_instruction = _edit_plan["final_instruction"]
+            logger.info("[MODEL ROUTER] using GPT final_instruction for structural edit")
+        else:
+            try:
+                from mini_assistant.phase2.prompt_enhancer import enhance_edit_instruction
+                _edit_instruction = await enhance_edit_instruction(effective_msg.strip())
+            except Exception:
+                _edit_instruction = effective_msg.strip()
+
+        # Build mask bytes from bounding box if GPT provided one (structural edit)
+        _mask_bytes = None
+        if (
+            attached_image_bytes and
+            _edit_plan and
+            _edit_plan.get("edit_type") == "structural_edit" and
+            _edit_plan.get("mask_box")
+        ):
+            try:
+                import io as _io
+                from PIL import Image as _PILImg
+                _mb = _edit_plan["mask_box"]  # {top, left, width, height} as % of image
+                _img_pil = _PILImg.open(_io.BytesIO(attached_image_bytes)).convert("RGBA")
+                _W, _H = _img_pil.size
+                # Build full-black mask (keep everything), then white box (erase = edit region)
+                _mask_img = _PILImg.new("RGBA", (_W, _H), (0, 0, 0, 255))
+                _px = round(_mb.get("left", 0) / 100 * _W)
+                _py = round(_mb.get("top", 0) / 100 * _H)
+                _pw = round(_mb.get("width", 100) / 100 * _W)
+                _ph = round(_mb.get("height", 100) / 100 * _H)
+                # White (transparent in RGBA mask) = area to edit
+                _mask_pix = _mask_img.load()
+                for _my in range(_py, min(_py + _ph, _H)):
+                    for _mx in range(_px, min(_px + _pw, _W)):
+                        _mask_pix[_mx, _my] = (0, 0, 0, 0)
+                _mask_buf = _io.BytesIO()
+                _mask_img.save(_mask_buf, format="PNG")
+                _mask_bytes = _mask_buf.getvalue()
+                logger.info(
+                    "[MODEL ROUTER] structural mask built: box=(%d,%d,%d,%d) on (%dx%d)",
+                    _px, _py, _pw, _ph, _W, _H,
+                )
+            except Exception as _mask_exc:
+                logger.warning("mask generation failed (%s) — editing without mask", _mask_exc)
+
         _edit_prompt = (
             f"Apply ONLY this change: {_edit_instruction}\n\n"
             "Rules:\n"
@@ -1659,7 +1694,7 @@ async def chat(req: ChatRequest, request: Request):
             from ..services.dalle_client import DalleClient
             _dalle = DalleClient()
             if attached_image_bytes:
-                _b64 = await _dalle.edit(attached_image_bytes, _edit_prompt)
+                _b64 = await _dalle.edit(attached_image_bytes, _edit_prompt, mask_bytes=_mask_bytes)
             else:
                 _b64 = await _dalle.generate(_edit_prompt)
             try:
