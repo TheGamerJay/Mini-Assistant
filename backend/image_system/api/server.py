@@ -41,6 +41,7 @@ from .models import (
     AutoFixRequest,
     SummarizeRequest,
     ShareRequest,
+    CommunityRequest,
     PullModelsRequest,
     ModelStatusResponse,
     ErrorResponse,
@@ -3362,6 +3363,67 @@ async def view_shared_app(share_id: str):
         html = html + _SHARE_BANNER
 
     return HTMLResponse(content=html, status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# Community showcase store + endpoints
+# ---------------------------------------------------------------------------
+_COMMUNITY_FILE = Path(__file__).parent.parent.parent / "memory_store" / "community.json"
+_community: list = []
+
+def _load_community():
+    global _community
+    try:
+        if _COMMUNITY_FILE.exists():
+            _community = _share_json.loads(_COMMUNITY_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        _community = []
+
+def _save_community():
+    try:
+        _COMMUNITY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _COMMUNITY_FILE.write_text(_share_json.dumps(_community), encoding="utf-8")
+    except Exception as e:
+        logger.warning("Could not persist community: %s", e)
+
+_load_community()
+
+
+@app.post("/api/community")
+async def add_to_community(req: CommunityRequest, request: Request):
+    """Add a shared app to the community showcase."""
+    # Verify the share_id actually exists
+    if req.share_id not in _shares:
+        _load_shares()
+    if req.share_id not in _shares:
+        raise HTTPException(status_code=404, detail="Share not found.")
+
+    # Deduplicate — don't add same share_id twice
+    if any(e.get("share_id") == req.share_id for e in _community):
+        return {"ok": True, "duplicate": True}
+
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc))
+    play_url = f"{scheme}://{host}/image-api/s/{req.share_id}"
+
+    entry = {
+        "id": str(uuid.uuid4())[:8],
+        "share_id": req.share_id,
+        "title": req.title[:80],
+        "author_name": req.author_name[:40],
+        "timestamp": int(time.time()),
+        "play_url": play_url,
+    }
+    _community.insert(0, entry)  # newest first
+    _community[:] = _community[:200]  # cap at 200
+    _save_community()
+    return {"ok": True, "id": entry["id"]}
+
+
+@app.get("/api/community")
+async def get_community():
+    """Return the community showcase list."""
+    return {"apps": _community}
 
 
 @app.post("/api/chat/suggestions")

@@ -86,6 +86,12 @@ class ShareRequest(BaseModel):
     html: str                       # full app HTML to share
 
 
+class CommunityRequest(BaseModel):
+    share_id: str          # id from /api/share
+    title: str = "Community App"
+    author_name: str = "Anonymous"
+
+
 # ---------------------------------------------------------------------------
 # Response models
 # ---------------------------------------------------------------------------

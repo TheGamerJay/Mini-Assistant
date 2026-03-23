@@ -48,6 +48,7 @@ import {
   Globe,
   FileSearch,
   Wand2,
+  Users,
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -674,6 +675,20 @@ function Sidebar() {
 
       {/* ---- Scrollable nav ---- */}
       <div className="flex-1 overflow-y-auto px-2 py-1 space-y-1">
+
+        {/* Community */}
+        <button
+          onClick={() => navTo('community')}
+          title="Community Showcase"
+          className={`w-full flex items-center gap-2 rounded-lg px-2 py-2 mb-1 text-xs transition-colors
+            ${page === 'community'
+              ? 'bg-indigo-500/10 border border-indigo-500/20 text-indigo-300'
+              : 'text-slate-500 hover:bg-white/5 hover:text-slate-300'}
+            ${sidebarCollapsed ? 'justify-center' : ''}`}
+        >
+          <Users size={14} className="flex-shrink-0" />
+          {!sidebarCollapsed && <span className="font-medium">Community</span>}
+        </button>
 
         {/* Images */}
         <SidebarSection icon={Image} label="Images" collapsed={sidebarCollapsed} defaultOpen={true} scrollable={true}>

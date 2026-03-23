@@ -40,6 +40,7 @@ import PricingPage from './pages/PricingPage';
 import CheckoutSuccessPage from './pages/CheckoutSuccessPage';
 import SharedPage from './pages/SharedPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
+import CommunityPage from './pages/CommunityPage';
 
 // Legal pages
 import TermsPage from './pages/legal/TermsPage';
@@ -152,6 +153,7 @@ const LEGAL_PAGES = {
 function pageTitle(page) {
   if (page === 'chat') return 'Chat';
   if (page === 'images') return 'Image Generation';
+  if (page === 'community') return 'Community';
   if (page === 'settings') return 'Settings';
   if (page === 'checkout-success') return 'Payment Confirmed';
   if (LEGAL_PAGES[page]) return LEGAL_PAGES[page].title;
@@ -264,6 +266,7 @@ function AppShell() {
     if (page === 'tool-appbuilder') { setPage('chat'); return <ChatPage />; }
     if (page === 'checkout-success') return <CheckoutSuccessPage />;
     if (page === 'images') return <ImagePage />;
+    if (page === 'community') return <CommunityPage />;
     if (page === 'profile') return <ProfilePage />;
     if (page === 'dashboard') return <UserDashboard />;
     if (page === 'admin') return <AdminPage />;

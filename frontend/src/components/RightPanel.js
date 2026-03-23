@@ -13,7 +13,7 @@ import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import {
   Monitor, Code2, FolderOpen, X, RefreshCw,
   ChevronRight, File, Download, ListTodo, Diff, Plus, Trash2, CheckSquare, Square,
-  Bug, Zap, CheckCircle, AlertTriangle, StopCircle, Share2, Copy, ExternalLink,
+  Bug, Zap, CheckCircle, AlertTriangle, StopCircle, Share2, Copy, ExternalLink, Users,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/client';
@@ -351,6 +351,8 @@ function PreviewPane({ blocks, previewImage = null, onClearImage, isStreaming = 
   // ── Share state ────────────────────────────────────────────────────────
   const [shareLoading, setShareLoading] = useState(false);
   const [shareToast, setShareToast] = useState(null); // { url, copied }
+  const [communityLoading, setCommunityLoading] = useState(false);
+  const [communityToast, setCommunityToast] = useState(null); // 'success' | 'error' | null
 
   const handleShare = useCallback(async () => {
     const shareHtml = currentFixHtml || html;
@@ -376,6 +378,41 @@ function PreviewPane({ blocks, previewImage = null, onClearImage, isStreaming = 
       setShareLoading(false);
     }
   }, [currentFixHtml, html, shareLoading]);
+
+  const handleCommunity = useCallback(async () => {
+    const shareHtml = currentFixHtml || html;
+    if (!shareHtml || communityLoading) return;
+    setCommunityLoading(true);
+    try {
+      const { IMAGE_API } = await import('../api/client');
+      // First share to get an ID
+      const shareRes = await fetch(`${IMAGE_API}/share`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ html: shareHtml }),
+      });
+      if (!shareRes.ok) throw new Error('Share failed');
+      const shareData = await shareRes.json();
+      // Then add to community
+      const comRes = await fetch(`${IMAGE_API}/community`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          share_id: shareData.id,
+          title: 'Community App',
+          author_name: 'Mini Assistant User',
+        }),
+      });
+      if (!comRes.ok) throw new Error('Community post failed');
+      setCommunityToast('success');
+      setTimeout(() => setCommunityToast(null), 4000);
+    } catch {
+      setCommunityToast('error');
+      setTimeout(() => setCommunityToast(null), 3000);
+    } finally {
+      setCommunityLoading(false);
+    }
+  }, [currentFixHtml, html, communityLoading]);
 
   // ── Auto-Fix loop state ────────────────────────────────────────────────
   const [fixing, setFixing] = useState(false);
@@ -587,6 +624,17 @@ function PreviewPane({ blocks, previewImage = null, onClearImage, isStreaming = 
             : <Share2 size={10} />}
           Share
         </button>
+        <button
+          onClick={handleCommunity}
+          disabled={communityLoading || isStreaming}
+          className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 border border-indigo-500/20 transition-all disabled:opacity-40"
+          title="Share to community showcase — your name stays visible"
+        >
+          {communityLoading
+            ? <RefreshCw size={10} className="animate-spin" />
+            : <Users size={10} />}
+          Community
+        </button>
         <button onClick={() => { setCurrentFixHtml(null); setKey(k => k + 1); setIframeErrors([]); setFixLog([]); }}
           className="p-1 rounded hover:bg-white/5 text-slate-600 hover:text-slate-400 transition-colors" title="Refresh preview">
           <RefreshCw size={12} />
@@ -624,6 +672,32 @@ function PreviewPane({ blocks, previewImage = null, onClearImage, isStreaming = 
                 </a>
               </div>
               <p className="text-[9px] text-slate-500">Viewers see the game — source code is hidden.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Community toast */}
+      {communityToast && (
+        <div
+          className="absolute top-12 right-3 z-20 rounded-xl border shadow-2xl overflow-hidden"
+          style={{
+            background: communityToast === 'error' ? 'rgba(239,68,68,0.12)' : 'rgba(99,102,241,0.10)',
+            borderColor: communityToast === 'error' ? 'rgba(239,68,68,0.3)' : 'rgba(99,102,241,0.25)',
+            backdropFilter: 'blur(10px)',
+            minWidth: 200,
+            animation: 'ma-slide-up 0.25s cubic-bezier(.22,1,.36,1) forwards',
+          }}
+        >
+          {communityToast === 'error' ? (
+            <div className="flex items-center gap-2 px-4 py-3">
+              <AlertTriangle size={13} className="text-red-400 flex-shrink-0" />
+              <span className="text-[11px] text-red-300">Couldn't post to community</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 px-4 py-3">
+              <CheckCircle size={13} style={{ color: '#34d399' }} className="flex-shrink-0" />
+              <span className="text-[11px] text-indigo-300 font-medium">Added to community showcase!</span>
             </div>
           )}
         </div>
