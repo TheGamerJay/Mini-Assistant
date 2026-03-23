@@ -283,6 +283,145 @@ class DalleClient:
         logger.info("gpt-image-1 edit complete (%d bytes b64)", len(b64))
         return b64
 
+    def color_replace(
+        self,
+        image_bytes: bytes,
+        from_color: str,
+        to_color: str,
+        tolerance: int = 30,
+    ) -> str | None:
+        """
+        Programmatic hue-based color replacement using PIL.
+
+        Shifts pixels whose hue falls within `from_color`'s HSV range to
+        `to_color`'s hue, leaving saturation, value, and all other pixels
+        completely unchanged.
+
+        Returns base64 PNG string, or None if PIL unavailable / color unknown.
+
+        Args:
+            image_bytes: Raw image bytes (any PIL-supported format).
+            from_color:  Color name to replace (e.g. "blue").
+            to_color:    Color name to shift to   (e.g. "purple").
+            tolerance:   Hue tolerance in degrees around the center hue.
+        """
+        if not _PIL_AVAILABLE:
+            return None
+
+        # ── Color name → HSV hue center ──────────────────────────────────────
+        # Hue in degrees 0-360. PIL uses 0-255 so we scale in the loop below.
+        _HUE_CENTER: dict[str, int] = {
+            "red":     0,
+            "orange":  30,
+            "yellow":  55,
+            "green":   120,
+            "cyan":    180,
+            "teal":    175,
+            "blue":    220,
+            "navy":    230,
+            "indigo":  255,
+            "violet":  270,
+            "purple":  275,
+            "magenta": 300,
+            "pink":    320,
+            "rose":    340,
+        }
+
+        fc = from_color.lower().strip()
+        tc = to_color.lower().strip()
+        from_hue = _HUE_CENTER.get(fc)
+        to_hue   = _HUE_CENTER.get(tc)
+        if from_hue is None or to_hue is None:
+            logger.warning("color_replace: unknown color '%s' or '%s'", fc, tc)
+            return None
+
+        import io as _io
+        import numpy as _np
+
+        try:
+            img = _PILImage.open(_io.BytesIO(image_bytes)).convert("RGBA")
+            arr = _np.array(img, dtype=_np.float32)
+
+            r, g, b, a = arr[..., 0], arr[..., 1], arr[..., 2], arr[..., 3]
+
+            # Convert RGB → HSV (all in 0-1 range)
+            r01, g01, b01 = r / 255.0, g / 255.0, b / 255.0
+            cmax = _np.maximum(_np.maximum(r01, g01), b01)
+            cmin = _np.minimum(_np.minimum(r01, g01), b01)
+            delta = cmax - cmin
+
+            # Hue in degrees 0-360
+            hue = _np.zeros_like(r01)
+            mask_r = (cmax == r01) & (delta > 0)
+            mask_g = (cmax == g01) & (delta > 0)
+            mask_b = (cmax == b01) & (delta > 0)
+            hue[mask_r] = (60 * ((g01[mask_r] - b01[mask_r]) / delta[mask_r])) % 360
+            hue[mask_g] = (60 * ((b01[mask_g] - r01[mask_g]) / delta[mask_g]) + 120) % 360
+            hue[mask_b] = (60 * ((r01[mask_b] - g01[mask_b]) / delta[mask_b]) + 240) % 360
+
+            sat  = _np.where(cmax > 0, delta / cmax, 0.0)
+            val  = cmax
+
+            # Find pixels matching the source color hue within tolerance,
+            # with enough saturation + brightness to be actual colored pixels
+            lo = (from_hue - tolerance) % 360
+            hi = (from_hue + tolerance) % 360
+            if lo <= hi:
+                hue_match = (hue >= lo) & (hue <= hi)
+            else:  # wraps around 0 (e.g. red)
+                hue_match = (hue >= lo) | (hue <= hi)
+
+            target_mask = hue_match & (sat > 0.25) & (val > 0.15)
+
+            if not _np.any(target_mask):
+                logger.warning("color_replace: no matching pixels found for '%s'", fc)
+                return None
+
+            # Shift hue to target color, preserve sat+val
+            hue_shift = (to_hue - from_hue) % 360
+            new_hue = (hue + hue_shift * target_mask) % 360
+
+            # Convert HSV → RGB
+            h6  = new_hue / 60.0
+            hi_ = _np.floor(h6).astype(int) % 6
+            f   = h6 - _np.floor(h6)
+            p   = val * (1 - sat)
+            q   = val * (1 - f * sat)
+            t_  = val * (1 - (1 - f) * sat)
+
+            new_r = _np.select(
+                [hi_ == 0, hi_ == 1, hi_ == 2, hi_ == 3, hi_ == 4, hi_ == 5],
+                [val, q, p, p, t_, val]
+            )
+            new_g = _np.select(
+                [hi_ == 0, hi_ == 1, hi_ == 2, hi_ == 3, hi_ == 4, hi_ == 5],
+                [t_, val, val, q, p, p]
+            )
+            new_b = _np.select(
+                [hi_ == 0, hi_ == 1, hi_ == 2, hi_ == 3, hi_ == 4, hi_ == 5],
+                [p, p, t_, val, val, q]
+            )
+
+            # Apply only to matched pixels, keep others unchanged
+            out = arr.copy()
+            out[target_mask, 0] = new_r[target_mask] * 255
+            out[target_mask, 1] = new_g[target_mask] * 255
+            out[target_mask, 2] = new_b[target_mask] * 255
+
+            out_img = _PILImage.fromarray(out.astype(_np.uint8), "RGBA")
+            buf = _io.BytesIO()
+            out_img.save(buf, format="PNG")
+            b64 = __import__("base64").b64encode(buf.getvalue()).decode()
+            logger.info(
+                "color_replace: %s → %s | %d pixels changed",
+                fc, tc, int(_np.sum(target_mask)),
+            )
+            return b64
+
+        except Exception as exc:
+            logger.error("color_replace failed: %s", exc)
+            return None
+
     async def health(self) -> dict:
         """Quick health check — verifies the API key is set and the client initialises."""
         try:

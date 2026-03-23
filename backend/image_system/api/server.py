@@ -1583,10 +1583,63 @@ async def chat(req: ChatRequest, request: Request):
     logger.info("[MODEL ROUTER] chat → Claude %s", _active_model)
 
     if execution_intent == "image_edit":
-        # ── TRUE IMAGE EDIT: minimal prompt — model already has the image ──
+        logger.info("[MODEL ROUTER] image_edit")
+
+        # ── Color-change detector ────────────────────────────────────────────
+        # Pattern: "make (him/her/the) <FROM_COLOR> <thing> <TO_COLOR>"
+        # or "change <FROM_COLOR> to <TO_COLOR>" or "make (him/her) <TO_COLOR>"
+        import re as _re_color
+        _COLORS = (
+            r"red|orange|yellow|green|cyan|teal|blue|navy|indigo|"
+            r"violet|purple|magenta|pink|rose|white|black|grey|gray|brown"
+        )
+        _COLOR_CHANGE_RE = _re_color.compile(
+            rf"(?:make(?:\s+(?:him|her|it|the|his|her))?\s+)?(?P<from>{_COLORS})"
+            rf"(?:\s+\w+){{0,3}}\s+(?:into|to|as)\s+(?P<to>{_COLORS})"
+            rf"|change\s+(?:the\s+)?(?P<from2>{_COLORS})(?:\s+\w+){{0,2}}\s+(?:to|into)\s+(?P<to2>{_COLORS})"
+            rf"|make\s+(?:him|her|it|the\s+\w+)\s+(?P<to3>{_COLORS})(?:\s+skin|\s+fur|\s+color)?",
+            _re_color.IGNORECASE,
+        )
+        _color_match = _COLOR_CHANGE_RE.search(effective_msg)
+        _from_color = (
+            _color_match.group("from") or
+            _color_match.group("from2")
+        ).lower() if _color_match and (_color_match.group("from") or _color_match.group("from2")) else None
+        _to_color = (
+            _color_match.group("to") or
+            _color_match.group("to2") or
+            _color_match.group("to3")
+        ).lower() if _color_match else None
+
+        # ── Route 1: PIL color replacement (pure color change, lossless) ─────
+        if attached_image_bytes and _from_color and _to_color:
+            logger.info(
+                "[MODEL ROUTER] image_edit → PIL color_replace: %s → %s",
+                _from_color, _to_color,
+            )
+            try:
+                from ..services.dalle_client import DalleClient
+                _dalle = DalleClient()
+                _b64 = _dalle.color_replace(attached_image_bytes, _from_color, _to_color)
+                if _b64:
+                    try:
+                        from mini_credits import log_image_generated as _log_img
+                        await _log_img(request.headers.get("authorization"), request_id=getattr(req, "request_id", None))
+                    except Exception:
+                        pass
+                    return {
+                        "image_base64": _b64,
+                        "reply": "Image edited.",
+                        "intent": "image_edit",
+                        "session_id": session_id,
+                        "plan": phase1_plan.to_dict() if phase1_plan else {},
+                    }
+                logger.warning("PIL color_replace returned None — falling through to gpt-image-1")
+            except Exception as _pil_exc:
+                logger.warning("PIL color_replace failed (%s) — falling through to gpt-image-1", _pil_exc)
+
+        # ── Route 2: gpt-image-1 edit (complex / non-color edits) ────────────
         logger.info("[MODEL ROUTER] image_edit → gpt-image-1 edit()")
-        # GPT-5.4 converts the vague user request into a precise, unambiguous
-        # edit instruction before hitting gpt-image-1.
         try:
             from mini_assistant.phase2.prompt_enhancer import enhance_edit_instruction
             _edit_instruction = await enhance_edit_instruction(effective_msg.strip())
@@ -1605,8 +1658,6 @@ async def chat(req: ChatRequest, request: Request):
         try:
             from ..services.dalle_client import DalleClient
             _dalle = DalleClient()
-            # Use gpt-image-1 edit() when we have the source image bytes
-            # so the model actually modifies the image instead of text-to-image
             if attached_image_bytes:
                 _b64 = await _dalle.edit(attached_image_bytes, _edit_prompt)
             else:
