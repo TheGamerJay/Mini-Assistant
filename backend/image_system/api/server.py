@@ -40,6 +40,7 @@ from .models import (
     ChatRequest,
     AutoFixRequest,
     SummarizeRequest,
+    ShareRequest,
     PullModelsRequest,
     ModelStatusResponse,
     ErrorResponse,
@@ -3278,6 +3279,91 @@ async def autofix_stream(req: AutoFixRequest, request: Request):
         "X-Accel-Buffering": "no",
         "Connection": "keep-alive",
     })
+
+
+# ---------------------------------------------------------------------------
+# Share store — persist shared apps to disk
+# ---------------------------------------------------------------------------
+import json as _share_json
+
+_SHARES_FILE = Path(__file__).parent.parent.parent / "memory_store" / "shares.json"
+_shares: Dict[str, str] = {}
+
+def _load_shares():
+    global _shares
+    try:
+        if _SHARES_FILE.exists():
+            _shares = _share_json.loads(_SHARES_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        _shares = {}
+
+def _save_shares():
+    try:
+        _SHARES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _SHARES_FILE.write_text(_share_json.dumps(_shares), encoding="utf-8")
+    except Exception as e:
+        logger.warning("Could not persist shares: %s", e)
+
+_load_shares()
+
+_SHARE_BANNER = """
+<div id="__ma_share_banner" style="
+  position:fixed;bottom:0;left:0;right:0;
+  background:linear-gradient(135deg,#0f111a,#1a1d2e);
+  border-top:1px solid rgba(99,102,241,0.25);
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  padding:8px 16px;z-index:99999;font-family:sans-serif;
+">
+  <span style="font-size:11px;color:rgba(255,255,255,0.45);">Built with</span>
+  <span style="font-size:12px;font-weight:700;
+    background:linear-gradient(90deg,#818cf8,#a78bfa);
+    -webkit-background-clip:text;-webkit-text-fill-color:transparent;">
+    Mini Assistant AI
+  </span>
+  <a href="https://miniassistantai.com" target="_blank"
+     style="font-size:10px;color:rgba(99,102,241,0.7);text-decoration:none;
+     border:1px solid rgba(99,102,241,0.3);border-radius:99px;padding:2px 10px;
+     transition:opacity .2s;" onmouseover="this.style.opacity='.7'" onmouseout="this.style.opacity='1'">
+    Build yours →
+  </a>
+</div>
+<style>#__ma_share_banner+*,body{padding-bottom:44px!important}</style>
+"""
+
+
+@app.post("/api/share")
+async def share_app(req: ShareRequest, request: Request):
+    """Store an app's HTML and return a public share URL."""
+    share_id = str(uuid.uuid4())[:8]
+    _shares[share_id] = req.html
+    _save_shares()
+
+    # Build share URL — account for /image-api mount prefix
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc))
+    share_url = f"{scheme}://{host}/image-api/s/{share_id}"
+    return {"id": share_id, "url": share_url}
+
+
+@app.get("/s/{share_id}")
+async def view_shared_app(share_id: str):
+    """Serve a shared app as a full HTML page with a Mini Assistant AI banner."""
+    from fastapi.responses import HTMLResponse
+    html = _shares.get(share_id)
+    if not html:
+        # Try reloading from disk in case server restarted
+        _load_shares()
+        html = _shares.get(share_id)
+    if not html:
+        raise HTTPException(status_code=404, detail="Shared app not found or expired.")
+
+    # Inject banner before </body> (or at end)
+    if "</body>" in html:
+        html = html.replace("</body>", _SHARE_BANNER + "</body>", 1)
+    else:
+        html = html + _SHARE_BANNER
+
+    return HTMLResponse(content=html, status_code=200)
 
 
 @app.post("/api/chat/suggestions")

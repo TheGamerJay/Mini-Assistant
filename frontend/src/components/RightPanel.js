@@ -13,7 +13,7 @@ import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import {
   Monitor, Code2, FolderOpen, X, RefreshCw,
   ChevronRight, File, Download, ListTodo, Diff, Plus, Trash2, CheckSquare, Square,
-  Bug, Zap, CheckCircle, AlertTriangle, StopCircle,
+  Bug, Zap, CheckCircle, AlertTriangle, StopCircle, Share2, Copy, ExternalLink,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/client';
@@ -277,10 +277,19 @@ function PreviewPane({ blocks, previewImage = null, onClearImage, isStreaming = 
   const html = rawHtml || lastHtmlRef.current;
 
   // Remount iframe when streaming ends (Play buttons work after full code arrives)
-  const wasStreamingRef = useRef(false);
+  const prevIsStreamingRef = useRef(false);
   useEffect(() => {
-    if (wasStreamingRef.current && !isStreaming && html) setKey(k => k + 1);
-    wasStreamingRef.current = isStreaming;
+    const wasStreaming = prevIsStreamingRef.current;
+    prevIsStreamingRef.current = isStreaming;
+    if (wasStreaming && !isStreaming && html) {
+      setKey(k => k + 1);
+      // Auto-run debug agent after every build — give iframe 1.8s to mount first
+      const t = setTimeout(() => {
+        if (!fixingRef.current) runFixLoop();
+      }, 1800);
+      return () => clearTimeout(t);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStreaming, html]);
 
   // Saved badge for new images
@@ -338,6 +347,35 @@ function PreviewPane({ blocks, previewImage = null, onClearImage, isStreaming = 
       }
     });
   }, []);
+
+  // ── Share state ────────────────────────────────────────────────────────
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareToast, setShareToast] = useState(null); // { url, copied }
+
+  const handleShare = useCallback(async () => {
+    const shareHtml = currentFixHtml || html;
+    if (!shareHtml || shareLoading) return;
+    setShareLoading(true);
+    try {
+      const { IMAGE_API } = await import('../api/client');
+      const res = await fetch(`${IMAGE_API}/share`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ html: shareHtml }),
+      });
+      if (!res.ok) throw new Error('Share failed');
+      const data = await res.json();
+      const url = data.url;
+      try { await navigator.clipboard.writeText(url); } catch {}
+      setShareToast({ url, copied: true });
+      setTimeout(() => setShareToast(null), 6000);
+    } catch (e) {
+      setShareToast({ url: null, copied: false, error: true });
+      setTimeout(() => setShareToast(null), 4000);
+    } finally {
+      setShareLoading(false);
+    }
+  }, [currentFixHtml, html, shareLoading]);
 
   // ── Auto-Fix loop state ────────────────────────────────────────────────
   const [fixing, setFixing] = useState(false);
@@ -528,31 +566,68 @@ function PreviewPane({ blocks, previewImage = null, onClearImage, isStreaming = 
             </span>
           )}
         </div>
-        {!fixing ? (
-          <button
-            onClick={runFixLoop}
-            disabled={isStreaming}
-            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-violet-500/15 text-violet-400 hover:bg-violet-500/25 border border-violet-500/20 transition-all disabled:opacity-40"
-            title="Auto-fix all bugs"
-          >
-            <Bug size={10} />
-            Auto-Fix
-          </button>
-        ) : (
+        {fixing && (
           <button
             onClick={stopFix}
             className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-red-500/15 text-red-400 hover:bg-red-500/25 border border-red-500/20 transition-all"
-            title="Stop auto-fix"
+            title="Stop debug agent"
           >
             <StopCircle size={10} />
             Stop
           </button>
         )}
+        <button
+          onClick={handleShare}
+          disabled={shareLoading || isStreaming}
+          className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 border border-cyan-500/20 transition-all disabled:opacity-40"
+          title="Share this app — anyone gets the game, not the code"
+        >
+          {shareLoading
+            ? <RefreshCw size={10} className="animate-spin" />
+            : <Share2 size={10} />}
+          Share
+        </button>
         <button onClick={() => { setCurrentFixHtml(null); setKey(k => k + 1); setIframeErrors([]); setFixLog([]); }}
           className="p-1 rounded hover:bg-white/5 text-slate-600 hover:text-slate-400 transition-colors" title="Refresh preview">
           <RefreshCw size={12} />
         </button>
       </div>
+
+      {/* Share toast */}
+      {shareToast && (
+        <div
+          className="absolute top-12 right-3 z-20 rounded-xl border shadow-2xl overflow-hidden"
+          style={{
+            background: shareToast.error ? 'rgba(239,68,68,0.12)' : 'rgba(6,182,212,0.10)',
+            borderColor: shareToast.error ? 'rgba(239,68,68,0.3)' : 'rgba(6,182,212,0.25)',
+            backdropFilter: 'blur(10px)',
+            minWidth: 240,
+            animation: 'ma-slide-up 0.25s cubic-bezier(.22,1,.36,1) forwards',
+          }}
+        >
+          {shareToast.error ? (
+            <div className="flex items-center gap-2 px-4 py-3">
+              <AlertTriangle size={13} className="text-red-400 flex-shrink-0" />
+              <span className="text-[11px] text-red-300">Couldn't create share link</span>
+            </div>
+          ) : (
+            <div className="px-4 py-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <CheckCircle size={13} style={{ color: '#34d399' }} className="flex-shrink-0" />
+                <span className="text-[11px] text-emerald-300 font-medium">Link copied to clipboard!</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="flex-1 text-[10px] font-mono text-cyan-300/70 truncate">{shareToast.url}</span>
+                <a href={shareToast.url} target="_blank" rel="noreferrer"
+                  className="p-1 rounded hover:bg-white/10 text-cyan-400 flex-shrink-0" title="Open in new tab">
+                  <ExternalLink size={10} />
+                </a>
+              </div>
+              <p className="text-[9px] text-slate-500">Viewers see the game — source code is hidden.</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Debug overlay animations */}
       <style>{`

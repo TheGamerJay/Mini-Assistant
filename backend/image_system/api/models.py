@@ -82,6 +82,10 @@ class SummarizeRequest(BaseModel):
     messages: List[ChatHistoryMessage]
 
 
+class ShareRequest(BaseModel):
+    html: str                       # full app HTML to share
+
+
 # ---------------------------------------------------------------------------
 # Response models
 # ---------------------------------------------------------------------------
