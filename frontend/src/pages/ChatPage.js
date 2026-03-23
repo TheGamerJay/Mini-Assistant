@@ -1186,15 +1186,18 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         onDebugSummary={(passes) => {
           if (!passes?.length) return;
           const lines = passes.map(p =>
-            p.allClear && p.fixed ? `Pass ${p.pass} — Patched & clean ✅`
-            : p.fixed ? `Pass ${p.pass} — Bug patched 🔧`
-            : p.allClear ? `Pass ${p.pass} — No issues found ✅`
-            : `Pass ${p.pass} — No output ⚠️`
+            p.pass === 'visual'
+              ? (p.fixed ? '🎨 Visual — Layout fixed' : '🎨 Visual — Looks good ✅')
+              : p.allClear && p.fixed ? `Pass ${p.pass} — Patched & clean ✅`
+              : p.fixed ? `Pass ${p.pass} — Bug patched 🔧`
+              : p.allClear ? `Pass ${p.pass} — No issues ✅`
+              : `Pass ${p.pass} — No output ⚠️`
           );
           const allGood = passes[passes.length - 1]?.allClear;
+          const jsPasses = passes.filter(p => p.pass !== 'visual').length;
           const debugMsg = {
             role: 'assistant', type: 'debug',
-            content: `🔍 **Debug Agent** — ${passes.length} pass${passes.length > 1 ? 'es' : ''}\n${lines.join('\n')}${allGood ? '\n\nAll clear — your app is running clean.' : ''}`,
+            content: `🔍 **Debug Agent** — ${jsPasses} JS pass${jsPasses !== 1 ? 'es' : ''} + visual QA\n${lines.join('\n')}${allGood ? '\n\nAll clear — your app is running clean.' : ''}`,
             timestamp: Date.now(),
           };
           setMessages(prev => {

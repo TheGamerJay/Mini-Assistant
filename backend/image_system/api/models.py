@@ -93,6 +93,12 @@ class CommunityRequest(BaseModel):
     author_name: str = "Anonymous"
 
 
+class VisualReviewRequest(BaseModel):
+    html: str                        # current full app HTML
+    screenshot_base64: str           # JPEG screenshot of the rendered iframe
+    session_id: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Response models
 # ---------------------------------------------------------------------------

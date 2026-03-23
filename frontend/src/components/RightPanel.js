@@ -751,11 +751,46 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
 
     // Notify parent with final code so it can add to chat history
     if (onFixedHtml && workingHtml !== startHtml) onFixedHtml(workingHtml);
-    // Post debug summary to chat
-    if (onDebugSummary && passLog.length > 0) onDebugSummary(passLog);
 
     // Remount iframe so fixed code runs from a clean state (clears stale JS)
     if (workingHtml !== startHtml) setKey(k => k + 1);
+
+    // ── Visual QA pass: screenshot → Claude vision → fix layout problems ──
+    try {
+      await new Promise(r => setTimeout(r, 1400)); // let iframe settle after any remount
+      const h2c = (await import('html2canvas')).default;
+      const iframeDoc = iframeRef.current?.contentDocument;
+      if (iframeDoc?.body && iframeRef.current) {
+        const canvas = await h2c(iframeDoc.body, {
+          useCORS: true, allowTaint: true, scale: 0.5,
+          width: iframeRef.current.clientWidth || 420,
+          height: iframeRef.current.clientHeight || 600,
+          logging: false,
+        });
+        const screenshotB64 = canvas.toDataURL('image/jpeg', 0.75).split(',')[1];
+        const { IMAGE_API } = await import('../api/client');
+        const vRes = await fetch(`${IMAGE_API}/visual_review`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ html: workingHtml, screenshot_base64: screenshotB64 }),
+        });
+        if (vRes.ok) {
+          const vData = await vRes.json();
+          if (vData.fixed_html) {
+            workingHtml = vData.fixed_html;
+            setCurrentFixHtml(vData.fixed_html);
+            setKey(k => k + 1);
+            if (onFixedHtml) onFixedHtml(vData.fixed_html);
+            passLog.push({ pass: 'visual', text: vData.issues || 'Layout issues fixed', allClear: false, fixed: true });
+          } else {
+            passLog.push({ pass: 'visual', text: 'Visual check passed', allClear: true, fixed: false });
+          }
+        }
+      }
+    } catch { /* visual review is best-effort */ }
+
+    // Post debug summary to chat (includes visual pass result)
+    if (onDebugSummary && passLog.length > 0) onDebugSummary(passLog);
 
     fixingRef.current = false;
     setFixing(false);

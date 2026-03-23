@@ -42,6 +42,7 @@ from .models import (
     SummarizeRequest,
     ShareRequest,
     CommunityRequest,
+    VisualReviewRequest,
     PullModelsRequest,
     ModelStatusResponse,
     ErrorResponse,
@@ -3305,6 +3306,87 @@ async def autofix_stream(req: AutoFixRequest, request: Request):
         "X-Accel-Buffering": "no",
         "Connection": "keep-alive",
     })
+
+
+# ---------------------------------------------------------------------------
+# Visual QA review — screenshot → Claude vision → patch if broken
+# ---------------------------------------------------------------------------
+
+@app.post("/api/visual_review")
+async def visual_review(req: VisualReviewRequest):
+    """
+    Accepts a JPEG screenshot of the rendered app + its source HTML.
+    Claude vision inspects it for visual problems (overflow, blank areas,
+    layout breaks, content cut off) and returns a patched HTML if needed.
+    """
+    import re as _re
+
+    _api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not _api_key:
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not set")
+
+    system_prompt = """\
+You are a visual QA engineer for web apps. You will be shown a screenshot of a rendered web app and its source HTML.
+
+Your job: look at the screenshot and identify any of these problems:
+- Content overflowing / cut off on any side
+- Blank or mostly-empty screen (app failed to render)
+- Layout completely broken (elements stacked wrong, overlapping badly)
+- Game canvas too large for the viewport
+- Critical elements invisible or off-screen
+
+If the app looks GOOD (playable, readable, content visible) → respond with EXACTLY: ALL_CLEAR
+
+If there are real visual problems → output the complete fixed HTML inside ```html ... ``` fences.
+Only fix the visual/layout issues. Do not change game logic, colors, features, or content.
+Keep fixes minimal: CSS overrides, viewport meta, canvas sizing, flex/grid adjustments.
+
+Do not explain. Do not add commentary. Just ALL_CLEAR or the fixed HTML block."""
+
+    user_content = [
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/jpeg",
+                "data": req.screenshot_base64,
+            },
+        },
+        {
+            "type": "text",
+            "text": f"## App Screenshot\nAnalyse the screenshot above for visual problems.\n\n## Source HTML\n```html\n{req.html[:40000]}\n```",
+        },
+    ]
+
+    try:
+        import anthropic as _am
+        _ac = _am.AsyncAnthropic(api_key=_api_key)
+        resp = await _ac.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=16000,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_content}],
+        )
+        reply = resp.content[0].text.strip() if resp.content else ""
+
+        if reply.startswith("ALL_CLEAR"):
+            return {"all_clear": True, "issues": None, "fixed_html": None}
+
+        # Extract fixed HTML if provided
+        fence = _re.search(r"```html\s*\n([\s\S]+?)```", reply)
+        fixed_html = fence.group(1).strip() if fence else None
+
+        issues = reply.replace(f"```html\n{fixed_html}\n```", "").strip() if fixed_html else reply
+
+        return {
+            "all_clear": False,
+            "issues": issues[:500] if issues else "Visual issues detected",
+            "fixed_html": fixed_html,
+        }
+
+    except Exception as exc:
+        logger.error("[VisualReview] error: %s", exc)
+        return {"all_clear": True, "issues": None, "fixed_html": None}  # fail open
 
 
 # ---------------------------------------------------------------------------
