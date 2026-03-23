@@ -2514,7 +2514,7 @@ async def chat_stream(req: ChatRequest, request: Request):
             _sys_prompt_stream = _MINI_SYSTEM_PROMPT
         history_msgs: list[dict] = [{"role": "system", "content": _sys_prompt_stream}]
         if req.history:
-            for h in req.history[-10:]:
+            for h in req.history:
                 history_msgs.append({"role": h.role, "content": h.content})
         user_content = (rt_context + effective_msg) if rt_context else effective_msg
 
@@ -2696,9 +2696,12 @@ async def chat_stream(req: ChatRequest, request: Request):
                     if _prefs_block:
                         _c_sys = _c_sys + _prefs_block
 
-            # ── Patch mode: reinforce the one rule at the top of the last message ─
-            # Claude reads the last user message right before generating.
-            # Stamping the rule there makes it the freshest thing in its context.
+            # ── Patch mode: pin the CURRENT code + reinforce the patch rule ────────
+            # Problem: _c_msgs only has the last 10 messages. If the HTML was built
+            # more than 10 messages ago, Claude cannot see it and guesses from old context.
+            # Fix: extract the latest HTML from the FULL req.history and inject it
+            # explicitly right before the user's request so Claude always patches
+            # the correct, up-to-date version.
             _is_patch_mode = (
                 _is_build_intent
                 and _has_prior_code
@@ -2706,6 +2709,35 @@ async def chat_stream(req: ChatRequest, request: Request):
                 and not all_images
             )
             if _is_patch_mode and _c_msgs:
+                # Extract latest HTML from full history (not the truncated 10-msg window)
+                _latest_html = None
+                for _ph in reversed(req.history or []):
+                    if _ph.role == "assistant" and _ph.content:
+                        _fence_m = _re.search(r'```html\s*\n([\s\S]+?)```', _ph.content)
+                        if _fence_m:
+                            _latest_html = _fence_m.group(1).strip()
+                            break
+                        _raw_m = _re.search(r'(<!DOCTYPE\s+html[\s\S]+)', _ph.content, _re.I)
+                        if _raw_m:
+                            _latest_html = _raw_m.group(1).strip()
+                            break
+
+                # Only inject if the code isn't already visible in the truncated context
+                _code_visible = any(
+                    "```html" in str(m.get("content", "")) or "<!DOCTYPE" in str(m.get("content", ""))
+                    for m in _c_msgs
+                )
+                if _latest_html and not _code_visible:
+                    # Pin current code immediately before the user's change request
+                    _c_msgs.insert(-1, {
+                        "role": "user",
+                        "content": f"📌 CURRENT APP CODE — patch this exact version, nothing else:\n```html\n{_latest_html}\n```",
+                    })
+                    _c_msgs.insert(-1, {
+                        "role": "assistant",
+                        "content": "Current code loaded. I'll only change what you ask for.",
+                    })
+
                 _patch_stamp = (
                     "\U0001f6a8 PATCH MODE — CHANGE ONLY WHAT I ASKED FOR.\n"
                     "Do NOT touch anything else in the code. One change. That's it.\n\n"
