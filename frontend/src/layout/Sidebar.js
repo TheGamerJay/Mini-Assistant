@@ -82,7 +82,7 @@ const TOOLS = [
 // ---------------------------------------------------------------------------
 // SidebarSection
 // ---------------------------------------------------------------------------
-function SidebarSection({ icon: Icon, label, collapsed, defaultOpen = true, action, children }) {
+function SidebarSection({ icon: Icon, label, collapsed, defaultOpen = true, action, scrollable = false, children }) {
   const [open, setOpen] = useState(defaultOpen);
 
   if (collapsed) {
@@ -122,7 +122,7 @@ function SidebarSection({ icon: Icon, label, collapsed, defaultOpen = true, acti
           {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
         </div>
       </button>
-      {open && <div>{children}</div>}
+      {open && <div className={scrollable ? 'overflow-y-auto max-h-60' : ''}>{children}</div>}
     </div>
   );
 }
@@ -666,7 +666,7 @@ function Sidebar() {
       <div className="flex-1 overflow-y-auto px-2 py-1 space-y-1">
 
         {/* Images */}
-        <SidebarSection icon={Image} label="Images" collapsed={sidebarCollapsed} defaultOpen={true}>
+        <SidebarSection icon={Image} label="Images" collapsed={sidebarCollapsed} defaultOpen={true} scrollable={true}>
           {images.length === 0 ? (
             !sidebarCollapsed && <p className="text-[10px] text-slate-600 px-2 py-2">No images yet</p>
           ) : (
