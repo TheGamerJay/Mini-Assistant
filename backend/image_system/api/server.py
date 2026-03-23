@@ -1583,40 +1583,21 @@ async def chat(req: ChatRequest, request: Request):
     logger.info("[MODEL ROUTER] chat → Claude %s", _active_model)
 
     if execution_intent == "image_edit":
-        # ── TRUE IMAGE EDIT: analyze identity → build strict preservation prompt ──
-        logger.info("[MODEL ROUTER] image_edit → vision identity analysis + DALL-E 3")
-        # Step 1: extract exact identity from attached image
-        identity_desc = ""
-        if attached_image_bytes:
-            try:
-                vision = _get_vision()
-                identity_desc = await vision.analyze(
-                    attached_image_bytes,
-                    "Describe this image in precise detail for IDENTITY PRESERVATION. Include: "
-                    "exact subject appearance (face shape, hair color/style, eye color, skin tone, "
-                    "body proportions), every clothing item and accessory, pose and body language, "
-                    "art style (realistic/cartoon/anime/painterly), color palette, lighting direction "
-                    "and quality, background elements, and overall composition. "
-                    "Be extremely specific — this description will be used to recreate the EXACT same "
-                    "character/scene with only a small modification applied.",
-                )
-                logger.info("[MODEL ROUTER] identity analysis complete (%d chars)", len(identity_desc))
-            except Exception as _ve:
-                logger.warning("Vision identity analysis failed: %s", _ve)
-        # Step 2: build strict edit prompt
+        # ── TRUE IMAGE EDIT: minimal prompt — model already has the image ──
+        # Do NOT send a text description of the image. gpt-image-1 can see the
+        # image directly; a long description tells it to recreate from text
+        # rather than make a targeted pixel-level change.
+        logger.info("[MODEL ROUTER] image_edit → gpt-image-1 edit()")
         _edit_instruction = effective_msg.strip()
         _edit_prompt = (
-            "Edit the provided image. Keep the exact same character, pose, proportions, "
-            "facial features, clothing, and composition completely unchanged.\n\n"
-        )
-        if identity_desc:
-            _edit_prompt += f"Character/scene identity to preserve:\n{identity_desc}\n\n"
-        _edit_prompt += (
-            f"ONLY apply this specific modification: {_edit_instruction}\n\n"
-            "STRICT RULES — do NOT: change the character's face, body shape, pose, clothing "
-            "(unless the modification explicitly requests it), or any element not mentioned. "
-            "Preserve art style, lighting, shading, and background unless the modification requires otherwise. "
-            "Identity preservation is the highest priority."
+            f"Apply ONLY this change: {_edit_instruction}\n\n"
+            "Rules:\n"
+            "• Change ONLY what is explicitly requested — nothing else\n"
+            "• Keep every other element pixel-identical: face, hair, eyes, mouth, "
+            "body shape, clothing, shoes, accessories, pose, expression, "
+            "art style, lighting, background\n"
+            "• Show the FULL character — do NOT crop, zoom in, or cut off any part\n"
+            "• Do not reinterpret, stylize, or add any detail not already present"
         )
         try:
             from ..services.dalle_client import DalleClient
