@@ -184,31 +184,57 @@ function BuildingTerminal({ codeText, linesBuilt }) {
 /** Scanning animation — shown while Claude reads existing code to find the bug */
 function CodeScanner({ existingCode }) {
   const [scanLine, setScanLine] = useState(0);
+  const [elapsed, setElapsed]   = useState(0);
   const allLines = existingCode ? existingCode.split('\n').filter(l => l.trim()) : [];
   const total = allLines.length;
 
-  // Advance the scan position every 120ms — looks like it's reading through the code
+  // Advance scan line every 110ms (forward pass, not looping — gives real progress feel)
   useEffect(() => {
     if (!total) return;
-    const t = setInterval(() => setScanLine(n => (n + 1) % total), 120);
+    const t = setInterval(() => setScanLine(n => Math.min(n + 1, total - 1)), 110);
     return () => clearInterval(t);
   }, [total]);
 
+  // Track elapsed seconds so we can reassure the user it's actually working
+  useEffect(() => {
+    const t = setInterval(() => setElapsed(s => s + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+
   if (!total) return null;
 
+  const progress = Math.round((scanLine / Math.max(total - 1, 1)) * 100);
+
+  const statusLabel =
+    elapsed < 6  ? 'scanning code…' :
+    elapsed < 14 ? 'still on it…'   :
+    elapsed < 24 ? 'almost there…'  :
+                   'complex fix, working…';
+
   // Show 4 lines around the scan cursor
-  const window = [scanLine - 1, scanLine, scanLine + 1, scanLine + 2]
-    .map(i => ({ line: allLines[(i + total) % total], isActive: i === scanLine }));
+  const win = [scanLine - 1, scanLine, scanLine + 1, scanLine + 2]
+    .map(i => ({ line: allLines[Math.max(0, Math.min(i, total - 1))], isActive: i === scanLine }));
 
   return (
     <div className="rounded-xl border border-violet-500/20 bg-[#07080f] overflow-hidden w-full">
+      {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 bg-[#0c0e1c] border-b border-white/[0.05]">
         <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
-        <span className="text-[10px] text-violet-300 font-mono font-semibold flex-1 tracking-wide">scanning code…</span>
-        <span className="text-[10px] text-slate-600 font-mono">{total} lines</span>
+        <span className="text-[10px] text-violet-300 font-mono font-semibold flex-1 tracking-wide">{statusLabel}</span>
+        <span className="text-[10px] text-slate-600 font-mono tabular-nums">{elapsed}s · {progress}%</span>
       </div>
+
+      {/* Progress bar */}
+      <div className="h-0.5 bg-white/[0.04]">
+        <div
+          className="h-full bg-gradient-to-r from-violet-500 to-cyan-500 transition-all duration-100"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+
+      {/* Scrolling lines */}
       <div className="px-3 py-2.5 space-y-1">
-        {window.map(({ line, isActive }, i) => (
+        {win.map(({ line, isActive }, i) => (
           <div
             key={i}
             className={`text-[11px] font-mono leading-5 truncate transition-all duration-100 ${
@@ -217,7 +243,7 @@ function CodeScanner({ existingCode }) {
                 : i === 0 ? 'text-slate-700 opacity-40' : 'text-slate-500 opacity-70'
             }`}
           >
-            {line.trimStart().slice(0, 44) || ' '}
+            {(line || ' ').trimStart().slice(0, 44)}
             {isActive && <span className="inline-block w-0.5 h-3 bg-violet-400 ml-0.5 align-middle animate-pulse" />}
           </div>
         ))}
