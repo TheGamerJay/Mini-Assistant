@@ -2117,12 +2117,16 @@ async def chat_stream(req: ChatRequest, request: Request):
         # ── Explicit chat_mode override (bypasses all intent detection) ──────
         # 'image' → force image generation (redirect to non-streaming endpoint)
         # 'build' → force app_builder (skip Q&A, build immediately)
+        # 'chat'  → force plain chat/search, never image-gen or build
         if req.chat_mode == "image":
             yield f"data: {_json.dumps({'done': True, 'meta': {'type': 'image_redirect'}})}\n\n"
             return
         if req.chat_mode == "build":
             execution_intent = "app_builder"
             phase1_plan = None  # skip routing entirely
+        if req.chat_mode == "chat":
+            execution_intent = "chat"
+            phase1_plan = None  # skip all intent routing
 
         # ── Phase 1 intent routing (fast regex, then LLM fallback) ──────────
         # Skip entirely when chat_mode forces the intent already
@@ -2200,15 +2204,19 @@ async def chat_stream(req: ChatRequest, request: Request):
         )
         if _in_build_conversation:
             execution_intent = "app_builder"
-        elif execution_intent in ("image_generation", "image_edit", "image_reference_generate"):
+        elif execution_intent in ("image_generation", "image_edit", "image_reference_generate") and req.chat_mode != "chat":
             yield f"data: {_json.dumps({'done': True, 'meta': {'type': 'image_redirect'}})}\n\n"
             return
+        # In chat mode, fall back to plain chat if image/build intent was detected
+        if req.chat_mode == "chat" and execution_intent in ("image_generation", "image_edit", "image_reference_generate", "app_builder"):
+            execution_intent = "chat"
 
         # ── Model selection — always Claude claude-sonnet-4-6 ─────────────────
         _is_build_intent = execution_intent == "app_builder"
 
         # Vibe Code mode OR explicit build mode — skip all Q&A, build immediately
-        if (req.vibe_mode or req.chat_mode == "build") and not _is_build_intent:
+        # (never override chat mode with build intent)
+        if (req.vibe_mode or req.chat_mode == "build") and not _is_build_intent and req.chat_mode != "chat":
             _is_build_intent = True
             execution_intent = "app_builder"  # so done-event intent is correct → auto-opens preview
 

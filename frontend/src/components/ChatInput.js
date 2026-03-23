@@ -10,7 +10,7 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Paperclip, Mic, MicOff, Send, Loader2, X, Image, FileText, Hammer } from 'lucide-react';
+import { Paperclip, Mic, MicOff, Send, Loader2, X, Image, FileText, Hammer, MessageSquare } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../api/client';
 import { useApp } from '../context/AppContext';
@@ -109,9 +109,11 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
   const textareaRef = useRef(null);
 
   const defaultPlaceholder =
-    variant === 'home'
-      ? 'Ask anything, generate an image, or write code…'
-      : 'Message Mini Assistant…';
+    chatMode === 'image' ? 'Describe an image to generate…'
+    : chatMode === 'build' ? 'Describe an app to build…'
+    : chatMode === 'chat'  ? 'Ask anything, search the web, or just chat…'
+    : variant === 'home'   ? 'Ask anything, generate an image, or write code…'
+    : 'Message Mini Assistant…';
   const resolvedPlaceholder = placeholder || defaultPlaceholder;
 
   // Consume pending template — fills input, or auto-submits for onboarding
@@ -483,7 +485,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
                 : <Mic size={16} />}
           </button>
 
-          {/* Mode buttons: Image | Build */}
+          {/* Mode buttons: Image | Build | Chat */}
           {onChatModeChange && (
             <>
               <button
@@ -509,6 +511,18 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
                 }`}
               >
                 <Hammer size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => onChatModeChange(chatMode === 'chat' ? null : 'chat')}
+                title={chatMode === 'chat' ? 'Chat Mode ON — click to exit' : 'Chat Mode — conversation & research, no building or image gen'}
+                className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 ${
+                  chatMode === 'chat'
+                    ? 'bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-500/40'
+                    : 'text-slate-500 hover:text-blue-400 hover:bg-white/5'
+                }`}
+              >
+                <MessageSquare size={16} />
               </button>
             </>
           )}
