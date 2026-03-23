@@ -52,6 +52,7 @@ from .conversation_store import (
     save_message,
     trim_html_in_old_messages,
 )
+from ..brains.search_brain import search as _memory_search
 
 logger = logging.getLogger(__name__)
 
@@ -2731,6 +2732,17 @@ async def chat_stream(req: ChatRequest, request: Request):
                     _prefs_block = _user_prefs_for_prompt()
                     if _prefs_block:
                         _c_sys = _c_sys + _prefs_block
+
+            # ── Search Brain: scan all memory files for relevant context ─────────
+            # Runs in parallel with prompt assembly (synchronous but <5ms on disk).
+            # Fetches: user style prefs, session facts, bug patterns, past sessions.
+            # Injects only what's relevant to this specific request — not everything.
+            try:
+                _search_block = _memory_search(effective_msg, session_id)
+                if _search_block:
+                    _c_sys = _c_sys + "\n\n" + _search_block
+            except Exception as _sb_err:
+                logger.debug("[SearchBrain] non-fatal: %s", _sb_err)
 
             # ── Patch mode: pin the CURRENT code + reinforce the patch rule ────────
             # Problem: _c_msgs only has the last 10 messages. If the HTML was built
