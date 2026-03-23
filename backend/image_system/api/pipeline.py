@@ -35,77 +35,51 @@ except ImportError:
     _CLAUDE_AVAILABLE = False
 
 
-# ── System prompts — each brain stays in its lane ────────────────────────────
+# ── System prompts — loaded from knowledge base ───────────────────────────────
+from .knowledge_base import (  # noqa: E402
+    image_to_code_build_prompt as _kb_build_prompt,
+    review_prompt              as _kb_review_prompt,
+    HOW_TO_BUILD               as _HOW_TO_BUILD,
+)
 
 _VISION_PROMPT = """\
-You are a UI analyst. You will receive a screenshot of a web UI.
+You are Mini Assistant's Vision Brain — a UI analyst who reads screenshots precisely.
 
-Your job: produce a precise technical specification so a developer can rebuild it exactly.
+Your job: produce a technical specification so the Builder Brain can recreate the UI exactly.
 
-Describe:
-1. COLOR PALETTE — background, text, buttons, inputs, accents. Use exact hex codes where readable.
-2. LAYOUT — structure, grid/flex, sections, positioning of each element
-3. TYPOGRAPHY — font sizes, weights, hierarchy (h1/h2/body/label)
-4. COMPONENTS — every visible element: logo, nav, inputs, buttons, cards, icons, images
-5. SPACING — padding, margins, gaps between elements
-6. STYLE — dark/light, glass, flat, gradient, shadows, border-radius
-7. TEXT CONTENT — exact labels, placeholders, button text, headings
+Describe in this order:
+1. COLOR PALETTE — background, surface, text, buttons, inputs, accents. Use exact hex codes.
+2. LAYOUT — overall structure (header/sidebar/main/footer), flexbox or grid, alignment
+3. TYPOGRAPHY — font sizes (px or rem), weights, hierarchy (h1/h2/body/label/caption)
+4. COMPONENTS — every visible element: logo, nav links, inputs, buttons, cards, badges, icons
+5. SPACING — padding and margin values; gap between sections
+6. STYLE — dark/light, glass/flat/gradient, shadow depth, border-radius values
+7. INTERACTIONS — hover states, active states, animations visible in the screenshot
+8. TEXT CONTENT — exact labels, placeholder text, button text, headings word-for-word
 
-Be precise and technical. This spec will be handed directly to a developer."""
+Be precise and technical. Hex codes over color names. Pixel values over vague descriptions.
+This spec is handed DIRECTLY to the Builder Brain — every detail you give will be built."""
 
-_BUILD_SYSTEM = """\
-You are an expert frontend developer. Build complete, pixel-faithful web UIs from specs.
+_BUILD_SYSTEM = _HOW_TO_BUILD + """
 
-## Standards
-- Single self-contained HTML file: CSS in <style>, JS in <script>
-- CSS custom properties for every color: --primary, --bg, --text, --accent, etc.
-- Flexbox or CSS Grid — no floats, no tables
-- Real JavaScript — live state, real event handlers, no stubs, no TODO comments
-- Every interactive element must actually work
-- NEVER use external image URLs (via.placeholder.com etc.) — they are dead
-- Logos: inline SVG using the app name and brand colors
-- Placeholder images: CSS gradient or SVG with text
-- Smooth transitions (0.2s ease) on all interactive elements
-- Mobile-responsive (media queries)
-- Empty states for lists and content areas
-
-## Output format
+## OUTPUT FORMAT
 Start with ```html on its own line.
 End with ``` on its own line.
 Output the COMPLETE file every time — never partial snippets."""
 
-_REVIEW_SYSTEM = """\
-You are a senior frontend code reviewer. Your job is to check whether generated code \
-faithfully implements a UI specification.
+_REVIEW_SYSTEM = _kb_review_prompt()
 
-You receive:
-1. The original user requirements
-2. The UI specification from the vision analyst
-3. The generated HTML/CSS/JS code
+_FIX_SYSTEM = _HOW_TO_BUILD + """
 
-Check for:
-- All required elements present and positioned correctly
-- Colors match the spec exactly (check hex values)
-- All interactive elements functional
-- Layout matches the screenshot description
-- Typography and spacing reasonable
+## YOUR TASK: FIX
+A reviewer found issues with the build. Fix every issue listed.
+The reviewer's list is the source of truth — address each item specifically.
+User requirements take absolute priority over everything else.
 
-Output format (STRICT):
-- Code is correct: output exactly PASS
-- Issues found: first line "SCORE: X/100", then numbered list of specific problems
-  Example:
-    SCORE: 72/100
-    1. Background should be #0d0d12, currently white
-    2. Missing email input field
-    3. Submit button has no click handler
-
-Do NOT rewrite code. Only flag real gaps."""
-
-_FIX_SYSTEM = _BUILD_SYSTEM + """
-
-You are fixing a previous build based on reviewer feedback.
-Every issue in the reviewer list MUST be fixed.
-User requirements take absolute priority over everything else."""
+## OUTPUT FORMAT
+Start with ```html on its own line.
+End with ``` on its own line.
+Output the COMPLETE fixed file."""
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
