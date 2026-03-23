@@ -148,7 +148,7 @@ function CodeViewer({ blocks }) {
 // ---------------------------------------------------------------------------
 // Preview
 // ---------------------------------------------------------------------------
-function PreviewPane({ blocks, previewImage = null, imageSaved = false }) {
+function PreviewPane({ blocks, previewImage = null, imageSaved = false, onClearImage }) {
   const iframeRef = useRef(null);
   const [key, setKey] = useState(0);
   const html = useMemo(() => buildPreviewHtml(blocks), [blocks]);
@@ -192,6 +192,15 @@ function PreviewPane({ blocks, previewImage = null, imageSaved = false }) {
           >
             <Download size={12} />
           </a>
+          {onClearImage && (
+            <button
+              onClick={onClearImage}
+              className="p-1 rounded hover:bg-red-500/20 text-slate-600 hover:text-red-400 transition-colors"
+              title="Clear image"
+            >
+              <X size={12} />
+            </button>
+          )}
         </div>
         <div className="flex-1 flex flex-col items-center justify-center p-4 overflow-auto gap-3">
           <img
@@ -488,7 +497,7 @@ const TABS = [
   { id: 'tasks',   label: 'Tasks',   icon: ListTodo },
 ];
 
-function RightPanel({ messages = [], streamingText = null, open, onClose, previewImage = null, activeTab = null }) {
+function RightPanel({ messages = [], streamingText = null, open, onClose, previewImage = null, onClearImage, activeTab = null }) {
   const [tab, setTab] = useState('preview');
   const codeBlocks = useMemo(() => getLatestCode(messages, streamingText), [messages, streamingText]);
 
@@ -524,7 +533,7 @@ function RightPanel({ messages = [], streamingText = null, open, onClose, previe
 
       {/* Body */}
       <div className="flex-1 overflow-hidden">
-        {tab === 'preview' && <PreviewPane blocks={codeBlocks} previewImage={previewImage} />}
+        {tab === 'preview' && <PreviewPane blocks={codeBlocks} previewImage={previewImage} onClearImage={onClearImage} />}
         {tab === 'code'    && <CodeViewer  blocks={codeBlocks} />}
         {tab === 'files'   && <FilesPane   blocks={codeBlocks} />}
         {tab === 'diff'    && <DiffPane    messages={messages} />}
