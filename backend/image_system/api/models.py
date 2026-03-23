@@ -66,6 +66,13 @@ class ChatRequest(BaseModel):
     request_id: Optional[str] = None                 # client-generated UUID for deduplication
 
 
+class AutoFixRequest(BaseModel):
+    html: str                                        # current full app HTML
+    errors: Optional[List[str]] = []                # JS errors captured from iframe
+    iteration: int = 1                              # which pass (1-5)
+    session_id: Optional[str] = None
+
+
 class PullModelsRequest(BaseModel):
     models: List[str]
 

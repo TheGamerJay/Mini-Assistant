@@ -13,8 +13,10 @@ import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import {
   Monitor, Code2, FolderOpen, X, RefreshCw,
   ChevronRight, File, Download, ListTodo, Diff, Plus, Trash2, CheckSquare, Square,
+  Bug, Zap, CheckCircle, AlertTriangle, StopCircle,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { api } from '../api/client';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -86,6 +88,35 @@ function getLatestCode(messages, streamingText) {
     if (raw.length > 0) return raw;
   }
   return [];
+}
+
+/** Script injected into every iframe to relay JS errors to the parent window */
+const ERROR_CAPTURE_SCRIPT = `<script>
+(function(){
+  var send = function(level, msg) {
+    try { window.parent.postMessage({ __maType: 'iframe_error', level: level, msg: String(msg).slice(0, 500) }, '*'); } catch(e) {}
+  };
+  var _ce = console.error.bind(console);
+  var _cw = console.warn.bind(console);
+  console.error = function() { send('error', Array.prototype.join.call(arguments,' ')); _ce.apply(console, arguments); };
+  console.warn  = function() { send('warn',  Array.prototype.join.call(arguments,' ')); _cw.apply(console, arguments); };
+  window.onerror = function(msg, src, line, col, err) {
+    send('error', msg + (err ? ' | ' + (err.stack||'').split('\\n')[0] : '') + ' [line ' + line + ']');
+    return false;
+  };
+  window.addEventListener('unhandledrejection', function(e) {
+    send('error', 'Unhandled promise: ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason)));
+  });
+  window.parent.postMessage({ __maType: 'iframe_ready' }, '*');
+})();
+<\/script>`;
+
+/** Inject error capture into an HTML string */
+function injectErrorCapture(html) {
+  if (!html) return html;
+  if (html.includes('<head>')) return html.replace('<head>', '<head>' + ERROR_CAPTURE_SCRIPT);
+  if (html.includes('<body>')) return html.replace('<body>', ERROR_CAPTURE_SCRIPT + '<body>');
+  return ERROR_CAPTURE_SCRIPT + html;
 }
 
 /** Try to build a renderable HTML doc from code blocks */
@@ -184,25 +215,23 @@ function CodeViewer({ blocks }) {
 // ---------------------------------------------------------------------------
 // Preview
 // ---------------------------------------------------------------------------
-function PreviewPane({ blocks, previewImage = null, imageSaved = false, onClearImage, isStreaming = false }) {
+const MAX_AUTOFIX_ITERATIONS = 5;
+
+function PreviewPane({ blocks, previewImage = null, onClearImage, isStreaming = false, sessionId = null, onFixedHtml = null }) {
   const [key, setKey] = useState(0);
   const rawHtml = useMemo(() => buildPreviewHtml(blocks), [blocks]);
-  // Keep last known HTML so the preview never blanks out when streaming ends
   const lastHtmlRef = useRef(null);
   if (rawHtml) lastHtmlRef.current = rawHtml;
   const html = rawHtml || lastHtmlRef.current;
 
-  // When streaming finishes and we have final HTML, remount the iframe so
-  // game JS fully initialises with the complete code (Play buttons work)
+  // Remount iframe when streaming ends (Play buttons work after full code arrives)
   const wasStreamingRef = useRef(false);
   useEffect(() => {
-    if (wasStreamingRef.current && !isStreaming && html) {
-      setKey(k => k + 1); // remount iframe with final complete HTML
-    }
+    if (wasStreamingRef.current && !isStreaming && html) setKey(k => k + 1);
     wasStreamingRef.current = isStreaming;
   }, [isStreaming, html]);
 
-  // Show "Saved" badge briefly after a new image arrives
+  // Saved badge for new images
   const [showSaved, setShowSaved] = useState(false);
   const prevImageRef = useRef(null);
   useEffect(() => {
@@ -214,7 +243,141 @@ function PreviewPane({ blocks, previewImage = null, imageSaved = false, onClearI
     }
   }, [previewImage]);
 
-  // Show generated image if present (image generation takes priority over empty code preview)
+  // ── Error capture: listen for postMessage from iframe ──────────────────
+  const [iframeErrors, setIframeErrors] = useState([]);
+  useEffect(() => {
+    const handler = (e) => {
+      if (!e.data || e.data.__maType !== 'iframe_error') return;
+      const msg = e.data.msg || '';
+      if (!msg) return;
+      setIframeErrors(prev => {
+        if (prev.some(p => p === msg)) return prev;
+        return [...prev, msg].slice(-20);
+      });
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, []);
+
+  // Clear errors when new code loads (key changes = iframe remounted)
+  useEffect(() => { setIframeErrors([]); }, [key]);
+
+  // ── Auto-Fix loop state ────────────────────────────────────────────────
+  const [fixing, setFixing] = useState(false);
+  const [fixLog, setFixLog] = useState([]);          // [{pass, text, allClear}]
+  const [fixIteration, setFixIteration] = useState(0);
+  const [currentFixHtml, setCurrentFixHtml] = useState(null); // live patched HTML
+  const [liveToken, setLiveToken] = useState('');
+  const fixAbortRef = useRef(null);
+  const fixingRef = useRef(false);
+
+  const stopFix = useCallback(() => {
+    fixAbortRef.current?.abort();
+    fixingRef.current = false;
+    setFixing(false);
+  }, []);
+
+  const runFixLoop = useCallback(async () => {
+    if (fixing || isStreaming) return;
+    const startHtml = currentFixHtml || html;
+    if (!startHtml) return;
+
+    setFixing(true);
+    fixingRef.current = true;
+    setFixLog([]);
+    setFixIteration(0);
+    setLiveToken('');
+
+    let workingHtml = startHtml;
+    let errors = [...iframeErrors];
+
+    for (let pass = 1; pass <= MAX_AUTOFIX_ITERATIONS; pass++) {
+      if (!fixingRef.current) break;
+      setFixIteration(pass);
+      setLiveToken('');
+
+      let accumulated = '';
+      let allClear = false;
+      let passError = null;
+
+      try {
+        const ctrl = new AbortController();
+        fixAbortRef.current = ctrl;
+        const res = await api.autofixStream(workingHtml, errors, pass, sessionId, ctrl.signal);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop();
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const raw = line.slice(6).trim();
+            if (!raw) continue;
+            try {
+              const evt = JSON.parse(raw);
+              if (evt.done) {
+                allClear = evt.meta?.all_clear || false;
+                passError = evt.meta?.error || null;
+              } else if (evt.t) {
+                accumulated += evt.t;
+                setLiveToken(accumulated);
+              }
+            } catch {}
+          }
+        }
+      } catch (err) {
+        if (err.name === 'AbortError') break;
+        passError = err.message;
+      }
+
+      // Extract fixed HTML from Claude's response
+      const fenceMatch = /```html\s*\n([\s\S]+?)```/.exec(accumulated);
+      const rawMatch = /<!DOCTYPE\s+html/i.exec(accumulated);
+      let newHtml = null;
+      if (fenceMatch) newHtml = fenceMatch[1];
+      else if (rawMatch) newHtml = accumulated.slice(rawMatch.index);
+
+      if (newHtml) {
+        workingHtml = newHtml;
+        setCurrentFixHtml(newHtml);
+        // Give iframe 2.5s to run and capture new errors
+        await new Promise(r => setTimeout(r, 2500));
+        errors = [...iframeErrors]; // collect fresh errors from new render
+      }
+
+      setFixLog(prev => [...prev, {
+        pass,
+        text: passError ? `Pass ${pass} error: ${passError}` : accumulated,
+        allClear,
+        fixed: !!newHtml,
+      }]);
+
+      if (allClear || passError) break;
+      if (!newHtml) break; // Claude found nothing to fix — treat as all clear
+    }
+
+    // Notify parent with final code so it can add to chat history
+    if (onFixedHtml && workingHtml !== startHtml) onFixedHtml(workingHtml);
+
+    fixingRef.current = false;
+    setFixing(false);
+    setLiveToken('');
+  }, [fixing, isStreaming, html, currentFixHtml, iframeErrors, sessionId, onFixedHtml]);
+
+  // Build the srcDoc — inject error capture into every render
+  const srcDoc = useMemo(() => {
+    const src = currentFixHtml || html;
+    return src ? injectErrorCapture(src) : null;
+  }, [html, currentFixHtml]);
+
+  // ── Image mode ─────────────────────────────────────────────────────────
   if (previewImage) {
     return (
       <div className="flex flex-col h-full">
@@ -223,32 +386,21 @@ function PreviewPane({ blocks, previewImage = null, imageSaved = false, onClearI
             <Monitor size={9} />
             generated image
           </div>
-          <a
-            href={`data:image/png;base64,${previewImage}`}
-            download="generated.png"
-            className="p-1 rounded hover:bg-white/5 text-slate-600 hover:text-slate-400 transition-colors"
-            title="Download image"
-          >
+          <a href={`data:image/png;base64,${previewImage}`} download="generated.png"
+            className="p-1 rounded hover:bg-white/5 text-slate-600 hover:text-slate-400 transition-colors" title="Download image">
             <Download size={12} />
           </a>
           {onClearImage && (
-            <button
-              onClick={onClearImage}
-              className="p-1 rounded hover:bg-red-500/20 text-slate-600 hover:text-red-400 transition-colors"
-              title="Clear image"
-            >
+            <button onClick={onClearImage} className="p-1 rounded hover:bg-red-500/20 text-slate-600 hover:text-red-400 transition-colors" title="Clear image">
               <X size={12} />
             </button>
           )}
         </div>
         <div className="flex-1 flex flex-col items-center justify-center p-4 overflow-auto gap-3">
-          <img
-            src={`data:image/png;base64,${previewImage}`}
-            alt="Generated"
-            className="max-w-full max-h-[85%] object-contain rounded-lg shadow-xl"
-          />
+          <img src={`data:image/png;base64,${previewImage}`} alt="Generated"
+            className="max-w-full max-h-[85%] object-contain rounded-lg shadow-xl" />
           {showSaved && (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 animate-fade-in">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
               <CheckSquare size={11} className="text-emerald-400 flex-shrink-0" />
               <span className="text-[10px] text-emerald-400 font-medium">Saved to your library</span>
             </div>
@@ -258,7 +410,7 @@ function PreviewPane({ blocks, previewImage = null, imageSaved = false, onClearI
     );
   }
 
-  if (!html) {
+  if (!srcDoc) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-slate-600 gap-3">
         <Monitor size={32} strokeWidth={1} />
@@ -267,24 +419,121 @@ function PreviewPane({ blocks, previewImage = null, imageSaved = false, onClearI
     );
   }
 
+  const lastLog = fixLog[fixLog.length - 1];
+  const isAllClear = lastLog?.allClear;
+
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-[#0f111a]">
+    <div className="flex flex-col h-full relative">
+      {/* Toolbar */}
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-[#0f111a] flex-shrink-0">
         <div className="flex items-center gap-1.5 flex-1 px-2 py-1 rounded bg-white/5 text-[10px] text-slate-600 font-mono">
           <Monitor size={9} />
           preview
+          {iframeErrors.length > 0 && !fixing && (
+            <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 text-[9px]">
+              {iframeErrors.length} error{iframeErrors.length > 1 ? 's' : ''}
+            </span>
+          )}
+          {isAllClear && (
+            <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[9px]">
+              ✅ all clear
+            </span>
+          )}
         </div>
-        <button
-          onClick={() => setKey(k => k + 1)}
-          className="p-1 rounded hover:bg-white/5 text-slate-600 hover:text-slate-400 transition-colors"
-          title="Refresh preview"
-        >
+        {!fixing ? (
+          <button
+            onClick={runFixLoop}
+            disabled={isStreaming}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-violet-500/15 text-violet-400 hover:bg-violet-500/25 border border-violet-500/20 transition-all disabled:opacity-40"
+            title="Auto-fix all bugs"
+          >
+            <Bug size={10} />
+            Auto-Fix
+          </button>
+        ) : (
+          <button
+            onClick={stopFix}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-red-500/15 text-red-400 hover:bg-red-500/25 border border-red-500/20 transition-all"
+            title="Stop auto-fix"
+          >
+            <StopCircle size={10} />
+            Stop
+          </button>
+        )}
+        <button onClick={() => { setCurrentFixHtml(null); setKey(k => k + 1); setIframeErrors([]); setFixLog([]); }}
+          className="p-1 rounded hover:bg-white/5 text-slate-600 hover:text-slate-400 transition-colors" title="Refresh preview">
           <RefreshCw size={12} />
         </button>
       </div>
+
+      {/* Auto-fix overlay — shown while fixing or when log exists */}
+      {(fixing || fixLog.length > 0) && (
+        <div className="absolute inset-x-0 top-[41px] z-10 bg-[#0b0d16]/95 border-b border-violet-500/20 p-3 space-y-2 max-h-[55%] overflow-y-auto">
+          <div className="flex items-center gap-2 mb-1">
+            <Zap size={11} className="text-violet-400 flex-shrink-0" />
+            <span className="text-[10px] font-mono text-violet-300 font-semibold uppercase tracking-widest">
+              Debug Agent {fixing ? `— Pass ${fixIteration}/${MAX_AUTOFIX_ITERATIONS}` : '— Done'}
+            </span>
+            {fixing && (
+              <div className="flex gap-[3px] ml-auto">
+                {[0,1,2].map(i => (
+                  <div key={i} className="w-1 h-1 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Completed passes */}
+          {fixLog.map((log, i) => (
+            <div key={i} className={`rounded-lg p-2 border text-[10px] font-mono leading-relaxed ${
+              log.allClear
+                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+                : log.fixed
+                  ? 'bg-violet-500/10 border-violet-500/15 text-slate-400'
+                  : 'bg-amber-500/10 border-amber-500/15 text-amber-300'
+            }`}>
+              <div className="flex items-center gap-1.5 mb-1">
+                {log.allClear ? <CheckCircle size={10} className="text-emerald-400" /> :
+                 log.fixed ? <Zap size={10} className="text-violet-400" /> :
+                 <AlertTriangle size={10} className="text-amber-400" />}
+                <span className="font-semibold">Pass {log.pass}</span>
+                {log.allClear && <span className="text-emerald-400"> — All clear!</span>}
+                {log.fixed && !log.allClear && <span className="text-violet-400"> — Patched</span>}
+                {!log.fixed && !log.allClear && <span className="text-amber-400"> — No code output</span>}
+              </div>
+              {/* Show first 2 lines of Claude's explanation */}
+              <div className="text-slate-500 line-clamp-2">
+                {log.text.replace(/```html[\s\S]*?```/g, '[fixed code]').slice(0, 200)}
+              </div>
+            </div>
+          ))}
+
+          {/* Live streaming of current pass */}
+          {fixing && liveToken && (
+            <div className="rounded-lg p-2 border border-violet-500/15 bg-[#13152a] text-[10px] font-mono text-slate-400 max-h-24 overflow-hidden">
+              <div className="text-violet-400 text-[9px] mb-1 uppercase tracking-widest">Analysing…</div>
+              <div className="line-clamp-4 whitespace-pre-wrap leading-relaxed">
+                {liveToken.replace(/```html[\s\S]*/g, '[writing fix…]').slice(0, 400)}
+              </div>
+            </div>
+          )}
+
+          {/* Error list */}
+          {iframeErrors.length > 0 && (
+            <div className="rounded-lg p-2 border border-red-500/15 bg-red-500/5 text-[9px] font-mono text-red-400 space-y-0.5">
+              <div className="text-[9px] uppercase tracking-widest text-red-500/70 mb-1">Live JS Errors</div>
+              {iframeErrors.slice(0, 5).map((e, i) => (
+                <div key={i} className="truncate">{e}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* iframe */}
       <iframe
         key={key}
-        srcDoc={html}
+        srcDoc={srcDoc}
         className="flex-1 w-full bg-white"
         sandbox="allow-scripts allow-same-origin allow-modals allow-pointer-lock allow-forms"
         title="App Preview"
@@ -536,7 +785,7 @@ const TABS = [
   { id: 'tasks',   label: 'Tasks',   icon: ListTodo },
 ];
 
-function RightPanel({ messages = [], streamingText = null, open, onClose, previewImage = null, onClearImage, activeTab = null }) {
+function RightPanel({ messages = [], streamingText = null, open, onClose, previewImage = null, onClearImage, activeTab = null, sessionId = null, onFixedHtml = null }) {
   const [tab, setTab] = useState('preview');
   const { isSubscribed } = useApp();
   const codeBlocks = useMemo(() => getLatestCode(messages, streamingText), [messages, streamingText]);
@@ -588,7 +837,7 @@ function RightPanel({ messages = [], streamingText = null, open, onClose, previe
 
       {/* Body */}
       <div className="flex-1 overflow-hidden">
-        {tab === 'preview' && <PreviewPane blocks={codeBlocks} previewImage={previewImage} onClearImage={onClearImage} isStreaming={!!streamingText} />}
+        {tab === 'preview' && <PreviewPane blocks={codeBlocks} previewImage={previewImage} onClearImage={onClearImage} isStreaming={!!streamingText} sessionId={sessionId} onFixedHtml={onFixedHtml} />}
         {tab === 'code'    && isSubscribed && <CodeViewer  blocks={codeBlocks} />}
         {tab === 'files'   && isSubscribed && <FilesPane   blocks={codeBlocks} />}
         {tab === 'diff'    && isSubscribed && <DiffPane    messages={messages} />}

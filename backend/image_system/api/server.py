@@ -38,6 +38,7 @@ from .models import (
     RouteRequest,
     AnalyzeRequest,
     ChatRequest,
+    AutoFixRequest,
     SummarizeRequest,
     PullModelsRequest,
     ModelStatusResponse,
@@ -2985,6 +2986,129 @@ async def execute_code(req: ExecuteRequest):
 class SuggestionsRequest(BaseModel):
     message: str
     reply: str
+
+
+# ---------------------------------------------------------------------------
+# Auto-Fix endpoint — one pass of autonomous bug detection + patching
+# ---------------------------------------------------------------------------
+_AUTOFIX_SYSTEM = """You are an expert autonomous debugging agent built into Mini Assistant.
+Your ONLY job is to make a broken or buggy app fully functional.
+
+You will receive:
+1. The complete HTML/CSS/JS app code
+2. JavaScript errors captured from the live running app (may be empty)
+3. The iteration number (you may see patterns across calls)
+
+## YOUR JOB — DEEP BUG ANALYSIS
+
+Read the code as a senior engineer doing a code review. Look for:
+
+### JavaScript Bugs
+- Variables used before they're defined
+- Event listeners attached to elements that don't exist yet (wrong selector, wrong timing)
+- Missing null checks (`querySelector` returns null → .addEventListener crashes)
+- Async timing issues (code running before DOM is ready)
+- Broken game loops, animation frames, intervals that never fire or double-fire
+- State not being initialised or reset properly
+- Functions called with wrong arguments or not called at all
+
+### HTML/CSS Bugs
+- Buttons with no click handlers
+- IDs referenced in JS that don't match actual element IDs
+- Elements that are hidden but never shown
+- Forms that don't submit or don't have handlers
+- Broken layout that makes the app unusable
+
+### Logic Bugs
+- Scores not updating, counters not incrementing
+- Timers not stopping when they should, or not starting
+- Win/lose conditions never triggering
+- Wrong variable being read/written
+
+## RESPONSE FORMAT
+
+**If you find bugs:**
+1. Write a brief list: "Found X bugs:" then bullet the root causes (not symptoms)
+2. Output the COMPLETE fixed HTML in a ```html fence
+3. After ```: "Pass complete — checking again..."
+
+**If the app is fully functional (no bugs found):**
+Respond ONLY with this exact line:
+✅ ALL CLEAR — the app is fully functional.
+(No code. No explanation. Just that line.)
+
+## CRITICAL RULES
+- NEVER rebuild the app from scratch. PATCH ONLY.
+- NEVER remove features, controls, or styling that the user requested.
+- NEVER add TODOs or stub out code.
+- The output HTML must be the COMPLETE file — preview requires the full document.
+- Keep all existing CSS variables, color themes, and design intact.
+"""
+
+@app.post("/api/autofix/stream")
+async def autofix_stream(req: AutoFixRequest, request: Request):
+    """
+    One autonomous bug-fix pass. Streams Claude's analysis + patched code.
+    Done event includes { all_clear: bool }.
+    """
+    import json as _json
+    import re as _re
+
+    _api_key_claude = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not _api_key_claude:
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not set")
+
+    # Build the user message with code + errors
+    error_block = ""
+    if req.errors:
+        unique_errors = list(dict.fromkeys(req.errors))[:10]  # dedupe, cap at 10
+        error_block = "\n\n## JavaScript Errors From Running App\n" + "\n".join(f"- {e}" for e in unique_errors)
+    else:
+        error_block = "\n\n## JavaScript Errors From Running App\nNone captured — check for silent/visual bugs."
+
+    user_msg = (
+        f"## Auto-Debug Pass {req.iteration}\n\n"
+        f"Analyse and fix all bugs in this app.{error_block}\n\n"
+        f"## Current App Code\n```html\n{req.html}\n```"
+    )
+
+    async def _generate():
+        import anthropic as _am
+        _ac = _am.AsyncAnthropic(api_key=_api_key_claude)
+        reply = ""
+        _first = False
+
+        async def _keepalive():
+            while not _first:
+                await asyncio.sleep(8)
+                if not _first:
+                    yield f": ping\n\n"
+
+        try:
+            async with _ac.messages.stream(
+                model="claude-sonnet-4-6",
+                max_tokens=8192,
+                system=_AUTOFIX_SYSTEM,
+                messages=[{"role": "user", "content": user_msg}],
+            ) as _cs:
+                _ka = _keepalive()
+                async for _ct in _cs.text_stream:
+                    _first = True
+                    reply += _ct
+                    yield f"data: {_json.dumps({'t': _ct})}\n\n"
+
+            all_clear = bool(_re.search(r'✅\s*ALL CLEAR', reply))
+            yield f"data: {_json.dumps({'done': True, 'meta': {'all_clear': all_clear, 'reply': reply}})}\n\n"
+
+        except Exception as exc:
+            err = _friendly_error(exc)
+            yield f"data: {_json.dumps({'done': True, 'meta': {'all_clear': False, 'error': err}})}\n\n"
+
+    return StreamingResponse(_generate(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+        "Connection": "keep-alive",
+    })
 
 
 @app.post("/api/chat/suggestions")

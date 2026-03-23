@@ -129,6 +129,21 @@ export const api = {
     });
   },
 
+  /** One autonomous bug-fix pass. Returns raw fetch Response (SSE). */
+  autofixStream(html, errors, iteration, sessionId, signal) {
+    const _token = getToken();
+    const authHeaders = {
+      ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+      ...(_token ? { 'Authorization': `Bearer ${_token}` } : {}),
+    };
+    return fetch(`${IMAGE_API}/autofix/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({ html, errors, iteration, session_id: sessionId }),
+      signal,
+    });
+  },
+
   /** Summarize a list of messages into bullet points for context compaction */
   summarizeMessages(messages) {
     const msgs = messages

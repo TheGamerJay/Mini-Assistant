@@ -1066,6 +1066,18 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         onClose={() => setRightPanelOpen(false)}
         previewImage={previewImage}
         onClearImage={() => { setPreviewImage(null); updateChatPreviewImage(activeChatId, null); }}
+        sessionId={sessionIdRef.current}
+        onFixedHtml={(fixedHtml) => {
+          // Add the auto-fixed code to chat history so it becomes the new "latest version"
+          const fixMsg = {
+            role: 'assistant', type: 'text',
+            content: `🔧 Auto-Fix complete:\n\`\`\`html\n${fixedHtml}\n\`\`\`\n\nAll bugs patched — give it a try! 🎮`,
+            timestamp: Date.now(),
+          };
+          const withFix = [...messages, fixMsg];
+          setMessages(withFix);
+          if (activeChatId) updateChatMessages(activeChatId, withFix);
+        }}
       />
     </div>
   );
