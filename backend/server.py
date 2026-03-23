@@ -5032,6 +5032,9 @@ async def posthog_proxy(path: str, request: StarletteRequest):
     if len(body) > _INGEST_MAX_B:
         return Response(content="Payload Too Large", status_code=413)
 
+    # array/**/config.js is a JS module served from the asset CDN, not the API host
+    if _segment == "array" and path.endswith(".js"):
+        _ph_host = _PH_ASSET
     url = f"{_ph_host}/{path}"
     if request.query_params:
         url += "?" + str(request.query_params)
@@ -5059,6 +5062,10 @@ async def posthog_proxy(path: str, request: StarletteRequest):
                 headers=fwd_headers,
                 content=body,
             )
+        # Swallow upstream errors — analytics must not surface to the SDK
+        if ph_resp.status_code >= 400:
+            logging.debug("PostHog upstream %s for %s (swallowed)", ph_resp.status_code, path)
+            return Response(status_code=204)
         return Response(
             content=ph_resp.content,
             status_code=ph_resp.status_code,
