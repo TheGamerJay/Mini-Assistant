@@ -598,10 +598,11 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
           content: isOutOfCredits
             ? '⚡ You\'ve used all your Mini Credits. Subscribe to keep building.'
             : isRateLimit
-            ? `Hold on! Let me catch up — try again in ~${retryAfter} seconds.`
+            ? 'Hold on! Let me catch up…'
             : (err.message || 'Something went wrong.'),
           timestamp: Date.now(),
           _outOfCredits: isOutOfCredits,
+          _retryAfter: retryAfter,
         }];
         setMessages(withErr);
         updateChatMessages(chatIdRef_local, withErr);

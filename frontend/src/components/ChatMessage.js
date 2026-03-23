@@ -631,10 +631,54 @@ function SuggestionPills({ suggestions, onSuggest }) {
 // ---------------------------------------------------------------------------
 // ChatMessage
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Rate limit countdown
+// ---------------------------------------------------------------------------
+function RateLimitCountdown({ seconds, onDone }) {
+  const [remaining, setRemaining] = useState(seconds);
+  useEffect(() => {
+    if (remaining <= 0) { onDone?.(); return; }
+    const t = setTimeout(() => setRemaining(r => r - 1), 1000);
+    return () => clearTimeout(t);
+  }, [remaining, onDone]);
+
+  const pct = Math.max(0, remaining / seconds);
+  const circumference = 2 * Math.PI * 18;
+
+  return (
+    <div className="mt-3 flex items-center gap-3 p-3 rounded-xl bg-red-500/5 border border-red-500/15">
+      {/* Circular timer */}
+      <div className="relative flex-shrink-0 w-12 h-12">
+        <svg className="w-12 h-12 -rotate-90" viewBox="0 0 40 40">
+          <circle cx="20" cy="20" r="18" fill="none" stroke="rgba(239,68,68,0.15)" strokeWidth="3" />
+          <circle
+            cx="20" cy="20" r="18" fill="none"
+            stroke="rgba(239,68,68,0.7)" strokeWidth="3"
+            strokeDasharray={circumference}
+            strokeDashoffset={circumference * (1 - pct)}
+            strokeLinecap="round"
+            style={{ transition: 'stroke-dashoffset 0.9s linear' }}
+          />
+        </svg>
+        <span className="absolute inset-0 flex items-center justify-center text-[13px] font-bold text-red-400">
+          {remaining}
+        </span>
+      </div>
+      <div>
+        <p className="text-xs font-medium text-red-400">Hold on! Let me catch up…</p>
+        <p className="text-[10px] text-slate-500 mt-0.5">
+          {remaining > 0 ? `Ready in ${remaining}s` : 'Good to go! Hit Retry.'}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function ChatMessage({ message, onRetry, onRate, onFork, onPin, onSendToBuilder, onSuggest }) {
   const { settings, user, avatar } = useApp();
   const { role, type, content, image_base64, prompt, route_result, generation_time_ms, retry_used, prompt_warnings, model_used, memory_stored, rating, pinned, timestamp, suggestions } = message;
   const { images_base64 } = message;
+  const [rateLimitDone, setRateLimitDone] = useState(false);
   const allImages = images_base64 && images_base64.length > 1 ? images_base64 : (image_base64 ? [image_base64] : []);
   const [lightboxIdx, setLightboxIdx] = useState(null);
 
@@ -763,8 +807,11 @@ function ChatMessage({ message, onRetry, onRate, onFork, onPin, onSendToBuilder,
           <SuggestionPills suggestions={suggestions} onSuggest={onSuggest} />
         )}
 
-        {/* Error retry button */}
-        {isError && onRetry && (
+        {/* Error retry button / rate limit countdown */}
+        {isError && message._retryAfter && !rateLimitDone && (
+          <RateLimitCountdown seconds={message._retryAfter} onDone={() => setRateLimitDone(true)} />
+        )}
+        {isError && onRetry && (!message._retryAfter || rateLimitDone) && (
           <button onClick={onRetry}
             className="mt-3 flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 px-2.5 py-1.5 rounded-lg transition-colors">
             <RotateCcw size={11} />
