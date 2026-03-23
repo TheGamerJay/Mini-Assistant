@@ -181,8 +181,54 @@ function BuildingTerminal({ codeText, linesBuilt }) {
   );
 }
 
+/** Scanning animation — shown while Claude reads existing code to find the bug */
+function CodeScanner({ existingCode }) {
+  const [scanLine, setScanLine] = useState(0);
+  const allLines = existingCode ? existingCode.split('\n').filter(l => l.trim()) : [];
+  const total = allLines.length;
+
+  // Advance the scan position every 120ms — looks like it's reading through the code
+  useEffect(() => {
+    if (!total) return;
+    const t = setInterval(() => setScanLine(n => (n + 1) % total), 120);
+    return () => clearInterval(t);
+  }, [total]);
+
+  if (!total) return null;
+
+  // Show 4 lines around the scan cursor
+  const window = [scanLine - 1, scanLine, scanLine + 1, scanLine + 2]
+    .map(i => ({ line: allLines[(i + total) % total], isActive: i === scanLine }));
+
+  return (
+    <div className="rounded-xl border border-violet-500/20 bg-[#07080f] overflow-hidden w-full">
+      <div className="flex items-center gap-2 px-3 py-2 bg-[#0c0e1c] border-b border-white/[0.05]">
+        <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
+        <span className="text-[10px] text-violet-300 font-mono font-semibold flex-1 tracking-wide">scanning code…</span>
+        <span className="text-[10px] text-slate-600 font-mono">{total} lines</span>
+      </div>
+      <div className="px-3 py-2.5 space-y-1">
+        {window.map(({ line, isActive }, i) => (
+          <div
+            key={i}
+            className={`text-[11px] font-mono leading-5 truncate transition-all duration-100 ${
+              isActive
+                ? 'text-violet-200 bg-violet-500/10 px-1.5 -mx-1.5 rounded'
+                : i === 0 ? 'text-slate-700 opacity-40' : 'text-slate-500 opacity-70'
+            }`}
+          >
+            {line.trimStart().slice(0, 44) || ' '}
+            {isActive && <span className="inline-block w-0.5 h-3 bg-violet-400 ml-0.5 align-middle animate-pulse" />}
+          </div>
+        ))}
+      </div>
+      <div className="h-3 bg-gradient-to-t from-[#07080f] to-transparent -mt-3 pointer-events-none relative z-10" />
+    </div>
+  );
+}
+
 /** Blinking cursor appended while streaming */
-function StreamingBubble({ text }) {
+function StreamingBubble({ text, existingCode }) {
   // Detect build start: either a ```html fence OR raw <!DOCTYPE html> (Claude sometimes skips the fence)
   const htmlFenceIdx = text ? text.indexOf('```html') : -1;
   const rawHtmlIdx   = text ? text.search(/<!DOCTYPE\s+html/i) : -1;
@@ -191,6 +237,10 @@ function StreamingBubble({ text }) {
   const preCodeText = isBuildingApp ? text.slice(0, buildIdx).trim() : null;
   const codeText = isBuildingApp ? text.slice(buildIdx) : '';
   const linesBuilt = codeText.split('\n').length;
+
+  // "Thinking" phase: not yet outputting code — show scanner if prior code exists
+  const isThinking = !isBuildingApp && !text;
+  const hasThinkingText = !isBuildingApp && !!text;
 
   return (
     <div className="flex items-start gap-3 msg-enter">
@@ -204,6 +254,8 @@ function StreamingBubble({ text }) {
             {preCodeText && <span className="whitespace-pre-wrap text-slate-300">{preCodeText}</span>}
             <BuildingTerminal codeText={codeText} linesBuilt={linesBuilt} />
           </div>
+        ) : isThinking && existingCode ? (
+          <CodeScanner existingCode={existingCode} />
         ) : (
           <span className="whitespace-pre-wrap">
             {text || <span className="text-slate-600 text-xs italic">Thinking…</span>}
@@ -868,7 +920,20 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
 
           {/* Live streaming text bubble */}
           {streamingText !== null && (
-            <StreamingBubble text={streamingText} />
+            <StreamingBubble
+              text={streamingText}
+              existingCode={(() => {
+                // Find the last HTML app code in message history for the scanner
+                for (let i = messages.length - 1; i >= 0; i--) {
+                  const c = messages[i]?.content || '';
+                  const m = /```html\s*\n([\s\S]+?)```/.exec(c);
+                  if (m) return m[1];
+                  const raw = /<!DOCTYPE\s+html/i.exec(c);
+                  if (raw) return c.slice(raw.index);
+                }
+                return null;
+              })()}
+            />
           )}
 
           {/* Cognitive stream + dots bubble while loading (image/non-streaming path) */}
