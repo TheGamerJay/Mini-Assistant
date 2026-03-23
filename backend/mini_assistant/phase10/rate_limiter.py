@@ -118,17 +118,35 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if any(path.startswith(p) for p in _EXEMPT_PREFIXES):
             return await call_next(request)
 
-        # Identify client: prefer forwarded IP, fall back to client host
+        # Identify client: prefer JWT sub (per-user), fall back to forwarded IP
+        # On Railway all traffic shares the same proxy IP, so IP-only bucketing
+        # would rate-limit all users together. JWT gives true per-user isolation.
+        client_key = None
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            try:
+                import base64 as _b64, json as _j
+                token = auth.split(" ", 1)[1]
+                payload_b64 = token.split(".")[1]
+                # Pad to multiple of 4
+                payload_b64 += "=" * (4 - len(payload_b64) % 4)
+                payload = _j.loads(_b64.urlsafe_b64decode(payload_b64))
+                client_key = f"user:{payload.get('sub') or payload.get('email') or payload.get('uid')}"
+            except Exception:
+                pass
+
         ip = (
             request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
             or request.headers.get("X-Real-IP", "")
             or (request.client.host if request.client else "unknown")
         )
+        # Use JWT-based key for rate limiting when available
+        rate_key = client_key or ip
 
-        # General IP rate limit
-        if not self._ip_limiter.is_allowed(ip):
-            retry = self._ip_limiter.retry_after(ip)
-            logger.warning("Rate limit (IP): %s %s [%s]", ip, path, request.method)
+        # General rate limit (per user or per IP)
+        if not self._ip_limiter.is_allowed(rate_key):
+            retry = self._ip_limiter.retry_after(rate_key)
+            logger.warning("Rate limit (general): %s %s [%s]", rate_key, path, request.method)
             return JSONResponse(
                 status_code=429,
                 headers={"Retry-After": str(retry)},
@@ -140,9 +158,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # Heavy-endpoint sub-limit
         is_heavy = any(p in path for p in _HEAVY_PATHS)
-        if is_heavy and not self._heavy_limiter.is_allowed(ip):
-            retry = self._heavy_limiter.retry_after(ip)
-            logger.warning("Rate limit (heavy): %s %s [%s]", ip, path, request.method)
+        if is_heavy and not self._heavy_limiter.is_allowed(rate_key):
+            retry = self._heavy_limiter.retry_after(rate_key)
+            logger.warning("Rate limit (heavy): %s %s [%s]", rate_key, path, request.method)
             return JSONResponse(
                 status_code=429,
                 headers={"Retry-After": str(retry)},
