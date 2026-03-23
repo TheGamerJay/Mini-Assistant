@@ -407,7 +407,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         const withErr = [...nextMessages, {
           role: 'assistant', type: 'error',
           content: _isRL
-            ? 'Slow down a little! Too many requests. Try again in ~30 seconds.'
+            ? 'Hold on! Let me catch up — try again in a few seconds.'
             : (err.message || 'Something went wrong.'),
           timestamp: Date.now(),
         }];
@@ -598,7 +598,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
           content: isOutOfCredits
             ? '⚡ You\'ve used all your Mini Credits. Subscribe to keep building.'
             : isRateLimit
-            ? `Slow down a little! Too many requests. Try again in ~${retryAfter} seconds.`
+            ? `Hold on! Let me catch up — try again in ~${retryAfter} seconds.`
             : (err.message || 'Something went wrong.'),
           timestamp: Date.now(),
           _outOfCredits: isOutOfCredits,
