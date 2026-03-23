@@ -40,8 +40,8 @@ export function makeThumbnail(base64) {
         canvas.width = 120;
         canvas.height = 120;
         const ctx = canvas.getContext('2d');
-        // Cover-crop: maintain aspect ratio, fill square
-        const scale = Math.max(120 / img.width, 120 / img.height);
+        // Contain: fit whole image inside square, letterbox with transparent bg
+        const scale = Math.min(120 / img.width, 120 / img.height);
         const w = img.width * scale;
         const h = img.height * scale;
         const ox = (120 - w) / 2;
