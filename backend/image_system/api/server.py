@@ -2665,40 +2665,38 @@ async def chat_stream(req: ChatRequest, request: Request):
                     _rev_html = reply_text[_rev_raw.start():].strip()
 
                 if _rev_html:
-                    yield f"data: {_json.dumps({'t': '\n\n---\n🔍 **Self-Review** scanning...\n\n'})}\n\n"
+                    _sr_scanning = _json.dumps({'t': '\n\n---\n\U0001f50d **Self-Review** scanning...\n\n'})
+                    yield f"data: {_sr_scanning}\n\n"
                     try:
                         import anthropic as _rev_am
                         _rev_client = _rev_am.AsyncAnthropic(api_key=_api_key_claude)
 
                         # Non-streaming Haiku review — fast, cheap
+                        _rev_content = "[USER REQUEST]\n" + effective_msg + "\n\n[GENERATED CODE]\n```html\n" + _rev_html + "\n```"
                         _rev_resp = await _rev_client.messages.create(
                             model="claude-haiku-4-5-20251001",
                             max_tokens=512,
                             system=_kb_review(),
-                            messages=[{
-                                "role": "user",
-                                "content": (
-                                    f"[USER REQUEST]\n{effective_msg}\n\n"
-                                    f"[GENERATED CODE]\n```html\n{_rev_html}\n```"
-                                ),
-                            }],
+                            messages=[{"role": "user", "content": _rev_content}],
                         )
                         _rev_text = _rev_resp.content[0].text.strip()
                         _rev_pass = bool(_re.match(r'^PASS\b', _rev_text, _re.I))
 
                         if _rev_pass:
-                            yield f"data: {_json.dumps({'t': '✅ Reviewed — all good!\n'})}\n\n"
+                            _sr_ok = _json.dumps({'t': '\u2705 Reviewed \u2014 all good!\n'})
+                            yield f"data: {_sr_ok}\n\n"
                         else:
                             _rev_score_m = _re.search(r'SCORE:\s*(\d+)', _rev_text, _re.I)
                             _rev_score = int(_rev_score_m.group(1)) if _rev_score_m else 50
                             logger.info("[SelfReview] score=%s — running fix pass", _rev_score)
-                            yield f"data: {_json.dumps({'t': f'⚠️ Score {_rev_score}/100 — fixing issues...\n\n'})}\n\n"
+                            _sr_fixing = _json.dumps({'t': '\u26a0\ufe0f Score ' + str(_rev_score) + '/100 \u2014 fixing issues...\n\n'})
+                            yield f"data: {_sr_fixing}\n\n"
 
                             # One streaming fix pass with Sonnet
                             _fix_sys = _kb_patch() + "\n\n## YOUR TASK: FIX ALL REVIEWER ISSUES\nFix every issue listed. Output the complete fixed HTML file starting with ```html."
                             _fix_user = (
-                                f"[REVIEWER ISSUES — FIX ALL]\n{_rev_text}\n\n"
-                                f"[CODE TO FIX]\n```html\n{_rev_html}\n```\n\n"
+                                "[REVIEWER ISSUES \u2014 FIX ALL]\n" + _rev_text + "\n\n"
+                                "[CODE TO FIX]\n```html\n" + _rev_html + "\n```\n\n"
                                 "Fix every issue. Output the complete corrected file."
                             )
                             try:
@@ -2712,11 +2710,12 @@ async def chat_stream(req: ChatRequest, request: Request):
                                     async for _fix_tok in _fix_stream.text_stream:
                                         _fix_now = asyncio.get_event_loop().time()
                                         if _fix_now - _fix_last_ping > 8:
-                                            yield f": ping\n\n"
+                                            yield ": ping\n\n"
                                             _fix_last_ping = _fix_now
                                         reply_text += _fix_tok
                                         yield f"data: {_json.dumps({'t': _fix_tok})}\n\n"
-                                yield f"data: {_json.dumps({'t': '\n\n✅ Fixed and ready!\n'})}\n\n"
+                                _sr_done = _json.dumps({'t': '\n\n\u2705 Fixed and ready!\n'})
+                                yield f"data: {_sr_done}\n\n"
                             except Exception as _fix_err:
                                 logger.warning("[SelfReview] fix pass failed (non-fatal): %s", _fix_err)
                     except Exception as _rev_err:
