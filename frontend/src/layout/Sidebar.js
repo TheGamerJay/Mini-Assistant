@@ -670,7 +670,7 @@ function Sidebar() {
           {images.length === 0 ? (
             !sidebarCollapsed && <p className="text-[10px] text-slate-600 px-2 py-2">No images yet</p>
           ) : (
-            <div className={`${sidebarCollapsed ? 'flex flex-col gap-1 px-1 max-h-64 overflow-y-auto' : 'grid grid-cols-3 gap-1 px-2 py-1 max-h-64 overflow-y-auto'}`}>
+            <div className={`${sidebarCollapsed ? 'flex flex-col gap-1 px-1' : 'grid grid-cols-3 gap-1 px-2 py-1'}`}>
               {images.map((img) => (
                 <button
                   key={img.id}
