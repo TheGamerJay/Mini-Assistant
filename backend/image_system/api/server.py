@@ -118,7 +118,10 @@ try:
     from mini_assistant.phase10.rate_limiter    import attach_rate_limiter
     from mini_assistant.phase10.auth_middleware import attach_auth
     attach_tracer(app)
-    attach_rate_limiter(app)
+    # phase10 IP-based rate limiter disabled — Railway proxies all traffic through
+    # the same IP, causing all users to share one bucket. Per-user limits are
+    # enforced by safety.py (enforce_rate_limit) keyed by JWT uid instead.
+    # attach_rate_limiter(app)
     attach_auth(app)
     logger.info("✓ Phase 10 middleware stack attached (image_system)")
 except Exception as _p10_err:

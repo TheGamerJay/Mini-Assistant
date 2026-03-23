@@ -5181,8 +5181,10 @@ try:
     from mini_assistant.phase10.rate_limiter   import attach_rate_limiter
     from mini_assistant.phase10.auth_middleware import attach_auth
     attach_tracer(app)        # 1. request ID + latency logging
-    attach_rate_limiter(app)  # 2. sliding-window rate limits
-    attach_auth(app)          # 3. X-API-Key validation (no-op if API_KEY unset)
+    # IP-based rate limiter disabled — Railway proxies all traffic through
+    # the same IP. Per-user limits enforced by safety.py via JWT uid.
+    # attach_rate_limiter(app)
+    attach_auth(app)          # 2. X-API-Key validation (no-op if API_KEY unset)
     logging.getLogger(__name__).info("✓ Phase 10 middleware stack attached")
 except Exception as _p10_err:
     logging.getLogger(__name__).warning("Phase 10 middleware unavailable: %s", _p10_err)
