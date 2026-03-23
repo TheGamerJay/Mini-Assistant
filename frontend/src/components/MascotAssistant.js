@@ -156,7 +156,7 @@ export default function MascotAssistant() {
       {/* Wrapper — slides in on mount                                        */}
       {/* ------------------------------------------------------------------ */}
       <div
-        className="fixed bottom-5 right-4 z-40 flex flex-col items-end gap-2 pointer-events-none"
+        className="fixed bottom-5 right-16 z-40 flex flex-col items-end gap-2 pointer-events-none"
         style={{
           opacity: visible ? 1 : 0,
           transform: visible ? 'none' : 'translateY(20px)',
