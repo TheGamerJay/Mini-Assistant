@@ -5032,6 +5032,16 @@ async def posthog_proxy(path: str, request: StarletteRequest):
     if len(body) > _INGEST_MAX_B:
         return Response(content="Payload Too Large", status_code=413)
 
+    # array/<key>/config.js — PostHog's API host 404s on this path.
+    # Return an empty JS stub locally so the SDK silently skips it.
+    if _segment == "array" and path.endswith("/config.js"):
+        return Response(content="", media_type="application/javascript", status_code=200)
+
+    # array/<key>/config — PostHog/Cloudflare returns 520 intermittently.
+    # Return an empty JSON object so the SDK treats it as a no-op.
+    if _segment == "array" and (path.endswith("/config") or path == "array/config"):
+        return Response(content="{}", media_type="application/json", status_code=200)
+
     # array/* always routes to the API host — config.js and config are
     # both API responses, not assets served from the CDN.
     url = f"{_ph_host}/{path}"
