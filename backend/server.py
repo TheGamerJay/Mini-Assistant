@@ -5064,7 +5064,10 @@ async def posthog_proxy(path: str, request: StarletteRequest):
         # 5xx = server/infra error (Cloudflare 520, PostHog outage, etc.)
         # Swallow silently — SDK has built-in retry/fallback for these.
         if ph_resp.status_code >= 500:
-            logging.debug("PostHog upstream %s on %s (swallowed)", ph_resp.status_code, path)
+            logging.warning(
+                "PostHog upstream error swallowed | path=%s status=%s",
+                path, ph_resp.status_code,
+            )
             return Response(status_code=204)
         # 2xx/4xx — forward as-is so the SDK can use the body or handle the error
         return Response(
