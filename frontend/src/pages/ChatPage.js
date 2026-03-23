@@ -245,7 +245,7 @@ function StreamingBubble({ text, existingCode }) {
   return (
     <div className="flex items-start gap-3 msg-enter">
       <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 via-violet-500 to-violet-600 flex items-center justify-center overflow-hidden flex-shrink-0 mt-1">
-        <img src="/Logo.png" alt="Mini Assistant" className="w-full h-full object-contain"
+        <img src="/mascot.png?v=2" alt="Mini Assistant" className="w-full h-full object-contain"
           onError={e => { e.target.style.display = 'none'; }} />
       </div>
       <div className="max-w-[92%] sm:max-w-[82%] px-3 sm:px-5 py-3 sm:py-4 rounded-2xl rounded-tl-sm border bg-[#151520] border-white/5 text-sm leading-relaxed text-slate-200 w-full">
