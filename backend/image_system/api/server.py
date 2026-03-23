@@ -2733,15 +2733,19 @@ async def chat_stream(req: ChatRequest, request: Request):
                         if not _first_token_received:
                             yield f": ping\n\n"  # SSE comment — ignored by client, keeps TCP alive
 
-                # Stream Claude response with extended thinking enabled.
-                # Extended thinking gives Claude a private scratchpad to fully reason
-                # through the problem before streaming any text — dramatically improves
-                # debugging accuracy and eliminates mid-response contradictions.
-                # text_stream automatically filters out thinking blocks; only text reaches user.
+                # Thinking budget scales with task complexity:
+                # - Fresh builds: lighter budget (5k) — requirements already gathered,
+                #   just build. Faster first token, still high quality.
+                # - Patch/debug: full budget (16k) — needs deep reasoning to find
+                #   root cause without breaking anything else.
+                _is_patch_or_debug = _has_prior_code or _is_code_intent
+                _think_budget = 16000 if _is_patch_or_debug else 5000
+                _max_out = 24000 if _is_patch_or_debug else 14000
+
                 async with _ac.messages.stream(
                     model="claude-sonnet-4-6",
-                    max_tokens=24000,
-                    thinking={"type": "enabled", "budget_tokens": 16000},
+                    max_tokens=_max_out,
+                    thinking={"type": "enabled", "budget_tokens": _think_budget},
                     system=_c_sys,
                     messages=_c_msgs,
                     betas=["interleaved-thinking-2025-05-14"],
