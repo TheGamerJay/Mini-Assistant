@@ -2252,16 +2252,6 @@ async def chat_stream(req: ChatRequest, request: Request):
             if _assistant_has_code or (_first_user and _BUILD_KW.search(_first_user.content or "")):
                 _is_build_intent = True
 
-        # ── Detect fix/debug intent — surgical patch, NOT a full rebuild ─────
-        _FIX_KW = _re.compile(
-            r"\b(fix|debug|broken|not work|doesn.t work|won.t work|isn.t work|"
-            r"bug|error|crash|freezes?|glitch|stuck|nothing happen|not respond|"
-            r"button.*(not|doesn.t|won.t)|play.*(not|doesn.t|won.t)|"
-            r"can.t (click|press|start|play)|doesn.t (start|load|move|respond))\b",
-            _re.I,
-        )
-        _is_fix_intent = _has_prior_code and _FIX_KW.search(effective_msg)
-
         # Detect if the user pasted code (``` in their message or coding intent from router)
         _has_code_in_msg = "```" in effective_msg or execution_intent == "coding"
         # Also check if their message looks like a code question even without fences

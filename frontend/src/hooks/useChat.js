@@ -60,6 +60,7 @@ export function useChat() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let receivedDone = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -76,12 +77,19 @@ export function useChat() {
           try {
             const evt = JSON.parse(raw);
             if (evt.done) {
+              receivedDone = true;
               onDone && onDone(evt.meta || {});
             } else if (evt.t !== undefined) {
               onToken && onToken(evt.t);
             }
           } catch { /* malformed SSE line — ignore */ }
         }
+      }
+
+      // Stream closed without a done event (e.g. backend crashed mid-response).
+      // Finalize with whatever was accumulated so the UI doesn't stay stuck.
+      if (!receivedDone) {
+        onDone && onDone({});
       }
     } catch (err) {
       if (err.name !== 'AbortError') {
