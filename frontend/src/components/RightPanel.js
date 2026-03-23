@@ -170,7 +170,11 @@ function CodeViewer({ blocks }) {
 // ---------------------------------------------------------------------------
 function PreviewPane({ blocks, previewImage = null, imageSaved = false, onClearImage }) {
   const [key, setKey] = useState(0);
-  const html = useMemo(() => buildPreviewHtml(blocks), [blocks]);
+  const rawHtml = useMemo(() => buildPreviewHtml(blocks), [blocks]);
+  // Keep last known HTML so the preview never blanks out when streaming ends
+  const lastHtmlRef = useRef(null);
+  if (rawHtml) lastHtmlRef.current = rawHtml;
+  const html = rawHtml || lastHtmlRef.current;
 
   // Show "Saved" badge briefly after a new image arrives
   const [showSaved, setShowSaved] = useState(false);
@@ -256,7 +260,7 @@ function PreviewPane({ blocks, previewImage = null, imageSaved = false, onClearI
         key={key}
         srcDoc={html}
         className="flex-1 w-full bg-white"
-        sandbox="allow-scripts allow-same-origin allow-modals"
+        sandbox="allow-scripts allow-same-origin allow-modals allow-pointer-lock allow-forms"
         title="App Preview"
       />
     </div>

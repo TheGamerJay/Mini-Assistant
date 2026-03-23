@@ -78,11 +78,11 @@ function tokenize(code, lang) {
 }
 
 // ---------------------------------------------------------------------------
-// AppBuilderCard — collapsible snippet showing truncated preview of all lines
-// Closed: each line truncated to ~40 chars. Expanded (Pro only): full code.
+// AppBuilderCard — collapsible snippet: header + 4 truncated lines preview
+// Closed: shows 4 lines clipped to ~42 chars. Expanded (Pro): full code.
 // ---------------------------------------------------------------------------
 const SNIPPET_CHAR_LIMIT = 42;
-const COLLAPSED_LINES = 10;
+const COLLAPSED_LINES = 4;
 function AppBuilderCard({ code }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -90,34 +90,34 @@ function AppBuilderCard({ code }) {
   const lines = code.split('\n');
   const lineCount = lines.length;
 
-  // Truncated preview: first N lines, each clipped to SNIPPET_CHAR_LIMIT chars
+  // Truncated preview: first 4 lines, each clipped to ~42 chars
   const previewLines = lines.slice(0, COLLAPSED_LINES).map(l =>
     l.length > SNIPPET_CHAR_LIMIT ? l.slice(0, SNIPPET_CHAR_LIMIT) + ' …' : l
   );
 
   return (
     <div className="my-3 rounded-xl border border-cyan-500/20 bg-[#0d0f1a] overflow-hidden">
-      {/* Header row */}
-      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-white/[0.06]">
+      {/* Header */}
+      <div className="flex items-center gap-2 px-3 py-2.5">
         <Monitor size={13} className="text-cyan-400 flex-shrink-0" />
-        <span className="text-xs text-cyan-300 font-medium flex-1">App built</span>
+        <span className="text-xs text-cyan-300 font-medium flex-1">App built — check Preview →</span>
         <span className="text-[10px] text-slate-600 font-mono">{lineCount} lines</span>
         {isSubscribed ? (
           <button
             onClick={() => { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1800); }}
-            className="flex items-center gap-1 text-[10px] font-mono text-slate-500 hover:text-slate-300 transition-colors"
+            className="flex items-center gap-1 text-[10px] font-mono text-slate-500 hover:text-slate-300 transition-colors ml-2"
             title="Copy code"
           >
             {copied ? <Check size={10} className="text-emerald-400" /> : <Copy size={10} />}
             {copied ? 'Copied' : 'Copy'}
           </button>
         ) : (
-          <span className="text-[9px] text-amber-400/60 border border-amber-400/20 bg-amber-400/5 px-1.5 py-0.5 rounded font-mono">PRO</span>
+          <span className="text-[9px] text-amber-400/60 border border-amber-400/20 bg-amber-400/5 px-1.5 py-0.5 rounded font-mono ml-2">PRO</span>
         )}
       </div>
 
-      {/* Code preview */}
-      <pre className="px-3 py-2.5 text-[11px] leading-[1.7] font-mono text-slate-500 overflow-hidden select-none">
+      {/* Tiny code snippet — collapsed by default */}
+      <pre className="px-3 pb-2.5 text-[11px] leading-[1.7] font-mono text-slate-600 overflow-hidden select-none border-t border-white/[0.04]">
         {expanded && isSubscribed
           ? <span className="text-slate-300 select-text">{code}</span>
           : previewLines.map((l, i) => <div key={i}>{l || ' '}</div>)
@@ -127,7 +127,7 @@ function AppBuilderCard({ code }) {
         )}
       </pre>
 
-      {/* Expand / collapse — only for Pro */}
+      {/* Expand / collapse — Pro only */}
       {isSubscribed && (
         <button
           onClick={() => setExpanded(v => !v)}
