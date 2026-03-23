@@ -424,12 +424,10 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
   const responseCountRef  = useRef(0); // increments per assistant response; compare triggers at multiples of 10
   const pendingMsgRef     = useRef(null); // queued message while a response is in-flight
   const streamAccumRef    = useRef(''); // accumulates all streamed tokens — fallback if meta.reply is empty
-  const compactingRef     = useRef(false); // prevents double-compaction while summarize is in-flight
-  const [compacting, setCompacting] = useState(false); // mirrors compactingRef for UI re-renders
   const lastHtmlRef       = useRef(null); // always holds the most recently built HTML app
 
   // Context meter — estimate token usage from character counts (chars/4 ≈ tokens)
-  const CONTEXT_MAX_TOKENS = 32000; // threshold at which we compact
+  const CONTEXT_MAX_TOKENS = 32000;
   const contextPct = useMemo(() => {
     if (!messages.length) return 0;
     const chars = messages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
@@ -448,28 +446,6 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     }
   }, [messages]);
 
-  // Proactive auto-compact: fires when context hits ≥95%
-  // Depends on messages.length too so it retries after each new message if a previous attempt failed
-  useEffect(() => {
-    const KEEP_RECENT = 8;
-    if (contextPct < 95 || compactingRef.current || messages.length < 4) return;
-    compactingRef.current = true;
-    setCompacting(true);
-    const toSummarize = messages.slice(0, messages.length - KEEP_RECENT);
-    const toKeep = messages.slice(messages.length - KEEP_RECENT);
-    api.summarizeMessages(toSummarize)
-      .then(data => {
-        if (!data?.summary) return;
-        const summaryMsg = { role: 'system', type: 'summary', content: data.summary, timestamp: Date.now(), _is_summary: true };
-        const compacted = [summaryMsg, ...toKeep];
-        setMessages(compacted);
-        if (activeChatId) updateChatMessages(activeChatId, compacted);
-        toast.info('Conversation compacted — context cleared.', { duration: 3500 });
-      })
-      .catch(() => {})
-      .finally(() => { compactingRef.current = false; setCompacting(false); });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contextPct, messages.length]);
 
   // Comparison state — set when it's time for a showdown
   const [compareData, setCompareData]     = useState(null); // {replyA, modelA, replyB, modelB, nextMessages, chatId}
@@ -783,35 +759,6 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
             const autoTitle = text.trim().slice(0, 45) + (text.trim().length > 45 ? '…' : '');
             renameChat(chatIdRef_local, autoTitle);
           }
-        }
-
-        // Auto-compact: when context meter hits 100% (estimated token limit), summarize old ones
-        const COMPACT_THRESHOLD = 30;
-        const KEEP_RECENT = 8;
-        const contextChars = withFinal.reduce((s, m) => s + (m.content?.length || 0), 0);
-        const contextTokenEst = Math.round(contextChars / 4);
-        const shouldCompact = (contextTokenEst >= CONTEXT_MAX_TOKENS) || (withFinal.length >= COMPACT_THRESHOLD);
-        if (shouldCompact && !compactingRef.current) {
-          compactingRef.current = true;
-          const toSummarize = withFinal.slice(0, withFinal.length - KEEP_RECENT);
-          const toKeep = withFinal.slice(withFinal.length - KEEP_RECENT);
-          api.summarizeMessages(toSummarize)
-            .then(data => {
-              if (!data.summary) return;
-              const summaryMsg = {
-                role: 'system',
-                type: 'summary',
-                content: data.summary,
-                timestamp: Date.now(),
-                _is_summary: true,
-              };
-              const compacted = [summaryMsg, ...toKeep];
-              setMessages(compacted);
-              updateChatMessages(chatIdRef_local, compacted);
-              toast.info('Conversation compacted — older messages summarized.', { duration: 3500 });
-            })
-            .catch(() => { /* non-fatal */ })
-            .finally(() => { compactingRef.current = false; });
         }
 
         // Every 10th response: kick off a model showdown in the background
@@ -1163,12 +1110,6 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
                 }}
               >
                 {contextPct}%
-                {compacting && (
-                  <span className="ml-1 opacity-70">compacting…</span>
-                )}
-                {contextPct >= 90 && !compacting && (
-                  <span className="ml-1 opacity-60">auto-compact soon</span>
-                )}
               </span>
             </div>
           )}

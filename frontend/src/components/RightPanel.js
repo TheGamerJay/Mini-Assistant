@@ -164,13 +164,13 @@ const ERROR_CAPTURE_SCRIPT = `<script>
 <\/script>`;
 
 /** Inject error capture into an HTML string */
-const FIT_CSS = `<style id="ma-fit">html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;}canvas{display:block;max-width:100%!important;}</style>`;
+const FIT_INJECT = `<style id="ma-fit">html,body{margin:0;padding:0;overflow:hidden;}</style><script id="ma-fit-js">(function(){function fit(){var dw=document.documentElement.scrollWidth,vw=window.innerWidth;if(dw>vw+4){var s=vw/dw;document.documentElement.style.transform='scale('+s+')';document.documentElement.style.transformOrigin='top left';document.documentElement.style.width=(100/s)+'%';}else{document.documentElement.style.transform='';document.documentElement.style.width='';}}window.addEventListener('load',fit);window.addEventListener('resize',fit);setTimeout(fit,100);setTimeout(fit,600);})()\x3c/script>`;
 
 function injectErrorCapture(html) {
   if (!html) return html;
-  if (html.includes('<head>')) return html.replace('<head>', '<head>' + ERROR_CAPTURE_SCRIPT + FIT_CSS);
-  if (html.includes('<body>')) return html.replace('<body>', ERROR_CAPTURE_SCRIPT + FIT_CSS + '<body>');
-  return ERROR_CAPTURE_SCRIPT + FIT_CSS + html;
+  if (html.includes('<head>')) return html.replace('<head>', '<head>' + ERROR_CAPTURE_SCRIPT + FIT_INJECT);
+  if (html.includes('<body>')) return html.replace('<body>', ERROR_CAPTURE_SCRIPT + FIT_INJECT + '<body>');
+  return ERROR_CAPTURE_SCRIPT + FIT_INJECT + html;
 }
 
 /** Try to build a renderable HTML doc from code blocks */
