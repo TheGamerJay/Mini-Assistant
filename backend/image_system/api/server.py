@@ -2233,7 +2233,8 @@ async def chat_stream(req: ChatRequest, request: Request):
         # Also detect build intent from history — follow-up messages in a build
         # conversation are often classified as "chat" by the router (e.g. "make it
         # a video uploader"), but they still need the coder model + build prompt.
-        if not _is_build_intent and req.history:
+        # Do NOT override chat or image mode — those explicitly opt out of building.
+        if not _is_build_intent and req.history and req.chat_mode not in ("chat", "image"):
             _hist_contents = " ".join(h.content or "" for h in req.history)
             # If any previous assistant turn contains a code fence or raw HTML, we're in a build session
             _assistant_has_code = any(
