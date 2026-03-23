@@ -46,6 +46,7 @@ RULE 2 — STRUCTURAL EDITS (remove object, add object, change background, add/r
 - Use vision analysis to locate the object or region.
 - Produce a tight bounding box description (top/left/width/height as % of image).
 - Pass the original image + mask + instruction to the AI inpainting model.
+- The final_instruction MUST end with: "Show the full character head-to-toe, do not crop or zoom in, preserve the original framing exactly."
 - Output edit_type: "structural_edit"
 
 RULE 3 — DECISION LOGIC:

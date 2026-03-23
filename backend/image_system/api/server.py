@@ -1687,7 +1687,8 @@ async def chat(req: ChatRequest, request: Request):
             "• Keep every other element pixel-identical: face, hair, eyes, mouth, "
             "body shape, clothing, shoes, accessories, pose, expression, "
             "art style, lighting, background\n"
-            "• Show the FULL character — do NOT crop, zoom in, or cut off any part\n"
+            "• Show the FULL character head-to-toe — do NOT crop, zoom in, cut off, "
+            "or reframe any part of the body; match the original framing exactly\n"
             "• Do not reinterpret, stylize, or add any detail not already present"
         )
         try:
