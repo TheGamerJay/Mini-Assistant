@@ -2176,7 +2176,19 @@ async def chat_stream(req: ChatRequest, request: Request):
             # Edit keywords OR short prompt with image → preserve identity, apply edit
             elif _edit_match or _short_prompt:
                 execution_intent = "image_edit"
-        if execution_intent in ("image_generation", "image_edit", "image_reference_generate"):
+        # If we're in the middle of a build Q&A conversation, never image-redirect.
+        # The user's answer to builder questions can look like an image prompt
+        # ("modern style", "forest", "cartoon") — we must keep it in build flow.
+        _build_convo_markers = ("ready to build", "build once", "```html", "what visual style",
+                                "visual style", "app builder", "platform —", "obstacles —",
+                                "difficulty —", "plain html", "react?")
+        _in_build_conversation = any(
+            h.role == "assistant" and any(kw in (h.content or "").lower() for kw in _build_convo_markers)
+            for h in (req.history or [])
+        )
+        if _in_build_conversation:
+            execution_intent = "app_builder"
+        elif execution_intent in ("image_generation", "image_edit", "image_reference_generate"):
             yield f"data: {_json.dumps({'done': True, 'meta': {'type': 'image_redirect'}})}\n\n"
             return
 
