@@ -4965,28 +4965,25 @@ except Exception as _orch_err:
 # Protection : allowlisted paths · per-IP rate limit · 512 KB payload cap
 # Reliability: fire-and-forget for data paths, 3 s timeout, silent 204 on fail
 # ---------------------------------------------------------------------------
-_POSTHOG_API_HOST   = "https://us.i.posthog.com"
-_POSTHOG_ASSET_HOST = "https://us-assets.i.posthog.com"
+# Single source of truth: first path segment → upstream host.
+# Allowlist check AND host resolution are both derived from this map.
+# To add a new path, add one line here — nothing else to update.
+_PH_API   = "https://us.i.posthog.com"
+_PH_ASSET = "https://us-assets.i.posthog.com"
 
-# Paths that route to the asset CDN (static JS plugins loaded by the SDK).
-# All other allowed paths route to the API host.
-_POSTHOG_ASSET_PREFIXES = ("static/",)
+_POSTHOG_HOST_MAP: dict[str, str] = {
+    "e":      _PH_API,    # event capture
+    "batch":  _PH_API,    # batch events
+    "s":      _PH_API,    # session recording
+    "decide": _PH_API,    # feature flags (legacy)
+    "flags":  _PH_API,    # feature flags (v1.36+)
+    "array":  _PH_API,    # project config (v1.36+)
+    "static": _PH_ASSET,  # plugin JS (recorder, web-vitals, dead-clicks)
+}
 
-_POSTHOG_ALLOWED_PREFIXES = (
-    # Data & config paths → us.i.posthog.com
-    "e/",       # event capture
-    "batch/",   # batch event capture
-    "s/",       # session recording
-    "decide/",  # feature flags (legacy)
-    "flags/",   # feature flags (v1.36+)
-    "array/",   # project config (v1.36+: array/{key}/config and config.js)
-    # Asset paths → us-assets.i.posthog.com
-    "static/",  # plugin JS: posthog-recorder.js, web-vitals.js, etc.
-)
-
-# Paths whose response the SDK ignores — safe to acknowledge immediately
-# and forward in the background so they never block the browser.
-_POSTHOG_FIRE_AND_FORGET = ("e/", "batch/", "s/")
+# Segments whose response the SDK ignores — return 204 immediately and
+# forward in the background so analytics never adds browser latency.
+_POSTHOG_FIRE_AND_FORGET = {"e", "batch", "s"}
 
 _INGEST_RPM     = 100      # per-IP requests per minute
 _INGEST_MAX_B   = 512_000  # 512 KB max body
@@ -5013,8 +5010,10 @@ async def posthog_proxy(path: str, request: StarletteRequest):
     from fastapi.responses import Response
     from safety import _mem  # reuse existing sliding-window counter
 
-    # 1. Path allowlist
-    if not any(path.startswith(p) for p in _POSTHOG_ALLOWED_PREFIXES):
+    # 1. Allowlist + host resolution — one dict lookup, no string guessing
+    _segment = path.split("/")[0]
+    _ph_host = _POSTHOG_HOST_MAP.get(_segment)
+    if _ph_host is None:
         return Response(content="Not found", status_code=404)
 
     # 2. Per-IP rate limit
@@ -5033,12 +5032,6 @@ async def posthog_proxy(path: str, request: StarletteRequest):
     if len(body) > _INGEST_MAX_B:
         return Response(content="Payload Too Large", status_code=413)
 
-    # Route static plugin assets to the CDN; everything else to the API host
-    _ph_host = (
-        _POSTHOG_ASSET_HOST
-        if any(path.startswith(p) for p in _POSTHOG_ASSET_PREFIXES)
-        else _POSTHOG_API_HOST
-    )
     url = f"{_ph_host}/{path}"
     if request.query_params:
         url += "?" + str(request.query_params)
@@ -5050,7 +5043,7 @@ async def posthog_proxy(path: str, request: StarletteRequest):
 
     # 4a. Fire-and-forget for data submission paths — return 204 immediately
     #     so analytics never adds latency to the browser.
-    if any(path.startswith(p) for p in _POSTHOG_FIRE_AND_FORGET):
+    if _segment in _POSTHOG_FIRE_AND_FORGET:
         asyncio.create_task(
             _forward_to_posthog(url, request.method, fwd_headers, body)
         )
