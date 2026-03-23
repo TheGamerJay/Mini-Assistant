@@ -41,14 +41,14 @@ export function useChat() {
     sessionId,
     history = [],
     imagesBase64 = null,
-    { onToken, onDone, onError, vibeMode = false } = {}
+    { onToken, onDone, onError, vibeMode = false, chatMode = null } = {}
   ) => {
     setLoading(true);
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
     try {
-      const res = await api.chatStream(text, sessionId, history, imagesBase64, controller.signal, vibeMode);
+      const res = await api.chatStream(text, sessionId, history, imagesBase64, controller.signal, vibeMode, chatMode);
       if (res.status === 402) throw new Error('out_of_credits');
       if (res.status === 429) {
         let retryAfter = 30;

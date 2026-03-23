@@ -10,7 +10,7 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Paperclip, Mic, MicOff, Send, Loader2, X, Image, FileText, Zap } from 'lucide-react';
+import { Paperclip, Mic, MicOff, Send, Loader2, X, Image, FileText, Hammer } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../api/client';
 import { useApp } from '../context/AppContext';
@@ -84,7 +84,7 @@ function readFileAsDataUrl(file) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, vibeMode = false, onVibeModeToggle }) {
+function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, chatMode = null, onChatModeChange }) {
   const { pendingTemplate, pendingAutoSubmit, clearPendingTemplate, clearPendingAutoSubmit } = useApp();
 
   // Always-current ref so the auto-submit path doesn't need onSubmit as a dep
@@ -477,20 +477,34 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, v
                 : <Mic size={16} />}
           </button>
 
-          {/* Vibe Code toggle */}
-          {onVibeModeToggle && (
-            <button
-              type="button"
-              onClick={onVibeModeToggle}
-              title={vibeMode ? 'Vibe Code ON — click to disable' : 'Vibe Code — build instantly, no questions'}
-              className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 ${
-                vibeMode
-                  ? 'bg-gradient-to-br from-yellow-400 to-orange-500 text-white shadow-lg shadow-yellow-500/40 animate-pulse'
-                  : 'text-slate-500 hover:text-yellow-400 hover:bg-white/5'
-              }`}
-            >
-              <Zap size={16} className={vibeMode ? 'fill-white' : ''} />
-            </button>
+          {/* Mode buttons: Image | Build */}
+          {onChatModeChange && (
+            <>
+              <button
+                type="button"
+                onClick={() => onChatModeChange(chatMode === 'image' ? null : 'image')}
+                title={chatMode === 'image' ? 'Image Mode ON — click to exit' : 'Image Mode — every message generates an image'}
+                className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 ${
+                  chatMode === 'image'
+                    ? 'bg-gradient-to-br from-pink-500 to-rose-600 text-white shadow-lg shadow-pink-500/40'
+                    : 'text-slate-500 hover:text-pink-400 hover:bg-white/5'
+                }`}
+              >
+                <Image size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => onChatModeChange(chatMode === 'build' ? null : 'build')}
+                title={chatMode === 'build' ? 'Build Mode ON — click to exit' : 'Build Mode — every message builds an app'}
+                className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 ${
+                  chatMode === 'build'
+                    ? 'bg-gradient-to-br from-cyan-400 to-violet-600 text-white shadow-lg shadow-cyan-500/40'
+                    : 'text-slate-500 hover:text-cyan-400 hover:bg-white/5'
+                }`}
+              >
+                <Hammer size={16} />
+              </button>
+            </>
           )}
 
           {/* Send */}

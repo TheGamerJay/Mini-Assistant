@@ -238,7 +238,8 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
   const [pendingApproval, setPendingApproval] = useState(null);
   const [rightPanelOpen, setRightPanelOpen]   = useState(false);
   const [imageLimitOpen, setImageLimitOpen]   = useState(false);
-  const [vibeMode, setVibeMode]               = useState(false);
+  const [chatMode, setChatMode]               = useState(null); // null | 'image' | 'build'
+  const vibeMode = chatMode === 'build'; // legacy compat — still used in sendStream body
   const [previewImage, setPreviewImage]       = useState(null); // latest generated image → shown in RightPanel
 
   // Streaming text state (non-image responses)
@@ -377,12 +378,15 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     setMessages(nextMessages);
     updateChatMessages(chatId, nextMessages);
 
-    if (isBuildIntent(text, null)) setRightPanelOpen(true);
+    if (chatMode === 'build' || isBuildIntent(text, null)) setRightPanelOpen(true);
 
-    const imageIntentDetected = isImageIntent(text);
+    // chatMode overrides all auto-detection:
+    // 'image' → always generate image, 'build' → always stream to builder
+    const imageIntentDetected = chatMode === 'image' || (chatMode === null && isImageIntent(text));
 
     // ── IMAGE path: non-streaming endpoint (generation only, not analysis) ──
-    if (imageIntentDetected && !imgs.length) {
+    // Blocked in build mode — in build mode every message goes to the builder
+    if (imageIntentDetected && !imgs.length && chatMode !== 'build') {
       if (imageIntentDetected) {
         setMessages([...nextMessages, {
           role: 'assistant', type: 'image_generating',
@@ -455,6 +459,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
 
     await sendStream(text, sessionIdRef.current, history, imgs.length ? imgs : null, {
       vibeMode,
+      chatMode,
       onToken(token) {
         streamAccumRef.current += token;
         setStreamingText(prev => (prev === null ? token : prev + token));
@@ -635,7 +640,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         submittingRef.current = false;
       },
     });
-  }, [activeChatId, chats, loading, messages, newChat, renameChat, send, sendStream, updateChatMessages, addImage, setPage, vibeMode, imageUsage, isSubscribed, plan]);
+  }, [activeChatId, chats, loading, messages, newChat, renameChat, send, sendStream, updateChatMessages, addImage, setPage, chatMode, vibeMode, imageUsage, isSubscribed, plan]);
 
   const handleCancel = useCallback(() => {
     cancel(sessionIdRef.current);
@@ -847,9 +852,14 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
               variant="chat"
               onSubmit={handleSubmit}
               loading={loading}
-              placeholder={vibeMode ? '⚡ Vibe Code ON — describe or show what you want built…' : rightPanelOpen ? 'Describe changes or chat…' : 'Message Mini Assistant, or say /build to create an app…'}
-              vibeMode={vibeMode}
-              onVibeModeToggle={() => setVibeMode(v => !v)}
+              placeholder={
+                chatMode === 'image' ? '🎨 Image Mode — describe what you want to generate…' :
+                chatMode === 'build' ? '🔨 Build Mode — describe the app you want built…' :
+                rightPanelOpen ? 'Describe changes or chat…' :
+                'Message Mini Assistant…'
+              }
+              chatMode={chatMode}
+              onChatModeChange={setChatMode}
             />
           </div>
           <div className="flex items-center justify-between mt-2">

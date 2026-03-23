@@ -2114,40 +2114,52 @@ async def chat_stream(req: ChatRequest, request: Request):
         phase1_plan = None
         execution_intent = "chat"
 
-        # ── Phase 1 intent routing (fast regex, then LLM fallback) ──────────
-        try:
-            from mini_assistant.phase1.command_parser import parse as cmd_parse
-            from mini_assistant.phase1.intent_planner import (
-                plan as make_plan,
-                classify_intent_with_llm,
-                INTENT_TO_EXECUTION,
-            )
-            parsed_cmd = cmd_parse(clean_message)
-            effective_msg = parsed_cmd.args if parsed_cmd.is_slash else clean_message
-            phase1_plan = make_plan(
-                message=effective_msg,
-                parsed_command=parsed_cmd,
-                history=req.history or [],
-            )
-            execution_intent = phase1_plan.execution_intent or "chat"
+        # ── Explicit chat_mode override (bypasses all intent detection) ──────
+        # 'image' → force image generation (redirect to non-streaming endpoint)
+        # 'build' → force app_builder (skip Q&A, build immediately)
+        if req.chat_mode == "image":
+            yield f"data: {_json.dumps({'done': True, 'meta': {'type': 'image_redirect'}})}\n\n"
+            return
+        if req.chat_mode == "build":
+            execution_intent = "app_builder"
+            phase1_plan = None  # skip routing entirely
 
-            # LLM fallback: regex returned low-confidence normal_chat for a long
-            # message — ask the model to classify properly
-            if (
-                phase1_plan.intent == "normal_chat"
-                and phase1_plan.confidence <= 0.72
-                and len(effective_msg.strip()) > 60
-                and not (parsed_cmd and parsed_cmd.is_slash)
-            ):
-                llm_intent = await classify_intent_with_llm(effective_msg)
-                if llm_intent != "normal_chat":
-                    execution_intent = INTENT_TO_EXECUTION.get(llm_intent, "chat")
-                    logger.info(
-                        "Phase1 LLM override: %s → %s (exec: %s)",
-                        phase1_plan.intent, llm_intent, execution_intent,
-                    )
-        except Exception as _e:
-            logger.warning("Phase1 failed in stream endpoint: %s", _e)
+        # ── Phase 1 intent routing (fast regex, then LLM fallback) ──────────
+        # Skip entirely when chat_mode forces the intent already
+        if not req.chat_mode:
+            try:
+                from mini_assistant.phase1.command_parser import parse as cmd_parse
+                from mini_assistant.phase1.intent_planner import (
+                    plan as make_plan,
+                    classify_intent_with_llm,
+                    INTENT_TO_EXECUTION,
+                )
+                parsed_cmd = cmd_parse(clean_message)
+                effective_msg = parsed_cmd.args if parsed_cmd.is_slash else clean_message
+                phase1_plan = make_plan(
+                    message=effective_msg,
+                    parsed_command=parsed_cmd,
+                    history=req.history or [],
+                )
+                execution_intent = phase1_plan.execution_intent or "chat"
+
+                # LLM fallback: regex returned low-confidence normal_chat for a long
+                # message — ask the model to classify properly
+                if (
+                    phase1_plan.intent == "normal_chat"
+                    and phase1_plan.confidence <= 0.72
+                    and len(effective_msg.strip()) > 60
+                    and not (parsed_cmd and parsed_cmd.is_slash)
+                ):
+                    llm_intent = await classify_intent_with_llm(effective_msg)
+                    if llm_intent != "normal_chat":
+                        execution_intent = INTENT_TO_EXECUTION.get(llm_intent, "chat")
+                        logger.info(
+                            "Phase1 LLM override: %s → %s (exec: %s)",
+                            phase1_plan.intent, llm_intent, execution_intent,
+                        )
+            except Exception as _e:
+                logger.warning("Phase1 failed in stream endpoint: %s", _e)
 
         # Image intents can't stream meaningfully — signal redirect to non-streaming endpoint
         import re as _re_stream
@@ -2195,8 +2207,8 @@ async def chat_stream(req: ChatRequest, request: Request):
         # ── Model selection — always Claude claude-sonnet-4-6 ─────────────────
         _is_build_intent = execution_intent == "app_builder"
 
-        # Vibe Code mode — user toggled ⚡ in the UI, skip all Q&A, build immediately
-        if req.vibe_mode and not _is_build_intent:
+        # Vibe Code mode OR explicit build mode — skip all Q&A, build immediately
+        if (req.vibe_mode or req.chat_mode == "build") and not _is_build_intent:
             _is_build_intent = True
             execution_intent = "app_builder"  # so done-event intent is correct → auto-opens preview
 
