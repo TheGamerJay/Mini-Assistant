@@ -4962,7 +4962,8 @@ except Exception as _orch_err:
 # PostHog reverse proxy — must be registered BEFORE the SPA catch-all
 # (/{full_path:path}) so GET requests to /ingest/* aren't swallowed by it.
 #
-# Protection: allowlisted paths · per-IP rate limit · 512 KB payload cap
+# Protection : allowlisted paths · per-IP rate limit · 512 KB payload cap
+# Reliability: fire-and-forget for data paths, 3 s timeout, silent 204 on fail
 # ---------------------------------------------------------------------------
 _POSTHOG_HOST = "https://us.i.posthog.com"
 
@@ -4971,21 +4972,35 @@ _POSTHOG_ALLOWED_PREFIXES = (
     "batch/",   # batch event capture
     "decide/",  # feature flags
     "s/",       # session recording
-    "static/",  # SDK asset bundle (array.js) fetched at init
+    "static/",  # SDK asset bundle fetched at init (fallback; asset_host handles normally)
     "array.js", # legacy SDK path
     "engage/",  # person properties
     "t/",       # toolbar
     "surveys/", # surveys
 )
 
-_INGEST_RPM   = 100      # per-IP requests per minute
-_INGEST_MAX_B = 512_000  # 512 KB max body
+# Paths whose response the SDK ignores — safe to acknowledge immediately
+# and forward in the background so they never block the browser.
+_POSTHOG_FIRE_AND_FORGET = ("e/", "batch/", "s/", "engage/")
+
+_INGEST_RPM     = 100      # per-IP requests per minute
+_INGEST_MAX_B   = 512_000  # 512 KB max body
+_INGEST_TIMEOUT = 3        # seconds — analytics must never slow the app
 
 
 def _client_ip(request: StarletteRequest) -> str:
     """Best-effort real IP (Railway sets X-Forwarded-For)."""
     xff = request.headers.get("x-forwarded-for", "")
     return xff.split(",")[0].strip() or request.client.host or "unknown"
+
+
+async def _forward_to_posthog(url: str, method: str, headers: dict, body: bytes) -> None:
+    """Background helper — fire-and-forget, errors are logged and swallowed."""
+    try:
+        async with httpx.AsyncClient(timeout=_INGEST_TIMEOUT) as _c:
+            await _c.request(method=method, url=url, headers=headers, content=body)
+    except Exception as _exc:
+        logging.debug("PostHog proxy background forward failed (non-fatal): %s", _exc)
 
 
 @app.api_route("/ingest/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
@@ -5013,7 +5028,6 @@ async def posthog_proxy(path: str, request: StarletteRequest):
     if len(body) > _INGEST_MAX_B:
         return Response(content="Payload Too Large", status_code=413)
 
-    # 4. Forward to PostHog
     url = f"{_POSTHOG_HOST}/{path}"
     if request.query_params:
         url += "?" + str(request.query_params)
@@ -5023,19 +5037,32 @@ async def posthog_proxy(path: str, request: StarletteRequest):
         if k.lower() not in ("host", "content-length")
     }
 
-    async with httpx.AsyncClient(timeout=15) as client_ph:
-        ph_resp = await client_ph.request(
-            method=request.method,
-            url=url,
-            headers=fwd_headers,
-            content=body,
+    # 4a. Fire-and-forget for data submission paths — return 204 immediately
+    #     so analytics never adds latency to the browser.
+    if any(path.startswith(p) for p in _POSTHOG_FIRE_AND_FORGET):
+        asyncio.create_task(
+            _forward_to_posthog(url, request.method, fwd_headers, body)
         )
+        return Response(status_code=204)
 
-    return Response(
-        content=ph_resp.content,
-        status_code=ph_resp.status_code,
-        headers=dict(ph_resp.headers),
-    )
+    # 4b. Response-required paths (decide/, static/) — forward synchronously
+    #     with tight timeout; return 204 silently on any failure.
+    try:
+        async with httpx.AsyncClient(timeout=_INGEST_TIMEOUT) as client_ph:
+            ph_resp = await client_ph.request(
+                method=request.method,
+                url=url,
+                headers=fwd_headers,
+                content=body,
+            )
+        return Response(
+            content=ph_resp.content,
+            status_code=ph_resp.status_code,
+            headers=dict(ph_resp.headers),
+        )
+    except Exception as _exc:
+        logging.debug("PostHog proxy failed (non-fatal): %s", _exc)
+        return Response(status_code=204)
 
 
 # Serve React frontend static files if the build directory exists
