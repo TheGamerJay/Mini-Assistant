@@ -4970,18 +4970,16 @@ _POSTHOG_HOST = "https://us.i.posthog.com"
 _POSTHOG_ALLOWED_PREFIXES = (
     "e/",       # event capture
     "batch/",   # batch event capture
-    "decide/",  # feature flags
+    "decide/",  # feature flags / feature flag payloads
     "s/",       # session recording
-    "engage/",  # person properties
-    "t/",       # toolbar
-    "surveys/", # surveys
-    # static/ and array.js intentionally excluded — SDK assets load directly
-    # from us-assets.i.posthog.com via asset_host; script tags need no CORS
+    # static/, array.js, engage/, t/, surveys/ excluded intentionally:
+    # SDK assets load directly via asset_host (no CORS needed for <script>);
+    # other paths are unused and increase attack surface.
 )
 
 # Paths whose response the SDK ignores — safe to acknowledge immediately
 # and forward in the background so they never block the browser.
-_POSTHOG_FIRE_AND_FORGET = ("e/", "batch/", "s/", "engage/")
+_POSTHOG_FIRE_AND_FORGET = ("e/", "batch/", "s/")
 
 _INGEST_RPM     = 100      # per-IP requests per minute
 _INGEST_MAX_B   = 512_000  # 512 KB max body
