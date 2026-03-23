@@ -1919,10 +1919,14 @@ async def chat_stream(req: ChatRequest, request: Request):
         phase1_plan = None
         execution_intent = "chat"
 
-        # ── Phase 1 intent routing (fast, non-blocking) ──────────────────────
+        # ── Phase 1 intent routing (fast regex, then LLM fallback) ──────────
         try:
             from mini_assistant.phase1.command_parser import parse as cmd_parse
-            from mini_assistant.phase1.intent_planner import plan as make_plan
+            from mini_assistant.phase1.intent_planner import (
+                plan as make_plan,
+                classify_intent_with_llm,
+                INTENT_TO_EXECUTION,
+            )
             parsed_cmd = cmd_parse(clean_message)
             effective_msg = parsed_cmd.args if parsed_cmd.is_slash else clean_message
             phase1_plan = make_plan(
@@ -1931,6 +1935,22 @@ async def chat_stream(req: ChatRequest, request: Request):
                 history=req.history or [],
             )
             execution_intent = phase1_plan.execution_intent or "chat"
+
+            # LLM fallback: regex returned low-confidence normal_chat for a long
+            # message — ask the model to classify properly
+            if (
+                phase1_plan.intent == "normal_chat"
+                and phase1_plan.confidence <= 0.72
+                and len(effective_msg.strip()) > 60
+                and not (parsed_cmd and parsed_cmd.is_slash)
+            ):
+                llm_intent = await classify_intent_with_llm(effective_msg)
+                if llm_intent != "normal_chat":
+                    execution_intent = INTENT_TO_EXECUTION.get(llm_intent, "chat")
+                    logger.info(
+                        "Phase1 LLM override: %s → %s (exec: %s)",
+                        phase1_plan.intent, llm_intent, execution_intent,
+                    )
         except Exception as _e:
             logger.warning("Phase1 failed in stream endpoint: %s", _e)
 

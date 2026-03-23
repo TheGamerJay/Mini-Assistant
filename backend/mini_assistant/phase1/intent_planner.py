@@ -34,12 +34,16 @@ Blueprint intents:
 
 from __future__ import annotations
 
+import logging
+import os
 import re
 import time
 from dataclasses import dataclass, field
 from typing import Optional
 
 from .command_parser import ParsedCommand
+
+log = logging.getLogger(__name__)
 
 
 # ── Intent constants ─────────────────────────────────────────────────────────
@@ -408,6 +412,62 @@ def _build_warnings(intent: str, message: str, is_slash: bool) -> list[str]:
         )
 
     return warnings
+
+
+# ── LLM intent classifier (async fallback) ────────────────────────────────────
+
+_CLASSIFIER_PROMPT = """\
+You are an intent classifier for an AI assistant. Given the user's message, \
+output EXACTLY ONE intent name from the list below — nothing else, no punctuation.
+
+Intents:
+  image_generate        — creating, drawing, painting, or rendering any image, photo, artwork, illustration, or visual
+  image_analysis        — analyzing, describing, reading, or understanding an existing image or screenshot
+  app_builder           — building a complete web app, mobile app, or software project
+  code_runner           — writing, explaining, refactoring, or reviewing code snippets or functions
+  debugging             — fixing errors, bugs, exceptions, or broken functionality
+  web_search            — looking up current news, facts, prices, or real-time information
+  planning              — breaking a goal into steps, creating a roadmap or architecture plan
+  normal_chat           — general conversation, questions, opinions, or anything else
+
+Rules:
+- Descriptive visual prompts (e.g. "A woman diving through a sunset sky, cinematic lighting, 8k") → image_generate
+- If the message contains technical quality terms (8k, masterpiece, cinematic, bokeh, volumetric) → image_generate
+- When unsure, prefer normal_chat over wrong classification
+- Output only the intent name, lowercase, no extra text\
+"""
+
+_VALID_LLM_INTENTS = frozenset({
+    "image_generate", "image_analysis", "app_builder",
+    "code_runner", "debugging", "web_search", "planning", "normal_chat",
+})
+
+
+async def classify_intent_with_llm(message: str) -> str:
+    """
+    Use Claude Haiku to classify intent when regex confidence is low.
+    Returns one of the known intent strings, or 'normal_chat' on any failure.
+    Fast (~300–600 ms typical), called only for ambiguous messages.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return "normal_chat"
+    try:
+        import anthropic as _am
+        client = _am.AsyncAnthropic(api_key=api_key)
+        resp = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=20,
+            system=_CLASSIFIER_PROMPT,
+            messages=[{"role": "user", "content": message[:2000]}],
+        )
+        raw = resp.content[0].text.strip().lower().split()[0] if resp.content else ""
+        intent = raw if raw in _VALID_LLM_INTENTS else "normal_chat"
+        log.info("LLM intent classifier: %r → %s", message[:60], intent)
+        return intent
+    except Exception as exc:
+        log.warning("LLM intent classifier failed: %s", exc)
+        return "normal_chat"
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
