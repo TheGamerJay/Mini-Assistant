@@ -2235,9 +2235,13 @@ async def chat_stream(req: ChatRequest, request: Request):
         # a video uploader"), but they still need the coder model + build prompt.
         if not _is_build_intent and req.history:
             _hist_contents = " ".join(h.content or "" for h in req.history)
-            # If any previous assistant turn contains a code fence, we're in a build session
+            # If any previous assistant turn contains a code fence or raw HTML, we're in a build session
             _assistant_has_code = any(
-                h.role == "assistant" and "```" in (h.content or "")
+                h.role == "assistant" and (
+                    "```" in (h.content or "") or
+                    "<!DOCTYPE" in (h.content or "") or
+                    "<!doctype" in (h.content or "")
+                )
                 for h in req.history
             )
             # Or if the first user message was a build request
@@ -2290,9 +2294,15 @@ async def chat_stream(req: ChatRequest, request: Request):
         _build_history_turns = sum(1 for h in (req.history or []) if h.role == "assistant") if _is_build_intent else 0
 
         _has_images = bool(req.image_base64 or req.images_base64)
-        # True if pipeline has already generated HTML code in a previous turn
+        # True if pipeline has already generated HTML code in a previous turn.
+        # Match both fenced (```html) and raw (<!DOCTYPE html) output so PATCH MODE
+        # triggers even when Claude previously skipped the fence.
         _has_prior_code = any(
-            h.role == "assistant" and "```html" in (h.content or "")
+            h.role == "assistant" and (
+                "```html" in (h.content or "") or
+                "<!DOCTYPE" in (h.content or "") or
+                "<!doctype" in (h.content or "")
+            )
             for h in (req.history or [])
         )
         if _is_build_intent:
