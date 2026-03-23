@@ -78,11 +78,9 @@ function tokenize(code, lang) {
 }
 
 // ---------------------------------------------------------------------------
-// AppBuilderCard — collapsible snippet: header + 4 truncated lines preview
-// Closed: shows 4 lines clipped to ~42 chars. Expanded (Pro): full code.
+// AppBuilderCard — compact action pill like Emergent: "Built app — N lines >"
+// Collapsed by default (no code visible). Click anywhere to expand/collapse.
 // ---------------------------------------------------------------------------
-const SNIPPET_CHAR_LIMIT = 42;
-const COLLAPSED_LINES = 4;
 function AppBuilderCard({ code }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -90,51 +88,49 @@ function AppBuilderCard({ code }) {
   const lines = code.split('\n');
   const lineCount = lines.length;
 
-  // Truncated preview: first 4 lines, each clipped to ~42 chars
-  const previewLines = lines.slice(0, COLLAPSED_LINES).map(l =>
-    l.length > SNIPPET_CHAR_LIMIT ? l.slice(0, SNIPPET_CHAR_LIMIT) + ' …' : l
-  );
-
   return (
-    <div className="my-3 rounded-xl border border-cyan-500/20 bg-[#0d0f1a] overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2.5">
-        <Monitor size={13} className="text-cyan-400 flex-shrink-0" />
-        <span className="text-xs text-cyan-300 font-medium flex-1">App built — check Preview →</span>
-        <span className="text-[10px] text-slate-600 font-mono">{lineCount} lines</span>
-        {isSubscribed ? (
+    <div className="my-2 rounded-lg overflow-hidden border border-white/[0.07] bg-[#0d0f1a]">
+      {/* Pill header — always visible, click to expand */}
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-white/[0.03] transition-colors text-left"
+      >
+        <Monitor size={11} className="text-cyan-500 flex-shrink-0" />
+        <span className="text-[11px] font-mono text-cyan-400 flex-1">
+          Built app.html
+        </span>
+        <span className="text-[10px] font-mono text-slate-600">{lineCount} lines</span>
+        {isSubscribed && (
           <button
-            onClick={() => { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1800); }}
-            className="flex items-center gap-1 text-[10px] font-mono text-slate-500 hover:text-slate-300 transition-colors ml-2"
+            onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1800); }}
+            className="flex items-center gap-1 text-[10px] font-mono text-slate-600 hover:text-slate-300 transition-colors px-1"
             title="Copy code"
           >
             {copied ? <Check size={10} className="text-emerald-400" /> : <Copy size={10} />}
-            {copied ? 'Copied' : 'Copy'}
           </button>
-        ) : (
-          <span className="text-[9px] text-amber-400/60 border border-amber-400/20 bg-amber-400/5 px-1.5 py-0.5 rounded font-mono ml-2">PRO</span>
         )}
-      </div>
+        <ChevronRight
+          size={12}
+          className="text-slate-600 flex-shrink-0 transition-transform duration-200"
+          style={{ transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+        />
+      </button>
 
-      {/* Tiny code snippet — collapsed by default */}
-      <pre className="px-3 pb-2.5 text-[11px] leading-[1.7] font-mono text-slate-600 overflow-hidden select-none border-t border-white/[0.04]">
-        {expanded && isSubscribed
-          ? <span className="text-slate-300 select-text">{code}</span>
-          : previewLines.map((l, i) => <div key={i}>{l || ' '}</div>)
-        }
-        {!expanded && lineCount > COLLAPSED_LINES && (
-          <div className="text-slate-700 mt-0.5">… {lineCount - COLLAPSED_LINES} more lines</div>
-        )}
-      </pre>
-
-      {/* Expand / collapse — Pro only */}
-      {isSubscribed && (
-        <button
-          onClick={() => setExpanded(v => !v)}
-          className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] text-slate-500 hover:text-slate-300 border-t border-white/[0.06] hover:bg-white/[0.02] transition-colors"
-        >
-          {expanded ? <><ChevronUp size={11} /> Collapse</> : <><ChevronDown size={11} /> Expand full code</>}
-        </button>
+      {/* Expanded code view */}
+      {expanded && (
+        <div className="border-t border-white/[0.06]">
+          {isSubscribed ? (
+            <pre className="px-4 py-3 text-[11px] leading-[1.7] font-mono text-slate-300 overflow-x-auto max-h-96 overflow-y-auto select-text">
+              {code}
+            </pre>
+          ) : (
+            <div className="px-4 py-3 flex items-center gap-2">
+              <span className="text-[11px] text-slate-500">Full code view is a</span>
+              <span className="text-[9px] text-amber-400/80 border border-amber-400/20 bg-amber-400/5 px-1.5 py-0.5 rounded font-mono">PRO</span>
+              <span className="text-[11px] text-slate-500">feature — preview it in the panel →</span>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
