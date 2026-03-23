@@ -179,10 +179,14 @@ try:
         patch_prompt         as _kb_patch,
         requirements_prompt  as _kb_requirements,
         debug_agent_prompt   as _kb_debug_agent,
+        self_review_prompt   as _kb_self_review,
         review_prompt        as _kb_review,
         WHEN_TO_DO_WHAT      as _KB_WHEN,
         HOW_TO_BUILD         as _KB_HOW_TO_BUILD,
         PERSONALITY          as _KB_PERSONALITY,
+        EXECUTIVE_MINDSET    as _KB_EXECUTIVE,
+        PARALLEL_ANALYSIS_PROTOCOL as _KB_PARALLEL,
+        MODE_AWARENESS       as _KB_MODE_AWARENESS,
     )
     _KB_LOADED = True
 except ImportError:
@@ -191,6 +195,8 @@ except ImportError:
     _kb_patch         = lambda: ""
     _kb_requirements  = lambda: ""
     _kb_debug_agent   = lambda: ""
+    _kb_self_review   = lambda: ""
+    _kb_review        = lambda: ""
 
 try:
     from .brains.lesson_memory import (
@@ -2621,6 +2627,84 @@ async def chat_stream(req: ChatRequest, request: Request):
                 logger.warning("Claude stream failed: %s", _ce)
                 _err_msg = f"⚠️ Claude hit an issue: {_ce}. Please try again.\n\n"
                 yield f"data: {_json.dumps({'t': _err_msg})}\n\n"
+
+            # ── Haiku Self-Review Quality Gate (fresh builds only) ────────────
+            # Runs after builder streams, before done event. Catches bugs the
+            # builder missed. Only on fresh builds — not patches, not vibe mode.
+            _is_fresh_build_mode = (
+                _is_build_intent
+                and not _has_prior_code
+                and not _is_explicit_rebuild
+                and not getattr(req, 'vibe_mode', False)
+                and _build_history_turns > 0   # user already answered requirements
+            )
+            if _is_fresh_build_mode and reply_text:
+                # Extract HTML from builder's response
+                _rev_fence = _re.search(r"```(?:html)?\s*\n([\s\S]+?)```", reply_text)
+                _rev_raw   = _re.search(r"<!DOCTYPE\s+html", reply_text, _re.I)
+                _rev_html  = None
+                if _rev_fence:
+                    _rev_html = _rev_fence.group(1).strip()
+                elif _rev_raw:
+                    _rev_html = reply_text[_rev_raw.start():].strip()
+
+                if _rev_html:
+                    yield f"data: {_json.dumps({'t': '\n\n---\n🔍 **Self-Review** scanning...\n\n'})}\n\n"
+                    try:
+                        import anthropic as _rev_am
+                        _rev_client = _rev_am.AsyncAnthropic(api_key=_api_key_claude)
+
+                        # Non-streaming Haiku review — fast, cheap
+                        _rev_resp = await _rev_client.messages.create(
+                            model="claude-haiku-4-5-20251001",
+                            max_tokens=512,
+                            system=_kb_review(),
+                            messages=[{
+                                "role": "user",
+                                "content": (
+                                    f"[USER REQUEST]\n{effective_msg}\n\n"
+                                    f"[GENERATED CODE]\n```html\n{_rev_html}\n```"
+                                ),
+                            }],
+                        )
+                        _rev_text = _rev_resp.content[0].text.strip()
+                        _rev_pass = bool(_re.match(r'^PASS\b', _rev_text, _re.I))
+
+                        if _rev_pass:
+                            yield f"data: {_json.dumps({'t': '✅ Reviewed — all good!\n'})}\n\n"
+                        else:
+                            _rev_score_m = _re.search(r'SCORE:\s*(\d+)', _rev_text, _re.I)
+                            _rev_score = int(_rev_score_m.group(1)) if _rev_score_m else 50
+                            logger.info("[SelfReview] score=%s — running fix pass", _rev_score)
+                            yield f"data: {_json.dumps({'t': f'⚠️ Score {_rev_score}/100 — fixing issues...\n\n'})}\n\n"
+
+                            # One streaming fix pass with Sonnet
+                            _fix_sys = _kb_patch() + "\n\n## YOUR TASK: FIX ALL REVIEWER ISSUES\nFix every issue listed. Output the complete fixed HTML file starting with ```html."
+                            _fix_user = (
+                                f"[REVIEWER ISSUES — FIX ALL]\n{_rev_text}\n\n"
+                                f"[CODE TO FIX]\n```html\n{_rev_html}\n```\n\n"
+                                "Fix every issue. Output the complete corrected file."
+                            )
+                            try:
+                                async with _rev_client.messages.stream(
+                                    model="claude-sonnet-4-6",
+                                    max_tokens=8192,
+                                    system=_fix_sys,
+                                    messages=[{"role": "user", "content": _fix_user}],
+                                ) as _fix_stream:
+                                    _fix_last_ping = asyncio.get_event_loop().time()
+                                    async for _fix_tok in _fix_stream.text_stream:
+                                        _fix_now = asyncio.get_event_loop().time()
+                                        if _fix_now - _fix_last_ping > 8:
+                                            yield f": ping\n\n"
+                                            _fix_last_ping = _fix_now
+                                        reply_text += _fix_tok
+                                        yield f"data: {_json.dumps({'t': _fix_tok})}\n\n"
+                                yield f"data: {_json.dumps({'t': '\n\n✅ Fixed and ready!\n'})}\n\n"
+                            except Exception as _fix_err:
+                                logger.warning("[SelfReview] fix pass failed (non-fatal): %s", _fix_err)
+                    except Exception as _rev_err:
+                        logger.debug("[SelfReview] review failed (non-fatal): %s", _rev_err)
 
         else:
             # ── Claude stream — all chat/planning/research ─────────────────────

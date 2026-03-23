@@ -36,10 +36,13 @@ except ImportError:
 
 
 # ── System prompts — loaded from knowledge base ───────────────────────────────
-from .knowledge_base import (  # noqa: E402
+from ..brains.knowledge_base import (  # noqa: E402
     image_to_code_build_prompt as _kb_build_prompt,
     review_prompt              as _kb_review_prompt,
     HOW_TO_BUILD               as _HOW_TO_BUILD,
+    EXECUTIVE_MINDSET          as _EXECUTIVE_MINDSET,
+    PARALLEL_ANALYSIS_PROTOCOL as _PARALLEL_ANALYSIS,
+    SELF_REVIEW_CHECKLIST      as _SELF_REVIEW_CHECKLIST,
 )
 
 _VISION_PROMPT = """\
@@ -60,21 +63,23 @@ Describe in this order:
 Be precise and technical. Hex codes over color names. Pixel values over vague descriptions.
 This spec is handed DIRECTLY to the Builder Brain — every detail you give will be built."""
 
-_BUILD_SYSTEM = _HOW_TO_BUILD + """
+_BUILD_SYSTEM = _EXECUTIVE_MINDSET + "\n" + _PARALLEL_ANALYSIS + "\n" + _HOW_TO_BUILD + _SELF_REVIEW_CHECKLIST + """
 
 ## OUTPUT FORMAT
 Start with ```html on its own line.
 End with ``` on its own line.
-Output the COMPLETE file every time — never partial snippets."""
+Output the COMPLETE file every time — never partial snippets.
+A Reviewer Brain will check your work — build it right the first time."""
 
 _REVIEW_SYSTEM = _kb_review_prompt()
 
-_FIX_SYSTEM = _HOW_TO_BUILD + """
+_FIX_SYSTEM = _EXECUTIVE_MINDSET + "\n" + _HOW_TO_BUILD + _SELF_REVIEW_CHECKLIST + """
 
 ## YOUR TASK: FIX
 A reviewer found issues with the build. Fix every issue listed.
 The reviewer's list is the source of truth — address each item specifically.
 User requirements take absolute priority over everything else.
+Run SELF_REVIEW_CHECKLIST on your output before finishing.
 
 ## OUTPUT FORMAT
 Start with ```html on its own line.
