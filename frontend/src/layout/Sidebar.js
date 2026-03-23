@@ -690,7 +690,7 @@ function Sidebar() {
 
         {/* Pinned Chats */}
         {(pinnedChats.length > 0 || !sidebarCollapsed) && (
-          <SidebarSection icon={Pin} label="Pinned" collapsed={sidebarCollapsed} defaultOpen={true}>
+          <SidebarSection icon={Pin} label="Pinned" collapsed={sidebarCollapsed} defaultOpen={true} scrollable={true}>
             {pinnedChats.length === 0 && !sidebarCollapsed && (
               <p className="text-[10px] text-slate-600 px-2 py-1">No pinned chats</p>
             )}
@@ -738,7 +738,7 @@ function Sidebar() {
         </SidebarSection>
 
         {/* Your Chats */}
-        <SidebarSection icon={MessageSquare} label="Your Chats" collapsed={sidebarCollapsed} defaultOpen={true}>
+        <SidebarSection icon={MessageSquare} label="Your Chats" collapsed={sidebarCollapsed} defaultOpen={true} scrollable={true}>
           {unassignedChats.length === 0 && !sidebarCollapsed && (
             <p className="text-[10px] text-slate-600 px-2 py-1">No chats yet</p>
           )}
