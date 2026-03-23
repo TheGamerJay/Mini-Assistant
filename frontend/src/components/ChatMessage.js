@@ -8,7 +8,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   RotateCcw, Copy, Check, Volume2, VolumeX,
   ThumbsUp, ThumbsDown, GitFork, Share2, MoreHorizontal, Clock, X, ChevronLeft, ChevronRight,
-  Bookmark, PanelRight, Play, Loader2, Terminal,
+  Bookmark, PanelRight, Play, Loader2, Terminal, Monitor,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp } from '../context/AppContext';
@@ -78,6 +78,30 @@ function tokenize(code, lang) {
 }
 
 // ---------------------------------------------------------------------------
+// AppBuilderCard — compact badge replacing full HTML code in chat
+// ---------------------------------------------------------------------------
+function AppBuilderCard({ code }) {
+  const [copied, setCopied] = useState(false);
+  const lineCount = code.split('\n').length;
+  return (
+    <div className="my-3 rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 flex items-center gap-3">
+      <Monitor size={15} className="text-cyan-400 flex-shrink-0" />
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-cyan-300 font-medium">App built</p>
+        <p className="text-[10px] text-slate-500 mt-0.5">{lineCount} lines · open the Preview tab →</p>
+      </div>
+      <button
+        onClick={() => { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1800); }}
+        className="flex items-center gap-1 text-[10px] font-mono text-slate-500 hover:text-slate-300 transition-colors"
+        title="Copy code"
+      >
+        {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
+  );
+}
+
 // CodeBlock
 // ---------------------------------------------------------------------------
 const RUNNABLE_LANGS = new Set(['python', 'py', 'javascript', 'js']);
@@ -223,7 +247,9 @@ function renderContent(text) {
     if (match.index > lastIdx) parts.push(<React.Fragment key={key++}>{renderText(text.slice(lastIdx, match.index))}</React.Fragment>);
     const lang = (match[1] || '').trim();
     const code = match[2].replace(/\n$/, '');
-    parts.push(<CodeBlock key={key++} lang={lang} code={code} />);
+    // Large HTML apps → compact card; everything else → full code block
+    const isHtmlApp = (lang === 'html' || lang === 'markup' || lang === '') && /<!DOCTYPE|<html/i.test(code) && code.length > 200;
+    parts.push(isHtmlApp ? <AppBuilderCard key={key++} code={code} /> : <CodeBlock key={key++} lang={lang} code={code} />);
     lastIdx = match.index + match[0].length;
   }
   if (lastIdx < text.length) parts.push(<React.Fragment key={key++}>{renderText(text.slice(lastIdx))}</React.Fragment>);

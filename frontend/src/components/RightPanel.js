@@ -149,7 +149,6 @@ function CodeViewer({ blocks }) {
 // Preview
 // ---------------------------------------------------------------------------
 function PreviewPane({ blocks, previewImage = null, imageSaved = false, onClearImage }) {
-  const iframeRef = useRef(null);
   const [key, setKey] = useState(0);
   const html = useMemo(() => buildPreviewHtml(blocks), [blocks]);
 
@@ -164,16 +163,6 @@ function PreviewPane({ blocks, previewImage = null, imageSaved = false, onClearI
       return () => clearTimeout(t);
     }
   }, [previewImage]);
-
-  useEffect(() => {
-    const iframe = iframeRef.current;
-    if (!iframe || !html || previewImage) return;
-    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (!doc) return;
-    doc.open();
-    doc.write(html);
-    doc.close();
-  }, [html, key, previewImage]);
 
   // Show generated image if present (image generation takes priority over empty code preview)
   if (previewImage) {
@@ -244,10 +233,10 @@ function PreviewPane({ blocks, previewImage = null, imageSaved = false, onClearI
         </button>
       </div>
       <iframe
-        ref={iframeRef}
         key={key}
+        srcDoc={html}
         className="flex-1 w-full bg-white"
-        sandbox="allow-scripts allow-same-origin"
+        sandbox="allow-scripts allow-same-origin allow-modals"
         title="App Preview"
       />
     </div>
