@@ -411,6 +411,8 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
   const pendingMsgRef     = useRef(null); // queued message while a response is in-flight
   const streamAccumRef    = useRef(''); // accumulates all streamed tokens — fallback if meta.reply is empty
   const compactingRef     = useRef(false); // prevents double-compaction while summarize is in-flight
+  const [compacting, setCompacting] = useState(false); // mirrors compactingRef for UI re-renders
+  const lastHtmlRef       = useRef(null); // always holds the most recently built HTML app
 
   // Context meter — estimate token usage from character counts (chars/4 ≈ tokens)
   const CONTEXT_MAX_TOKENS = 32000; // threshold at which we compact
@@ -420,6 +422,40 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     const tokens = Math.round(chars / 4);
     return Math.min(100, Math.round((tokens / CONTEXT_MAX_TOKENS) * 100));
   }, [messages]);
+
+  // Track last built HTML so the AI always has its code even after compaction
+  useEffect(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const c = messages[i]?.content || '';
+      const fenced = /```html\s*\n([\s\S]+?)```/.exec(c);
+      if (fenced) { lastHtmlRef.current = fenced[1]; break; }
+      const raw = /<!DOCTYPE\s+html/i.exec(c);
+      if (raw) { lastHtmlRef.current = c.slice(raw.index); break; }
+    }
+  }, [messages]);
+
+  // Proactive auto-compact: fires when context hits ≥95% without needing a new message
+  useEffect(() => {
+    const COMPACT_THRESHOLD = 30;
+    const KEEP_RECENT = 8;
+    if (contextPct < 95 || compactingRef.current || messages.length < KEEP_RECENT + 2) return;
+    compactingRef.current = true;
+    setCompacting(true);
+    const toSummarize = messages.slice(0, messages.length - KEEP_RECENT);
+    const toKeep = messages.slice(messages.length - KEEP_RECENT);
+    api.summarizeMessages(toSummarize)
+      .then(data => {
+        if (!data.summary) return;
+        const summaryMsg = { role: 'system', type: 'summary', content: data.summary, timestamp: Date.now(), _is_summary: true };
+        const compacted = [summaryMsg, ...toKeep];
+        setMessages(compacted);
+        if (activeChatId) updateChatMessages(activeChatId, compacted);
+        toast.info('Conversation compacted — context cleared.', { duration: 3500 });
+      })
+      .catch(() => {})
+      .finally(() => { compactingRef.current = false; setCompacting(false); });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contextPct]);
 
   // Comparison state — set when it's time for a showdown
   const [compareData, setCompareData]     = useState(null); // {replyA, modelA, replyB, modelB, nextMessages, chatId}
@@ -621,6 +657,16 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
       if (m._is_summary) return { role: 'user', content: `[EARLIER CONVERSATION SUMMARY]\n${m.content}` };
       return { role: m.role, content: m.content };
     });
+
+    // If no HTML code is visible in current history (e.g. after compaction) but we have
+    // one stored, inject it as a pinned assistant message so the AI can always patch it.
+    const historyHasHtml = history.some(m => m.role === 'assistant' && /```html/i.test(m.content || ''));
+    if (!historyHasHtml && lastHtmlRef.current) {
+      history.push({
+        role: 'assistant',
+        content: `Here is the current app code:\n\`\`\`html\n${lastHtmlRef.current}\n\`\`\``,
+      });
+    }
 
     await sendStream(text, sessionIdRef.current, history, imgs.length ? imgs : null, {
       vibeMode,
@@ -1078,10 +1124,10 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
                 }}
               >
                 {contextPct}%
-                {contextPct >= 90 && compactingRef.current && (
+                {compacting && (
                   <span className="ml-1 opacity-70">compacting…</span>
                 )}
-                {contextPct >= 90 && !compactingRef.current && (
+                {contextPct >= 90 && !compacting && (
                   <span className="ml-1 opacity-60">auto-compact soon</span>
                 )}
               </span>
