@@ -83,7 +83,17 @@ const TOOLS = [
 // SidebarSection
 // ---------------------------------------------------------------------------
 function SidebarSection({ icon: Icon, label, collapsed, defaultOpen = true, action, scrollable = false, children }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const _key = `sidebar_section_${label}`;
+  const [open, setOpen] = useState(() => {
+    const saved = localStorage.getItem(_key);
+    return saved !== null ? saved === 'true' : defaultOpen;
+  });
+
+  const toggle = () => setOpen(v => {
+    const next = !v;
+    localStorage.setItem(_key, next ? 'true' : 'false');
+    return next;
+  });
 
   if (collapsed) {
     return (
@@ -91,7 +101,7 @@ function SidebarSection({ icon: Icon, label, collapsed, defaultOpen = true, acti
         <button
           className="w-full flex justify-center items-center h-9 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-colors"
           title={label}
-          onClick={() => setOpen((v) => !v)}
+          onClick={toggle}
         >
           <Icon size={16} />
         </button>
@@ -104,7 +114,7 @@ function SidebarSection({ icon: Icon, label, collapsed, defaultOpen = true, acti
     <div className="mb-1">
       <button
         className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-colors group"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
       >
         <div className="flex items-center gap-2">
           <Icon size={13} />
