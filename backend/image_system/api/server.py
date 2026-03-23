@@ -47,6 +47,11 @@ from .models import (
     ModelStatusResponse,
     ErrorResponse,
 )
+from .conversation_store import (
+    load_conversation,
+    save_message,
+    trim_html_in_old_messages,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -2244,6 +2249,24 @@ async def chat_stream(req: ChatRequest, request: Request):
         phase1_plan = None
         execution_intent = "chat"
 
+        # ── Persistent conversation store — load full server-side history ─────
+        # This is the source of truth for all history checks below.
+        # Falls back gracefully to req.history when the session file is empty/new.
+        _stored_conv = load_conversation(session_id)
+
+        def _history_source():
+            """Return a list of objects with .role / .content from stored conv or req.history."""
+            if _stored_conv:
+                class _Msg:
+                    __slots__ = ("role", "content")
+                    def __init__(self, d):
+                        self.role = d.get("role", "")
+                        self.content = d.get("content", "")
+                return [_Msg(m) for m in _stored_conv]
+            return req.history or []
+
+        _effective_history = _history_source()
+
         # ── Explicit chat_mode override (bypasses all intent detection) ──────
         # 'image' → force image generation (redirect to non-streaming endpoint)
         # 'build' → force app_builder (skip Q&A, build immediately)
@@ -2330,7 +2353,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                                 "difficulty —", "plain html", "react?")
         _in_build_conversation = any(
             h.role == "assistant" and any(kw in (h.content or "").lower() for kw in _build_convo_markers)
-            for h in (req.history or [])
+            for h in _effective_history
         )
         if _in_build_conversation:
             execution_intent = "app_builder"
@@ -2354,8 +2377,8 @@ async def chat_stream(req: ChatRequest, request: Request):
         # conversation are often classified as "chat" by the router (e.g. "make it
         # a video uploader"), but they still need the coder model + build prompt.
         # Do NOT override chat or image mode — those explicitly opt out of building.
-        if not _is_build_intent and req.history and req.chat_mode not in ("chat", "image"):
-            _hist_contents = " ".join(h.content or "" for h in req.history)
+        if not _is_build_intent and _effective_history and req.chat_mode not in ("chat", "image"):
+            _hist_contents = " ".join(h.content or "" for h in _effective_history)
             # If any previous assistant turn contains a code fence or raw HTML, we're in a build session
             _assistant_has_code = any(
                 h.role == "assistant" and (
@@ -2363,7 +2386,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                     "<!DOCTYPE" in (h.content or "") or
                     "<!doctype" in (h.content or "")
                 )
-                for h in req.history
+                for h in _effective_history
             )
             # Or if the first user message was a build request
             _BUILD_KW = _re.compile(
@@ -2373,7 +2396,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                 r"can you (build|make|create|add|update)",
                 _re.I,
             )
-            _first_user = next((h for h in req.history if h.role == "user"), None)
+            _first_user = next((h for h in _effective_history if h.role == "user"), None)
             if _assistant_has_code or (_first_user and _BUILD_KW.search(_first_user.content or "")):
                 _is_build_intent = True
 
@@ -2412,7 +2435,7 @@ async def chat_stream(req: ChatRequest, request: Request):
 
         # ── Build message list ────────────────────────────────────────────────
         # Determine whether history already has a build-turn so we know where we are in the cycle.
-        _build_history_turns = sum(1 for h in (req.history or []) if h.role == "assistant") if _is_build_intent else 0
+        _build_history_turns = sum(1 for h in _effective_history if h.role == "assistant") if _is_build_intent else 0
 
         _has_images = bool(req.image_base64 or req.images_base64)
         # True if pipeline has already generated HTML code in a previous turn.
@@ -2424,7 +2447,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                 "<!DOCTYPE" in (h.content or "") or
                 "<!doctype" in (h.content or "")
             )
-            for h in (req.history or [])
+            for h in _effective_history
         )
         if _is_build_intent:
             if not _has_images and not _has_prior_code and _build_history_turns == 0 and not req.vibe_mode:
@@ -2513,9 +2536,16 @@ async def chat_stream(req: ChatRequest, request: Request):
         else:
             _sys_prompt_stream = _MINI_SYSTEM_PROMPT
         history_msgs: list[dict] = [{"role": "system", "content": _sys_prompt_stream}]
-        if req.history:
-            for h in req.history:
-                history_msgs.append({"role": h.role, "content": h.content})
+        # Use stored conversation as source of truth; fall back to req.history when empty.
+        _history_to_build = (
+            trim_html_in_old_messages(_stored_conv) if _stored_conv
+            else (req.history or [])
+        )
+        for h in _history_to_build:
+            _hr = h.get("role") if isinstance(h, dict) else h.role
+            _hc = h.get("content") if isinstance(h, dict) else h.content
+            if _hr and _hc:
+                history_msgs.append({"role": _hr, "content": _hc})
         user_content = (rt_context + effective_msg) if rt_context else effective_msg
 
         # ── Web search injection — fetch live results when intent is web_search ─
@@ -2601,6 +2631,12 @@ async def chat_stream(req: ChatRequest, request: Request):
         _api_key_claude = os.environ.get("ANTHROPIC_API_KEY", "")
         _use_claude     = True  # Always use Claude — no local models
         reply_text      = ""
+
+        # ── Save user message to persistent store ─────────────────────────────
+        try:
+            save_message(session_id, "user", effective_msg)
+        except Exception as _sm_err:
+            logger.warning("conversation_store: save_message(user) failed — %s", _sm_err)
 
         if _is_build_intent and all_images and not _has_prior_code:
             from .pipeline import image_to_code_pipeline
@@ -2709,9 +2745,9 @@ async def chat_stream(req: ChatRequest, request: Request):
                 and not all_images
             )
             if _is_patch_mode and _c_msgs:
-                # Extract latest HTML from full history (not the truncated 10-msg window)
+                # Extract latest HTML from full stored history (not the truncated 10-msg window)
                 _latest_html = None
-                for _ph in reversed(req.history or []):
+                for _ph in reversed(_effective_history):
                     if _ph.role == "assistant" and _ph.content:
                         _fence_m = _re.search(r'```html\s*\n([\s\S]+?)```', _ph.content)
                         if _fence_m:
@@ -2930,6 +2966,13 @@ If all pass: PASS.
                 err = _friendly_error(_plain_err)
                 reply_text = err
                 yield f"data: {_json.dumps({'t': err})}\n\n"
+
+        # ── Save assistant reply to persistent store (non-fatal) ─────────────
+        if reply_text:
+            try:
+                save_message(session_id, "assistant", reply_text)
+            except Exception as _sm_err:
+                logger.warning("conversation_store: save_message(assistant) failed — %s", _sm_err)
 
         # ── Observability: log this brain call (non-fatal) ────────────────────
         try:
