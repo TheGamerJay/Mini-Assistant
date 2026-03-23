@@ -43,6 +43,9 @@ from ..brains.knowledge_base import (  # noqa: E402
     EXECUTIVE_MINDSET          as _EXECUTIVE_MINDSET,
     PARALLEL_ANALYSIS_PROTOCOL as _PARALLEL_ANALYSIS,
     SELF_REVIEW_CHECKLIST      as _SELF_REVIEW_CHECKLIST,
+    SECURITY_RULES             as _SECURITY_RULES,
+    ACCESSIBILITY_STANDARDS    as _ACCESSIBILITY_STANDARDS,
+    REGRESSION_PREVENTION      as _REGRESSION_PREVENTION,
 )
 
 _VISION_PROMPT = """\
@@ -63,18 +66,30 @@ Describe in this order:
 Be precise and technical. Hex codes over color names. Pixel values over vague descriptions.
 This spec is handed DIRECTLY to the Builder Brain — every detail you give will be built."""
 
-_BUILD_SYSTEM = _EXECUTIVE_MINDSET + "\n" + _PARALLEL_ANALYSIS + "\n" + _HOW_TO_BUILD + _SELF_REVIEW_CHECKLIST + """
-
+_BUILD_SYSTEM = (
+    _EXECUTIVE_MINDSET + "\n"
+    + _PARALLEL_ANALYSIS + "\n"
+    + _HOW_TO_BUILD
+    + _SECURITY_RULES
+    + _ACCESSIBILITY_STANDARDS
+    + _SELF_REVIEW_CHECKLIST
+    + """
 ## OUTPUT FORMAT
 Start with ```html on its own line.
 End with ``` on its own line.
 Output the COMPLETE file every time — never partial snippets.
 A Reviewer Brain will check your work — build it right the first time."""
+)
 
 _REVIEW_SYSTEM = _kb_review_prompt()
 
-_FIX_SYSTEM = _EXECUTIVE_MINDSET + "\n" + _HOW_TO_BUILD + _SELF_REVIEW_CHECKLIST + """
-
+_FIX_SYSTEM = (
+    _EXECUTIVE_MINDSET + "\n"
+    + _HOW_TO_BUILD
+    + _REGRESSION_PREVENTION
+    + _SECURITY_RULES
+    + _SELF_REVIEW_CHECKLIST
+    + """
 ## YOUR TASK: FIX
 A reviewer found issues with the build. Fix every issue listed.
 The reviewer's list is the source of truth — address each item specifically.
@@ -85,6 +100,7 @@ Run SELF_REVIEW_CHECKLIST on your output before finishing.
 Start with ```html on its own line.
 End with ``` on its own line.
 Output the COMPLETE fixed file."""
+)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

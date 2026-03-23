@@ -211,6 +211,17 @@ except ImportError:
     _save_lesson          = lambda *a, **kw: None
     _extract_lessons      = lambda r: []
 
+try:
+    from .brains.user_memory import (
+        format_prefs_for_prompt      as _user_prefs_for_prompt,
+        update_prefs_from_conversation as _update_user_prefs,
+    )
+    _USER_MEMORY_LOADED = True
+except ImportError:
+    _USER_MEMORY_LOADED = False
+    _user_prefs_for_prompt = lambda: ""
+    _update_user_prefs     = lambda *a, **kw: None
+
 _APP_BUILDER_CODING_STANDARDS = """
 ## CODING STANDARDS (follow these exactly when building apps)
 
@@ -2584,11 +2595,16 @@ async def chat_stream(req: ChatRequest, request: Request):
                     "Be warm and direct, like a senior dev pair-programming with a friend."
                 )
 
-            # ── Inject lesson memory into build/patch prompts ─────────────────
-            if _is_build_intent and _LESSONS_LOADED:
-                _lessons_block = _lessons_for_prompt()
-                if _lessons_block:
-                    _c_sys = _c_sys + _lessons_block
+            # ── Inject lesson memory + user prefs into build/patch prompts ───
+            if _is_build_intent:
+                if _LESSONS_LOADED:
+                    _lessons_block = _lessons_for_prompt()
+                    if _lessons_block:
+                        _c_sys = _c_sys + _lessons_block
+                if _USER_MEMORY_LOADED:
+                    _prefs_block = _user_prefs_for_prompt()
+                    if _prefs_block:
+                        _c_sys = _c_sys + _prefs_block
 
             try:
                 import anthropic as _am_lib
@@ -2764,6 +2780,19 @@ async def chat_stream(req: ChatRequest, request: Request):
             )
         except Exception:
             pass
+
+        # ── Post-processing: user preference learning (non-fatal) ─────────────
+        if _USER_MEMORY_LOADED and reply_text:
+            try:
+                _update_user_prefs(
+                    message=effective_msg,
+                    reply=reply_text,
+                    intent=execution_intent,
+                    was_build=bool(_is_build_intent and not _has_prior_code),
+                    was_fix=bool(_is_build_intent and _has_prior_code),
+                )
+            except Exception:
+                pass
 
         # ── Final done event with metadata ────────────────────────────────────
         meta = {
