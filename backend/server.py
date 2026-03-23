@@ -5183,6 +5183,43 @@ async def send_expiry_reminders():
     return {"sent": sent, "eligible": len(users)}
 
 
+# ---------------------------------------------------------------------------
+# PostHog reverse proxy — avoids CORS errors from us.i.posthog.com/s/
+# All /ingest/* requests are forwarded to us.i.posthog.com with the same
+# method, headers (minus host), body, and query string.
+# ---------------------------------------------------------------------------
+_POSTHOG_HOST = "https://us.i.posthog.com"
+
+@app.api_route("/ingest/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def posthog_proxy(path: str, request: StarletteRequest):
+    url = f"{_POSTHOG_HOST}/{path}"
+    if request.query_params:
+        url += "?" + str(request.query_params)
+
+    # Forward all headers except Host (which httpx sets automatically)
+    fwd_headers = {
+        k: v for k, v in request.headers.items()
+        if k.lower() not in ("host", "content-length")
+    }
+
+    body = await request.body()
+
+    async with httpx.AsyncClient(timeout=15) as client_ph:
+        ph_resp = await client_ph.request(
+            method=request.method,
+            url=url,
+            headers=fwd_headers,
+            content=body,
+        )
+
+    from fastapi.responses import Response
+    return Response(
+        content=ph_resp.content,
+        status_code=ph_resp.status_code,
+        headers=dict(ph_resp.headers),
+    )
+
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
     if client is not None:
