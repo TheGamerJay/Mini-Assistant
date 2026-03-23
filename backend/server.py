@@ -5032,9 +5032,8 @@ async def posthog_proxy(path: str, request: StarletteRequest):
     if len(body) > _INGEST_MAX_B:
         return Response(content="Payload Too Large", status_code=413)
 
-    # array/**/config.js is a JS module served from the asset CDN, not the API host
-    if _segment == "array" and path.endswith(".js"):
-        _ph_host = _PH_ASSET
+    # array/* always routes to the API host — config.js and config are
+    # both API responses, not assets served from the CDN.
     url = f"{_ph_host}/{path}"
     if request.query_params:
         url += "?" + str(request.query_params)
@@ -5062,8 +5061,12 @@ async def posthog_proxy(path: str, request: StarletteRequest):
                 headers=fwd_headers,
                 content=body,
             )
-        # Forward response as-is — SDK reads these bodies (feature flags,
-        # config, etc.) and uses the status code to decide whether to retry.
+        # 5xx = server/infra error (Cloudflare 520, PostHog outage, etc.)
+        # Swallow silently — SDK has built-in retry/fallback for these.
+        if ph_resp.status_code >= 500:
+            logging.debug("PostHog upstream %s on %s (swallowed)", ph_resp.status_code, path)
+            return Response(status_code=204)
+        # 2xx/4xx — forward as-is so the SDK can use the body or handle the error
         return Response(
             content=ph_resp.content,
             status_code=ph_resp.status_code,
