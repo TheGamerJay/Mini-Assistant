@@ -29,6 +29,9 @@ logger = logging.getLogger(__name__)
 VALID_SIZES = {"1024x1024", "1024x1792", "1792x1024"}
 DEFAULT_SIZE = "1024x1024"
 
+# gpt-image-1 / gpt-image-1.5 — configurable via IMAGE_MODEL env var
+_IMAGE_EDIT_MODEL = os.getenv("IMAGE_MODEL", "gpt-image-1")
+
 # DALL-E 3 hard prompt limit (OpenAI enforces this server-side)
 _PROMPT_MAX = 4000
 
@@ -256,8 +259,8 @@ class DalleClient:
 
         client = self._get_client()
         logger.info(
-            "gpt-image-1 edit: size=%s len=%d mask=%s prompt=%.80s",
-            size, len(prompt), mask_bytes is not None, prompt,
+            "%s edit: size=%s len=%d mask=%s prompt=%.80s",
+            _IMAGE_EDIT_MODEL, size, len(prompt), mask_bytes is not None, prompt,
         )
 
         # Ensure PNG format — gpt-image-1 accepts PNG/JPEG/WEBP but PNG is safest
@@ -274,7 +277,7 @@ class DalleClient:
         image_file.name = "image.png"
 
         kwargs: dict = dict(
-            model="gpt-image-1",
+            model=_IMAGE_EDIT_MODEL,
             image=image_file,
             prompt=prompt,
             size=size,  # type: ignore[arg-type]
@@ -291,7 +294,7 @@ class DalleClient:
         if not b64:
             raise RuntimeError("gpt-image-1 returned an empty edit response")
 
-        logger.info("gpt-image-1 edit complete (%d bytes b64)", len(b64))
+        logger.info("%s edit complete (%d bytes b64)", _IMAGE_EDIT_MODEL, len(b64))
         return b64
 
     def color_replace(
