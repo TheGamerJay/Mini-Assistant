@@ -184,13 +184,23 @@ function CodeViewer({ blocks }) {
 // ---------------------------------------------------------------------------
 // Preview
 // ---------------------------------------------------------------------------
-function PreviewPane({ blocks, previewImage = null, imageSaved = false, onClearImage }) {
+function PreviewPane({ blocks, previewImage = null, imageSaved = false, onClearImage, isStreaming = false }) {
   const [key, setKey] = useState(0);
   const rawHtml = useMemo(() => buildPreviewHtml(blocks), [blocks]);
   // Keep last known HTML so the preview never blanks out when streaming ends
   const lastHtmlRef = useRef(null);
   if (rawHtml) lastHtmlRef.current = rawHtml;
   const html = rawHtml || lastHtmlRef.current;
+
+  // When streaming finishes and we have final HTML, remount the iframe so
+  // game JS fully initialises with the complete code (Play buttons work)
+  const wasStreamingRef = useRef(false);
+  useEffect(() => {
+    if (wasStreamingRef.current && !isStreaming && html) {
+      setKey(k => k + 1); // remount iframe with final complete HTML
+    }
+    wasStreamingRef.current = isStreaming;
+  }, [isStreaming, html]);
 
   // Show "Saved" badge briefly after a new image arrives
   const [showSaved, setShowSaved] = useState(false);
@@ -578,7 +588,7 @@ function RightPanel({ messages = [], streamingText = null, open, onClose, previe
 
       {/* Body */}
       <div className="flex-1 overflow-hidden">
-        {tab === 'preview' && <PreviewPane blocks={codeBlocks} previewImage={previewImage} onClearImage={onClearImage} />}
+        {tab === 'preview' && <PreviewPane blocks={codeBlocks} previewImage={previewImage} onClearImage={onClearImage} isStreaming={!!streamingText} />}
         {tab === 'code'    && isSubscribed && <CodeViewer  blocks={codeBlocks} />}
         {tab === 'files'   && isSubscribed && <FilesPane   blocks={codeBlocks} />}
         {tab === 'diff'    && isSubscribed && <DiffPane    messages={messages} />}

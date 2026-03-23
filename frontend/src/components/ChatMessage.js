@@ -275,6 +275,49 @@ function renderText(text) {
 }
 
 // ---------------------------------------------------------------------------
+// Build suggestion chips — shown after a completed app build
+// Parses "1. ...\n2. ...\n3. ..." from the post-code text in the message
+// ---------------------------------------------------------------------------
+function parseBuildSuggestions(content) {
+  if (!content) return [];
+  // Find text after the last closing code fence (or after <!DOCTYPE for raw HTML)
+  let postCode = '';
+  const lastFence = content.lastIndexOf('```');
+  if (lastFence !== -1) {
+    postCode = content.slice(lastFence + 3);
+  } else {
+    // raw HTML path — no text after the HTML block to parse
+    return [];
+  }
+  // Extract numbered items: "1. some text" or "1) some text"
+  const matches = [...postCode.matchAll(/^\s*\d+[.)]\s+(.+)/gm)];
+  return matches.map(m => m[1].trim()).filter(Boolean).slice(0, 3);
+}
+
+function BuildSuggestionChips({ content, onSuggest }) {
+  const suggestions = parseBuildSuggestions(content);
+  if (!suggestions.length || !onSuggest) return null;
+  return (
+    <div className="mt-3 flex flex-col gap-2">
+      <p className="text-[11px] text-slate-500 font-medium">What's next?</p>
+      <div className="flex flex-wrap gap-2">
+        {suggestions.map((s, i) => (
+          <button
+            key={i}
+            onClick={() => onSuggest(s)}
+            className="px-3 py-1.5 rounded-xl border border-cyan-500/20 bg-cyan-500/5
+                       text-xs text-cyan-300 hover:border-cyan-400/40 hover:bg-cyan-500/10
+                       hover:text-white active:scale-95 transition-all duration-150 text-left"
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Top-level content renderer: splits out fenced code blocks first
 // ---------------------------------------------------------------------------
 function renderContent(text) {
@@ -850,7 +893,10 @@ function ChatMessage({ message, onRetry, onRate, onFork, onPin, onSendToBuilder,
               generation_time_ms={generation_time_ms} retry_used={retry_used} dry_run={false} />
           </>
         ) : (
-          renderContent(content)
+          <>
+            {renderContent(content)}
+            <BuildSuggestionChips content={content} onSuggest={onSuggest} />
+          </>
         )}
 
 
