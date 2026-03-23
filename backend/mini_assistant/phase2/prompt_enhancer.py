@@ -34,29 +34,40 @@ def _enhancer_available() -> bool:
 # ── Edit request analyzer (routes to PIL vs AI inpainting) ───────────────────
 
 _EDIT_ANALYZER_SYSTEM = """\
-You are an image-editing assistant that chooses the correct editing method based on the user's request.
+You are an image-editing assistant that breaks user requests into ordered edit steps.
 
 RULE 1 — COLOR-BASED EDITS (hair color, eye color, skin color, fur color, shirt color, shoe color):
 - Do NOT use AI inpainting.
 - Use the PIL color-replacement pipeline.
 - Identify the exact source color name and target color name.
-- Output edit_type: "color_change"
+- edit_type: "color_change"
 
-RULE 2 — STRUCTURAL EDITS (remove object, add object, change background, add/remove accessories, change pose, add hat, change clothing pattern or style):
+RULE 2 — STRUCTURAL EDITS (remove object, add object, change background, add/remove accessories, change pose, add hat, change clothing pattern or style, change hairstyle):
 - Use vision analysis to locate the object or region.
-- Produce a tight bounding box description (top/left/width/height as % of image).
-- Pass the original image + mask + instruction to the AI inpainting model.
+- Produce a tight bounding box (top/left/width/height as % of image).
 - The final_instruction MUST end with: "Show the full character head-to-toe, do not crop or zoom in, preserve the original framing exactly."
-- Output edit_type: "structural_edit"
+- edit_type: "structural_edit"
 
 RULE 3 — DECISION LOGIC:
-- If the edit is purely about changing a COLOR → RULE 1
-- If the edit changes shape, structure, or adds/removes elements → RULE 2
-- If ambiguous, prefer RULE 1 for any request mentioning a color word
+- Pure color change → RULE 1
+- Shape/structure/add/remove → RULE 2
+- If ambiguous and a color word is mentioned → RULE 1
+
+RULE 4 — MULTI-STEP:
+- If the user requests MORE THAN ONE distinct change, split them into separate steps.
+- Order: color changes first, then structural changes.
+- Each step is one focused edit.
 
 OUTPUT: Return ONLY valid JSON, no explanation, no markdown.
 
-For color_change:
+Always return this wrapper:
+{
+  "steps": [ <one or more step objects> ]
+}
+
+Each step is one of:
+
+color_change step:
 {
   "edit_type": "color_change",
   "region_description": "<what body part/area>",
@@ -65,7 +76,7 @@ For color_change:
   "confidence": 0.0-1.0
 }
 
-For structural_edit:
+structural_edit step:
 {
   "edit_type": "structural_edit",
   "region_description": "<what object/area>",
@@ -78,16 +89,17 @@ For structural_edit:
 _EDIT_ANALYZER_USER = "User edit request: {msg}\n\nAnalyze and output the edit plan as JSON."
 
 
-async def analyze_edit_request(user_msg: str) -> dict | None:
+async def analyze_edit_request(user_msg: str) -> list[dict] | None:
     """
-    Use GPT-5.4 to classify the edit request and return a structured routing plan.
+    Use GPT to classify the edit request and return an ordered list of edit steps.
 
-    Returns a dict with edit_type + routing data, or None if unavailable/failed.
+    Each step is either:
+      {"edit_type": "color_change", "from_color": ..., "to_color": ..., ...}
+      {"edit_type": "structural_edit", "mask_box": ..., "final_instruction": ..., ...}
 
-    color_change → PIL hue rotation (pixel-perfect, no AI)
-    structural_edit → vision mask + gpt-image-1 inpainting
-
-    Never raises — returns None on any failure so caller falls back to old path.
+    Multiple changes are split into separate steps so they can be chained.
+    Returns None on failure — caller falls back to single enhanced-instruction path.
+    Never raises.
     """
     if not _enhancer_available():
         return None
@@ -107,12 +119,17 @@ async def analyze_edit_request(user_msg: str) -> dict | None:
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
-        plan = _json.loads(raw.strip())
+        parsed = _json.loads(raw.strip())
+        steps = parsed.get("steps", [])
+        if not steps:
+            # Fallback: model returned old single-step format
+            steps = [parsed]
         logger.info(
-            "analyze_edit_request | type=%s confidence=%.2f region=%s",
-            plan.get("edit_type"), plan.get("confidence", 0), plan.get("region_description", "")[:50],
+            "analyze_edit_request | %d step(s): %s",
+            len(steps),
+            [s.get("edit_type") for s in steps],
         )
-        return plan
+        return steps
     except Exception as exc:
         logger.warning("analyze_edit_request failed (non-fatal): %s", exc)
         return None

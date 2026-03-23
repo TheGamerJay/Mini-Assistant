@@ -1586,133 +1586,125 @@ async def chat(req: ChatRequest, request: Request):
         logger.info("[MODEL ROUTER] image_edit")
 
         # ── Smart edit routing via GPT analyzer ──────────────────────────────
-        # Uses GPT to classify the edit as color_change (→ PIL) or structural_edit (→ gpt-image-1)
-        _edit_plan = None
+        # GPT breaks the request into ordered steps (color first, then structural).
+        # Steps are chained: each step's output is the next step's input image.
+        _edit_steps = None
         try:
             from mini_assistant.phase2.prompt_enhancer import analyze_edit_request
-            _edit_plan = await analyze_edit_request(effective_msg.strip())
-            logger.info("[MODEL ROUTER] analyze_edit_request → %s", _edit_plan)
+            _edit_steps = await analyze_edit_request(effective_msg.strip())
+            logger.info("[MODEL ROUTER] analyze_edit_request → %d steps", len(_edit_steps) if _edit_steps else 0)
         except Exception as _ae:
             logger.warning("analyze_edit_request failed (%s) — using fallback routing", _ae)
 
-        # ── Route 1: PIL color replacement (pixel-perfect, lossless) ─────────
-        _route1_triggered = (
-            attached_image_bytes and
-            _edit_plan and
-            _edit_plan.get("edit_type") == "color_change" and
-            _edit_plan.get("to_color")
-        )
-        if _route1_triggered:
-            _from_color = (_edit_plan.get("from_color") or "").lower() or None
-            _to_color = (_edit_plan.get("to_color") or "").lower()
-            logger.info(
-                "[MODEL ROUTER] image_edit → PIL color_replace: %s → %s (confidence=%.2f)",
-                _from_color, _to_color, _edit_plan.get("confidence", 0),
+        # If no steps from GPT, create a single fallback structural step
+        if not _edit_steps:
+            _edit_steps = [{"edit_type": "structural_edit", "final_instruction": None}]
+
+        # ── Helper: build PIL mask from bounding box ──────────────────────────
+        def _build_mask(img_bytes: bytes, mask_box: dict) -> bytes | None:
+            try:
+                import io as _io2
+                from PIL import Image as _PILImg2
+                _img2 = _PILImg2.open(_io2.BytesIO(img_bytes)).convert("RGBA")
+                _W2, _H2 = _img2.size
+                _mask2 = _PILImg2.new("RGBA", (_W2, _H2), (0, 0, 0, 255))
+                _px2 = round(mask_box.get("left", 0) / 100 * _W2)
+                _py2 = round(mask_box.get("top", 0) / 100 * _H2)
+                _pw2 = round(mask_box.get("width", 100) / 100 * _W2)
+                _ph2 = round(mask_box.get("height", 100) / 100 * _H2)
+                _mpix = _mask2.load()
+                for _my2 in range(_py2, min(_py2 + _ph2, _H2)):
+                    for _mx2 in range(_px2, min(_px2 + _pw2, _W2)):
+                        _mpix[_mx2, _my2] = (0, 0, 0, 0)
+                _mbuf = _io2.BytesIO()
+                _mask2.save(_mbuf, format="PNG")
+                return _mbuf.getvalue()
+            except Exception as _me:
+                logger.warning("mask build failed: %s", _me)
+                return None
+
+        # ── Chain through each edit step ──────────────────────────────────────
+        from ..services.dalle_client import DalleClient
+        _dalle = DalleClient()
+        _current_bytes = attached_image_bytes  # updated after each step
+        _current_b64: str | None = None
+
+        for _step_i, _step in enumerate(_edit_steps):
+            _etype = _step.get("edit_type")
+            logger.info("[MODEL ROUTER] step %d/%d → %s", _step_i + 1, len(_edit_steps), _etype)
+
+            if _etype == "color_change" and _current_bytes:
+                # ── PIL color replacement ─────────────────────────────────────
+                _from_color = (_step.get("from_color") or "").lower() or None
+                _to_color = (_step.get("to_color") or "").lower() or None
+                if _to_color:
+                    try:
+                        _b64_step = _dalle.color_replace(_current_bytes, _from_color, _to_color)
+                        if _b64_step:
+                            import base64 as _b64mod
+                            _current_b64 = _b64_step
+                            _current_bytes = _b64mod.b64decode(_b64_step)
+                            logger.info("[MODEL ROUTER] step %d color_replace OK: %s→%s", _step_i + 1, _from_color, _to_color)
+                            continue
+                        logger.warning("step %d color_replace returned None — skipping step", _step_i + 1)
+                        continue
+                    except Exception as _pe:
+                        logger.warning("step %d color_replace failed (%s) — skipping", _step_i + 1, _pe)
+                        continue
+
+            # ── gpt-image-1 structural edit ───────────────────────────────────
+            if _step.get("final_instruction"):
+                _edit_instruction = _step["final_instruction"]
+            else:
+                try:
+                    from mini_assistant.phase2.prompt_enhancer import enhance_edit_instruction
+                    _edit_instruction = await enhance_edit_instruction(effective_msg.strip())
+                except Exception:
+                    _edit_instruction = effective_msg.strip()
+
+            _mask_bytes = None
+            if _current_bytes and _step.get("mask_box"):
+                _mask_bytes = _build_mask(_current_bytes, _step["mask_box"])
+
+            _edit_prompt = (
+                f"Apply ONLY this change: {_edit_instruction}\n\n"
+                "Rules:\n"
+                "• Change ONLY what is explicitly requested — nothing else\n"
+                "• Keep every other element pixel-identical: face, hair, eyes, mouth, "
+                "body shape, clothing, shoes, accessories, pose, expression, "
+                "art style, lighting, background\n"
+                "• Show the FULL character head-to-toe — do NOT crop, zoom in, cut off, "
+                "or reframe any part of the body; match the original framing exactly\n"
+                "• Do not reinterpret, stylize, or add any detail not already present"
             )
             try:
-                from ..services.dalle_client import DalleClient
-                _dalle = DalleClient()
-                _b64 = _dalle.color_replace(attached_image_bytes, _from_color, _to_color)
-                if _b64:
-                    try:
-                        from mini_credits import log_image_generated as _log_img
-                        await _log_img(request.headers.get("authorization"), request_id=getattr(req, "request_id", None))
-                    except Exception:
-                        pass
-                    return {
-                        "image_base64": _b64,
-                        "reply": "Image edited.",
-                        "intent": "image_edit",
-                        "session_id": session_id,
-                        "plan": phase1_plan.to_dict() if phase1_plan else {},
-                    }
-                logger.warning("PIL color_replace returned None — falling through to gpt-image-1")
-            except Exception as _pil_exc:
-                logger.warning("PIL color_replace failed (%s) — falling through to gpt-image-1", _pil_exc)
+                if _current_bytes:
+                    _b64_step = await _dalle.edit(_current_bytes, _edit_prompt, mask_bytes=_mask_bytes)
+                else:
+                    _b64_step = await _dalle.generate(_edit_prompt)
+                import base64 as _b64mod
+                _current_b64 = _b64_step
+                _current_bytes = _b64mod.b64decode(_b64_step)
+                logger.info("[MODEL ROUTER] step %d structural edit OK", _step_i + 1)
+            except Exception as _se:
+                logger.error("step %d structural edit failed: %s", _step_i + 1, _se)
+                if _current_b64 is None:
+                    reply = f"Image generation failed: {_se}"
+                break  # use best result so far
 
-        # ── Route 2: gpt-image-1 edit (structural edits + color fallback) ────
-        logger.info("[MODEL ROUTER] image_edit → gpt-image-1 edit()")
-
-        # Use the GPT-analyzed final_instruction if available (structural edit),
-        # otherwise enhance the raw user message
-        if _edit_plan and _edit_plan.get("edit_type") == "structural_edit" and _edit_plan.get("final_instruction"):
-            _edit_instruction = _edit_plan["final_instruction"]
-            logger.info("[MODEL ROUTER] using GPT final_instruction for structural edit")
-        else:
-            try:
-                from mini_assistant.phase2.prompt_enhancer import enhance_edit_instruction
-                _edit_instruction = await enhance_edit_instruction(effective_msg.strip())
-            except Exception:
-                _edit_instruction = effective_msg.strip()
-
-        # Build mask bytes from bounding box if GPT provided one (structural edit)
-        _mask_bytes = None
-        if (
-            attached_image_bytes and
-            _edit_plan and
-            _edit_plan.get("edit_type") == "structural_edit" and
-            _edit_plan.get("mask_box")
-        ):
-            try:
-                import io as _io
-                from PIL import Image as _PILImg
-                _mb = _edit_plan["mask_box"]  # {top, left, width, height} as % of image
-                _img_pil = _PILImg.open(_io.BytesIO(attached_image_bytes)).convert("RGBA")
-                _W, _H = _img_pil.size
-                # Build full-black mask (keep everything), then white box (erase = edit region)
-                _mask_img = _PILImg.new("RGBA", (_W, _H), (0, 0, 0, 255))
-                _px = round(_mb.get("left", 0) / 100 * _W)
-                _py = round(_mb.get("top", 0) / 100 * _H)
-                _pw = round(_mb.get("width", 100) / 100 * _W)
-                _ph = round(_mb.get("height", 100) / 100 * _H)
-                # White (transparent in RGBA mask) = area to edit
-                _mask_pix = _mask_img.load()
-                for _my in range(_py, min(_py + _ph, _H)):
-                    for _mx in range(_px, min(_px + _pw, _W)):
-                        _mask_pix[_mx, _my] = (0, 0, 0, 0)
-                _mask_buf = _io.BytesIO()
-                _mask_img.save(_mask_buf, format="PNG")
-                _mask_bytes = _mask_buf.getvalue()
-                logger.info(
-                    "[MODEL ROUTER] structural mask built: box=(%d,%d,%d,%d) on (%dx%d)",
-                    _px, _py, _pw, _ph, _W, _H,
-                )
-            except Exception as _mask_exc:
-                logger.warning("mask generation failed (%s) — editing without mask", _mask_exc)
-
-        _edit_prompt = (
-            f"Apply ONLY this change: {_edit_instruction}\n\n"
-            "Rules:\n"
-            "• Change ONLY what is explicitly requested — nothing else\n"
-            "• Keep every other element pixel-identical: face, hair, eyes, mouth, "
-            "body shape, clothing, shoes, accessories, pose, expression, "
-            "art style, lighting, background\n"
-            "• Show the FULL character head-to-toe — do NOT crop, zoom in, cut off, "
-            "or reframe any part of the body; match the original framing exactly\n"
-            "• Do not reinterpret, stylize, or add any detail not already present"
-        )
-        try:
-            from ..services.dalle_client import DalleClient
-            _dalle = DalleClient()
-            if attached_image_bytes:
-                _b64 = await _dalle.edit(attached_image_bytes, _edit_prompt, mask_bytes=_mask_bytes)
-            else:
-                _b64 = await _dalle.generate(_edit_prompt)
+        if _current_b64:
             try:
                 from mini_credits import log_image_generated as _log_img
                 await _log_img(request.headers.get("authorization"), request_id=getattr(req, "request_id", None))
             except Exception:
                 pass
             return {
-                "image_base64": _b64,
+                "image_base64": _current_b64,
                 "reply": "Image edited.",
                 "intent": "image_edit",
                 "session_id": session_id,
                 "plan": phase1_plan.to_dict() if phase1_plan else {},
             }
-        except Exception as exc:
-            logger.error("DALL-E image edit failed: %s", exc)
-            reply = f"Image generation failed: {exc}"
 
     elif execution_intent == "image_generation":
         # ── PURE TEXT-TO-IMAGE: no reference image ────────────────────────────
