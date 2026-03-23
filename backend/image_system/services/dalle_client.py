@@ -62,6 +62,12 @@ class DalleClient:
         if size not in VALID_SIZES:
             size = DEFAULT_SIZE
 
+        # DALL-E 3 hard API limit is 4000 chars — truncate at word boundary
+        _PROMPT_MAX = 4000
+        if len(prompt) > _PROMPT_MAX:
+            prompt = prompt[:_PROMPT_MAX].rsplit(" ", 1)[0]
+            logger.warning("Prompt truncated to %d chars for DALL-E 3", _PROMPT_MAX)
+
         dalle_quality: Literal["standard", "hd"] = (
             "hd" if quality == "high" else "standard"
         )

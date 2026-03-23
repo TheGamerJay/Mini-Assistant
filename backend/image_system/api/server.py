@@ -938,12 +938,6 @@ async def generate_image(req: GenerateRequest, request: Request):
         elif w > h:
             size = "1792x1024"
 
-    # DALL-E 3 has a 4000-char prompt limit — truncate gracefully at a word boundary
-    _DALLE_MAX = 4000
-    if len(clean_prompt) > _DALLE_MAX:
-        clean_prompt = clean_prompt[:_DALLE_MAX].rsplit(" ", 1)[0]
-        prompt_warnings.append("Prompt truncated to 4000 chars for DALL-E 3 compatibility.")
-
     dalle = DalleClient()
     try:
         image_b64 = await dalle.generate(clean_prompt, quality=quality, size=size)
