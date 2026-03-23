@@ -51,6 +51,7 @@ from .conversation_store import (
     load_conversation,
     save_message,
     trim_html_in_old_messages,
+    harvest_patterns_if_ready,
 )
 from ..brains.search_brain import search as _memory_search
 
@@ -3381,6 +3382,14 @@ async def autofix_stream(req: AutoFixRequest, request: Request):
                         _save_lesson(lesson["pattern"], lesson["root_cause"], lesson["fix"])
                 except Exception as _le:
                     logger.debug("[LessonMemory] extraction failed (non-fatal): %s", _le)
+
+            # Save build pattern when app passes clean — shared across all users
+            if all_clear and req.iteration == 1:
+                try:
+                    from ..brains.build_patterns import extract_and_save as _save_build_pattern
+                    _save_build_pattern(req.html, session_id=req.session_id)
+                except Exception as _bp_err:
+                    logger.debug("[BuildPatterns] non-fatal: %s", _bp_err)
 
             yield f"data: {_json.dumps({'done': True, 'meta': {'all_clear': all_clear, 'reply': reply}})}\n\n"
 

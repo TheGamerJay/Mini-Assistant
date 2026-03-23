@@ -62,6 +62,13 @@ def save_message(session_id: str, role: str, content: str) -> None:
         path.write_text(json.dumps(messages, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError as exc:
         logger.warning("conversation_store: could not save %s — %s", path.name, exc)
+        return
+
+    # Non-blocking pattern harvest when conversation grows long
+    try:
+        harvest_patterns_if_ready(session_id)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -126,3 +133,45 @@ def trim_html_in_old_messages(messages: list[dict]) -> list[dict]:
             result.append(msg)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Pattern harvesting — runs when conversation grows long
+# ---------------------------------------------------------------------------
+
+_HARVEST_THRESHOLD = 30  # harvest after this many messages in the session
+
+def harvest_patterns_if_ready(session_id: str) -> None:
+    """
+    When a session conversation reaches the harvest threshold, scan all
+    assistant HTML messages and save any successful build patterns to the
+    shared library. Called non-fatally after every save_message.
+
+    Only runs once per N messages (at threshold, then every 10 after).
+    """
+    messages = load_conversation(session_id)
+    count = len(messages)
+    if count < _HARVEST_THRESHOLD:
+        return
+    if (count - _HARVEST_THRESHOLD) % 10 != 0:
+        return  # only re-harvest every 10 messages after threshold
+
+    try:
+        from ..brains.build_patterns import extract_and_save as _save_pattern
+        harvested = 0
+        for msg in messages:
+            if msg.get("role") != "assistant":
+                continue
+            content = msg.get("content", "")
+            m = _HTML_FENCE_RE.search(content)
+            if m:
+                raw = re.sub(r'^```html\s*\n', '', m.group(0), flags=re.I)
+                raw = re.sub(r'\n```$', '', raw)
+                if len(raw) > 2000 and "[HTML code -" not in raw:
+                    if _save_pattern(raw, session_id=session_id):
+                        harvested += 1
+        if harvested:
+            logger.info("[ConversationStore] harvested %d patterns from session %s",
+                        harvested, session_id[:8])
+    except Exception as exc:
+        logger.debug("[ConversationStore] harvest non-fatal: %s", exc)

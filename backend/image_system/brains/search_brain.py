@@ -172,6 +172,19 @@ def _search_reflections(query_tokens: set[str], top_n: int = 2) -> list[str]:
 # Public API
 # ---------------------------------------------------------------------------
 
+def _search_build_patterns(query: str) -> list[str]:
+    """Search shared build patterns library — populated from successful builds across all users."""
+    try:
+        from .build_patterns import search_patterns, format_for_prompt
+        patterns = search_patterns(query, top_n=3)
+        if not patterns:
+            return []
+        block = format_for_prompt(patterns)
+        return [block] if block else []
+    except Exception:
+        return []
+
+
 def search(user_message: str, session_id: str | None = None) -> str:
     """
     Search all memory sources for content relevant to user_message.
@@ -204,7 +217,12 @@ def search(user_message: str, session_id: str | None = None) -> str:
     if past:
         sections.append(("Related past work", past))
 
-    # 5. Reflections
+    # 5. Shared build patterns (from all users' successful builds)
+    build_pats = _search_build_patterns(user_message)
+    if build_pats:
+        sections.append(("Shared build patterns library", build_pats))
+
+    # 6. Reflections
     refs = _search_reflections(query_tokens)
     if refs:
         sections.append(("Past decisions", refs))
