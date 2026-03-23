@@ -164,11 +164,13 @@ const ERROR_CAPTURE_SCRIPT = `<script>
 <\/script>`;
 
 /** Inject error capture into an HTML string */
+const FIT_CSS = `<style id="ma-fit">html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;}canvas{display:block;max-width:100%!important;}</style>`;
+
 function injectErrorCapture(html) {
   if (!html) return html;
-  if (html.includes('<head>')) return html.replace('<head>', '<head>' + ERROR_CAPTURE_SCRIPT);
-  if (html.includes('<body>')) return html.replace('<body>', ERROR_CAPTURE_SCRIPT + '<body>');
-  return ERROR_CAPTURE_SCRIPT + html;
+  if (html.includes('<head>')) return html.replace('<head>', '<head>' + ERROR_CAPTURE_SCRIPT + FIT_CSS);
+  if (html.includes('<body>')) return html.replace('<body>', ERROR_CAPTURE_SCRIPT + FIT_CSS + '<body>');
+  return ERROR_CAPTURE_SCRIPT + FIT_CSS + html;
 }
 
 /** Try to build a renderable HTML doc from code blocks */
@@ -437,7 +439,7 @@ function extractAppTitle(messages) {
   return 'Community App';
 }
 
-function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage, isStreaming = false, sessionId = null, onFixedHtml = null }) {
+function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage, isStreaming = false, sessionId = null, onFixedHtml = null, onDebugSummary = null }) {
   const { user } = useApp();
   const [key, setKey] = useState(0);
   const iframeRef = useRef(null);
@@ -663,6 +665,7 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
 
     let workingHtml = startHtml;
     let errors = [...iframeErrors];
+    const passLog = [];
 
     for (let pass = 1; pass <= MAX_AUTOFIX_ITERATIONS; pass++) {
       if (!fixingRef.current) break;
@@ -733,12 +736,14 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
         errors = [...iframeErrors]; // collect fresh errors from new render
       }
 
-      setFixLog(prev => [...prev, {
+      const passEntry = {
         pass,
         text: passError ? `Pass ${pass} error: ${passError}` : accumulated,
         allClear,
         fixed: !!newHtml,
-      }]);
+      };
+      passLog.push(passEntry);
+      setFixLog(prev => [...prev, passEntry]);
 
       if (allClear || passError) break;
       if (!newHtml) break; // Claude found nothing to fix — treat as all clear
@@ -746,6 +751,8 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
 
     // Notify parent with final code so it can add to chat history
     if (onFixedHtml && workingHtml !== startHtml) onFixedHtml(workingHtml);
+    // Post debug summary to chat
+    if (onDebugSummary && passLog.length > 0) onDebugSummary(passLog);
 
     // Remount iframe so fixed code runs from a clean state (clears stale JS)
     if (workingHtml !== startHtml) setKey(k => k + 1);
@@ -753,7 +760,7 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
     fixingRef.current = false;
     setFixing(false);
     setLiveToken('');
-  }, [fixing, isStreaming, html, currentFixHtml, iframeErrors, sessionId, onFixedHtml]);
+  }, [fixing, isStreaming, html, currentFixHtml, iframeErrors, sessionId, onFixedHtml, onDebugSummary]);
 
   // Build the srcDoc — inject error capture into every render
   const srcDoc = useMemo(() => {
@@ -818,7 +825,13 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
               {iframeErrors.length} error{iframeErrors.length > 1 ? 's' : ''}
             </span>
           )}
-          {isAllClear && (
+          {fixing && (
+            <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-violet-500/20 text-violet-300 text-[9px] flex items-center gap-1">
+              <RefreshCw size={7} className="animate-spin" />
+              debug {fixIteration}/{MAX_AUTOFIX_ITERATIONS}
+            </span>
+          )}
+          {isAllClear && !fixing && (
             <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[9px]">
               ✅ all clear
             </span>
@@ -859,7 +872,7 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
           onClick={handleShare}
           disabled={shareLoading || isStreaming}
           className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 border border-cyan-500/20 transition-all disabled:opacity-40"
-          title="Share this app — anyone gets the game, not the code"
+          title="Deploy your app as a shareable live link"
         >
           {shareLoading
             ? <RefreshCw size={10} className="animate-spin" />
@@ -1094,8 +1107,8 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
         .ma-cursor::after { content:'▋'; animation: ma-blink 1s step-end infinite; margin-left:2px; }
       `}</style>
 
-      {/* Auto-fix overlay — shown while fixing or when log exists */}
-      {(fixing || fixLog.length > 0) && (
+      {/* Auto-fix overlay — REMOVED: debug output now goes to chat via onDebugSummary */}
+      {false && (fixing || fixLog.length > 0) && (
         <div
           className="absolute inset-x-0 top-[41px] z-10 border-b border-violet-500/20 p-3 space-y-2 max-h-[55%] overflow-y-auto"
           style={{
@@ -1601,7 +1614,7 @@ const TABS = [
   { id: 'tasks',   label: 'Tasks',   icon: ListTodo },
 ];
 
-function RightPanel({ messages = [], streamingText = null, open, onClose, previewImage = null, onClearImage, activeTab = null, sessionId = null, onFixedHtml = null, onRestoreCode = null }) {
+function RightPanel({ messages = [], streamingText = null, open, onClose, previewImage = null, onClearImage, activeTab = null, sessionId = null, onFixedHtml = null, onRestoreCode = null, onDebugSummary = null }) {
   const [tab, setTab] = useState('preview');
   const { isSubscribed } = useApp();
   const codeBlocks = useMemo(() => getLatestCode(messages, streamingText), [messages, streamingText]);
@@ -1653,7 +1666,7 @@ function RightPanel({ messages = [], streamingText = null, open, onClose, previe
 
       {/* Body */}
       <div className="flex-1 overflow-hidden">
-        {tab === 'preview' && <PreviewPane blocks={codeBlocks} messages={messages} previewImage={previewImage} onClearImage={onClearImage} isStreaming={!!streamingText} sessionId={sessionId} onFixedHtml={onFixedHtml} />}
+        {tab === 'preview' && <PreviewPane blocks={codeBlocks} messages={messages} previewImage={previewImage} onClearImage={onClearImage} isStreaming={!!streamingText} sessionId={sessionId} onFixedHtml={onFixedHtml} onDebugSummary={onDebugSummary} />}
         {tab === 'code'    && isSubscribed && <CodeViewer  blocks={codeBlocks} />}
         {tab === 'files'   && isSubscribed && <FilesPane   blocks={codeBlocks} />}
         {tab === 'diff'    && isSubscribed && <DiffPane    messages={messages} onRestoreCode={onRestoreCode} />}
