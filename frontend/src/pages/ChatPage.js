@@ -108,16 +108,62 @@ function LoadingBubble() {
   );
 }
 
+/** Live code-terminal shown while the app builder streams */
+function BuildingTerminal({ codeText, linesBuilt }) {
+  const termRef = useRef(null);
+
+  // Grab the last 5 non-empty lines of code as they arrive
+  const liveLines = codeText
+    .split('\n')
+    .filter(l => l.trim())
+    .slice(-5);
+
+  // Auto-scroll the terminal to the bottom on every update
+  useEffect(() => {
+    if (termRef.current) termRef.current.scrollTop = termRef.current.scrollHeight;
+  });
+
+  return (
+    <div className="rounded-lg border border-cyan-500/20 bg-[#0a0b14] overflow-hidden w-full">
+      {/* Title bar */}
+      <div className="flex items-center gap-2 px-3 py-1.5 bg-[#0f1120] border-b border-white/[0.05]">
+        <span className="inline-block w-0.5 h-3 bg-cyan-400 animate-pulse" />
+        <span className="text-[10px] text-cyan-400 font-mono font-medium flex-1">building app…</span>
+        <span className="text-[10px] text-slate-600 font-mono">{linesBuilt} lines</span>
+      </div>
+      {/* Scrolling code lines */}
+      <div ref={termRef} className="px-3 py-2 space-y-0.5 overflow-hidden" style={{ maxHeight: 90 }}>
+        {liveLines.map((line, i) => {
+          const isLast = i === liveLines.length - 1;
+          // Simple syntax-aware colouring
+          const colored =
+            /^\s*(\/\/|\/\*)/.test(line) ? 'text-slate-600' :
+            /^\s*(function|const|let|var|if|for|while|return|class|import|export|async|await)\b/.test(line) ? 'text-violet-400' :
+            /^\s*[\w-]+\s*[:=]/.test(line) ? 'text-cyan-300' :
+            /[<>{}]/.test(line) ? 'text-amber-300/70' :
+            'text-slate-400';
+          return (
+            <div key={i} className={`text-[11px] font-mono leading-5 truncate ${isLast ? 'text-white' : colored} transition-colors`}>
+              {line}
+              {isLast && <span className="inline-block w-0.5 h-3 bg-cyan-400 ml-0.5 align-middle animate-pulse" />}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /** Blinking cursor appended while streaming */
 function StreamingBubble({ text }) {
-  // Once the model starts outputting an HTML app block, hide the raw code
-  // and show a compact building indicator instead.
+  // Detect build start: either a ```html fence OR raw <!DOCTYPE html> (Claude sometimes skips the fence)
   const htmlFenceIdx = text ? text.indexOf('```html') : -1;
-  const isBuildingApp = htmlFenceIdx !== -1;
-  const preCodeText = isBuildingApp ? text.slice(0, htmlFenceIdx).trim() : null;
-
-  // Count lines generated so far (rough progress indicator)
-  const linesBuilt = isBuildingApp ? text.slice(htmlFenceIdx).split('\n').length : 0;
+  const rawHtmlIdx   = text ? text.search(/<!DOCTYPE\s+html/i) : -1;
+  const buildIdx = htmlFenceIdx !== -1 ? htmlFenceIdx : rawHtmlIdx;
+  const isBuildingApp = buildIdx !== -1;
+  const preCodeText = isBuildingApp ? text.slice(0, buildIdx).trim() : null;
+  const codeText = isBuildingApp ? text.slice(buildIdx) : '';
+  const linesBuilt = codeText.split('\n').length;
 
   return (
     <div className="flex items-start gap-3 msg-enter">
@@ -125,15 +171,11 @@ function StreamingBubble({ text }) {
         <img src="/Logo.png" alt="Mini Assistant" className="w-full h-full object-contain"
           onError={e => { e.target.style.display = 'none'; }} />
       </div>
-      <div className="max-w-[92%] sm:max-w-[82%] px-3 sm:px-5 py-3 sm:py-4 rounded-2xl rounded-tl-sm border bg-[#151520] border-white/5 text-sm leading-relaxed text-slate-200">
+      <div className="max-w-[92%] sm:max-w-[82%] px-3 sm:px-5 py-3 sm:py-4 rounded-2xl rounded-tl-sm border bg-[#151520] border-white/5 text-sm leading-relaxed text-slate-200 w-full">
         {isBuildingApp ? (
           <div className="flex flex-col gap-2">
-            {preCodeText && <span className="whitespace-pre-wrap">{preCodeText}</span>}
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-cyan-500/20 bg-cyan-500/5">
-              <span className="inline-block w-0.5 h-3.5 bg-cyan-400 animate-pulse" />
-              <span className="text-xs text-cyan-300 font-medium">Building your app…</span>
-              <span className="text-[10px] text-slate-500 ml-auto">{linesBuilt} lines</span>
-            </div>
+            {preCodeText && <span className="whitespace-pre-wrap text-slate-300">{preCodeText}</span>}
+            <BuildingTerminal codeText={codeText} linesBuilt={linesBuilt} />
           </div>
         ) : (
           <span className="whitespace-pre-wrap">

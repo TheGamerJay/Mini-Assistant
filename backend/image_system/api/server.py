@@ -2496,7 +2496,12 @@ async def chat_stream(req: ChatRequest, request: Request):
                         _APP_BUILDER_CODING_STANDARDS +
                         "\n\n## BUILD IMMEDIATELY\n"
                         "Build or update the complete working app right now. "
-                        "No questions. Output the full HTML/CSS/JS as a single ```html code block. "
+                        "No questions. "
+                        "IMPORTANT: You MUST wrap the entire HTML/CSS/JS in a fenced code block that starts with exactly:\n"
+                        "```html\n"
+                        "and ends with:\n"
+                        "```\n"
+                        "Do NOT output <!DOCTYPE html> or any HTML without first writing the ```html fence. "
                         "After the closing ``` write: "
                         "'Here\\'s what I built! What would you like to change?\\n1. ...\\n2. ...\\n3. ...'"
                     )
@@ -2518,7 +2523,12 @@ async def chat_stream(req: ChatRequest, request: Request):
                         _APP_BUILDER_CODING_STANDARDS +
                         "\n\n## BUILD NOW — USER ANSWERED YOUR QUESTIONS\n"
                         "The user has answered your questions. Build the complete app immediately.\n"
-                        "Output the full HTML/CSS/JS as a single ```html code block. No more questions.\n"
+                        "IMPORTANT: You MUST wrap the entire HTML/CSS/JS in a fenced code block that starts with exactly:\n"
+                        "```html\n"
+                        "and ends with:\n"
+                        "```\n"
+                        "Do NOT output <!DOCTYPE html> or any HTML without first writing the ```html fence. "
+                        "No more questions.\n"
                         "After the closing ``` write: "
                         "'Here\\'s what I built! What would you like to change?\\n1. ...\\n2. ...\\n3. ...'"
                     )

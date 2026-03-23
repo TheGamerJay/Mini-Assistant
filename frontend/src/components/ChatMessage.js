@@ -279,6 +279,21 @@ function renderText(text) {
 // ---------------------------------------------------------------------------
 function renderContent(text) {
   if (!text) return null;
+
+  // ── Fast path: raw HTML app (no code fence) ────────────────────────────
+  // Claude sometimes outputs <!DOCTYPE html> directly without a ```html wrapper.
+  // Detect this and show the AppBuilderCard so the preview + card still work.
+  const rawHtmlIdx = text.search(/<!DOCTYPE\s+html/i);
+  if (rawHtmlIdx !== -1 && text.length > 300) {
+    const beforeHtml = text.slice(0, rawHtmlIdx).trim();
+    const htmlCode   = text.slice(rawHtmlIdx);
+    return [
+      beforeHtml ? <React.Fragment key="pre">{renderText(beforeHtml)}</React.Fragment> : null,
+      <AppBuilderCard key="app" code={htmlCode} />,
+    ].filter(Boolean);
+  }
+
+  // ── Fenced code blocks path ────────────────────────────────────────────
   const fenceRe = /```([^\n]*)\n([\s\S]*?)```/g;
   const parts = []; let lastIdx = 0; let match; let key = 0;
   while ((match = fenceRe.exec(text)) !== null) {

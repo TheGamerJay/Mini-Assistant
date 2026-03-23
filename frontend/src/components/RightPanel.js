@@ -51,6 +51,16 @@ function extractPartialBlock(streamingText) {
   return [{ lang, code }];
 }
 
+/** Detect raw HTML (no code fence) — Claude sometimes skips the ```html wrapper */
+function extractRawHtml(content) {
+  if (!content) return [];
+  const idx = content.search(/<!DOCTYPE\s+html/i);
+  if (idx !== -1 && content.length > 300) {
+    return [{ lang: 'html', code: content.slice(idx) }];
+  }
+  return [];
+}
+
 /** Find the latest code — live stream first, then last completed assistant message */
 function getLatestCode(messages, streamingText) {
   // Live stream takes priority — extract as tokens arrive
@@ -61,6 +71,9 @@ function getLatestCode(messages, streamingText) {
     // Fall back to partial block (fence opened, closing ``` not yet streamed)
     const partial = extractPartialBlock(streamingText);
     if (partial.length > 0) return partial;
+    // Last resort: raw HTML without a fence
+    const raw = extractRawHtml(streamingText);
+    if (raw.length > 0) return raw;
   }
   // Fall back to last completed assistant message with code
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -68,6 +81,9 @@ function getLatestCode(messages, streamingText) {
     if (msg.role !== 'assistant') continue;
     const blocks = extractCodeBlocks(msg.content);
     if (blocks.length > 0) return blocks;
+    // Also try raw HTML fallback for messages without fences
+    const raw = extractRawHtml(msg.content);
+    if (raw.length > 0) return raw;
   }
   return [];
 }
