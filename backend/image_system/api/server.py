@@ -2488,10 +2488,24 @@ async def chat_stream(req: ChatRequest, request: Request):
             # Local models stay for simple chat (cost control).
 
             # Convert history to Claude message format (filter system msgs)
+            # For build/patch turns: keep last 8 turns but strip large HTML code blocks
+            # from older turns (keep only the most recent code for context efficiency).
+            # The latest assistant message with code is kept intact so Claude can patch it.
             _c_msgs = []
-            for _hm in history_msgs:
+            _raw_history = [m for m in history_msgs if m.get("role") in ("user", "assistant") and m.get("content")]
+            _latest_code_idx = None
+            for _i in range(len(_raw_history) - 1, -1, -1):
+                if "```html" in _raw_history[_i].get("content", "") or "<!DOCTYPE" in _raw_history[_i].get("content", ""):
+                    _latest_code_idx = _i
+                    break
+            for _i, _hm in enumerate(_raw_history[-8:]):
                 _hr, _hc = _hm.get("role"), _hm.get("content", "")
-                if _hr in ("user", "assistant") and _hc:
+                # Strip large HTML from older messages — only keep the most recent code intact
+                _abs_i = len(_raw_history) - 8 + _i if len(_raw_history) > 8 else _i
+                if _abs_i != _latest_code_idx and ("```html" in _hc or "<!DOCTYPE" in _hc) and len(_hc) > 500:
+                    _hc = _re.sub(r"```html[\s\S]*?```", "[previous app code — see latest version above]", _hc)
+                    _hc = _re.sub(r"<!DOCTYPE[\s\S]{200,}", "[previous app code — see latest version above]", _hc)
+                if _hc.strip():
                     _c_msgs.append({"role": _hr, "content": _hc})
 
             # Inject images into last user message as multipart content

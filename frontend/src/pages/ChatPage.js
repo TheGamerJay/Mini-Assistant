@@ -188,14 +188,13 @@ function CodeScanner({ existingCode }) {
   const allLines = existingCode ? existingCode.split('\n').filter(l => l.trim()) : [];
   const total = allLines.length;
 
-  // Advance scan line every 110ms (forward pass, not looping — gives real progress feel)
+  // Scan forward then loop back — keeps looking alive even if Claude takes a long time
   useEffect(() => {
     if (!total) return;
-    const t = setInterval(() => setScanLine(n => Math.min(n + 1, total - 1)), 110);
+    const t = setInterval(() => setScanLine(n => (n + 1) % total), 110);
     return () => clearInterval(t);
   }, [total]);
 
-  // Track elapsed seconds so we can reassure the user it's actually working
   useEffect(() => {
     const t = setInterval(() => setElapsed(s => s + 1), 1000);
     return () => clearInterval(t);
@@ -203,13 +202,15 @@ function CodeScanner({ existingCode }) {
 
   if (!total) return null;
 
-  const progress = Math.round((scanLine / Math.max(total - 1, 1)) * 100);
+  // Progress bar: one full pass = 100%, then wraps back
+  const progress = Math.round(((scanLine + 1) / total) * 100);
 
   const statusLabel =
-    elapsed < 6  ? 'scanning code…' :
-    elapsed < 14 ? 'still on it…'   :
-    elapsed < 24 ? 'almost there…'  :
-                   'complex fix, working…';
+    elapsed < 6  ? 'scanning code…'       :
+    elapsed < 14 ? 'digging in…'           :
+    elapsed < 25 ? 'found something…'      :
+    elapsed < 40 ? 'fixing it now…'        :
+                   'almost done, hang on…';
 
   // Show 4 lines around the scan cursor
   const win = [scanLine - 1, scanLine, scanLine + 1, scanLine + 2]
