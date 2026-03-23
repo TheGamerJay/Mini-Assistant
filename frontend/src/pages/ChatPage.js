@@ -80,7 +80,10 @@ function ImageLimitModal({ onClose, onUpgrade }) {
 /** Detect if a message looks like an image generation request */
 function isImageIntent(text) {
   if (!text) return false;
-  return /\b(draw|paint|generate|create|make|render|design|illustrate|sketch|produce)\b.{0,50}\b(image|photo|picture|illustration|artwork|portrait|landscape|anime|realistic|wallpaper|avatar|banner|logo|thumbnail)\b|\b(image|picture|photo)\s+of\b|\banime\b|\bdigital art\b|\bphoto realistic\b/i.test(text);
+  // Action verb + subject ("generate an image of...")
+  if (/\b(draw|paint|generate|create|make|render|design|illustrate|sketch|produce)\b.{0,50}\b(image|photo|picture|illustration|artwork|portrait|landscape|anime|realistic|wallpaper|avatar|banner|logo|thumbnail)\b|\b(image|picture|photo)\s+of\b|\banime\b|\bdigital art\b|\bphoto realistic\b/i.test(text)) return true;
+  // Pure descriptive prompt — quality/style keywords used in image generation
+  return /\b(8k|4k|ultra[\s-]?detailed|masterpiece|cinematic lighting|volumetric light|photorealistic|hyper[\s-]?realistic|concept art|digital painting|unreal engine|octane render|artstation|highly detailed|studio lighting|depth of field|bokeh|ray tracing|smooth anatomy|realistic proportions|full.?body shot|head[\s-]to[\s-]toe)\b/i.test(text);
 }
 
 /** Detect if a message/prompt suggests app-building intent */

@@ -165,12 +165,24 @@ _DEBUGGING = re.compile(
     re.IGNORECASE,
 )
 
-# Image generation
+# Image generation — action verb + subject
 _IMG_GEN = re.compile(
     r"\b(generate|create|draw|make|paint|render|produce|design|sketch|illustrate)\b"
     r".{0,50}"
     r"\b(image|picture|photo|artwork|art|illustration|logo|icon|wallpaper|poster|"
     r"banner|thumbnail|hero image|splash|background|portrait|landscape|concept art)\b",
+    re.IGNORECASE,
+)
+
+# Image generation — pure descriptive / prompt-style input with quality/style keywords
+# Catches direct prompts like "A woman diving through a sunset sky, 8k, masterpiece"
+_IMG_GEN_STYLE = re.compile(
+    r"\b(8k|4k|ultra[\s\-]?detailed|masterpiece|cinematic lighting|volumetric light|"
+    r"photorealistic|hyper[\s\-]?realistic|concept art|digital painting|unreal engine|"
+    r"octane render|artstation|highly detailed|studio lighting|depth of field|"
+    r"bokeh|ray tracing|subsurface scattering|ambient occlusion|"
+    r"smooth anatomy|realistic proportions|stylized elegance|"
+    r"full.?body shot|head[\s\-]to[\s\-]toe)\b",
     re.IGNORECASE,
 )
 
@@ -240,7 +252,8 @@ def _detect_intent(message: str) -> tuple[str, float]:
         (_3D_ASSET,    "3d_asset_generation",     0.90),
         (_IMG_ANALYSIS,"image_analysis",           0.91),
         (_DEBUGGING,   "debugging",                0.92),
-        (_IMG_GEN,     "image_generate",           0.88),
+        (_IMG_GEN,       "image_generate",           0.88),
+        (_IMG_GEN_STYLE, "image_generate",           0.84),
         (_APP_BUILDER, "app_builder",              0.85),
         (_CODE,        "code_runner",              0.82),
         (_SEARCH,      "web_search",               0.84),
