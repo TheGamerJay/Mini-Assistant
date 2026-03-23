@@ -508,6 +508,7 @@ const TABS = [
 
 function RightPanel({ messages = [], streamingText = null, open, onClose, previewImage = null, onClearImage, activeTab = null }) {
   const [tab, setTab] = useState('preview');
+  const { isSubscribed } = useApp();
   const codeBlocks = useMemo(() => getLatestCode(messages, streamingText), [messages, streamingText]);
 
   // Auto-switch to preview when a new image arrives
@@ -520,6 +521,15 @@ function RightPanel({ messages = [], streamingText = null, open, onClose, previe
     if (activeTab) setTab(activeTab);
   }, [activeTab]);
 
+  // Free users can only see Preview and Tasks
+  const CODE_TABS = new Set(['code', 'files', 'diff']);
+  const visibleTabs = isSubscribed ? TABS : TABS.filter(t => !CODE_TABS.has(t.id));
+
+  // If free user somehow ends up on a locked tab, bounce to preview
+  useEffect(() => {
+    if (!isSubscribed && CODE_TABS.has(tab)) setTab('preview');
+  }, [isSubscribed, tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!open) return null;
 
   return (
@@ -527,9 +537,15 @@ function RightPanel({ messages = [], streamingText = null, open, onClose, previe
       {/* Header */}
       <div className="flex items-center h-10 px-2 border-b border-white/[0.06] flex-shrink-0">
         <div className="flex items-center gap-0.5 flex-1 overflow-x-auto">
-          {TABS.map(t => (
+          {visibleTabs.map(t => (
             <TabBtn key={t.id} {...t} active={tab === t.id} onClick={setTab} />
           ))}
+          {/* Lock badge — shown to free users so they know code tabs exist */}
+          {!isSubscribed && (
+            <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] text-amber-400/70 border border-amber-400/20 bg-amber-400/5 font-mono flex-shrink-0">
+              PRO
+            </span>
+          )}
         </div>
         <button
           onClick={onClose}
@@ -543,9 +559,9 @@ function RightPanel({ messages = [], streamingText = null, open, onClose, previe
       {/* Body */}
       <div className="flex-1 overflow-hidden">
         {tab === 'preview' && <PreviewPane blocks={codeBlocks} previewImage={previewImage} onClearImage={onClearImage} />}
-        {tab === 'code'    && <CodeViewer  blocks={codeBlocks} />}
-        {tab === 'files'   && <FilesPane   blocks={codeBlocks} />}
-        {tab === 'diff'    && <DiffPane    messages={messages} />}
+        {tab === 'code'    && isSubscribed && <CodeViewer  blocks={codeBlocks} />}
+        {tab === 'files'   && isSubscribed && <FilesPane   blocks={codeBlocks} />}
+        {tab === 'diff'    && isSubscribed && <DiffPane    messages={messages} />}
         {tab === 'tasks'   && <TasksPane />}
       </div>
     </div>

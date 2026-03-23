@@ -82,6 +82,7 @@ function tokenize(code, lang) {
 // ---------------------------------------------------------------------------
 function AppBuilderCard({ code }) {
   const [copied, setCopied] = useState(false);
+  const { isSubscribed } = useApp();
   const lineCount = code.split('\n').length;
   return (
     <div className="my-3 rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 flex items-center gap-3">
@@ -90,14 +91,18 @@ function AppBuilderCard({ code }) {
         <p className="text-xs text-cyan-300 font-medium">App built</p>
         <p className="text-[10px] text-slate-500 mt-0.5">{lineCount} lines · open the Preview tab →</p>
       </div>
-      <button
-        onClick={() => { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1800); }}
-        className="flex items-center gap-1 text-[10px] font-mono text-slate-500 hover:text-slate-300 transition-colors"
-        title="Copy code"
-      >
-        {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
-        {copied ? 'Copied' : 'Copy'}
-      </button>
+      {isSubscribed ? (
+        <button
+          onClick={() => { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1800); }}
+          className="flex items-center gap-1 text-[10px] font-mono text-slate-500 hover:text-slate-300 transition-colors"
+          title="Copy code"
+        >
+          {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      ) : (
+        <span className="text-[9px] text-amber-400/60 border border-amber-400/20 bg-amber-400/5 px-1.5 py-0.5 rounded font-mono">PRO</span>
+      )}
     </div>
   );
 }
