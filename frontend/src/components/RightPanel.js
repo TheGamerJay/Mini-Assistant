@@ -545,42 +545,162 @@ function PreviewPane({ blocks, previewImage = null, onClearImage, isStreaming = 
         </button>
       </div>
 
+      {/* Debug overlay animations */}
+      <style>{`
+        @keyframes ma-slide-up {
+          from { opacity: 0; transform: translateY(10px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes ma-wave {
+          0%, 60%, 100% { transform: translateY(0); }
+          30% { transform: translateY(-5px); }
+        }
+        @keyframes ma-shimmer {
+          0%   { background-position: -200% center; }
+          100% { background-position:  200% center; }
+        }
+        @keyframes ma-scan {
+          0%   { top: 0%; opacity: 0; }
+          5%   { opacity: 1; }
+          95%  { opacity: 1; }
+          100% { top: 100%; opacity: 0; }
+        }
+        @keyframes ma-blink { 0%,100%{opacity:1} 50%{opacity:0} }
+        @keyframes ma-pulse-glow {
+          0%,100% { box-shadow: 0 0 0 0 rgba(139,92,246,0.4), inset 0 0 0 0 rgba(139,92,246,0); }
+          50%     { box-shadow: 0 0 12px 2px rgba(139,92,246,0.25), inset 0 0 8px 0 rgba(139,92,246,0.05); }
+        }
+        @keyframes ma-border-pulse {
+          0%,100% { border-color: rgba(139,92,246,0.2); }
+          50%     { border-color: rgba(139,92,246,0.55); }
+        }
+        @keyframes ma-err-pulse {
+          0%,100% { border-color: rgba(239,68,68,0.2); }
+          50%     { border-color: rgba(239,68,68,0.5); }
+        }
+        .ma-slide-up { animation: ma-slide-up 0.28s cubic-bezier(.22,1,.36,1) forwards; }
+        .ma-shimmer  {
+          background: linear-gradient(90deg, transparent 0%, rgba(139,92,246,0.18) 50%, transparent 100%);
+          background-size: 200% 100%;
+          animation: ma-shimmer 1.8s linear infinite;
+        }
+        .ma-cursor::after { content:'▋'; animation: ma-blink 1s step-end infinite; margin-left:2px; }
+      `}</style>
+
       {/* Auto-fix overlay — shown while fixing or when log exists */}
       {(fixing || fixLog.length > 0) && (
-        <div className="absolute inset-x-0 top-[41px] z-10 bg-[#0b0d16]/95 border-b border-violet-500/20 p-3 space-y-2 max-h-[55%] overflow-y-auto">
-          <div className="flex items-center gap-2 mb-1">
-            <Zap size={11} className="text-violet-400 flex-shrink-0" />
-            <span className="text-[10px] font-mono text-violet-300 font-semibold uppercase tracking-widest">
+        <div
+          className="absolute inset-x-0 top-[41px] z-10 border-b border-violet-500/20 p-3 space-y-2 max-h-[55%] overflow-y-auto"
+          style={{
+            background: 'rgba(11,13,22,0.97)',
+            backdropFilter: 'blur(8px)',
+            animation: fixing ? 'ma-pulse-glow 2.5s ease-in-out infinite' : undefined,
+          }}
+        >
+          {/* Scanning line — only while active */}
+          {fixing && (
+            <div className="absolute inset-x-0 top-0 h-full overflow-hidden pointer-events-none" style={{ zIndex: 0 }}>
+              <div style={{
+                position: 'absolute', left: 0, right: 0, height: '2px',
+                background: 'linear-gradient(90deg, transparent, rgba(139,92,246,0.7), transparent)',
+                animation: 'ma-scan 2s ease-in-out infinite',
+              }} />
+            </div>
+          )}
+
+          {/* Header */}
+          <div className="relative flex items-center gap-2 mb-1" style={{ zIndex: 1 }}>
+            <Zap
+              size={11}
+              className="flex-shrink-0"
+              style={{
+                color: fixing ? '#a78bfa' : '#6d28d9',
+                filter: fixing ? 'drop-shadow(0 0 4px rgba(139,92,246,0.8))' : undefined,
+                animation: fixing ? 'ma-blink 2s ease-in-out infinite' : undefined,
+              }}
+            />
+            <span
+              className="text-[10px] font-mono font-semibold uppercase tracking-widest"
+              style={{
+                background: fixing
+                  ? 'linear-gradient(90deg, #c4b5fd, #818cf8, #c4b5fd)'
+                  : '#7c3aed',
+                backgroundSize: '200% 100%',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: fixing ? 'transparent' : undefined,
+                animation: fixing ? 'ma-shimmer 2s linear infinite' : undefined,
+              }}
+            >
               Debug Agent {fixing ? `— Pass ${fixIteration}/${MAX_AUTOFIX_ITERATIONS}` : '— Done'}
             </span>
             {fixing && (
-              <div className="flex gap-[3px] ml-auto">
-                {[0,1,2].map(i => (
-                  <div key={i} className="w-1 h-1 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+              <div className="flex items-end gap-[3px] ml-auto" style={{ height: 12 }}>
+                {[0, 1, 2].map(i => (
+                  <div
+                    key={i}
+                    style={{
+                      width: 4, height: 4, borderRadius: '50%',
+                      background: '#a78bfa',
+                      boxShadow: '0 0 6px rgba(167,139,250,0.8)',
+                      animation: `ma-wave 1.1s ease-in-out ${i * 0.18}s infinite`,
+                    }}
+                  />
                 ))}
               </div>
+            )}
+            {!fixing && fixLog.length > 0 && (
+              <span
+                className="ml-auto text-[9px] font-mono px-2 py-0.5 rounded-full"
+                style={{
+                  background: fixLog[fixLog.length-1]?.allClear
+                    ? 'rgba(16,185,129,0.15)' : 'rgba(139,92,246,0.15)',
+                  color: fixLog[fixLog.length-1]?.allClear ? '#34d399' : '#a78bfa',
+                  border: `1px solid ${fixLog[fixLog.length-1]?.allClear ? 'rgba(16,185,129,0.3)' : 'rgba(139,92,246,0.3)'}`,
+                }}
+              >
+                {fixLog[fixLog.length-1]?.allClear ? '✓ clean' : `${fixLog.length} pass${fixLog.length > 1 ? 'es' : ''}`}
+              </span>
             )}
           </div>
 
           {/* Completed passes */}
           {fixLog.map((log, i) => (
-            <div key={i} className={`rounded-lg p-2 border text-[10px] font-mono leading-relaxed ${
-              log.allClear
-                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
-                : log.fixed
-                  ? 'bg-violet-500/10 border-violet-500/15 text-slate-400'
-                  : 'bg-amber-500/10 border-amber-500/15 text-amber-300'
-            }`}>
+            <div
+              key={i}
+              className="ma-slide-up rounded-lg p-2 border text-[10px] font-mono leading-relaxed relative overflow-hidden"
+              style={{
+                animationDelay: `${i * 0.06}s`,
+                opacity: 0,
+                background: log.allClear
+                  ? 'rgba(16,185,129,0.08)' : log.fixed
+                  ? 'rgba(139,92,246,0.08)' : 'rgba(245,158,11,0.08)',
+                borderColor: log.allClear
+                  ? 'rgba(16,185,129,0.25)' : log.fixed
+                  ? 'rgba(139,92,246,0.2)' : 'rgba(245,158,11,0.2)',
+              }}
+            >
+              {/* Top accent line */}
+              <div style={{
+                position: 'absolute', top: 0, left: 0, right: 0, height: 1,
+                background: log.allClear
+                  ? 'linear-gradient(90deg, transparent, rgba(16,185,129,0.6), transparent)'
+                  : log.fixed
+                  ? 'linear-gradient(90deg, transparent, rgba(139,92,246,0.6), transparent)'
+                  : 'linear-gradient(90deg, transparent, rgba(245,158,11,0.6), transparent)',
+              }} />
               <div className="flex items-center gap-1.5 mb-1">
-                {log.allClear ? <CheckCircle size={10} className="text-emerald-400" /> :
-                 log.fixed ? <Zap size={10} className="text-violet-400" /> :
-                 <AlertTriangle size={10} className="text-amber-400" />}
-                <span className="font-semibold">Pass {log.pass}</span>
-                {log.allClear && <span className="text-emerald-400"> — All clear!</span>}
-                {log.fixed && !log.allClear && <span className="text-violet-400"> — Patched</span>}
-                {!log.fixed && !log.allClear && <span className="text-amber-400"> — No code output</span>}
+                {log.allClear
+                  ? <CheckCircle size={10} style={{ color: '#34d399', filter: 'drop-shadow(0 0 3px rgba(52,211,153,0.6))' }} />
+                  : log.fixed
+                  ? <Zap size={10} style={{ color: '#a78bfa', filter: 'drop-shadow(0 0 3px rgba(167,139,250,0.6))' }} />
+                  : <AlertTriangle size={10} style={{ color: '#fbbf24', filter: 'drop-shadow(0 0 3px rgba(251,191,36,0.6))' }} />}
+                <span style={{ color: log.allClear ? '#6ee7b7' : log.fixed ? '#c4b5fd' : '#fcd34d', fontWeight: 600 }}>
+                  Pass {log.pass}
+                </span>
+                {log.allClear && <span style={{ color: '#34d399' }}> — All clear!</span>}
+                {log.fixed && !log.allClear && <span style={{ color: '#a78bfa' }}> — Patched</span>}
+                {!log.fixed && !log.allClear && <span style={{ color: '#fbbf24' }}> — No output</span>}
               </div>
-              {/* Show first 2 lines of Claude's explanation */}
               <div className="text-slate-500 line-clamp-2">
                 {log.text.replace(/```html[\s\S]*?```/g, '[fixed code]').slice(0, 200)}
               </div>
@@ -588,21 +708,64 @@ function PreviewPane({ blocks, previewImage = null, onClearImage, isStreaming = 
           ))}
 
           {/* Live streaming of current pass */}
-          {fixing && liveToken && (
-            <div className="rounded-lg p-2 border border-violet-500/15 bg-[#13152a] text-[10px] font-mono text-slate-400 max-h-24 overflow-hidden">
-              <div className="text-violet-400 text-[9px] mb-1 uppercase tracking-widest">Analysing…</div>
-              <div className="line-clamp-4 whitespace-pre-wrap leading-relaxed">
-                {liveToken.replace(/```html[\s\S]*/g, '[writing fix…]').slice(0, 400)}
+          {fixing && (
+            <div
+              className="rounded-lg p-2 text-[10px] font-mono text-slate-400 max-h-28 overflow-hidden relative"
+              style={{
+                background: '#0d0f1e',
+                border: '1px solid',
+                animation: 'ma-border-pulse 1.8s ease-in-out infinite',
+              }}
+            >
+              {/* Shimmer overlay */}
+              <div className="ma-shimmer absolute inset-0 rounded-lg pointer-events-none" />
+              <div className="relative" style={{ zIndex: 1 }}>
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <div style={{
+                    width: 5, height: 5, borderRadius: '50%',
+                    background: '#818cf8',
+                    boxShadow: '0 0 8px rgba(129,140,248,0.9)',
+                    animation: 'ma-blink 1s ease-in-out infinite',
+                  }} />
+                  <span className="text-[9px] uppercase tracking-widest" style={{ color: '#818cf8' }}>
+                    {liveToken ? 'Analysing' : 'Scanning errors…'}
+                  </span>
+                </div>
+                <div className={`line-clamp-4 whitespace-pre-wrap leading-relaxed ${liveToken ? 'ma-cursor' : ''}`} style={{ color: '#94a3b8' }}>
+                  {liveToken
+                    ? liveToken.replace(/```html[\s\S]*/g, '[writing fix…]').slice(0, 400)
+                    : '…'}
+                </div>
               </div>
             </div>
           )}
 
           {/* Error list */}
           {iframeErrors.length > 0 && (
-            <div className="rounded-lg p-2 border border-red-500/15 bg-red-500/5 text-[9px] font-mono text-red-400 space-y-0.5">
-              <div className="text-[9px] uppercase tracking-widest text-red-500/70 mb-1">Live JS Errors</div>
+            <div
+              className="rounded-lg p-2 text-[9px] font-mono space-y-0.5"
+              style={{
+                background: 'rgba(239,68,68,0.05)',
+                border: '1px solid',
+                animation: fixing ? 'ma-err-pulse 1.8s ease-in-out infinite' : undefined,
+                borderColor: 'rgba(239,68,68,0.25)',
+                color: '#f87171',
+              }}
+            >
+              <div className="flex items-center gap-1.5 mb-1" style={{ color: 'rgba(239,68,68,0.6)' }}>
+                <div style={{
+                  width: 4, height: 4, borderRadius: '50%',
+                  background: '#ef4444',
+                  boxShadow: fixing ? '0 0 6px rgba(239,68,68,0.8)' : undefined,
+                  animation: fixing ? 'ma-blink 1s step-end infinite' : undefined,
+                }} />
+                <span className="uppercase tracking-widest">Live JS Errors</span>
+                <span className="ml-auto px-1 rounded-full" style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171' }}>
+                  {iframeErrors.length}
+                </span>
+              </div>
               {iframeErrors.slice(0, 5).map((e, i) => (
-                <div key={i} className="truncate">{e}</div>
+                <div key={i} className="truncate opacity-80">{e}</div>
               ))}
             </div>
           )}

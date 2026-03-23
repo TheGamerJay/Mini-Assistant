@@ -3,7 +3,7 @@
  * Main chat page. Transitions between HomeHero (no chat) and active conversation.
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { PanelRight, Download, ChevronDown, Zap, Star } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp, makeThumbnail, canGenerateImage } from '../context/AppContext';
@@ -412,6 +412,15 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
   const streamAccumRef    = useRef(''); // accumulates all streamed tokens — fallback if meta.reply is empty
   const compactingRef     = useRef(false); // prevents double-compaction while summarize is in-flight
 
+  // Context meter — estimate token usage from character counts (chars/4 ≈ tokens)
+  const CONTEXT_MAX_TOKENS = 32000; // threshold at which we compact
+  const contextPct = useMemo(() => {
+    if (!messages.length) return 0;
+    const chars = messages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
+    const tokens = Math.round(chars / 4);
+    return Math.min(100, Math.round((tokens / CONTEXT_MAX_TOKENS) * 100));
+  }, [messages]);
+
   // Comparison state — set when it's time for a showdown
   const [compareData, setCompareData]     = useState(null); // {replyA, modelA, replyB, modelB, nextMessages, chatId}
   const [compareLoading, setCompareLoading] = useState(false);
@@ -716,10 +725,13 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
           }
         }
 
-        // Auto-compact: when conversation hits 30 messages, summarize old ones
+        // Auto-compact: when context meter hits 100% (estimated token limit), summarize old ones
         const COMPACT_THRESHOLD = 30;
         const KEEP_RECENT = 8;
-        if (withFinal.length >= COMPACT_THRESHOLD && !compactingRef.current) {
+        const contextChars = withFinal.reduce((s, m) => s + (m.content?.length || 0), 0);
+        const contextTokenEst = Math.round(contextChars / 4);
+        const shouldCompact = (contextTokenEst >= CONTEXT_MAX_TOKENS) || (withFinal.length >= COMPACT_THRESHOLD);
+        if (shouldCompact && !compactingRef.current) {
           compactingRef.current = true;
           const toSummarize = withFinal.slice(0, withFinal.length - KEEP_RECENT);
           const toKeep = withFinal.slice(withFinal.length - KEEP_RECENT);
@@ -1018,6 +1030,47 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
 
         {/* Input footer */}
         <div className="flex-shrink-0 border-t border-white/5 px-4 md:px-10 lg:px-16 py-4 bg-[#0d0d12]">
+          {/* Context meter */}
+          {contextPct > 0 && (
+            <div className="mb-3 flex items-center gap-2">
+              <div className={`flex-1 relative h-[3px] rounded-full overflow-hidden ${contextPct >= 90 ? 'animate-pulse' : ''}`} style={{ background: 'rgba(255,255,255,0.05)' }}>
+                <div
+                  className="absolute left-0 top-0 h-full rounded-full transition-all duration-700"
+                  style={{
+                    width: `${contextPct}%`,
+                    background: contextPct >= 90
+                      ? 'linear-gradient(90deg, #f97316, #ef4444)'
+                      : contextPct >= 70
+                      ? 'linear-gradient(90deg, #eab308, #f97316)'
+                      : contextPct >= 40
+                      ? 'linear-gradient(90deg, #06b6d4, #6366f1)'
+                      : 'linear-gradient(90deg, #22d3ee, #818cf8)',
+                    boxShadow: contextPct >= 90
+                      ? '0 0 6px rgba(239,68,68,0.6)'
+                      : contextPct >= 70
+                      ? '0 0 6px rgba(234,179,8,0.5)'
+                      : '0 0 4px rgba(99,102,241,0.4)',
+                  }}
+                />
+              </div>
+              <span
+                className="text-[9px] font-mono tabular-nums flex-shrink-0"
+                style={{
+                  color: contextPct >= 90 ? '#f87171'
+                    : contextPct >= 70 ? '#fbbf24'
+                    : '#64748b',
+                }}
+              >
+                {contextPct}%
+                {contextPct >= 90 && compactingRef.current && (
+                  <span className="ml-1 opacity-70">compacting…</span>
+                )}
+                {contextPct >= 90 && !compactingRef.current && (
+                  <span className="ml-1 opacity-60">auto-compact soon</span>
+                )}
+              </span>
+            </div>
+          )}
           <div className="relative">
             <ChatInput
               variant="chat"
