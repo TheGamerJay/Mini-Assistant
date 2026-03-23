@@ -110,15 +110,37 @@ function LoadingBubble() {
 
 /** Blinking cursor appended while streaming */
 function StreamingBubble({ text }) {
+  // Once the model starts outputting an HTML app block, hide the raw code
+  // and show a compact building indicator instead.
+  const htmlFenceIdx = text ? text.indexOf('```html') : -1;
+  const isBuildingApp = htmlFenceIdx !== -1;
+  const preCodeText = isBuildingApp ? text.slice(0, htmlFenceIdx).trim() : null;
+
+  // Count lines generated so far (rough progress indicator)
+  const linesBuilt = isBuildingApp ? text.slice(htmlFenceIdx).split('\n').length : 0;
+
   return (
     <div className="flex items-start gap-3 msg-enter">
       <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 via-violet-500 to-violet-600 flex items-center justify-center overflow-hidden flex-shrink-0 mt-1">
         <img src="/Logo.png" alt="Mini Assistant" className="w-full h-full object-contain"
           onError={e => { e.target.style.display = 'none'; }} />
       </div>
-      <div className="max-w-[92%] sm:max-w-[82%] px-3 sm:px-5 py-3 sm:py-4 rounded-2xl rounded-tl-sm border bg-[#151520] border-white/5 text-sm leading-relaxed text-slate-200 whitespace-pre-wrap">
-        {text || <span className="text-slate-600 text-xs italic">Thinking…</span>}
-        <span className="inline-block w-0.5 h-3.5 bg-cyan-400 ml-0.5 align-middle animate-pulse" />
+      <div className="max-w-[92%] sm:max-w-[82%] px-3 sm:px-5 py-3 sm:py-4 rounded-2xl rounded-tl-sm border bg-[#151520] border-white/5 text-sm leading-relaxed text-slate-200">
+        {isBuildingApp ? (
+          <div className="flex flex-col gap-2">
+            {preCodeText && <span className="whitespace-pre-wrap">{preCodeText}</span>}
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-cyan-500/20 bg-cyan-500/5">
+              <span className="inline-block w-0.5 h-3.5 bg-cyan-400 animate-pulse" />
+              <span className="text-xs text-cyan-300 font-medium">Building your app…</span>
+              <span className="text-[10px] text-slate-500 ml-auto">{linesBuilt} lines</span>
+            </div>
+          </div>
+        ) : (
+          <span className="whitespace-pre-wrap">
+            {text || <span className="text-slate-600 text-xs italic">Thinking…</span>}
+            <span className="inline-block w-0.5 h-3.5 bg-cyan-400 ml-0.5 align-middle animate-pulse" />
+          </span>
+        )}
       </div>
     </div>
   );
@@ -235,6 +257,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
   const lastUserTextRef   = useRef('');
   const responseCountRef  = useRef(0); // increments per assistant response; compare triggers at multiples of 10
   const pendingMsgRef     = useRef(null); // queued message while a response is in-flight
+  const streamAccumRef    = useRef(''); // accumulates all streamed tokens — fallback if meta.reply is empty
   const compactingRef     = useRef(false); // prevents double-compaction while summarize is in-flight
 
   // Comparison state — set when it's time for a showdown
@@ -422,6 +445,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     // ── TEXT path: streaming ───────────────────────────────────────────────
     // Show a live-updating streaming bubble immediately
     setStreamingText('');
+    streamAccumRef.current = ''; // reset accumulator for this response
 
     const chatIdRef_local = chatId; // capture for callbacks
     const history = nextMessages.slice(0, -1).map(m => {
@@ -432,6 +456,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     await sendStream(text, sessionIdRef.current, history, imgs.length ? imgs : null, {
       vibeMode,
       onToken(token) {
+        streamAccumRef.current += token;
         setStreamingText(prev => (prev === null ? token : prev + token));
       },
 
@@ -491,7 +516,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         const _msgId = crypto.randomUUID();
         const finalMsg = {
           role: 'assistant', type: 'text',
-          content: meta.reply || '',
+          content: meta.reply || streamAccumRef.current || '',
           route_result: meta.route_result || null,
           model_used: meta.model_used || null,
           memory_stored: meta.memory_stored || [],
