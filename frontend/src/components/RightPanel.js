@@ -35,12 +35,32 @@ function extractCodeBlocks(content) {
   return blocks;
 }
 
+/**
+ * During live streaming the closing ``` never arrives yet.
+ * Grab whatever is after the opening ```html fence — even if incomplete —
+ * so the preview updates in real-time as tokens arrive.
+ */
+function extractPartialBlock(streamingText) {
+  // Match an opening fence (```html or ```) that has NOT closed yet
+  const openRe = /```([a-zA-Z0-9_+-]*)[ \t]*\r?\n([\s\S]+)$/;
+  const m = openRe.exec(streamingText);
+  if (!m) return [];
+  const lang = (m[1] || 'text').toLowerCase();
+  const code = m[2]; // partial — no trailing ``` yet
+  if (!code.trim()) return [];
+  return [{ lang, code }];
+}
+
 /** Find the latest code — live stream first, then last completed assistant message */
 function getLatestCode(messages, streamingText) {
   // Live stream takes priority — extract as tokens arrive
   if (streamingText) {
+    // Try complete blocks first (multiple code blocks in one message)
     const liveBlocks = extractCodeBlocks(streamingText);
     if (liveBlocks.length > 0) return liveBlocks;
+    // Fall back to partial block (fence opened, closing ``` not yet streamed)
+    const partial = extractPartialBlock(streamingText);
+    if (partial.length > 0) return partial;
   }
   // Fall back to last completed assistant message with code
   for (let i = messages.length - 1; i >= 0; i--) {
