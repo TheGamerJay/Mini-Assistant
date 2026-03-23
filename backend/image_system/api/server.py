@@ -2606,6 +2606,29 @@ async def chat_stream(req: ChatRequest, request: Request):
                     if _prefs_block:
                         _c_sys = _c_sys + _prefs_block
 
+            # ── Patch mode: reinforce the one rule at the top of the last message ─
+            # Claude reads the last user message right before generating.
+            # Stamping the rule there makes it the freshest thing in its context.
+            _is_patch_mode = (
+                _is_build_intent
+                and _has_prior_code
+                and not _is_explicit_rebuild
+                and not all_images
+            )
+            if _is_patch_mode and _c_msgs:
+                _patch_stamp = (
+                    "\U0001f6a8 PATCH MODE — CHANGE ONLY WHAT I ASKED FOR.\n"
+                    "Do NOT touch anything else in the code. One change. That's it.\n\n"
+                )
+                last_msg = _c_msgs[-1]
+                if isinstance(last_msg.get("content"), str):
+                    _c_msgs[-1] = {**last_msg, "content": _patch_stamp + last_msg["content"]}
+                elif isinstance(last_msg.get("content"), list):
+                    for _part in last_msg["content"]:
+                        if isinstance(_part, dict) and _part.get("type") == "text":
+                            _part["text"] = _patch_stamp + _part["text"]
+                            break
+
             try:
                 import anthropic as _am_lib
                 _ac = _am_lib.AsyncAnthropic(api_key=_api_key_claude)
