@@ -2622,13 +2622,13 @@ async def chat_stream(req: ChatRequest, request: Request):
             # Routes: text builds, image analysis, code debugging → Claude API.
             # Local models stay for simple chat (cost control).
 
-            # Convert history to Claude message format (filter system msgs).
-            # Send the last 8 turns with full content — never cut code from history.
-            # Claude needs the complete code to debug and patch accurately.
-            # The thinking budget handles complexity; don't trade quality for context savings.
+            # Convert history to Claude message format — send everything, full content.
+            # Quality over token cost: Claude needs the full conversation + full code
+            # to make accurate decisions. The 200k context window and extended thinking
+            # budget handle it. Never truncate.
             _c_msgs = []
             _raw_history = [m for m in history_msgs if m.get("role") in ("user", "assistant") and m.get("content")]
-            for _hm in _raw_history[-8:]:
+            for _hm in _raw_history:
                 _hr, _hc = _hm.get("role"), _hm.get("content", "")
                 if _hc.strip():
                     _c_msgs.append({"role": _hr, "content": _hc})
@@ -2853,7 +2853,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                 _ac_plain = _am_plain.AsyncAnthropic(api_key=_api_key_claude)
                 async with _ac_plain.messages.stream(
                     model="claude-sonnet-4-6",
-                    max_tokens=4096,
+                    max_tokens=8192,
                     system=_sys_prompt_stream,
                     messages=_c_msgs_plain,
                 ) as _cs_plain:
