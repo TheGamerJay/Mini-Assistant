@@ -7,7 +7,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   RotateCcw, Copy, Check, Volume2, VolumeX,
-  ThumbsUp, ThumbsDown, GitFork, Share2, MoreHorizontal, Clock, X, ChevronLeft, ChevronRight,
+  ThumbsUp, ThumbsDown, GitFork, Share2, MoreHorizontal, Clock, X, ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   Bookmark, PanelRight, Play, Loader2, Terminal, Monitor,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -78,30 +78,63 @@ function tokenize(code, lang) {
 }
 
 // ---------------------------------------------------------------------------
-// AppBuilderCard — compact badge replacing full HTML code in chat
+// AppBuilderCard — collapsible snippet showing truncated preview of all lines
+// Closed: each line truncated to ~40 chars. Expanded (Pro only): full code.
 // ---------------------------------------------------------------------------
+const SNIPPET_CHAR_LIMIT = 42;
+const COLLAPSED_LINES = 10;
 function AppBuilderCard({ code }) {
+  const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const { isSubscribed } = useApp();
-  const lineCount = code.split('\n').length;
+  const lines = code.split('\n');
+  const lineCount = lines.length;
+
+  // Truncated preview: first N lines, each clipped to SNIPPET_CHAR_LIMIT chars
+  const previewLines = lines.slice(0, COLLAPSED_LINES).map(l =>
+    l.length > SNIPPET_CHAR_LIMIT ? l.slice(0, SNIPPET_CHAR_LIMIT) + ' …' : l
+  );
+
   return (
-    <div className="my-3 rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 flex items-center gap-3">
-      <Monitor size={15} className="text-cyan-400 flex-shrink-0" />
-      <div className="flex-1 min-w-0">
-        <p className="text-xs text-cyan-300 font-medium">App built</p>
-        <p className="text-[10px] text-slate-500 mt-0.5">{lineCount} lines · open the Preview tab →</p>
+    <div className="my-3 rounded-xl border border-cyan-500/20 bg-[#0d0f1a] overflow-hidden">
+      {/* Header row */}
+      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-white/[0.06]">
+        <Monitor size={13} className="text-cyan-400 flex-shrink-0" />
+        <span className="text-xs text-cyan-300 font-medium flex-1">App built</span>
+        <span className="text-[10px] text-slate-600 font-mono">{lineCount} lines</span>
+        {isSubscribed ? (
+          <button
+            onClick={() => { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1800); }}
+            className="flex items-center gap-1 text-[10px] font-mono text-slate-500 hover:text-slate-300 transition-colors"
+            title="Copy code"
+          >
+            {copied ? <Check size={10} className="text-emerald-400" /> : <Copy size={10} />}
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        ) : (
+          <span className="text-[9px] text-amber-400/60 border border-amber-400/20 bg-amber-400/5 px-1.5 py-0.5 rounded font-mono">PRO</span>
+        )}
       </div>
-      {isSubscribed ? (
+
+      {/* Code preview */}
+      <pre className="px-3 py-2.5 text-[11px] leading-[1.7] font-mono text-slate-500 overflow-hidden select-none">
+        {expanded && isSubscribed
+          ? <span className="text-slate-300 select-text">{code}</span>
+          : previewLines.map((l, i) => <div key={i}>{l || ' '}</div>)
+        }
+        {!expanded && lineCount > COLLAPSED_LINES && (
+          <div className="text-slate-700 mt-0.5">… {lineCount - COLLAPSED_LINES} more lines</div>
+        )}
+      </pre>
+
+      {/* Expand / collapse — only for Pro */}
+      {isSubscribed && (
         <button
-          onClick={() => { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1800); }}
-          className="flex items-center gap-1 text-[10px] font-mono text-slate-500 hover:text-slate-300 transition-colors"
-          title="Copy code"
+          onClick={() => setExpanded(v => !v)}
+          className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] text-slate-500 hover:text-slate-300 border-t border-white/[0.06] hover:bg-white/[0.02] transition-colors"
         >
-          {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
-          {copied ? 'Copied' : 'Copy'}
+          {expanded ? <><ChevronUp size={11} /> Collapse</> : <><ChevronDown size={11} /> Expand full code</>}
         </button>
-      ) : (
-        <span className="text-[9px] text-amber-400/60 border border-amber-400/20 bg-amber-400/5 px-1.5 py-0.5 rounded font-mono">PRO</span>
       )}
     </div>
   );
