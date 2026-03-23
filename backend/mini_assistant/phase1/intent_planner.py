@@ -52,8 +52,9 @@ INTENTS = [
     "normal_chat",
     "web_search",
     "image_generate",
+    "image_edit",                 # modify an existing attached image (identity preserved)
     "image_analysis",
-    "image_reference_generate",   # analyze reference image → generate new via DALL-E
+    "image_reference_generate",   # use attached image as style reference → new generation
     "code_runner",
     "debugging",
     "planning",
@@ -69,6 +70,7 @@ INTENT_TO_EXECUTION: dict[str, str] = {
     "normal_chat":              "chat",
     "web_search":               "chat",                    # handled via search tool
     "image_generate":           "image_generation",
+    "image_edit":               "image_edit",              # modify existing image
     "image_analysis":           "image_analysis",
     "image_reference_generate": "image_reference_generate",# GPT-4o analyze → DALL-E generate
     "code_runner":              "coding",
@@ -85,6 +87,7 @@ _RESPONSE_MODES: dict[str, str] = {
     "normal_chat":              "chat",
     "web_search":               "research",
     "image_generate":           "builder",
+    "image_edit":               "builder",
     "image_analysis":           "debug",
     "image_reference_generate": "builder",
     "code_runner":              "builder",
@@ -301,6 +304,13 @@ def _build_tasks(intent: str) -> tuple[list, list]:
             {"id": "t2", "task": "format_answer",               "brain": "fast",      "depends_on": ["t1"]},
         ]
 
+    elif intent == "image_edit":
+        seq = [
+            {"id": "t1", "task": "analyse_identity_with_vision","brain": "vision",    "depends_on": []},
+            {"id": "t2", "task": "build_identity_preserving_prompt", "brain": "fast", "depends_on": ["t1"]},
+            {"id": "t3", "task": "apply_edit_with_dalle",       "brain": "image_gen", "depends_on": ["t2"]},
+        ]
+
     elif intent == "image_reference_generate":
         seq = [
             {"id": "t1", "task": "analyse_reference_image",     "brain": "vision",    "depends_on": []},
@@ -421,7 +431,8 @@ You are an intent classifier for an AI assistant. Given the user's message, \
 output EXACTLY ONE intent name from the list below — nothing else, no punctuation.
 
 Intents:
-  image_generate        — creating, drawing, painting, or rendering any image, photo, artwork, illustration, or visual
+  image_generate        — creating, drawing, painting, or rendering a NEW image with no existing reference
+  image_edit            — modifying an EXISTING image: change color, add/remove element, fix lighting, recolor, etc.
   image_analysis        — analyzing, describing, reading, or understanding an existing image or screenshot
   app_builder           — building a complete web app, mobile app, or software project
   code_runner           — writing, explaining, refactoring, or reviewing code snippets or functions
@@ -431,14 +442,17 @@ Intents:
   normal_chat           — general conversation, questions, opinions, or anything else
 
 Rules:
+- "turn him purple", "make it darker", "add wings", "fix the lighting", "recolor", "change X to Y" → image_edit
+- image_edit is ONLY valid when the user has provided an image to modify
 - Descriptive visual prompts (e.g. "A woman diving through a sunset sky, cinematic lighting, 8k") → image_generate
-- If the message contains technical quality terms (8k, masterpiece, cinematic, bokeh, volumetric) → image_generate
+- Quality terms (8k, masterpiece, cinematic, bokeh, volumetric) with no attached image → image_generate
+- When unsure between image_edit and image_generate and an image is present → prefer image_edit
 - When unsure, prefer normal_chat over wrong classification
 - Output only the intent name, lowercase, no extra text\
 """
 
 _VALID_LLM_INTENTS = frozenset({
-    "image_generate", "image_analysis", "app_builder",
+    "image_generate", "image_edit", "image_analysis", "app_builder",
     "code_runner", "debugging", "web_search", "planning", "normal_chat",
 })
 

@@ -1312,20 +1312,44 @@ async def chat(req: ChatRequest, request: Request):
         effective_msg = parsed_cmd.args if parsed_cmd.is_slash else clean_message
 
         # ── Phase 1 Step 2: Planner (ALWAYS RUNS FIRST) ────────────────────────
-        # If an image is attached, route to the correct intent based on message content
+        # If an image is attached, route to edit / reference-generate / analysis
         import re as _re_intent
-        _GENERATE_KW = _re_intent.compile(
-            r"\b(make|add|give|draw|generate|create|recreate|render|design|transform|"
-            r"change|turn|style|wearing|holding|show|put|place|set|cool|awesome|epic|"
-            r"badass|darker|brighter|angrier|fiercer|stronger|glowing|lightning|fire|"
-            r"flames|smoke|electric|neon|dramatic|intense|powerful|look)\b",
+        # Edit keywords — modify the EXACT same image, preserve identity
+        _EDIT_KW = _re_intent.compile(
+            r"\b(change|edit|modify|fix|adjust|recolor|replace|remove|enhance|improve|"
+            r"turn\s+(him|her|it|them|this|that)\b|make\s+(him|her|it|them|this|that)\b|"
+            r"darker|brighter|lighter|redder|bluer|greener|purpler|"
+            r"angrier|fiercer|stronger|calmer|sadder|happier|older|younger|"
+            r"add\s+(?!a\s+new|another)|give\s+(?:him|her|it|them))\b",
+            _re_intent.I,
+        )
+        # Reference-generate keywords — use image as style reference, create NEW image
+        _REF_GEN_KW = _re_intent.compile(
+            r"\b(draw|generate|create|recreate|render|design|reimagine|reinvent|"
+            r"in the style of|inspired by|wearing|holding|show|put|place)\b",
             _re_intent.I,
         )
         from mini_assistant.phase1.command_parser import ParsedCommand as _PC, SLASH_COMMANDS as _SC
         if attached_image_bytes and not (parsed_cmd and parsed_cmd.is_slash):
-            _wants_gen = bool(_GENERATE_KW.search(effective_msg)) if effective_msg else False
-            if _wants_gen:
-                # User wants a new image generated based on the reference
+            _wants_edit   = bool(_EDIT_KW.search(effective_msg))    if effective_msg else False
+            _wants_refgen = bool(_REF_GEN_KW.search(effective_msg)) if effective_msg else False
+            # Short prompt + image with no clear ref-gen keywords → treat as edit
+            _short_prompt = len((effective_msg or "").strip()) < 80
+            if _wants_edit or (_short_prompt and not _wants_refgen):
+                # Modify the attached image — preserve identity
+                logger.info("[MODEL ROUTER] image_edit detected (edit_kw=%s short=%s)", _wants_edit, _short_prompt)
+                parsed_cmd = _PC(
+                    raw=effective_msg,
+                    command="image_edit",
+                    args=effective_msg,
+                    intent_override="image_edit",
+                    is_slash=True,
+                    is_known=True,
+                    help_requested=False,
+                )
+            elif _wants_refgen:
+                # Generate new image inspired by the reference
+                logger.info("[MODEL ROUTER] image_reference_generate detected")
                 parsed_cmd = _PC(
                     raw=effective_msg,
                     command="image",
@@ -1558,8 +1582,64 @@ async def chat(req: ChatRequest, request: Request):
     _active_model = "claude-sonnet-4-6"
     logger.info("[MODEL ROUTER] chat → Claude %s", _active_model)
 
-    if execution_intent in ("image_generation", "image_edit"):
-        # Direct text-to-image via DALL-E 3 (no ComfyUI)
+    if execution_intent == "image_edit":
+        # ── TRUE IMAGE EDIT: analyze identity → build strict preservation prompt ──
+        logger.info("[MODEL ROUTER] image_edit → vision identity analysis + DALL-E 3")
+        # Step 1: extract exact identity from attached image
+        identity_desc = ""
+        if attached_image_bytes:
+            try:
+                vision = _get_vision()
+                identity_desc = await vision.analyze(
+                    attached_image_bytes,
+                    "Describe this image in precise detail for IDENTITY PRESERVATION. Include: "
+                    "exact subject appearance (face shape, hair color/style, eye color, skin tone, "
+                    "body proportions), every clothing item and accessory, pose and body language, "
+                    "art style (realistic/cartoon/anime/painterly), color palette, lighting direction "
+                    "and quality, background elements, and overall composition. "
+                    "Be extremely specific — this description will be used to recreate the EXACT same "
+                    "character/scene with only a small modification applied.",
+                )
+                logger.info("[MODEL ROUTER] identity analysis complete (%d chars)", len(identity_desc))
+            except Exception as _ve:
+                logger.warning("Vision identity analysis failed: %s", _ve)
+        # Step 2: build strict edit prompt
+        _edit_instruction = effective_msg.strip()
+        _edit_prompt = (
+            "Edit the provided image. Keep the exact same character, pose, proportions, "
+            "facial features, clothing, and composition completely unchanged.\n\n"
+        )
+        if identity_desc:
+            _edit_prompt += f"Character/scene identity to preserve:\n{identity_desc}\n\n"
+        _edit_prompt += (
+            f"ONLY apply this specific modification: {_edit_instruction}\n\n"
+            "STRICT RULES — do NOT: change the character's face, body shape, pose, clothing "
+            "(unless the modification explicitly requests it), or any element not mentioned. "
+            "Preserve art style, lighting, shading, and background unless the modification requires otherwise. "
+            "Identity preservation is the highest priority."
+        )
+        try:
+            from ..services.dalle_client import DalleClient
+            _dalle = DalleClient()
+            _b64 = await _dalle.generate(_edit_prompt)
+            try:
+                from mini_credits import log_image_generated as _log_img
+                await _log_img(request.headers.get("authorization"), request_id=getattr(req, "request_id", None))
+            except Exception:
+                pass
+            return {
+                "image_base64": _b64,
+                "reply": "Image edited.",
+                "intent": "image_edit",
+                "session_id": session_id,
+                "plan": phase1_plan.to_dict() if phase1_plan else {},
+            }
+        except Exception as exc:
+            logger.error("DALL-E image edit failed: %s", exc)
+            reply = f"Image generation failed: {exc}"
+
+    elif execution_intent == "image_generation":
+        # ── PURE TEXT-TO-IMAGE: no reference image ────────────────────────────
         logger.info("[MODEL ROUTER] image_generation → DALL-E 3")
         try:
             from ..services.dalle_client import DalleClient
@@ -1956,17 +2036,31 @@ async def chat_stream(req: ChatRequest, request: Request):
 
         # Image intents can't stream meaningfully — signal redirect to non-streaming endpoint
         import re as _re_stream
-        _GENERATE_KW_STREAM = _re_stream.compile(
-            r"\b(make|add|give|draw|generate|create|recreate|render|design|transform|"
-            r"change|turn|style|wearing|holding|show|put|place|set|cool|awesome|epic|"
-            r"badass|darker|brighter|angrier|fiercer|stronger|glowing|lightning|fire|"
-            r"flames|smoke|electric|neon|dramatic|intense|powerful|look)\b",
+        _EDIT_KW_STREAM = _re_stream.compile(
+            r"\b(change|edit|modify|fix|adjust|recolor|replace|remove|enhance|improve|"
+            r"turn\s+(?:him|her|it|them|this|that)\b|make\s+(?:him|her|it|them|this|that)\b|"
+            r"darker|brighter|lighter|sharper|blurrier|warmer|cooler|saturate|desaturate|"
+            r"add\s+(?!a\s+new|another)|give\s+(?:him|her|it|them)\b|"
+            r"angrier|fiercer|stronger|glowing|dramatic|intense|powerful)\b",
+            _re_stream.I,
+        )
+        _REF_GEN_KW_STREAM = _re_stream.compile(
+            r"\b(draw|generate|create|recreate|render|design|reimagine|reinvent|"
+            r"in the style of|inspired by|wearing|holding|show|put|place)\b",
             _re_stream.I,
         )
         _has_attached = bool(req.image_base64)
-        # If image attached + generation keywords → image_reference_generate (redirect)
-        if _has_attached and bool(_GENERATE_KW_STREAM.search(effective_msg or "")):
-            execution_intent = "image_reference_generate"
+        if _has_attached:
+            _msg_str = effective_msg or ""
+            _edit_match    = bool(_EDIT_KW_STREAM.search(_msg_str))
+            _ref_gen_match = bool(_REF_GEN_KW_STREAM.search(_msg_str))
+            _short_prompt  = len(_msg_str.strip()) < 80
+            # Ref-gen keywords (draw/create/generate/wearing…) → image_reference_generate
+            if _ref_gen_match:
+                execution_intent = "image_reference_generate"
+            # Edit keywords OR short prompt with image → preserve identity, apply edit
+            elif _edit_match or _short_prompt:
+                execution_intent = "image_edit"
         if execution_intent in ("image_generation", "image_edit", "image_reference_generate"):
             yield f"data: {_json.dumps({'done': True, 'meta': {'type': 'image_redirect'}})}\n\n"
             return
