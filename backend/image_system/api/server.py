@@ -1823,6 +1823,24 @@ async def chat(req: ChatRequest, request: Request):
         except Exception as exc:
             reply = _friendly_error(exc)
 
+    # ── Phase 2 QA Feedback Loop (runs before Critic when quality mode) ─────────
+    # Only active when ENABLE_QA_LOOP=true + CEO priority==quality + code intent.
+    # Fails silently — the original reply is always preserved on any error.
+    if reply and phase1_plan is not None and ceo_posture is not None:
+        try:
+            from mini_assistant.phase2.qa import should_run_qa, review as qa_review
+            if should_run_qa(execution_intent or "chat", ceo_posture.priority):
+                _qa = await qa_review(request=effective_msg, output=reply)
+                logger.info(
+                    "QA loop | approved=%s issues=%d qa_ms=%.1f",
+                    _qa["approved"], len(_qa["issues"]), _qa["qa_ms"],
+                )
+                if not _qa["approved"] and _qa["improved_output"]:
+                    logger.info("QA loop | applying improved output (%d chars)", len(_qa["improved_output"]))
+                    reply = _qa["improved_output"]
+        except Exception as _qa_err:
+            logger.warning("QA loop failed (non-fatal): %s", _qa_err)
+
     # ── Phase 1+2 Step 5: Critic + Composer ────────────────────────────────────
     if phase1_plan is not None:
         try:

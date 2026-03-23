@@ -24,8 +24,12 @@ Public surface:
 from .ceo        import assess as ceo_assess,  CEOPosture
 from .manager    import prepare as mgr_prepare, ManagerPacket, get_session_summary
 from .supervisor import Supervisor, SupervisorResult
+from .models     import MODEL_CONFIG, get_model
+from .router     import call_model
+from .qa         import review as qa_review, should_run_qa
 
 __all__ = [
+    # Phase 2 core
     "ceo_assess",
     "CEOPosture",
     "mgr_prepare",
@@ -33,4 +37,11 @@ __all__ = [
     "get_session_summary",
     "Supervisor",
     "SupervisorResult",
+    # Multi-model routing
+    "MODEL_CONFIG",
+    "get_model",
+    "call_model",
+    # QA feedback loop
+    "qa_review",
+    "should_run_qa",
 ]
