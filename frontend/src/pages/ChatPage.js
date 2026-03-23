@@ -448,18 +448,18 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     }
   }, [messages]);
 
-  // Proactive auto-compact: fires when context hits ≥95% without needing a new message
+  // Proactive auto-compact: fires when context hits ≥95%
+  // Depends on messages.length too so it retries after each new message if a previous attempt failed
   useEffect(() => {
-    const COMPACT_THRESHOLD = 30;
     const KEEP_RECENT = 8;
-    if (contextPct < 95 || compactingRef.current || messages.length < KEEP_RECENT + 2) return;
+    if (contextPct < 95 || compactingRef.current || messages.length < 4) return;
     compactingRef.current = true;
     setCompacting(true);
     const toSummarize = messages.slice(0, messages.length - KEEP_RECENT);
     const toKeep = messages.slice(messages.length - KEEP_RECENT);
     api.summarizeMessages(toSummarize)
       .then(data => {
-        if (!data.summary) return;
+        if (!data?.summary) return;
         const summaryMsg = { role: 'system', type: 'summary', content: data.summary, timestamp: Date.now(), _is_summary: true };
         const compacted = [summaryMsg, ...toKeep];
         setMessages(compacted);
@@ -469,7 +469,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
       .catch(() => {})
       .finally(() => { compactingRef.current = false; setCompacting(false); });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contextPct]);
+  }, [contextPct, messages.length]);
 
   // Comparison state — set when it's time for a showdown
   const [compareData, setCompareData]     = useState(null); // {replyA, modelA, replyB, modelB, nextMessages, chatId}
