@@ -2748,7 +2748,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                     thinking={"type": "enabled", "budget_tokens": _think_budget},
                     system=_c_sys,
                     messages=_c_msgs,
-                    betas=["interleaved-thinking-2025-05-14"],
+                    extra_headers={"anthropic-beta": "interleaved-thinking-2025-05-14"},
                 ) as _cs:
                     _ping_task = asyncio.create_task(asyncio.sleep(0))  # dummy
                     _last_ping = asyncio.get_event_loop().time()
@@ -2849,7 +2849,7 @@ If all pass: PASS.
                                     thinking={"type": "enabled", "budget_tokens": 8000},
                                     system=_fix_sys,
                                     messages=[{"role": "user", "content": _fix_user}],
-                                    betas=["interleaved-thinking-2025-05-14"],
+                                    extra_headers={"anthropic-beta": "interleaved-thinking-2025-05-14"},
                                 ) as _fix_stream:
                                     _fix_last_ping = asyncio.get_event_loop().time()
                                     async for _fix_tok in _fix_stream.text_stream:
@@ -3276,7 +3276,7 @@ async def autofix_stream(req: AutoFixRequest, request: Request):
                 thinking={"type": "enabled", "budget_tokens": 16000},
                 system=_autofix_system,
                 messages=[{"role": "user", "content": user_msg}],
-                betas=["interleaved-thinking-2025-05-14"],
+                extra_headers={"anthropic-beta": "interleaved-thinking-2025-05-14"},
             ) as _cs:
                 async for _ct in _cs.text_stream:
                     _first = True
