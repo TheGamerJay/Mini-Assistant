@@ -945,23 +945,39 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
                 />
               );
             }
+            const isBuildResponse = msg.role === 'assistant' && (
+              msg.content?.includes('```html') || msg.content?.includes('<!DOCTYPE')
+            );
+            // Show "Agent Finished" separator after build responses (not after the last message if still streaming)
+            const showFinishedSep = isBuildResponse && (idx < messages.length - 1 || !loading);
             return (
-              <ChatMessage
-                key={idx}
-                message={msg}
-                onRetry={msg.role === 'assistant' ? () => {
-                  const prevUser = messages.slice(0, idx).reverse().find(m => m.role === 'user');
-                  if (prevUser) handleSubmit(
-                    prevUser.content,
-                    prevUser.images_base64 || (prevUser.image_base64 ? [prevUser.image_base64] : null)
-                  );
-                } : undefined}
-                onRate={msg.role === 'assistant' ? (rating) => rateMessage(activeChatId, idx, rating) : undefined}
-                onFork={msg.role === 'assistant' && activeChatId ? () => forkChat(activeChatId, idx) : undefined}
-                onSendToBuilder={msg.role === 'assistant' && msg.content?.includes('```') ? () => setRightPanelOpen(true) : undefined}
-                onPin={activeChatId ? () => pinMessage(activeChatId, idx) : undefined}
-                onSuggest={msg.role === 'assistant' ? (text) => handleSubmit(text) : undefined}
-              />
+              <React.Fragment key={idx}>
+                <ChatMessage
+                  message={msg}
+                  onRetry={msg.role === 'assistant' ? () => {
+                    const prevUser = messages.slice(0, idx).reverse().find(m => m.role === 'user');
+                    if (prevUser) handleSubmit(
+                      prevUser.content,
+                      prevUser.images_base64 || (prevUser.image_base64 ? [prevUser.image_base64] : null)
+                    );
+                  } : undefined}
+                  onRate={msg.role === 'assistant' ? (rating) => rateMessage(activeChatId, idx, rating) : undefined}
+                  onFork={msg.role === 'assistant' && activeChatId ? () => forkChat(activeChatId, idx) : undefined}
+                  onSendToBuilder={msg.role === 'assistant' && msg.content?.includes('```') ? () => setRightPanelOpen(true) : undefined}
+                  onPin={activeChatId ? () => pinMessage(activeChatId, idx) : undefined}
+                  onSuggest={msg.role === 'assistant' ? (text) => handleSubmit(text) : undefined}
+                />
+                {showFinishedSep && (
+                  <div className="flex items-center gap-3 py-1">
+                    <div className="flex-1 h-px bg-emerald-500/20" />
+                    <span className="text-[9px] font-mono text-emerald-500/60 uppercase tracking-widest flex items-center gap-1.5">
+                      <span style={{ display:'inline-block', width:5, height:5, borderRadius:'50%', background:'#10b981', boxShadow:'0 0 6px rgba(16,185,129,0.8)' }} />
+                      Agent Finished
+                    </span>
+                    <div className="flex-1 h-px bg-emerald-500/20" />
+                  </div>
+                )}
+              </React.Fragment>
             );
           })}
 
