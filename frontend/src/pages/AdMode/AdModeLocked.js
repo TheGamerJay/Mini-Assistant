@@ -3,7 +3,7 @@
  * Clean premium locked screen with pricing and checkout CTAs.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Zap, Image, Sparkles, Target, Download, TrendingUp, Lock, Check } from 'lucide-react';
 import { api } from '../../api/client';
 import { toast } from 'sonner';
@@ -39,11 +39,23 @@ const PLANS = [
 export default function AdModeLocked() {
   const [loading, setLoading] = useState(null);
 
+  // Clear loading when user presses Back from Stripe (bfcache restore)
+  useEffect(() => {
+    const handler = (e) => { if (e.persisted) setLoading(null); };
+    window.addEventListener('pageshow', handler);
+    return () => window.removeEventListener('pageshow', handler);
+  }, []);
+
   const handleCheckout = async (billingPeriod) => {
     setLoading(billingPeriod);
     try {
       const { checkout_url } = await api.adModeCheckout(billingPeriod);
-      window.location.href = checkout_url;
+      if (checkout_url) {
+        window.location.href = checkout_url;
+      } else {
+        setLoading(null);
+        toast.error('Could not start checkout. Try again.');
+      }
     } catch (err) {
       toast.error(err?.message || 'Could not start checkout. Try again.');
       setLoading(null);
