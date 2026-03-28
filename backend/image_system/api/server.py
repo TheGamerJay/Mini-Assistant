@@ -1808,72 +1808,88 @@ async def chat(req: ChatRequest, request: Request):
             # ── TIER 1: Semantic (gpt-image-1 edit) ──────────────────────────
             async def _try_tier1() -> bool:
                 nonlocal _current_b64, _current_bytes
-                _is_skin_region = bool(re.search(
-                    r"\b(skin|fur|body|complexion|tone)\b", _region_desc or "", re.I
-                ))
 
-                if _is_skin_region and _to_color and _current_bytes:
-                    # Pre-flight vision scan: identify every from_color element by name
-                    # so we can explicitly preserve non-skin elements in the prompt.
-                    _preserve_list: list[str] = []
+                # Step 1 — get full character description via GPT-4o vision so
+                # the edit prompt describes the FINAL STATE, not just a change.
+                # This prevents gpt-image-1 from treating it as a global swap.
+                _full_desc: str = _edit_desc_cache.get(session_id, "")
+                if not _full_desc and _current_bytes:
                     try:
                         from ..services.dalle_client import analyze_region_colors as _arc
                         _scan = await _arc(
                             _dalle._get_client(),
                             _current_bytes,
-                            _from_color,
+                            _from_color or (_to_color or ""),
                             _region_desc or "skin/fur",
                         )
-                        _preserve_list = _scan.get("preserve_elements", [])
-                        # Cache full description for Tier 2 (skip second vision call)
-                        _preflight_desc = _scan.get("full_description", "")
-                        if _preflight_desc and session_id not in _edit_desc_cache:
+                        _full_desc = _scan.get("full_description", "")
+                        if _full_desc:
                             if len(_edit_desc_cache) >= _EDIT_DESC_CACHE_MAX:
                                 _edit_desc_cache.pop(next(iter(_edit_desc_cache)))
-                            _edit_desc_cache[session_id] = _preflight_desc
+                            _edit_desc_cache[session_id] = _full_desc
+                        # Also build explicit preserve list from scan
+                        _preserve_els = _scan.get("preserve_elements", [])
                     except Exception as _scan_err:
                         logger.warning("pre-flight scan failed (non-fatal): %s", _scan_err)
+                        _preserve_els = []
+                else:
+                    _preserve_els = []
 
-                    # Build explicit per-element preservation lines so the model
-                    # cannot interpret this as a global color swap.
-                    _orig_color = _from_color or "their current"
-                    if _preserve_list:
-                        _preserve_lines = " ".join(
-                            f"The {el} must stay {_orig_color} color." for el in _preserve_list
-                        )
-                    else:
-                        _preserve_lines = (
-                            f"The eyes, shoes, headset, clothing trim, outlines, and all "
-                            f"accessories must keep their current colors exactly."
-                        )
+                # Step 2 — build the definitive final-state prompt.
+                # Describe what the character looks like AFTER the edit, not what to change.
+                _region = _region_desc or "skin and fur"
+                _target = _to_color or effective_msg.strip()
 
+                if _full_desc and _to_color:
+                    # Swap the color only in skin/fur context within the description
+                    _mod_desc = _full_desc
+                    if _from_color:
+                        _mod_desc = re.sub(
+                            rf"\b{re.escape(_from_color)}\b(?=\s+(?:skin|fur|body|tone|complexion))",
+                            _to_color, _mod_desc, flags=re.IGNORECASE,
+                        )
                     _strict_prompt = (
-                        f"Make the character's {_region_desc or 'skin and fur'} color {_to_color}. "
-                        f"Apply {_to_color} only to the body skin and fur surface. "
-                        f"{_preserve_lines} "
-                        f"Do not change any clothing, accessories, headset, shoes, eyes, or background. "
-                        "Preserve the character's pose, expression, and art style exactly."
+                        f"Edit this image so the character has {_target} {_region}. "
+                        f"ONLY the {_region} changes to {_target}. "
+                        f"Everything else stays exactly as in the original image — "
+                        f"clothing, accessories, eyes, headset, shoes, pose, expression, background.\n\n"
+                        f"Character reference (final state):\n{_mod_desc[:1200]}"
                     )
                 else:
-                    _instr = _step.get("final_instruction")
-                    if not _instr:
-                        try:
-                            from mini_assistant.phase2.prompt_enhancer import enhance_edit_instruction
-                            _instr = await enhance_edit_instruction(effective_msg.strip())
-                        except Exception:
-                            _instr = effective_msg.strip()
+                    # No description available — use a tight final-state instruction
+                    _preserve_note = (
+                        "Specifically: eyes, headset, shoes, clothing, outlines, and all accessories "
+                        "keep their exact original colors."
+                        if not _preserve_els else
+                        " ".join(f"{el} stays its original color." for el in _preserve_els)
+                    )
                     _strict_prompt = (
-                        f"Apply ONLY this change: {_instr}. "
-                        "DO NOT modify clothing, accessories, background, pose, lighting, or identity. "
-                        "Preserve everything else pixel-perfectly."
+                        f"Edit this image: the character's {_region} is now {_target}. "
+                        f"Only the {_region} surface changes. {_preserve_note} "
+                        "Pose, expression, art style, and background are unchanged."
                     )
 
                 _msk = None
                 if _current_bytes and _mask_box:
                     _msk = _build_mask(_current_bytes, _mask_box)
+
+                # Ensure image is within gpt-image-1 size limits (4 MB max)
+                _img_data = _current_bytes
+                if _img_data and _PIL_AVAILABLE:
+                    try:
+                        import io as _io3
+                        _pil_img = _PILImage.open(_io3.BytesIO(_img_data)).convert("RGBA")
+                        if max(_pil_img.size) > 1024:
+                            _pil_img = _pil_img.resize((1024, 1024), _PILImage.LANCZOS)
+                        _buf3 = _io3.BytesIO()
+                        _pil_img.save(_buf3, format="PNG", optimize=True)
+                        _img_data = _buf3.getvalue()
+                    except Exception:
+                        pass
+
                 try:
-                    if _current_bytes:
-                        _b64s = await _dalle.edit(_current_bytes, _strict_prompt, mask_bytes=_msk)
+                    if _img_data:
+                        _b64s = await _dalle.edit(_img_data, _strict_prompt, mask_bytes=_msk)
                     else:
                         _b64s = await _dalle.generate(_strict_prompt)
                     _current_b64   = _b64s
