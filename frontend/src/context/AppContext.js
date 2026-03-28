@@ -326,6 +326,7 @@ export function AppProvider({ children }) {
   // ---- Credits ----
   const [credits, setCredits] = useState(null); // null = loading
   const [plan, setPlan]       = useState('free');
+  const [hasAdMode, setHasAdMode] = useState(false);
   const isSubscribed = plan !== 'free';
   const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -450,6 +451,7 @@ export function AppProvider({ children }) {
         _setUser((prev) => ({ ...prev, ...profile }));
         if (profile.credits !== undefined) setCredits(profile.credits);
         if (profile.plan !== undefined) setPlan(profile.plan);
+        if (profile.has_ad_mode !== undefined) setHasAdMode(Boolean(profile.has_ad_mode));
         if (profile.avatar !== undefined) {
           _setAvatar(profile.avatar || null);
           // Cache avatar locally so it survives backend restarts
@@ -940,6 +942,8 @@ export function AppProvider({ children }) {
     register,
     credits,
     plan,
+    hasAdMode,
+    setHasAdMode,
     isSubscribed,
     refreshCredits,
     imageUsage,

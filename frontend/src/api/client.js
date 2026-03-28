@@ -590,6 +590,52 @@ export const api = {
 
   /** Delete a task. */
   deleteTask(id) { return request(`${MAIN_API}/tasks/${id}`, { method: 'DELETE' }, 10000); },
+
+  // ── Ad Mode endpoints ──────────────────────────────────────────────────────
+
+  /** Check if user has Ad Mode access. Returns { has_ad_mode }. */
+  adModeStatus() { return get(`${MAIN_API}/ad-mode/status`, 10000); },
+
+  /** Create Stripe checkout for Ad Mode add-on. Returns { checkout_url }. */
+  adModeCheckout(billingPeriod = 'monthly') {
+    return post(`${MAIN_API}/checkout/ad-mode`, { billing_period: billingPeriod }, 15000);
+  },
+
+  /** Generate a brand profile with Claude. Returns { profile }. */
+  adModeProfileGenerate(data) { return post(`${MAIN_API}/ad-mode/profile/generate`, data, 90000); },
+
+  /** Get stored brand profile. Returns { profile }. */
+  adModeGetProfile() { return get(`${MAIN_API}/ad-mode/profile`, 10000); },
+
+  /** Update brand profile fields. Returns { profile }. */
+  adModeUpdateProfile(data) {
+    return request(`${MAIN_API}/ad-mode/profile`, { method: 'PUT', body: JSON.stringify(data) }, 15000);
+  },
+
+  /** Create a campaign. Returns { campaign }. */
+  adModeCreateCampaign(data) { return post(`${MAIN_API}/ad-mode/campaigns`, data, 10000); },
+
+  /** List all campaigns. Returns { campaigns }. */
+  adModeGetCampaigns() { return get(`${MAIN_API}/ad-mode/campaigns`, 10000); },
+
+  /** Get one campaign with its ad sets. Returns { campaign, ad_sets }. */
+  adModeGetCampaign(id) { return get(`${MAIN_API}/ad-mode/campaigns/${id}`, 10000); },
+
+  /** Generate full ad set (Claude copy + DALL-E images). Returns { ad_sets, count }. */
+  adModeGenerate(data) { return post(`${MAIN_API}/ad-mode/generate`, data, 180000); },
+
+  /** Regenerate copy only for an ad set. Returns updated fields. */
+  adModeRegenerateCopy(adSetId, campaignId) {
+    return post(`${MAIN_API}/ad-mode/regenerate-copy`, { ad_set_id: adSetId, campaign_id: campaignId }, 60000);
+  },
+
+  /** Regenerate image for an ad set. Returns { image_base64 }. */
+  adModeRegenerateImage(adSetId, imagePrompt) {
+    return post(`${MAIN_API}/ad-mode/regenerate-image`, { ad_set_id: adSetId, image_prompt: imagePrompt }, 60000);
+  },
+
+  /** Download asset data (base64 image). Returns { image_base64, headline }. */
+  adModeDownloadAsset(adSetId) { return get(`${MAIN_API}/ad-mode/assets/${adSetId}/download`, 15000); },
 };
 
 export default api;

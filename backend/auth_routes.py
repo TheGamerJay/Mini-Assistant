@@ -120,6 +120,7 @@ def _public_user(user: dict) -> dict:
         "avatar": user.get("avatar"),
         "credits": user.get("credits", 0),
         "plan": user.get("plan", "free"),
+        "has_ad_mode": user.get("has_ad_mode", False),
         "referral_code": user.get("referral_code"),
         "referrals_rewarded_count": user.get("referrals_rewarded_count", 0),
         # True for existing users (backward compat) and Google OAuth users

@@ -103,6 +103,14 @@ for _pid_val, _credits in [
     if _pid_val and _credits in _SAFE_TOPUP_AMOUNTS:
         TOPUP_PRICES[_pid_val] = _credits
 
+# Ad Mode add-on price IDs (independent of plan)
+_AD_MODE_MONTHLY_ID = _pid("STRIPE_AD_MODE_MONTHLY")
+_AD_MODE_YEARLY_ID  = _pid("STRIPE_AD_MODE_YEARLY")
+AD_MODE_PRICES: frozenset[str] = frozenset(
+    p for p in [_AD_MODE_MONTHLY_ID, _AD_MODE_YEARLY_ID] if p
+)
+log.info("Ad Mode prices loaded: %d", len(AD_MODE_PRICES))
+
 # Subscription credits per plan (per billing cycle)
 PLAN_CREDITS: dict[str, int] = {
     "free":     50,
@@ -750,15 +758,22 @@ async def _handle_checkout_completed(db, session: dict) -> None:
             log.warning("Top-up email failed (non-fatal): %s", _email_exc)
 
     elif mode == "subscription":
-        # Subscription start — plan upgrade handled fully by invoice.paid
-        # Just store subscription ID if available
         sub_id = session.get("subscription")
-        if sub_id:
-            await db["users"].update_one(
-                {"id": user_id},
-                {"$set": {"stripe_subscription_id": sub_id}},
-            )
-        log.info("Subscription checkout completed for user %s (sub=%s)", user_id, sub_id)
+        if price_id and price_id in AD_MODE_PRICES:
+            # Ad Mode add-on — independent of main plan
+            update: dict = {"has_ad_mode": True}
+            if sub_id:
+                update["ad_mode_subscription_id"] = sub_id
+            await db["users"].update_one({"id": user_id}, {"$set": update})
+            log.info("Ad Mode activated: user=%s sub=%s", user_id, sub_id)
+        else:
+            # Main plan subscription — upgrade handled fully by invoice.paid
+            if sub_id:
+                await db["users"].update_one(
+                    {"id": user_id},
+                    {"$set": {"stripe_subscription_id": sub_id}},
+                )
+            log.info("Subscription checkout completed for user %s (sub=%s)", user_id, sub_id)
 
 
 async def _handle_invoice_paid(db, invoice: dict) -> None:
@@ -784,7 +799,20 @@ async def _handle_invoice_paid(db, invoice: dict) -> None:
     if sub_id:
         try:
             sub = stripe.Subscription.retrieve(sub_id)
-            for item in sub.get("items", {}).get("data", []):
+            # Check if this invoice is for Ad Mode add-on first
+            _sub_items = sub.get("items", {}).get("data", [])
+            _is_ad_mode = any(
+                item.get("price", {}).get("id", "") in AD_MODE_PRICES
+                for item in _sub_items
+            )
+            if _is_ad_mode:
+                await db["users"].update_one(
+                    {"id": user_id},
+                    {"$set": {"has_ad_mode": True}},
+                )
+                log.info("invoice.paid: Ad Mode renewed for user=%s sub=%s", user_id, sub_id)
+                return   # Don't touch plan credits or billing cycle
+            for item in _sub_items:
                 pid = item.get("price", {}).get("id", "")
                 if pid in SUBSCRIPTION_PRICES:
                     plan = SUBSCRIPTION_PRICES[pid]
@@ -880,6 +908,29 @@ async def _handle_subscription_deleted(db, subscription: dict) -> None:
         return
 
     user_id  = user["id"]
+
+    # Check if this is the Ad Mode add-on subscription being cancelled
+    _sub_items = subscription.get("items", {}).get("data", [])
+    _is_ad_mode = any(
+        item.get("price", {}).get("id", "") in AD_MODE_PRICES
+        for item in _sub_items
+    )
+    if _is_ad_mode:
+        await db["users"].update_one(
+            {"stripe_customer_id": cid},
+            {"$set": {"has_ad_mode": False, "ad_mode_subscription_id": None}},
+        )
+        log.info("Ad Mode cancelled: user=%s (access immediately revoked)", user_id)
+        await db["activity_logs"].insert_one({
+            "user_id":    user_id,
+            "type":       "ad_mode_cancelled",
+            "action_type": "ad_mode_cancelled",
+            "credits_used": 0,
+            "month_key":  _month_key(),
+            "timestamp":  time.time(),
+        })
+        return   # Don't touch main plan
+
     old_plan = user.get("plan", "free")
 
     await db["users"].update_one(
@@ -917,11 +968,27 @@ async def _handle_subscription_updated(db, subscription: dict) -> None:
     if not user:
         return
 
-    user_id = user["id"]
+    user_id    = user["id"]
+    sub_items  = subscription.get("items", {}).get("data", [])
+    sub_status = subscription.get("status", "")
+
+    # Check if this is an Ad Mode subscription update
+    _is_ad_mode = any(
+        item.get("price", {}).get("id", "") in AD_MODE_PRICES
+        for item in sub_items
+    )
+    if _is_ad_mode:
+        has_ad = sub_status in ("active", "trialing")
+        await db["users"].update_one(
+            {"id": user_id},
+            {"$set": {"has_ad_mode": has_ad}},
+        )
+        log.info("Ad Mode subscription updated: user=%s status=%s has_ad_mode=%s", user_id, sub_status, has_ad)
+        return   # Don't touch main plan
 
     # Find new plan from price
     new_plan = user.get("plan", "free")
-    for item in subscription.get("items", {}).get("data", []):
+    for item in sub_items:
         pid = item.get("price", {}).get("id", "")
         if pid in SUBSCRIPTION_PRICES:
             new_plan = SUBSCRIPTION_PRICES[pid]

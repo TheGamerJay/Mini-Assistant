@@ -51,6 +51,7 @@ import ProhibitedPage from './pages/legal/ProhibitedPage';
 import DmcaPage from './pages/legal/DmcaPage';
 import ContactPage from './pages/legal/ContactPage';
 import CreationRecordInfo from './pages/creation/CreationRecordInfo';
+import AdModePage from './pages/AdMode/AdModePage';
 
 // Existing tool components (kept for backward compat via 'tool-X' pages)
 import Dashboard from './pages/Dashboard';
@@ -160,6 +161,7 @@ function pageTitle(page) {
   if (page === 'lessons') return 'What I\'ve Learned';
   if (page === 'settings') return 'Settings';
   if (page === 'checkout-success') return 'Payment Confirmed';
+  if (page === 'ad-mode') return 'Ad Mode';
   if (LEGAL_PAGES[page]) return LEGAL_PAGES[page].title;
   return TOOL_PAGES[page]?.title || 'Mini Assistant';
 }
@@ -276,6 +278,7 @@ function AppShell() {
     if (page === 'dashboard') return <UserDashboard />;
     if (page === 'admin') return <AdminPage />;
     if (page === 'pricing') return <PricingPage />;
+    if (page === 'ad-mode') return <AdModePage />;
 
     const legalEntry = LEGAL_PAGES[page];
     if (legalEntry) {
