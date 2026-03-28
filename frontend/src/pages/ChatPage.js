@@ -620,9 +620,12 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     // 'build' → always stream to builder
     const imageIntentDetected = chatMode === 'image' || (chatMode === null && isImageIntent(text));
 
-    // ── IMAGE path: non-streaming endpoint (generation only, not analysis) ──
-    // Blocked when a reference image is attached (DALL-E 3 has no img2img) or in build mode
-    if (imageIntentDetected && !imgs.length && chatMode !== 'build') {
+    // ── IMAGE path: non-streaming endpoint ────────────────────────────────────
+    // Handles both pure generation (no reference) and image editing (reference attached).
+    // The image system's /chat endpoint routes to image_edit when an image is present,
+    // using PIL color_replace + gpt-image-1 for structural changes.
+    // Only skip this path in build mode.
+    if (imageIntentDetected && chatMode !== 'build') {
       if (imageIntentDetected) {
         setMessages([...nextMessages, {
           role: 'assistant', type: 'image_generating',
