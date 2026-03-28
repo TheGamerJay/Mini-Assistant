@@ -509,6 +509,17 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     }
   }, [activeChatId, chats]);
 
+  // On mount: restore the chat that belongs to the persisted chatMode
+  const _modeRestored = useRef(false);
+  useEffect(() => {
+    if (_modeRestored.current || !chatMode || !chats.length) return;
+    _modeRestored.current = true;
+    const savedId = modeChatIds[chatMode];
+    if (savedId && chats.find(c => c.id === savedId) && savedId !== activeChatId) {
+      selectChat(savedId);
+    }
+  }, [chats]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Keep per-mode chat pointer current whenever the active chat changes
   useEffect(() => {
     if (chatMode && activeChatId) saveModeChatId(chatMode, activeChatId);
