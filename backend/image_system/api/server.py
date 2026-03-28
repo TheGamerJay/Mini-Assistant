@@ -1791,6 +1791,7 @@ async def chat(req: ChatRequest, request: Request):
         _current_bytes = attached_image_bytes   # updated after each step
         _current_b64: str | None = None
         _step_metadata: list[dict] = []
+        _tier_errors: list[str] = []  # collect errors for debug reply
 
         for _step_i, _step in enumerate(_edit_steps):
             _etype        = _step.get("edit_type", "structural_edit")
@@ -1911,6 +1912,7 @@ async def chat(req: ChatRequest, request: Request):
                 except Exception as _t1e:
                     _is_mod = "moderation_blocked" in str(_t1e) or "safety system" in str(_t1e).lower()
                     logger.error("step %d tier1/semantic FAILED: %s | type=%s | is_moderation=%s", _step_i + 1, _t1e, type(_t1e).__name__, _is_mod)
+                    _tier_errors.append(f"T1:{type(_t1e).__name__}:{str(_t1e)[:120]}")
                     return False
 
             # ── TIER 2: Vision reconstruction ────────────────────────────────
@@ -1949,6 +1951,7 @@ async def chat(req: ChatRequest, request: Request):
                     return True
                 except Exception as _t2e:
                     logger.error("step %d tier2/vision FAILED: %s | type=%s", _step_i + 1, _t2e, type(_t2e).__name__)
+                    _tier_errors.append(f"T2:{type(_t2e).__name__}:{str(_t2e)[:120]}")
                     return False
 
             # ── TIER 3: Region-constrained PIL ───────────────────────────────
@@ -2039,19 +2042,26 @@ async def chat(req: ChatRequest, request: Request):
 
             if not _step_success:
                 if _current_b64 is None:
-                    # Last-resort: DALL-E 3 generation from user instruction alone
-                    logger.warning("[MODEL ROUTER] all tiers exhausted — attempting DALL-E 3 last-resort generation")
+                    # Last-resort: describe image with GPT-4o then regenerate with DALL-E 3
+                    logger.warning("[MODEL ROUTER] all tiers exhausted — last-resort. errors: %s", _tier_errors)
                     try:
-                        _lr_prompt = (
-                            f"{effective_msg.strip()}. "
-                            "High quality, detailed character art, full body visible."
-                        )
-                        _current_b64 = await _dalle.generate(_lr_prompt)
+                        if _current_bytes:
+                            # Have image — describe it and apply the change
+                            _b64s, _ = await _dalle.describe_and_recolor(
+                                _current_bytes,
+                                _from_color or "current color",
+                                _to_color or effective_msg.strip(),
+                                region=_region_desc or "skin/fur",
+                            )
+                        else:
+                            _b64s = await _dalle.generate(effective_msg.strip())
+                        _current_b64 = _b64s
                         _current_bytes = base64.b64decode(_current_b64)
-                        logger.info("[MODEL ROUTER] last-resort DALL-E 3 generation succeeded")
+                        logger.info("[MODEL ROUTER] last-resort succeeded")
                     except Exception as _lr_err:
                         logger.error("[MODEL ROUTER] last-resort generation also failed: %s", _lr_err)
-                        reply = f"Image editing failed. Please try again or rephrase your request."
+                        _tier_errors.append(f"LR:{type(_lr_err).__name__}:{str(_lr_err)[:120]}")
+                        reply = f"Edit failed. Debug: {' | '.join(_tier_errors)}"
                 break
 
         _edit_elapsed_ms = round((time.perf_counter() - _edit_start) * 1000, 1)
