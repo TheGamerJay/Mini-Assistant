@@ -28,9 +28,9 @@ const PLANS = [
   {
     id: 'yearly',
     label: 'Yearly',
-    price: '$19',
+    price: '$24',
     period: '/month',
-    note: 'Billed $228/year · Save 34%',
+    note: 'Billed $290/year · Save 17%',
     highlight: true,
     badge: 'Best Value',
   },

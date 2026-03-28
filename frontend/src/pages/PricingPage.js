@@ -567,11 +567,11 @@ export default function PricingPage() {
 
               {/* Yearly */}
               <div className="rounded-xl border border-violet-500/30 bg-violet-500/8 p-4 flex flex-col gap-3 relative">
-                <div className="absolute top-3 right-3 text-[9px] font-mono bg-violet-500 text-white rounded px-1.5 py-0.5">SAVE 34%</div>
+                <div className="absolute top-3 right-3 text-[9px] font-mono bg-violet-500 text-white rounded px-1.5 py-0.5">SAVE 17%</div>
                 <div>
                   <p className="text-xs text-slate-500 mb-1">Yearly</p>
-                  <p className="text-2xl font-bold text-white">$19<span className="text-sm font-normal text-slate-500">/mo</span></p>
-                  <p className="text-[10px] text-slate-600">$228 billed annually</p>
+                  <p className="text-2xl font-bold text-white">$24<span className="text-sm font-normal text-slate-500">/mo</span></p>
+                  <p className="text-[10px] text-slate-600">$290 billed annually</p>
                 </div>
                 {hasAdMode ? (
                   <button
