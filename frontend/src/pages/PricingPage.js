@@ -234,8 +234,13 @@ export default function PricingPage() {
   const handleAdModeCheckout = useCallback(async (period) => {
     setAdModeLoading(period);
     try {
-      const { url } = await api.adModeCheckout(period);
-      if (url) window.location.href = url;
+      const { checkout_url } = await api.adModeCheckout(period);
+      if (checkout_url) {
+        window.location.href = checkout_url;
+        // Don't clear loading — tab is navigating away
+      } else {
+        setAdModeLoading(null);
+      }
     } catch (err) {
       console.error('Ad Mode checkout error:', err);
       setAdModeLoading(null);
