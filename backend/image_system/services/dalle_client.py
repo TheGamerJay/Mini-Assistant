@@ -490,23 +490,44 @@ class DalleClient:
             _IMAGE_EDIT_MODEL, size, len(prompt), mask_bytes is not None, prompt,
         )
 
-        # dall-e-2 edit requires: square RGBA PNG, max 4MB
+        # dall-e-2 edit requires: square RGBA PNG, mask must match image size exactly.
         img_data = image_bytes
+        mask_data = mask_bytes  # will be cropped/resized alongside image
+        _crop_box: tuple | None = None
+        _final_side: int = 0
         if _PIL_AVAILABLE:
             try:
                 _pil = _PILImage.open(_io.BytesIO(image_bytes)).convert("RGBA")
-                # Make square (dall-e-2 requirement)
                 w, h = _pil.size
+                # Make square — record the crop box so we can apply it to the mask too
                 if w != h:
                     side = min(w, h)
-                    _pil = _pil.crop(((w - side) // 2, (h - side) // 2,
-                                      (w + side) // 2, (h + side) // 2))
+                    _crop_box = ((w - side) // 2, (h - side) // 2,
+                                 (w + side) // 2, (h + side) // 2)
+                    _pil = _pil.crop(_crop_box)
                 # Cap at 1024x1024
+                _final_side = _pil.width
                 if _pil.width > 1024:
                     _pil = _pil.resize((1024, 1024), _PILImage.LANCZOS)
+                    _final_side = 1024
                 buf = _io.BytesIO()
                 _pil.save(buf, format="PNG", optimize=True)
                 img_data = buf.getvalue()
+
+                # Apply identical crop + resize to mask so dimensions always match
+                if mask_bytes is not None:
+                    try:
+                        _mpil = _PILImage.open(_io.BytesIO(mask_bytes)).convert("RGBA")
+                        if _crop_box:
+                            _mpil = _mpil.crop(_crop_box)
+                        if _mpil.width != _final_side:
+                            _mpil = _mpil.resize((_final_side, _final_side), _PILImage.LANCZOS)
+                        mbuf = _io.BytesIO()
+                        _mpil.save(mbuf, format="PNG")
+                        mask_data = mbuf.getvalue()
+                    except Exception as _me:
+                        logger.warning("Mask resize failed, skipping mask: %s", _me)
+                        mask_data = None
             except Exception as _e:
                 logger.warning("PIL PNG conversion failed, passing raw bytes: %s", _e)
 
@@ -521,8 +542,8 @@ class DalleClient:
             response_format="b64_json",
         )
 
-        if mask_bytes is not None:
-            mask_file = _io.BytesIO(mask_bytes)
+        if mask_data is not None:
+            mask_file = _io.BytesIO(mask_data)
             mask_file.name = "mask.png"
             kwargs["mask"] = mask_file
 
