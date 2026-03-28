@@ -10,7 +10,7 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Paperclip, Mic, MicOff, Send, Loader2, X, Image, FileText, Hammer, MessageSquare, Clock } from 'lucide-react';
+import { Paperclip, Mic, MicOff, Send, Loader2, X, Image, FileText, Hammer, MessageSquare, Clock, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../api/client';
 import { useApp } from '../context/AppContext';
@@ -537,13 +537,14 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
                 : <Mic size={16} />}
           </button>
 
-          {/* Mode buttons: Image | Build | Chat */}
+          {/* Mode buttons: Generate | Edit | Build | Chat */}
           {onChatModeChange && (
             <>
+              {/* Create New Image */}
               <button
                 type="button"
                 onClick={() => onChatModeChange(chatMode === 'image' ? null : 'image')}
-                title={chatMode === 'image' ? 'Image Mode ON — click to exit' : 'Image Mode — every message generates an image'}
+                title={chatMode === 'image' ? 'Create Mode ON — click to exit' : 'Create New Image — generate a brand new image from text'}
                 className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 ${
                   chatMode === 'image'
                     ? 'bg-gradient-to-br from-pink-500 to-rose-600 text-white shadow-lg shadow-pink-500/40'
@@ -551,6 +552,19 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
                 }`}
               >
                 <Image size={16} />
+              </button>
+              {/* Edit Existing Image */}
+              <button
+                type="button"
+                onClick={() => onChatModeChange(chatMode === 'image_edit' ? null : 'image_edit')}
+                title={chatMode === 'image_edit' ? 'Edit Mode ON — click to exit' : 'Edit Existing Image — attach your image and describe the change'}
+                className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 ${
+                  chatMode === 'image_edit'
+                    ? 'bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-lg shadow-amber-500/40'
+                    : 'text-slate-500 hover:text-amber-400 hover:bg-white/5'
+                }`}
+              >
+                <Pencil size={16} />
               </button>
               <button
                 type="button"

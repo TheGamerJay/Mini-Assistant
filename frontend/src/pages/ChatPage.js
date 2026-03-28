@@ -402,8 +402,8 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
   const [imageLimitOpen, setImageLimitOpen]   = useState(false);
   const [chatMode, setChatMode]               = useState(() => {
     const saved = localStorage.getItem('chatMode');
-    return ['image', 'build', 'chat'].includes(saved) ? saved : null;
-  }); // null | 'image' | 'build' | 'chat' — persisted across refreshes
+    return ['image', 'image_edit', 'build', 'chat'].includes(saved) ? saved : null;
+  }); // null | 'image' | 'image_edit' | 'build' | 'chat' — persisted across refreshes
   const vibeMode = chatMode === 'build'; // legacy compat — still used in sendStream body
 
   // Per-mode chat isolation: save current chat for old mode, restore saved chat for new mode
@@ -575,9 +575,15 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     let imgs = Array.isArray(imagesBase64) ? imagesBase64.filter(Boolean) : (imagesBase64 ? [imagesBase64] : []);
     if (!text && !imgs.length) return;
 
-    // Auto-attach last generated image as edit source when in Image Mode.
-    // If the user has a generated image and types anything that isn't
-    // explicitly a brand-new generation request, treat it as an edit.
+    // Edit Mode guard: requires an attached image — never fall back to generation.
+    if (chatMode === 'image_edit' && !imgs.length) {
+      toast.error('Please attach the image you want to edit first.');
+      submittingRef.current = false;
+      return;
+    }
+
+    // Generate Mode: auto-attach last generated image when the request looks like
+    // a follow-up edit (not an explicit new-generation command).
     const _NEW_GEN_RE = /\b(generate\s+a|create\s+a|draw\s+a|make\s+a\s+new|make\s+me\s+a|new\s+image\s+of|imagine\s+a)\b/i;
     if (chatMode === 'image' && !imgs.length && previewImage && !_NEW_GEN_RE.test(text)) {
       imgs = [previewImage];
@@ -655,12 +661,15 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     // 'image' → always generate image (unless a reference image is attached — DALL-E 3 can't do img2img,
     //            so fall through to vision brain which can analyse/describe the reference)
     // 'build' → always stream to builder
-    const imageIntentDetected = chatMode === 'image' || (chatMode === null && isImageIntent(text));
+    // image_edit mode always routes through the image endpoint (edit pipeline).
+    // image mode routes through image endpoint (generate pipeline).
+    // Auto-detect for null mode.
+    const imageIntentDetected = chatMode === 'image' || chatMode === 'image_edit' || (chatMode === null && isImageIntent(text));
 
     // ── IMAGE path: non-streaming endpoint ────────────────────────────────────
-    // Handles both pure generation (no reference) and image editing (reference attached).
-    // The image system's /chat endpoint routes to image_edit when an image is present,
-    // using PIL color_replace + gpt-image-1 for structural changes.
+    // 'image'      → Create New Image (text-to-image, DALL-E 3)
+    // 'image_edit' → Edit Existing Image (source-preserving CEO pipeline, requires attachment)
+    // null + auto  → auto-detected image intent → generation
     // Only skip this path in build mode.
     if (imageIntentDetected && chatMode !== 'build') {
       if (imageIntentDetected) {
@@ -693,7 +702,11 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
           role: 'assistant',
           type: 'text',
           content: isImg
-            ? '🎨 Image generated! Check the **Preview** panel →'
+            ? (chatMode === 'image_edit'
+                ? (data.reconstruction_fallback_used
+                    ? '✏️ Edit applied (enhanced reconstruction). Check the **Preview** panel →'
+                    : '✏️ Edit applied! Check the **Preview** panel →')
+                : '🎨 Image generated! Check the **Preview** panel →')
             : (data.reply || 'Done.'),
           route_result: data.route_result || null,
           generation_time_ms: data.generation_time_ms || null,
@@ -1297,8 +1310,9 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
               onSubmit={handleSubmit}
               loading={loading}
               placeholder={
-                chatMode === 'image' ? '🎨 Image Mode — describe what you want to generate…' :
-                chatMode === 'build' ? '🔨 Build Mode — describe the app you want built…' :
+                chatMode === 'image'      ? '🎨 Create New Image — describe what you want to generate…' :
+                chatMode === 'image_edit' ? '✏️ Edit Existing Image — attach your image and describe the change…' :
+                chatMode === 'build'      ? '🔨 Build Mode — describe the app you want built…' :
                 rightPanelOpen ? 'Describe changes or chat…' :
                 'Message Mini Assistant…'
               }

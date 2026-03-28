@@ -1772,6 +1772,19 @@ async def chat(req: ChatRequest, request: Request):
 
     if execution_intent == "image_edit":
         logger.info("[CEO] image_edit — delegating to ImageCEO")
+        # Hard guard: Edit pipeline requires a source image.
+        # Never silently fall back to generation — that changes the contract.
+        if not attached_image_bytes:
+            return {
+                "reply": (
+                    "Edit mode requires the original image. "
+                    "Please attach the image you want to edit and send again. "
+                    "To create a brand new image instead, switch to Create mode."
+                ),
+                "intent": "image_edit",
+                "error": "no_source_image",
+                "session_id": session_id,
+            }
         _edit_start = time.perf_counter()
         try:
             from ..orchestration.image_ceo import ImageCEO as _ImageCEO
