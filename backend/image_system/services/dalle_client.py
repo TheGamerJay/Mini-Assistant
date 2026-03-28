@@ -422,6 +422,7 @@ class DalleClient:
         to_color: str,
         region: str = "skin/fur",
         cached_description: str | None = None,
+        preserve_elements: list | None = None,
     ) -> tuple[str, str]:
         """
         Vision-guided recolor: analyze the image with GPT-4o to get a precise
@@ -542,18 +543,39 @@ class DalleClient:
         logger.info("describe_and_recolor: swapped description (%d chars)", len(modified))
 
         # ── Step 3: Regenerate with DALL-E 3 ────────────────────────────────
+        # Build explicit preserve note from scan results
+        if preserve_elements:
+            _pres_note = (
+                "DO NOT recolor any of these — they must keep their original colors: " +
+                ", ".join(preserve_elements) + "."
+            )
+        else:
+            _pres_note = (
+                "DO NOT recolor: eyes, headset ring, shoes, clothing, accessories, outlines — "
+                "these must keep their exact original colors."
+            )
+
+        # Extract art style from description to lock it in
+        _art_style_hint = ""
+        if modified:
+            _first_line = modified.split(".")[0].strip()
+            if any(kw in _first_line.lower() for kw in ("3d", "cgi", "cartoon", "anime", "pixel", "render", "watercolor", "realistic")):
+                _art_style_hint = f"Art style: {_first_line}. "
+
         prompt = (
-            f"Recreate this EXACT character changing ONLY the {region} color from {from_color} to {to_color}. "
-            f"Everything else — species, art style, face, body proportions, clothing, accessories, "
-            f"pose, expression, background, lighting — must be PIXEL-PERFECT identical to the original.\n\n"
-            f"CRITICAL RULES:\n"
-            f"- Keep the EXACT same character species and design (do NOT change to a different creature or person)\n"
-            f"- Keep the EXACT same art style (3D CGI stays 3D CGI, cartoon stays cartoon, etc.)\n"
-            f"- Keep the EXACT same face shape, eyes, and expression\n"
-            f"- Keep ALL clothing colors and styles unchanged\n"
-            f"- Only the {region} changes: {from_color} → {to_color}\n\n"
-            f"Character description:\n{modified}\n\n"
-            "Render the full character. Do not crop or reframe."
+            f"{_art_style_hint}"
+            f"Recreate this EXACT character with {to_color} {region} instead of {from_color} {region}.\n\n"
+            f"WHAT CHANGES: only the {region} surface color: {from_color} → {to_color}.\n"
+            f"WHAT DOES NOT CHANGE: {_pres_note}\n\n"
+            f"CRITICAL — maintain EXACTLY:\n"
+            f"- Same character species and design (do NOT substitute a different creature)\n"
+            f"- Same art style (3D CGI stays 3D CGI, flat cartoon stays flat cartoon, etc.)\n"
+            f"- Same face shape, eyes, and expression\n"
+            f"- Same body proportions and pose\n"
+            f"- Same clothing colors, patterns, and styles\n"
+            f"- Same background and lighting\n\n"
+            f"Character description (final state with {to_color} {region}):\n{modified}\n\n"
+            "Render the full character head-to-toe. Do not crop or reframe."
         )
         b64_image = await self.generate(prompt)
         return b64_image, description

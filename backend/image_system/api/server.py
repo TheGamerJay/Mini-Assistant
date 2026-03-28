@@ -1792,6 +1792,7 @@ async def chat(req: ChatRequest, request: Request):
         _current_b64: str | None = None
         _step_metadata: list[dict] = []
         _tier_errors: list[str] = []  # collect errors for debug reply
+        _cached_preserve_els: list[str] = []  # from pre-flight scan, shared across tiers
 
         for _step_i, _step in enumerate(_edit_steps):
             _etype        = _step.get("edit_type", "structural_edit")
@@ -1816,14 +1817,15 @@ async def chat(req: ChatRequest, request: Request):
                           "confidence_score": 0.0, "notes": ""}
             _step_success = False
 
-            # ── TIER 1: Semantic (gpt-image-1 edit) ──────────────────────────
+            # ── TIER 1: Semantic (dall-e-2 edit) ─────────────────────────────
             async def _try_tier1() -> bool:
-                nonlocal _current_b64, _current_bytes
+                nonlocal _current_b64, _current_bytes, _cached_preserve_els
 
                 # Step 1 — get full character description via GPT-4o vision so
                 # the edit prompt describes the FINAL STATE, not just a change.
-                # This prevents gpt-image-1 from treating it as a global swap.
+                # This prevents dall-e-2 from treating it as a global swap.
                 _full_desc: str = _edit_desc_cache.get(session_id, "")
+                _preserve_els: list = list(_cached_preserve_els)  # start from cached
                 if not _full_desc and _current_bytes:
                     try:
                         from ..services.dalle_client import analyze_region_colors as _arc
@@ -1838,19 +1840,27 @@ async def chat(req: ChatRequest, request: Request):
                             if len(_edit_desc_cache) >= _EDIT_DESC_CACHE_MAX:
                                 _edit_desc_cache.pop(next(iter(_edit_desc_cache)))
                             _edit_desc_cache[session_id] = _full_desc
-                        # Also build explicit preserve list from scan
+                        # Build explicit preserve list and share it with other tiers
                         _preserve_els = _scan.get("preserve_elements", [])
+                        _cached_preserve_els = _preserve_els
                     except Exception as _scan_err:
                         logger.warning("pre-flight scan failed (non-fatal): %s", _scan_err)
-                        _preserve_els = []
-                else:
-                    _preserve_els = []
 
-                # Step 2 — build the definitive final-state prompt.
-                # Describe what the character looks like AFTER the edit, not what to change.
+                # Step 2 — build preserve note (ALWAYS used regardless of description availability)
                 _region = _region_desc or "skin and fur"
                 _target = _to_color or effective_msg.strip()
+                if _preserve_els:
+                    _pres_note = (
+                        "DO NOT recolor any of these — they keep their original colors: " +
+                        ", ".join(_preserve_els) + "."
+                    )
+                else:
+                    _pres_note = (
+                        "DO NOT recolor: eyes, headset ring, shoes, clothing, accessories, "
+                        "outlines — these keep their exact original colors."
+                    )
 
+                # Step 3 — build the definitive final-state prompt.
                 if _full_desc and _to_color:
                     # Swap the color only in skin/fur context within the description
                     _mod_desc = _full_desc
@@ -1860,24 +1870,18 @@ async def chat(req: ChatRequest, request: Request):
                             _to_color, _mod_desc, flags=re.IGNORECASE,
                         )
                     _strict_prompt = (
-                        f"Edit this image so the character has {_target} {_region}. "
-                        f"ONLY the {_region} changes to {_target}. "
-                        f"Everything else stays exactly as in the original image — "
-                        f"clothing, accessories, eyes, headset, shoes, pose, expression, background.\n\n"
-                        f"Character reference (final state):\n{_mod_desc[:1200]}"
+                        f"Edit this image: change ONLY the {_region} color to {_target}.\n"
+                        f"WHAT CHANGES: the {_region} surface becomes {_target}.\n"
+                        f"WHAT DOES NOT CHANGE: {_pres_note}\n"
+                        f"Pose, expression, art style, and background are identical to the original.\n\n"
+                        f"Character reference (final state):\n{_mod_desc[:1000]}"
                     )
                 else:
-                    # No description available — use a tight final-state instruction
-                    _preserve_note = (
-                        "Specifically: eyes, headset, shoes, clothing, outlines, and all accessories "
-                        "keep their exact original colors."
-                        if not _preserve_els else
-                        " ".join(f"{el} stays its original color." for el in _preserve_els)
-                    )
                     _strict_prompt = (
-                        f"Edit this image: the character's {_region} is now {_target}. "
-                        f"Only the {_region} surface changes. {_preserve_note} "
-                        "Pose, expression, art style, and background are unchanged."
+                        f"Edit this image: change ONLY the {_region} color to {_target}.\n"
+                        f"WHAT CHANGES: the {_region} surface becomes {_target}.\n"
+                        f"WHAT DOES NOT CHANGE: {_pres_note}\n"
+                        "Pose, expression, art style, and background are identical to the original."
                     )
 
                 _msk = None
@@ -1935,6 +1939,7 @@ async def chat(req: ChatRequest, request: Request):
                         _current_bytes, _t2_from, _t2_to,
                         region=_region_desc or "skin/fur",
                         cached_description=_cached,
+                        preserve_elements=_cached_preserve_els or None,
                     )
                     # Cache the description for this session
                     if len(_edit_desc_cache) >= _EDIT_DESC_CACHE_MAX:
@@ -2052,6 +2057,7 @@ async def chat(req: ChatRequest, request: Request):
                                 _from_color or "current color",
                                 _to_color or effective_msg.strip(),
                                 region=_region_desc or "skin/fur",
+                                preserve_elements=_cached_preserve_els or None,
                             )
                         else:
                             _b64s = await _dalle.generate(effective_msg.strip())
