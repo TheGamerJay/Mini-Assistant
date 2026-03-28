@@ -555,6 +555,7 @@ function Sidebar() {
     setPurchaseModalOpen,
     mobileSidebarOpen,
     setMobileSidebarOpen,
+    hasAdMode,
   } = useApp();
 
   // Close mobile sidebar on page/chat navigation
@@ -695,7 +696,7 @@ function Sidebar() {
         <button
           onClick={() => navTo('lessons')}
           title="What Mini Assistant learned from you"
-          className={`w-full flex items-center gap-2 rounded-lg px-2 py-2 mb-1 text-xs transition-colors
+          className={`w-full flex items-center gap-2 rounded-lg px-2 py-2 text-xs transition-colors
             ${page === 'lessons'
               ? 'bg-violet-500/10 border border-violet-500/20 text-violet-300'
               : 'text-slate-500 hover:bg-white/5 hover:text-slate-300'}
@@ -703,6 +704,25 @@ function Sidebar() {
         >
           <BookOpen size={14} className="flex-shrink-0" />
           {!sidebarCollapsed && <span className="font-medium">What I Know</span>}
+        </button>
+
+        {/* Ad Mode */}
+        <button
+          onClick={() => navTo('ad-mode')}
+          title={hasAdMode ? 'Ad Mode — AI Ad Creation' : 'Ad Mode — Upgrade to unlock'}
+          className={`w-full flex items-center gap-2 rounded-lg px-2 py-2 mb-1 text-xs transition-colors
+            ${page === 'ad-mode'
+              ? 'bg-violet-500/10 border border-violet-500/20 text-violet-300'
+              : 'text-slate-500 hover:bg-white/5 hover:text-slate-300'}
+            ${sidebarCollapsed ? 'justify-center' : ''}`}
+        >
+          <Zap size={14} className="flex-shrink-0" />
+          {!sidebarCollapsed && (
+            <span className="font-medium flex items-center gap-1.5 flex-1">
+              Ad Mode
+              {!hasAdMode && <span className="text-[9px] font-mono text-violet-500 bg-violet-500/10 border border-violet-500/20 rounded px-1 py-px ml-auto">PRO</span>}
+            </span>
+          )}
         </button>
 
         {/* Images */}

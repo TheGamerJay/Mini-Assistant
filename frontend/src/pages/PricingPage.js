@@ -6,6 +6,7 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { startCheckout, getPriceId } from '../api/checkout';
+import { api } from '../api/client';
 // getPriceId is async — call it inside handlers, not at module scope
 import {
   Check, X as XIcon, Zap, Crown, Users, Star, Shield,
@@ -181,14 +182,15 @@ const TOPUP_BUNDLES = [
 ];
 
 export default function PricingPage() {
-  const { plan: currentPlan, isSubscribed, credits, openUpgradeModal, setPage, getPrevPage, setPurchaseModalOpen } = useApp();
+  const { plan: currentPlan, isSubscribed, credits, openUpgradeModal, setPage, getPrevPage, setPurchaseModalOpen, hasAdMode } = useApp();
   const [annual, setAnnual] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState(null); // plan id while loading
   const [topupLoading, setTopupLoading] = useState(null);
+  const [adModeLoading, setAdModeLoading] = useState(null); // 'monthly' | 'yearly'
 
   // Clear loading states when user presses Back from Stripe (bfcache restore)
   useEffect(() => {
-    const handler = (e) => { if (e.persisted) { setCheckoutLoading(null); setTopupLoading(null); } };
+    const handler = (e) => { if (e.persisted) { setCheckoutLoading(null); setTopupLoading(null); setAdModeLoading(null); } };
     window.addEventListener('pageshow', handler);
     return () => window.removeEventListener('pageshow', handler);
   }, []);
@@ -228,6 +230,17 @@ export default function PricingPage() {
       setTopupLoading(null);
     }
   }, [setPurchaseModalOpen]);
+
+  const handleAdModeCheckout = useCallback(async (period) => {
+    setAdModeLoading(period);
+    try {
+      const { url } = await api.adModeCheckout(period);
+      if (url) window.location.href = url;
+    } catch (err) {
+      console.error('Ad Mode checkout error:', err);
+      setAdModeLoading(null);
+    }
+  }, []);
 
   return (
     <div className="h-full overflow-y-auto bg-[#0b0b12]">
@@ -489,6 +502,95 @@ export default function PricingPage() {
               You have <span className="text-slate-400 font-medium">{credits} credits</span> remaining. Top-ups unlock once your balance reaches zero.
             </p>
           )}
+        </div>
+
+        {/* Ad Mode Add-on */}
+        <div className="mb-12">
+          <div className="text-center mb-6">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400 text-xs font-medium mb-3">
+              <Zap className="w-3 h-3" /> Add-On
+            </div>
+            <h2 className="text-xl font-bold text-white mb-2">Ad Mode</h2>
+            <p className="text-sm text-slate-400 max-w-md mx-auto">
+              AI-powered ad creation. Generate complete ad campaigns with copy and images — works alongside any plan.
+            </p>
+          </div>
+
+          <div className="max-w-2xl mx-auto rounded-2xl border border-violet-500/25 bg-gradient-to-br from-violet-500/5 to-[#111118] overflow-hidden">
+            {/* Feature list */}
+            <div className="px-6 pt-6 pb-4 grid grid-cols-2 gap-2">
+              {[
+                'AI-generated ad copy (hook, headline, CTA)',
+                'DALL-E 3 ad images per concept',
+                'Brand profile & voice guidelines',
+                'Multi-angle campaign generation',
+                'Save & manage campaigns',
+                'Per-image regeneration',
+              ].map((f) => (
+                <div key={f} className="flex items-start gap-2 text-xs text-slate-400">
+                  <Check className="w-3.5 h-3.5 text-violet-400 flex-shrink-0 mt-px" />
+                  {f}
+                </div>
+              ))}
+            </div>
+
+            {/* Pricing cards */}
+            <div className="grid grid-cols-2 gap-3 px-6 pb-6 pt-2">
+              {/* Monthly */}
+              <div className="rounded-xl border border-white/10 bg-white/3 p-4 flex flex-col gap-3">
+                <div>
+                  <p className="text-xs text-slate-500 mb-1">Monthly</p>
+                  <p className="text-2xl font-bold text-white">$29<span className="text-sm font-normal text-slate-500">/mo</span></p>
+                </div>
+                {hasAdMode ? (
+                  <button
+                    onClick={() => setPage('ad-mode')}
+                    className="w-full py-2 rounded-lg bg-violet-500/20 border border-violet-500/30 text-violet-300 text-xs font-semibold"
+                  >
+                    Open Ad Mode
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleAdModeCheckout('monthly')}
+                    disabled={adModeLoading !== null}
+                    className="w-full py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold transition-colors disabled:opacity-60"
+                  >
+                    {adModeLoading === 'monthly' ? 'Redirecting…' : 'Subscribe Monthly'}
+                  </button>
+                )}
+              </div>
+
+              {/* Yearly */}
+              <div className="rounded-xl border border-violet-500/30 bg-violet-500/8 p-4 flex flex-col gap-3 relative">
+                <div className="absolute top-3 right-3 text-[9px] font-mono bg-violet-500 text-white rounded px-1.5 py-0.5">SAVE 34%</div>
+                <div>
+                  <p className="text-xs text-slate-500 mb-1">Yearly</p>
+                  <p className="text-2xl font-bold text-white">$19<span className="text-sm font-normal text-slate-500">/mo</span></p>
+                  <p className="text-[10px] text-slate-600">$228 billed annually</p>
+                </div>
+                {hasAdMode ? (
+                  <button
+                    onClick={() => setPage('ad-mode')}
+                    className="w-full py-2 rounded-lg bg-violet-500/20 border border-violet-500/30 text-violet-300 text-xs font-semibold"
+                  >
+                    Open Ad Mode
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleAdModeCheckout('yearly')}
+                    disabled={adModeLoading !== null}
+                    className="w-full py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold transition-colors disabled:opacity-60"
+                  >
+                    {adModeLoading === 'yearly' ? 'Redirecting…' : 'Subscribe Yearly'}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <p className="text-center text-[10px] text-slate-600 pb-4">
+              Billed separately from your main plan. Cancel anytime.
+            </p>
+          </div>
         </div>
 
         {/* Trust signals */}
