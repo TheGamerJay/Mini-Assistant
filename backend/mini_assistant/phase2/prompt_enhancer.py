@@ -65,12 +65,16 @@ RULE 4 — MULTI-STEP:
 
 RULE 5 — PRIMARY TIER ROUTING:
 Assign primary_tier to each step using this routing table:
-- hair color → "semantic"    (gpt-image-1; hair is usually isolated)
+- hair color → "semantic"    (gpt-image-1 with explicit region isolation)
 - eye color  → "semantic"
 - eyebrow color → "semantic"
-- skin/fur/body/complexion/tone color → "vision"  (PIL cannot isolate skin from same-colored clothing)
+- skin/fur/body/complexion/tone color → "semantic"  (gpt-image-1 with pre-flight scan to name preserve elements)
 - clothing/accessory color → "semantic"  (gpt-image-1 understands clothing semantics)
 - unknown/ambiguous color region → "semantic"
+
+NOTE: skin/fur is always "semantic" — the pipeline does a pre-flight GPT-4o vision scan to identify
+every element sharing the from_color, then explicitly names them in the gpt-image-1 prompt as
+elements to preserve. This prevents "change all blue" behavior.
 
 RULE 6 — COLOR OVERLAP RISK:
 Set color_overlap_risk: true when the from_color is likely shared between skin/fur AND clothing

@@ -200,6 +200,67 @@ def _has_color_overlap(description: str, from_color: str) -> bool:
 
 # ─────────────────────────────────────────────────────────────────────────────
 
+
+async def analyze_region_colors(
+    client,
+    image_bytes: bytes,
+    target_color: str,
+    target_region: str,
+) -> dict:
+    """
+    GPT-4o vision pre-flight: identify every element that is `target_color`,
+    split into elements TO CHANGE (target_region) vs elements TO PRESERVE.
+
+    Returns:
+        {
+            "target_elements":   ["fur", "body"],
+            "preserve_elements": ["eyes", "shoes", "headset ring"],
+            "full_description":  "<detailed character description>"
+        }
+    """
+    import base64 as _b64
+    import json as _json
+
+    img_b64 = _b64.b64encode(image_bytes).decode()
+    prompt = (
+        f"I need to change ONLY the character's {target_region} color from {target_color} "
+        f"to a different color, leaving everything else unchanged.\n\n"
+        f"Scan this image and list EVERY visible element that is currently {target_color}.\n"
+        f"Separate them into two groups:\n"
+        f"1. target_elements — parts of the {target_region} itself (body surface, fur, skin)\n"
+        f"2. preserve_elements — ALL other {target_color} elements that must NOT be changed "
+        f"(e.g. eyes, shoes, headset ring, clothing trim, accessories, outlines)\n\n"
+        f"Also write a full detailed character description for recreation.\n\n"
+        f"Return ONLY valid JSON:\n"
+        f'{{"target_elements": [...], "preserve_elements": [...], "full_description": "..."}}'
+    )
+    resp = await client.chat.completions.create(
+        model="gpt-4o",
+        max_tokens=800,
+        response_format={"type": "json_object"},
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}", "detail": "high"}},
+                {"type": "text", "text": prompt},
+            ],
+        }],
+    )
+    raw = resp.choices[0].message.content or "{}"
+    try:
+        result = _json.loads(raw)
+    except Exception:
+        result = {}
+    logger.info(
+        "analyze_region_colors: target=%s preserve=%s",
+        result.get("target_elements", []),
+        result.get("preserve_elements", []),
+    )
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
 class DalleClient:
     """Async wrapper around the OpenAI images.generate endpoint."""
 

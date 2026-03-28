@@ -2037,31 +2037,65 @@ async def chat(req: ChatRequest, request: Request):
             # ── TIER 1: Semantic (gpt-image-1 edit) ──────────────────────────
             async def _try_tier1() -> bool:
                 nonlocal _current_b64, _current_bytes
-                _instr = _step.get("final_instruction")
-                if not _instr:
-                    try:
-                        from mini_assistant.phase2.prompt_enhancer import enhance_edit_instruction
-                        _instr = await enhance_edit_instruction(effective_msg.strip())
-                    except Exception:
-                        _instr = effective_msg.strip()
+                _is_skin_region = bool(re.search(
+                    r"\b(skin|fur|body|complexion|tone)\b", _region_desc or "", re.I
+                ))
 
-                # For skin/fur color changes where from_color may overlap other elements,
-                # be very explicit about keeping non-skin elements their original color.
-                _is_skin_region = bool(re.search(r"\b(skin|fur|body|complexion|tone)\b", _region_desc or "", re.I))
-                if _is_skin_region and _from_color and _to_color:
+                if _is_skin_region and _from_color and _to_color and _current_bytes:
+                    # Pre-flight vision scan: identify every from_color element by name
+                    # so we can explicitly preserve non-skin elements in the prompt.
+                    _preserve_list: list[str] = []
+                    try:
+                        from ..services.dalle_client import analyze_region_colors as _arc
+                        _scan = await _arc(
+                            _dalle._get_client(),
+                            _current_bytes,
+                            _from_color,
+                            _region_desc or "skin/fur",
+                        )
+                        _preserve_list = _scan.get("preserve_elements", [])
+                        # Cache full description for Tier 2 (skip second vision call)
+                        _preflight_desc = _scan.get("full_description", "")
+                        if _preflight_desc and session_id not in _edit_desc_cache:
+                            if len(_edit_desc_cache) >= _EDIT_DESC_CACHE_MAX:
+                                _edit_desc_cache.pop(next(iter(_edit_desc_cache)))
+                            _edit_desc_cache[session_id] = _preflight_desc
+                    except Exception as _scan_err:
+                        logger.warning("pre-flight scan failed (non-fatal): %s", _scan_err)
+
+                    if _preserve_list:
+                        _preserve_clause = (
+                            f"These elements are also {_from_color} but must REMAIN {_from_color} "
+                            f"and MUST NOT change: {', '.join(_preserve_list)}."
+                        )
+                    else:
+                        _preserve_clause = (
+                            f"All eyes, shoes, clothing, accessories, headset parts, rings, "
+                            f"trim, and outlines that are currently {_from_color} must REMAIN "
+                            f"{_from_color} and must NOT change."
+                        )
+
                     _strict_prompt = (
-                        f"Change ONLY the character's {_region_desc or 'skin/fur'} color from {_from_color} to {_to_color}. "
-                        f"Every other element that is currently {_from_color} — including eyes, shoes, clothing, "
-                        f"accessories, headset, rings, trim, outlines — must STAY {_from_color}. "
+                        f"Change ONLY the character's {_region_desc or 'skin/fur'} from "
+                        f"{_from_color} to {_to_color}. "
+                        f"{_preserve_clause} "
                         "Only the skin/fur/body surface changes. "
-                        "Do NOT change anything else. Preserve pose, expression, art style, background."
+                        "Preserve pose, expression, art style, and background exactly."
                     )
                 else:
+                    _instr = _step.get("final_instruction")
+                    if not _instr:
+                        try:
+                            from mini_assistant.phase2.prompt_enhancer import enhance_edit_instruction
+                            _instr = await enhance_edit_instruction(effective_msg.strip())
+                        except Exception:
+                            _instr = effective_msg.strip()
                     _strict_prompt = (
                         f"Apply ONLY this change: {_instr}. "
                         "DO NOT modify clothing, accessories, background, pose, lighting, or identity. "
                         "Preserve everything else pixel-perfectly."
                     )
+
                 _msk = None
                 if _current_bytes and _mask_box:
                     _msk = _build_mask(_current_bytes, _mask_box)
