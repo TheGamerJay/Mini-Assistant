@@ -2262,6 +2262,37 @@ async def chat(req: ChatRequest, request: Request):
             phase9_prefix = phase9_ctx.prefix if phase9_ctx else ""
             combined_prefix = rt_context + phase9_prefix + (system_prefix or "")
             user_content = (combined_prefix + effective_msg) if combined_prefix else effective_msg
+
+            # ── Web search injection (non-streaming path) ─────────────────────
+            if (
+                phase1_plan and phase1_plan.intent == "web_search"
+                and not getattr(req, "image_base64", None)
+            ):
+                try:
+                    from mini_assistant.tools.docs_retriever import doc_aware_search, is_tech_query
+                    _is_tech = is_tech_query(effective_msg)
+                    if _is_tech:
+                        _doc_r = await asyncio.get_event_loop().run_in_executor(
+                            None, lambda: doc_aware_search(effective_msg, max_results=5)
+                        )
+                        _ctx = _doc_r.get("context_snippet", "")
+                        if _ctx:
+                            user_content = (
+                                f"[DOCS] {_ctx}\n\n"
+                                "Answer using the documentation above. "
+                                "Do not say you lack internet access.\n\n"
+                                f"{effective_msg}"
+                            )
+                    else:
+                        from mini_assistant.tools.web_search_reliability import (
+                            reliable_search as _rel_search,
+                            format_for_injection as _fmt_injection,
+                        )
+                        _rel_out = await _rel_search(effective_msg)
+                        user_content = f"{_fmt_injection(_rel_out)}\n\nUser question: {effective_msg}"
+                except Exception as _ws_err2:
+                    logger.warning("Non-streaming web search failed (non-fatal): %s", _ws_err2)
+
             claude_msgs.append({"role": "user", "content": user_content})
 
             import anthropic as _am
@@ -2783,16 +2814,16 @@ async def chat_stream(req: ChatRequest, request: Request):
                 history_msgs.append({"role": _hr, "content": _hc})
         user_content = (rt_context + effective_msg) if rt_context else effective_msg
 
-        # ── Web search injection — fetch live results when needed ────────────────
-        # Intent planner (which runs even in chat mode now) classifies web_search
-        # correctly regardless of how the user phrases the request.
+        # ── Web search injection — reliability layer ──────────────────────────────
+        # Uses multi-query search with auto-retry, scoring, and structured output.
+        # Tech queries still get doc-aware search first; product/general use the
+        # reliability layer which uses shopping search + text search + fallbacks.
         _needs_web = bool(phase1_plan and phase1_plan.intent == "web_search")
         if _needs_web and not req.image_base64 and not req.images_base64:
             try:
                 from mini_assistant.tools.docs_retriever import doc_aware_search, is_tech_query
                 _is_tech = is_tech_query(effective_msg)
                 if _is_tech:
-                    # Tech query: local index → live official docs → web fallback
                     _doc_result = await asyncio.get_event_loop().run_in_executor(
                         None, lambda: doc_aware_search(effective_msg, max_results=5)
                     )
@@ -2818,24 +2849,21 @@ async def chat_stream(req: ChatRequest, request: Request):
                             f"{effective_msg}"
                         )
                 else:
-                    # Non-tech query: plain web search
-                    from mini_assistant.tools.search import web_search as _plain_search
-                    _ws_results = await asyncio.get_event_loop().run_in_executor(
-                        None, lambda: _plain_search(effective_msg, max_results=5)
+                    # Non-tech: reliability layer (multi-query + shopping + auto-retry)
+                    from mini_assistant.tools.web_search_reliability import (
+                        reliable_search as _rel_search,
+                        format_for_injection as _fmt_injection,
                     )
-                    if _ws_results:
-                        _snippets = "\n".join(
-                            f"[{i+1}] {r.get('title', '')}\n{r.get('body', '')}"
-                            for i, r in enumerate(_ws_results[:5])
-                        )
-                        user_content = (
-                            f"[WEB SEARCH RESULTS for: {effective_msg}]\n{_snippets}\n\n"
-                            "Use the search results above to answer the user's question accurately. "
-                            "Do not say you lack internet access.\n\n"
-                            f"{effective_msg}"
-                        )
+                    _rel_output = await _rel_search(effective_msg)
+                    logger.info(
+                        "ReliableSearch | mode=%s results=%d top_conf=%.2f retry=%s",
+                        _rel_output.answer_mode, len(_rel_output.results),
+                        _rel_output.top_confidence, _rel_output.retry_used,
+                    )
+                    _injected = _fmt_injection(_rel_output)
+                    user_content = f"{_injected}\n\nUser question: {effective_msg}"
             except Exception as _ws_err:
-                logger.warning("Web search failed (non-fatal): %s", _ws_err)
+                logger.warning("Web search reliability layer failed (non-fatal): %s", _ws_err)
 
         # Collect all attached images (multi-image support)
         # Compress each image to reduce payload size through Cloudflare tunnel.
