@@ -18,6 +18,22 @@ import ImageCard from './ImageCard';
 import IntelligencePanel from './IntelligencePanel';
 
 // ---------------------------------------------------------------------------
+// Timestamp formatter
+// ---------------------------------------------------------------------------
+function _fmtTs(ts) {
+  if (!ts) return null;
+  const d = new Date(ts);
+  if (isNaN(d)) return null;
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const sameYear = d.getFullYear() === now.getFullYear();
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (sameDay) return time;
+  const date = d.toLocaleDateString([], { month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) });
+  return `${date}, ${time}`;
+}
+
+// ---------------------------------------------------------------------------
 // Lightweight syntax tokenizer (no external deps)
 // ---------------------------------------------------------------------------
 const KEYWORDS = {
@@ -430,6 +446,10 @@ function MessageActions({ content, rating, onRate, onRetry, onFork, onPin, onSen
 
   return (
     <div className="flex items-center gap-0.5 mt-3 pt-2 border-t border-white/5">
+      {/* Timestamp — visible inline */}
+      {_fmtTs(timestamp) && (
+        <span className="text-[10px] font-mono text-slate-600 mr-auto pl-0.5 select-none">{_fmtTs(timestamp)}</span>
+      )}
       {/* Copy */}
       <ActionBtn onClick={handleCopy} title={copied ? 'Copied!' : 'Copy message'} active={copied} activeClass="text-emerald-400">
         {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
@@ -852,6 +872,9 @@ function ChatMessage({ message, onRetry, onRate, onFork, onPin, onSendToBuilder,
               {renderText(content)}
             </div>
           )}
+          {_fmtTs(timestamp) && (
+            <div className="text-[10px] text-slate-600 font-mono mt-1 text-right">{_fmtTs(timestamp)}</div>
+          )}
         </div>
         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-blue-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-1 select-none overflow-hidden">
           {avatar ? <AvatarMedia src={avatar} className="w-full h-full object-cover" fallback={<span>{initial}</span>} /> : initial}
@@ -902,6 +925,9 @@ function ChatMessage({ message, onRetry, onRate, onFork, onPin, onSendToBuilder,
             <p className="text-slate-400 text-sm mb-3">Here's your image:</p>
             <ImageCard image_base64={image_base64} prompt={prompt || content} route_result={route_result}
               generation_time_ms={generation_time_ms} retry_used={retry_used} dry_run={false} />
+            {_fmtTs(timestamp) && (
+              <div className="text-[10px] font-mono text-slate-600 mt-2">{_fmtTs(timestamp)}</div>
+            )}
           </>
         ) : (
           <>
