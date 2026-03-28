@@ -158,36 +158,6 @@ export const api = {
     return post(`${IMAGE_API}/chat/compare`, { message, session_id: sessionId, history: trimmedHistory }, 180000);
   },
 
-  /**
-   * Try to call Ollama directly on localhost:11434 for image analysis.
-   * Only works when the user's machine runs Ollama locally (e.g. developer).
-   * Returns the reply string on success, throws on failure/timeout.
-   * Timeout is 25s — fast enough to still fall back to backend if it fails.
-   */
-  async tryLocalOllamaChat(message, imageBase64, model = 'gemma3:4b') {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 25000);
-    try {
-      const res = await fetch('http://localhost:11434/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          messages: [{ role: 'user', content: message, images: [imageBase64] }],
-          stream: false,
-        }),
-        signal: controller.signal,
-      });
-      if (!res.ok) throw new Error(`Ollama local: HTTP ${res.status}`);
-      const data = await res.json();
-      const reply = data.message?.content;
-      if (!reply) throw new Error('Empty reply from local Ollama');
-      return reply;
-    } finally {
-      clearTimeout(timer);
-    }
-  },
-
   /** Get session memory facts */
   getMemory(sessionId) {
     return get(`${MAIN_API}/memory/${sessionId}`, 10000);
@@ -226,7 +196,7 @@ export const api = {
   },
 
   /**
-   * Generate an image — Phase 7: smart ComfyUI routing.
+   * Generate an image via DALL-E 3.
    * params may include: prompt, quality, session_id,
    *   reference_image_base64, mask_image_base64,
    *   pose_image_base64, style_image_base64,

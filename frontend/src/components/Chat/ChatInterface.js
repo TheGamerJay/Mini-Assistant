@@ -505,7 +505,7 @@ const ChatInterface = () => {
             <h2 className="text-lg font-bold text-cyan-400 uppercase tracking-wider" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
               {activeChatId ? (chats.find(c => c.id === activeChatId)?.title || 'Chat') : 'Mini Assistant'}
             </h2>
-            <p className="text-[10px] font-mono text-slate-500 mt-0.5">Ollama · ComfyUI · Local AI</p>
+            <p className="text-[10px] font-mono text-slate-500 mt-0.5">GPT-4o · DALL-E 3 · Claude</p>
           </div>
           {activeChatId && (
             <button

@@ -1186,6 +1186,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
                 prompt={streamPrompt}
                 response={streamResponse}
                 onDone={handleStreamDone}
+                chatMode={chatMode}
               />
               {!streamActive && <LoadingBubble />}
             </div>

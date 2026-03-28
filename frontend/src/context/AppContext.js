@@ -792,8 +792,6 @@ export function AppProvider({ children }) {
   // ---- Server Status ----
   const [serverStatus, _setServerStatus] = useState({
     backend: null,
-    ollama: null,
-    comfyui: null,
   });
 
   const setServerStatus = useCallback((patch) => {

@@ -14,7 +14,8 @@ const IntelligencePanel = ({ route_result, generation_time_ms }) => {
   // Only show for non-trivial routes
   if (!intent || intent === 'chat') return null;
 
-  const brain = intent === 'image_generation' || intent === 'image_edit' ? 'router + comfyui'
+  const brain = intent === 'image_generation' ? 'dall-e 3'
+    : intent === 'image_edit' ? 'ceo + image brain'
     : intent === 'coding' ? 'coder brain'
     : intent === 'image_analysis' ? 'vision brain'
     : 'router brain';

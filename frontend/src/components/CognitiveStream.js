@@ -21,26 +21,27 @@ import { ChevronDown, ChevronUp, CheckCircle2, XCircle, Loader2, Brain, Cpu, Wan
 // ── Stage definitions ──────────────────────────────────────────────────────
 
 const STAGE_ICONS = {
-  router:   Brain,
-  prompt:   Wand2,
-  comfyui:  Cpu,
-  vision:   Eye,
-  coder:    Code2,
-  llm:      MessageSquare,
+  router:      Brain,
+  prompt:      Wand2,
+  generation:  Cpu,
+  image_brain: Cpu,
+  vision:      Eye,
+  coder:       Code2,
+  llm:         MessageSquare,
 };
 
 const PIPELINE = {
   image_generation: [
-    { id: 'router',  icon: 'router',  label: 'Router Brain',     desc: 'Analyzing intent & style…',         estimatedMs: 2000 },
-    { id: 'prompt',  icon: 'prompt',  label: 'Prompt Builder',   desc: 'Crafting positive & negative prompts…', estimatedMs: 1200 },
-    { id: 'comfyui', icon: 'comfyui', label: 'ComfyUI Pipeline', desc: 'Building workflow & running inference…', estimatedMs: 90000 },
-    { id: 'vision',  icon: 'vision',  label: 'Vision Brain',     desc: 'Reviewing output quality…',         estimatedMs: 6000 },
+    { id: 'router',     icon: 'router',     label: 'Router Brain',    desc: 'Analyzing intent & style…',            estimatedMs: 1500 },
+    { id: 'prompt',     icon: 'prompt',     label: 'Prompt Builder',  desc: 'Crafting generation prompt…',          estimatedMs: 1200 },
+    { id: 'generation', icon: 'generation', label: 'DALL-E 3',        desc: 'Generating image…',                    estimatedMs: 14000 },
+    { id: 'vision',     icon: 'vision',     label: 'Vision Brain',    desc: 'Reviewing output quality…',            estimatedMs: 3000 },
   ],
   image_edit: [
-    { id: 'router',  icon: 'router',  label: 'Router Brain',     desc: 'Detecting edit intent…',            estimatedMs: 2000 },
-    { id: 'prompt',  icon: 'prompt',  label: 'Prompt Builder',   desc: 'Building inpaint prompt…',          estimatedMs: 1000 },
-    { id: 'comfyui', icon: 'comfyui', label: 'ComfyUI Pipeline', desc: 'Running inpaint workflow…',         estimatedMs: 60000 },
-    { id: 'vision',  icon: 'vision',  label: 'Vision Brain',     desc: 'Reviewing edit result…',            estimatedMs: 5000 },
+    { id: 'router',      icon: 'router',      label: 'CEO Brain',      desc: 'Planning edit strategy…',             estimatedMs: 1500 },
+    { id: 'prompt',      icon: 'prompt',      label: 'Analysis Brain', desc: 'Scanning region & building mask…',    estimatedMs: 2000 },
+    { id: 'image_brain', icon: 'image_brain', label: 'Image Brain',    desc: 'Applying edit…',                      estimatedMs: 10000 },
+    { id: 'vision',      icon: 'vision',      label: 'QA Brain',       desc: 'Validating result…',                  estimatedMs: 2000 },
   ],
   coding: [
     { id: 'router', icon: 'router', label: 'Router Brain', desc: 'Detecting coding intent…',      estimatedMs: 1500 },
@@ -83,17 +84,17 @@ function initStages(pipeline) {
     ...s,
     status: i === 0 ? STATUS.ACTIVE : STATUS.WAITING,
     result: null,
-    progress: null, // 0-100 for comfyui stage
+    progress: null, // 0-100 for generation/image_brain stage
   }));
 }
 
 // ── CognitiveStream component ──────────────────────────────────────────────
 
-export default function CognitiveStream({ active, prompt, response, onDone }) {
+export default function CognitiveStream({ active, prompt, response, onDone, chatMode }) {
   const [stages, setStages] = useState([]);
   const [collapsed, setCollapsed] = useState(false);
   const [visible, setVisible] = useState(false);
-  const [comfyuiProgress, setComfyuiProgress] = useState(0);
+  const [genProgress, setGenProgress] = useState(0);
 
   const intentRef      = useRef('chat');
   const timerRefs      = useRef([]);
@@ -133,12 +134,12 @@ export default function CognitiveStream({ active, prompt, response, onDone }) {
       if (s.id === 'prompt') {
         result = checkpoint ? `Model: ${checkpoint}` : 'Prompts built';
       }
-      if (s.id === 'comfyui') {
+      if (s.id === 'generation' || s.id === 'image_brain') {
         result = [
-          workflow ? `Workflow: ${workflow}` : null,
           timeTaken ? `Time: ${(timeTaken/1000).toFixed(1)}s` : null,
           res?.retry_used ? 'Retry used' : null,
-        ].filter(Boolean).join('  ·  ');
+          res?.tier_used ? `Tier: ${res.tier_used}` : null,
+        ].filter(Boolean).join('  ·  ') || 'Complete';
       }
       if (s.id === 'vision') {
         result = qualityScore != null
@@ -165,9 +166,8 @@ export default function CognitiveStream({ active, prompt, response, onDone }) {
     setStages(newStages);
     setVisible(true);
     setCollapsed(false);
-    setComfyuiProgress(0);
+    setGenProgress(0);
 
-    let cursor = 0; // which stage is currently active
     let elapsed = 0;
 
     pipeline.forEach((stage, i) => {
@@ -183,18 +183,17 @@ export default function CognitiveStream({ active, prompt, response, onDone }) {
           if (idx === i)     return { ...s, status: STATUS.ACTIVE };
           return s;
         }));
-        cursor = i;
 
-        // Fake progress bar for comfyui stage
-        if (stage.id === 'comfyui') {
-          setComfyuiProgress(0);
+        // Fake progress bar for generation/image_brain stages
+        if (stage.id === 'generation' || stage.id === 'image_brain') {
+          setGenProgress(0);
           let prog = 0;
           const estimatedMs = stage.estimatedMs;
-          const tick = 500;
-          const increment = (tick / estimatedMs) * 100 * 0.92; // cap at 92% until real done
+          const tick = 400;
+          const increment = (tick / estimatedMs) * 100 * 0.88; // cap at 88% until real done
           progressRef.current = setInterval(() => {
-            prog = Math.min(prog + increment + Math.random() * 0.5, 92);
-            setComfyuiProgress(Math.round(prog));
+            prog = Math.min(prog + increment + Math.random() * 0.8, 88);
+            setGenProgress(Math.round(prog));
           }, tick);
         }
       }, delay);
@@ -206,7 +205,11 @@ export default function CognitiveStream({ active, prompt, response, onDone }) {
   // Start pipeline when active turns true
   useEffect(() => {
     if (active && prompt) {
-      const intent = guessIntent(prompt);
+      // Prefer chatMode prop for accuracy; fall back to keyword heuristic
+      let intent;
+      if (chatMode === 'image')       intent = 'image_generation';
+      else if (chatMode === 'image_edit') intent = 'image_edit';
+      else                             intent = guessIntent(prompt);
       intentRef.current = intent;
       const pipeline = PIPELINE[intent] || DEFAULT_PIPELINE;
       runPipeline(pipeline);
@@ -217,7 +220,7 @@ export default function CognitiveStream({ active, prompt, response, onDone }) {
   useEffect(() => {
     if (response && stages.length > 0 && !doneCalledRef.current) {
       clearTimers();
-      setComfyuiProgress(100);
+      setGenProgress(100);
 
       // Brief delay so progress bar "hits 100" visually
       setTimeout(() => {
@@ -341,21 +344,21 @@ export default function CognitiveStream({ active, prompt, response, onDone }) {
                       {isDone && stage.result ? stage.result : stage.desc}
                     </p>
 
-                    {/* ComfyUI progress bar */}
-                    {stage.id === 'comfyui' && isActive && (
+                    {/* Generation / Image Brain progress bar */}
+                    {(stage.id === 'generation' || stage.id === 'image_brain') && isActive && (
                       <div className="mt-2 flex items-center gap-2">
                         <div className="flex-1 h-1 rounded-full bg-white/5 overflow-hidden">
                           <div
                             className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-violet-500 transition-all duration-500"
-                            style={{ width: `${comfyuiProgress}%` }}
+                            style={{ width: `${genProgress}%` }}
                           />
                         </div>
                         <span className="text-[10px] font-mono text-slate-500 w-8 text-right">
-                          {comfyuiProgress}%
+                          {genProgress}%
                         </span>
                       </div>
                     )}
-                    {stage.id === 'comfyui' && isDone && (
+                    {(stage.id === 'generation' || stage.id === 'image_brain') && isDone && (
                       <div className="mt-1.5 h-1 rounded-full bg-cyan-500/20 overflow-hidden">
                         <div className="h-full w-full rounded-full bg-gradient-to-r from-cyan-500 to-violet-500" />
                       </div>

@@ -63,7 +63,7 @@ const _ACTIVE_TASK_STATES = new Set([
 
 const Dashboard = () => {
   const [activeTab, setActiveTab] = usePersist('ma_dashboard_tab', 'chat');
-  const [isOllamaConnected, setIsOllamaConnected] = useState(false);
+  const [isBackendConnected, setIsBackendConnected] = useState(false);
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [activeTasks, setActiveTasks] = useState([]);
 
@@ -88,10 +88,7 @@ const Dashboard = () => {
   const checkHealth = async () => {
     try {
       const response = await axiosInstance.get('/health');
-      setIsOllamaConnected(response.data.ollama === 'connected');
-      if (response.data.ollama === 'disconnected') {
-        toast.error('AI service not connected. Check OLLAMA_HOST and OLLAMA_API_KEY settings.');
-      }
+      setIsBackendConnected(response.status === 200);
     } catch (error) {
       toast.error('Backend connection error');
     }
@@ -178,9 +175,9 @@ const Dashboard = () => {
               </button>
             )}
             <div className="flex items-center gap-3" data-testid="status-indicator">
-              <Activity className={`w-5 h-5 ${isOllamaConnected ? 'text-green-400' : 'text-red-400'}`} />
+              <Activity className={`w-5 h-5 ${isBackendConnected ? 'text-green-400' : 'text-red-400'}`} />
               <span className="text-sm font-mono uppercase tracking-wider">
-                {isOllamaConnected ? 'ONLINE' : 'OFFLINE'}
+                {isBackendConnected ? 'ONLINE' : 'OFFLINE'}
               </span>
             </div>
           </div>
