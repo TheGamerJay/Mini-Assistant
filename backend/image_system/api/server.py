@@ -2705,8 +2705,21 @@ async def chat_stream(req: ChatRequest, request: Request):
                 history_msgs.append({"role": _hr, "content": _hc})
         user_content = (rt_context + effective_msg) if rt_context else effective_msg
 
-        # ── Web search injection — fetch live results when intent is web_search ─
-        if phase1_plan and phase1_plan.intent == "web_search" and not req.image_base64 and not req.images_base64:
+        # ── Web search injection — fetch live results when needed ────────────────
+        # In chat mode phase1_plan is None, so detect web-search intent locally.
+        _WEB_INTENT_RE = _re.compile(
+            r"\b(search|look up|find online|latest|current news|today.?s|right now|"
+            r"as of|recent|up to date|what.?s the|stock price|weather|currency|"
+            r"exchange rate|news about|who is|when did|how many|what year|"
+            r"current|price of|cost of|value of|rate of|score|standings|"
+            r"headlines|trending|happened|just announced)\b",
+            _re.IGNORECASE,
+        )
+        _needs_web = (
+            (phase1_plan and phase1_plan.intent == "web_search")
+            or (req.chat_mode == "chat" and bool(_WEB_INTENT_RE.search(effective_msg)))
+        )
+        if _needs_web and not req.image_base64 and not req.images_base64:
             try:
                 from mini_assistant.tools.docs_retriever import doc_aware_search, is_tech_query
                 _is_tech = is_tech_query(effective_msg)
