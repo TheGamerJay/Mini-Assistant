@@ -1981,6 +1981,26 @@ async def chat(req: ChatRequest, request: Request):
                         logger.warning("step %d color_replace failed (%s) — skipping", _step_i + 1, _pe)
                         continue
 
+            # ── Skin/fur color: vision-guided recolor (describe + regenerate) ──
+            # structural_edit steps that carry from_color/to_color are semantic
+            # color changes (skin, fur) that PIL can't isolate. Use GPT-4o to
+            # describe the character, swap the color in text, then regenerate.
+            _sb_from = (_step.get("from_color") or "").lower() or None
+            _sb_to   = (_step.get("to_color")   or "").lower() or None
+            _sb_region = (_step.get("region_description") or "skin/fur").lower()
+            if _etype == "structural_edit" and _sb_from and _sb_to and _current_bytes:
+                try:
+                    logger.info("[MODEL ROUTER] step %d describe_and_recolor %s→%s", _step_i + 1, _sb_from, _sb_to)
+                    _b64_step = await _dalle.describe_and_recolor(_current_bytes, _sb_from, _sb_to, region=_sb_region)
+                    if _b64_step:
+                        import base64 as _b64mod
+                        _current_b64 = _b64_step
+                        _current_bytes = _b64mod.b64decode(_b64_step)
+                        logger.info("[MODEL ROUTER] step %d describe_and_recolor OK", _step_i + 1)
+                        continue
+                except Exception as _dre:
+                    logger.warning("step %d describe_and_recolor failed (%s) — falling through to gpt-image-1", _step_i + 1, _dre)
+
             # ── gpt-image-1 structural edit ───────────────────────────────────
             if _step.get("final_instruction"):
                 _edit_instruction = _step["final_instruction"]

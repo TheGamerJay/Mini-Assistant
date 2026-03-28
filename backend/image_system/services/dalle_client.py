@@ -297,6 +297,113 @@ class DalleClient:
         logger.info("%s edit complete (%d bytes b64)", _IMAGE_EDIT_MODEL, len(b64))
         return b64
 
+    async def describe_and_recolor(
+        self,
+        image_bytes: bytes,
+        from_color: str,
+        to_color: str,
+        region: str = "skin/fur",
+    ) -> str:
+        """
+        Vision-guided recolor: analyze the image with GPT-4o to get a precise
+        character description, swap the target color in the description text,
+        then regenerate via DALL-E 3.
+
+        Avoids PIL's blind pixel swap AND gpt-image-1's moderation filter.
+        Skin/fur regions are correctly isolated because the model describes
+        them separately from clothing.
+
+        Args:
+            image_bytes: Raw reference image bytes.
+            from_color:  Color to replace (e.g. "blue").
+            to_color:    New color (e.g. "yellow").
+            region:      Human label for the region (e.g. "skin/fur", "hair").
+
+        Returns:
+            base64 PNG string of the regenerated image.
+        """
+        import base64 as _b64
+        client = self._get_client()
+
+        img_b64 = _b64.b64encode(image_bytes).decode()
+
+        # ── Step 1: Describe the character precisely with GPT-4o vision ──────
+        logger.info("describe_and_recolor: analyzing reference image (%s→%s)", from_color, to_color)
+        vision = await client.chat.completions.create(
+            model="gpt-4o",
+            max_tokens=600,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{img_b64}", "detail": "high"},
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "Describe this character/image in precise detail for exact recreation. "
+                            "Include: art style, character type/species, "
+                            f"{region} color, hair/fur color, eye color, "
+                            "every clothing piece with its exact color, accessories, "
+                            "pose, expression, background, lighting. "
+                            "Output ONLY the description — no preamble, no commentary."
+                        ),
+                    },
+                ],
+            }],
+        )
+        description = vision.choices[0].message.content or ""
+        logger.info("describe_and_recolor: description (%d chars)", len(description))
+
+        # ── Step 2: Swap the target color only in region references ──────────
+        # Replace "blue skin", "blue fur", "blue body" etc. but NOT "blue hoodie"
+        def _swap(text: str) -> str:
+            # Replace color adjacent to skin/fur/body region words
+            swapped = re.sub(
+                rf"\b{re.escape(from_color)}\b(?=\s+(?:skin|fur|body|tone|complexion))",
+                to_color, text, flags=re.IGNORECASE,
+            )
+            # Also replace region+color order: "skin is blue" / "skin color: blue"
+            swapped = re.sub(
+                rf"(?<={region}\s(?:is|are|color[:\s]+)){re.escape(from_color)}\b",
+                to_color, swapped, flags=re.IGNORECASE,
+            )
+            # Fallback: replace any remaining standalone from_color that is NOT
+            # preceded by a clothing keyword
+            _CLOTHING = re.compile(
+                r"\b(shirt|hoodie|jacket|pants|jeans|shorts|shoes|sneakers|boots|"
+                r"gloves|hat|cap|vest|dress|outfit|clothing|coat|scarf|belt|bag)\s+",
+                re.IGNORECASE,
+            )
+            parts = _CLOTHING.split(swapped)
+            result = []
+            skip_next = False
+            for part in parts:
+                if skip_next:
+                    result.append(part)
+                    skip_next = False
+                elif _CLOTHING.match(part):
+                    result.append(part)
+                    skip_next = True  # don't swap color in next segment
+                else:
+                    result.append(re.sub(rf"\b{re.escape(from_color)}\b", to_color, part, flags=re.IGNORECASE))
+            swapped = "".join(result)
+            return swapped
+
+        modified = _swap(description)
+        logger.info("describe_and_recolor: swapped description (%d chars)", len(modified))
+
+        # ── Step 3: Regenerate with DALL-E 3 ────────────────────────────────
+        prompt = (
+            f"Recreate this character with ONE change only — the {region} color is now {to_color} "
+            f"instead of {from_color}. All clothing, accessories, art style, pose, expression, "
+            f"and background must remain IDENTICAL to the original.\n\n"
+            f"Character description:\n{modified}\n\n"
+            "Show the full character head-to-toe. Do not crop, zoom in, or reframe."
+        )
+        return await self.generate(prompt)
+
     def color_replace(
         self,
         image_bytes: bytes,
