@@ -93,10 +93,22 @@ color_change step:
   "region_description": "<what body part/area>",
   "from_color": "<exact color name to replace>",
   "to_color": "<exact color name to apply>",
+  "mask_box": {"top": 0-100, "left": 0-100, "width": 0-100, "height": 0-100},
   "primary_tier": "semantic" | "vision" | "region_pil" | "pil_global",
   "color_overlap_risk": true | false,
   "confidence": 0.0-1.0
 }
+
+MASK_BOX GUIDANCE for color_change steps — estimate where the region lives in a typical
+character portrait (values are % of full image dimension):
+  face / eyes / head:    top=5  left=25 width=50 height=30
+  hair:                  top=0  left=15 width=70 height=25
+  torso / shirt / body:  top=30 left=20 width=60 height=35
+  full body / skin / fur: top=5 left=10 width=80 height=90
+  arms / sleeves:        top=30 left=5  width=90 height=40
+  legs / pants:          top=60 left=20 width=60 height=35
+  shoes / feet:          top=80 left=20 width=60 height=20
+  tail:                  top=50 left=50 width=50 height=50
 
 structural_edit step:
 {

@@ -231,14 +231,19 @@ async def analyze_region_colors(
     prompt = (
         f"I need to change ONLY the character's {target_region} color from {target_color} "
         f"to a different color, leaving everything else unchanged.\n\n"
-        f"Scan this image and list EVERY visible element that is currently {target_color}.\n"
-        f"Separate them into two groups:\n"
-        f"1. target_elements — parts of the {target_region} itself (body surface, fur, skin)\n"
-        f"2. preserve_elements — ALL other {target_color} elements that must NOT be changed "
-        f"(e.g. eyes, shoes, headset ring, clothing trim, accessories, outlines)\n\n"
-        f"Also write a full detailed character description for recreation.\n\n"
+        f"Answer three things:\n\n"
+        f"1. List every visible element that is currently {target_color}:\n"
+        f"   - target_elements: parts of the {target_region} itself (body surface, fur, skin)\n"
+        f"   - preserve_elements: ALL other {target_color} elements that must NOT change\n"
+        f"     (e.g. eyes, shoes, headset ring, clothing trim, accessories, outlines)\n\n"
+        f"2. Estimate a TIGHT bounding box around ONLY the {target_region} area (as % of image):\n"
+        f"   top=% from top edge, left=% from left edge, width=% of image width, height=% of image height.\n"
+        f"   The box must enclose just the {target_region} — not the full image, not accessories.\n\n"
+        f"3. Write a full detailed character description for recreation.\n\n"
         f"Return ONLY valid JSON:\n"
-        f'{{"target_elements": [...], "preserve_elements": [...], "full_description": "..."}}'
+        f'{{"target_elements": [...], "preserve_elements": [...], '
+        f'"mask_box": {{"top": 0, "left": 0, "width": 100, "height": 100}}, '
+        f'"full_description": "..."}}'
     )
     resp = await client.chat.completions.create(
         model="gpt-4o",
@@ -258,9 +263,10 @@ async def analyze_region_colors(
     except Exception:
         result = {}
     logger.info(
-        "analyze_region_colors: target=%s preserve=%s",
+        "analyze_region_colors: target=%s preserve=%s mask_box=%s",
         result.get("target_elements", []),
         result.get("preserve_elements", []),
+        result.get("mask_box"),
     )
     return result
 
