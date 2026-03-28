@@ -996,10 +996,16 @@ class DalleClient:
         # ── Step 2: Swap the target color only in region references ──────────
         # Replace "blue skin", "blue fur", "blue body" etc. but NOT "blue hoodie"
         def _swap(text: str) -> str:
+            # Direct swap: "red hair" → "blue hair" when region="hair", etc.
+            _region_words = "|".join(re.escape(w) for w in region.lower().split("/"))
+            swapped = re.sub(
+                rf"\b{re.escape(from_color)}\b(?=\s+(?:{_region_words}))",
+                to_color, text, flags=re.IGNORECASE,
+            )
             # Replace color adjacent to skin/fur/body region words
             swapped = re.sub(
                 rf"\b{re.escape(from_color)}\b(?=\s+(?:skin|fur|body|tone|complexion))",
-                to_color, text, flags=re.IGNORECASE,
+                to_color, swapped, flags=re.IGNORECASE,
             )
             # Also replace region+color order: "skin is blue" / "skin color: blue"
             # Use capturing group instead of variable-width look-behind
@@ -1010,11 +1016,17 @@ class DalleClient:
             # Fallback: replace any remaining standalone from_color that is NOT
             # followed by a non-skin body feature (hair, eyes, etc.) and NOT
             # preceded by a clothing keyword.
-            # Negative lookahead protects "blue hair", "blue eyes", "blue headset"
-            # from being swapped to the target color.
-            _NON_SKIN_FEATURES = (
-                r"hair|eye(?:s|brow|lash)?|lash|headset|ring|ear(?:ring)?|"
-                r"tail|horn|wing|whisker|claw|nail|beak|antler|spike"
+            # Negative lookahead protects non-target features from being swapped.
+            # Exclude the current target region so "red hair" swaps when region="hair".
+            _region_key = region.lower().split("/")[0].strip()  # "hair" from "hair/fur"
+            _ALL_NON_SKIN = [
+                r"hair", r"eye(?:s|brow|lash)?", r"lash", r"headset", r"ring",
+                r"ear(?:ring)?", r"tail", r"horn", r"wing", r"whisker",
+                r"claw", r"nail", r"beak", r"antler", r"spike",
+            ]
+            _NON_SKIN_FEATURES = "|".join(
+                p for p in _ALL_NON_SKIN
+                if not re.match(rf"^{re.escape(_region_key)}", p)
             )
             _CLOTHING = re.compile(
                 r"\b(shirt|hoodie|jacket|pants|jeans|shorts|shoes|sneakers|boots|"
