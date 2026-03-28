@@ -1804,24 +1804,24 @@ async def chat(req: ChatRequest, request: Request):
                     except Exception as _scan_err:
                         logger.warning("pre-flight scan failed (non-fatal): %s", _scan_err)
 
+                    # Build explicit per-element preservation lines so the model
+                    # cannot interpret "change blue → pink" as a global swap.
                     if _preserve_list:
-                        _preserve_clause = (
-                            f"These elements are also {_from_color} but must REMAIN {_from_color} "
-                            f"and MUST NOT change: {', '.join(_preserve_list)}."
+                        _preserve_lines = " ".join(
+                            f"The {el} must stay {_from_color}." for el in _preserve_list
                         )
                     else:
-                        _preserve_clause = (
-                            f"All eyes, shoes, clothing, accessories, headset parts, rings, "
-                            f"trim, and outlines that are currently {_from_color} must REMAIN "
-                            f"{_from_color} and must NOT change."
+                        _preserve_lines = (
+                            f"The eyes, shoes, headset, clothing trim, outlines, and all "
+                            f"accessories must keep their current {_from_color} color exactly."
                         )
 
                     _strict_prompt = (
-                        f"Change ONLY the character's {_region_desc or 'skin/fur'} from "
-                        f"{_from_color} to {_to_color}. "
-                        f"{_preserve_clause} "
-                        "Only the skin/fur/body surface changes. "
-                        "Preserve pose, expression, art style, and background exactly."
+                        f"Make the character's {_region_desc or 'skin and fur'} color {_to_color}. "
+                        f"Apply {_to_color} only to the body skin and fur surface. "
+                        f"{_preserve_lines} "
+                        f"Do not change any clothing, accessories, headset, shoes, eyes, or background. "
+                        "Preserve the character's pose, expression, and art style exactly."
                     )
                 else:
                     _instr = _step.get("final_instruction")
