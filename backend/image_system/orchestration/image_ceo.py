@@ -295,7 +295,12 @@ class ImageCEO:
             revised.allow_reconstruction = True
             return revised
 
-        return None  # no viable revision
+        # Fallback: always give T3 a chance on the second attempt.
+        # T3 (describe + DALL-E 3 reconstruct) can succeed even when
+        # T2 color targeting found nothing and detected_color is unknown.
+        revised = EditStep(**step.__dict__)
+        revised.allow_reconstruction = True
+        return revised
 
     def _fail(self, message: str) -> ImageTaskResult:
         return ImageTaskResult(success=False, reply=message)
