@@ -439,7 +439,7 @@ function extractAppTitle(messages) {
   return 'Community App';
 }
 
-function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage, isStreaming = false, sessionId = null, onFixedHtml = null, onDebugSummary = null }) {
+function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage, isStreaming = false, sessionId = null, onFixedHtml = null, onDebugSummary = null, onBuildScreenshot = null }) {
   const { user } = useApp();
   const [key, setKey] = useState(0);
   const iframeRef = useRef(null);
@@ -760,6 +760,41 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
 
     // Post debug summary to chat (includes visual pass result)
     if (onDebugSummary && passLog.length > 0) onDebugSummary(passLog);
+
+    // ── Screenshot → chat: capture what was built, send for visual analysis ──
+    if (onBuildScreenshot) {
+      try {
+        await new Promise(r => setTimeout(r, 800)); // let iframe settle
+        const h2c = (await import('html2canvas')).default;
+        const iframeDoc = iframeRef.current?.contentDocument;
+        if (iframeDoc?.body && iframeRef.current) {
+          const canvas = await h2c(iframeDoc.body, {
+            useCORS: true, allowTaint: true, scale: 0.6,
+            width: iframeRef.current.clientWidth || 420,
+            height: iframeRef.current.clientHeight || 600,
+            logging: false,
+          });
+          const screenshotB64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+          // Send to visual review for text-only analysis (no HTML replacement)
+          let analysisText = null;
+          try {
+            const { IMAGE_API } = await import('../api/client');
+            const vRes = await fetch(`${IMAGE_API}/visual_review`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ html: workingHtml, screenshot_base64: screenshotB64 }),
+            });
+            if (vRes.ok) {
+              const vData = await vRes.json();
+              analysisText = vData.all_clear
+                ? '✅ Looks good — content fits and everything is visible.'
+                : (vData.issues || 'Some visual issues detected — let me know if you want them fixed.');
+            }
+          } catch {}
+          onBuildScreenshot(screenshotB64, analysisText);
+        }
+      } catch { /* screenshot is best-effort */ }
+    }
 
     fixingRef.current = false;
     setFixing(false);
@@ -1618,7 +1653,7 @@ const TABS = [
   { id: 'tasks',   label: 'Tasks',   icon: ListTodo },
 ];
 
-function RightPanel({ messages = [], streamingText = null, open, onClose, previewImage = null, onClearImage, activeTab = null, sessionId = null, onFixedHtml = null, onRestoreCode = null, onDebugSummary = null }) {
+function RightPanel({ messages = [], streamingText = null, open, onClose, previewImage = null, onClearImage, activeTab = null, sessionId = null, onFixedHtml = null, onRestoreCode = null, onDebugSummary = null, onBuildScreenshot = null }) {
   const [tab, setTab] = useState('preview');
   const { isSubscribed } = useApp();
   const codeBlocks = useMemo(() => getLatestCode(messages, streamingText), [messages, streamingText]);
@@ -1670,7 +1705,7 @@ function RightPanel({ messages = [], streamingText = null, open, onClose, previe
 
       {/* Body */}
       <div className="flex-1 overflow-hidden">
-        {tab === 'preview' && <PreviewPane blocks={codeBlocks} messages={messages} previewImage={previewImage} onClearImage={onClearImage} isStreaming={!!streamingText} sessionId={sessionId} onFixedHtml={onFixedHtml} onDebugSummary={onDebugSummary} />}
+        {tab === 'preview' && <PreviewPane blocks={codeBlocks} messages={messages} previewImage={previewImage} onClearImage={onClearImage} isStreaming={!!streamingText} sessionId={sessionId} onFixedHtml={onFixedHtml} onDebugSummary={onDebugSummary} onBuildScreenshot={onBuildScreenshot} />}
         {tab === 'code'    && isSubscribed && <CodeViewer  blocks={codeBlocks} />}
         {tab === 'files'   && isSubscribed && <FilesPane   blocks={codeBlocks} />}
         {tab === 'diff'    && isSubscribed && <DiffPane    messages={messages} onRestoreCode={onRestoreCode} />}

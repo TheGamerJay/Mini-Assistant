@@ -2,6 +2,13 @@ import React from 'react';
 import { useApp } from '../../context/AppContext';
 import { ArrowLeft } from 'lucide-react';
 
+const FOOTER_LINKS = [
+  { label: 'Terms',           page: 'legal-terms' },
+  { label: 'Privacy',         page: 'legal-privacy' },
+  { label: 'Contact',         page: 'legal-contact' },
+  { label: 'Creation Record Info', page: 'creation-record-info' },
+];
+
 export default function LegalLayout({ title, lastUpdated, children }) {
   const { getPrevPage, setPage } = useApp();
 
@@ -37,6 +44,17 @@ export default function LegalLayout({ title, lastUpdated, children }) {
 
         {/* Footer */}
         <div className="mt-16 pt-6 border-t border-white/10 text-center">
+          <div className="flex flex-wrap justify-center gap-x-5 gap-y-1 mb-3">
+            {FOOTER_LINKS.map(({ label, page }) => (
+              <button
+                key={page}
+                onClick={() => setPage(page)}
+                className="text-[11px] text-slate-600 hover:text-slate-400 transition-colors"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <p className="text-[11px] text-slate-600">
             © {new Date().getFullYear()} Mini Assistant. All rights reserved.
           </p>

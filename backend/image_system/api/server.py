@@ -43,6 +43,8 @@ from .models import (
     ShareRequest,
     CommunityRequest,
     VisualReviewRequest,
+    OrchestrationRequest,
+    CreationExportRequest,
     PullModelsRequest,
     ModelStatusResponse,
     ErrorResponse,
@@ -952,6 +954,140 @@ async def observatory():
         return JSONResponse({"stats": stats, "recent_calls": recent})
     except Exception as exc:
         return JSONResponse({"error": str(exc), "stats": {}, "recent_calls": []})
+
+
+@app.post("/api/orchestrate/analyze")
+async def orchestrate_analyze(req: OrchestrationRequest):
+    """
+    Phase 1 Orchestration — Pre-execution Analysis
+
+    Runs before any chat/builder execution to:
+      1. Evaluate ask vs act
+      2. Lock intent + normalize goal
+      3. Estimate risk, confidence, and credit cost
+      4. Return structured AnalysisResult for the frontend task card
+
+    Fast path: simple conversational/chat messages return in <10ms.
+    Full analysis (builder mode): ~20–50ms with no LLM calls.
+    """
+    import uuid as _uuid
+    from ..orchestration.orchestrator import analyze as _orch_analyze, to_dict as _orch_to_dict
+
+    session_id = req.session_id or str(_uuid.uuid4())
+    history_raw = [{"role": m.role, "content": m.content} for m in (req.history or [])]
+
+    try:
+        result = _orch_analyze(
+            message=req.message,
+            session_id=session_id,
+            mode=req.mode,
+            history=history_raw,
+            has_existing_code=req.has_existing_code,
+            vibe_mode=req.vibe_mode,
+        )
+        return _orch_to_dict(result)
+    except Exception as exc:
+        logger.exception("[orchestrate/analyze] unexpected error: %s", exc)
+        # Fail safe: return a minimal ACT result so the user is never blocked
+        return {
+            "decision": "act",
+            "proceed_immediately": True,
+            "intent_type": "chat",
+            "normalized_goal": req.message,
+            "mode": req.mode,
+            "confidence": 0.75,
+            "confidence_label": "High",
+            "risk_level": "low",
+            "risk_score": 0,
+            "cost_min": 0,
+            "cost_max": 1,
+            "cost_label": "Low",
+            "confidence_factors": [],
+            "confidence_deductions": [],
+            "risk_factors": [],
+            "risk_mitigations": [],
+            "clarification_q": None,
+            "interpretations": [],
+            "requires_checkpoint": False,
+            "requires_approval": False,
+            "contradiction_found": False,
+            "ambiguity_score": 0.0,
+            "constraints": [],
+            "assumptions": [],
+            "recommendation": None,
+            "elapsed_ms": 0,
+            "session_id": session_id,
+        }
+
+
+@app.get("/api/orchestrate/stream/{task_id}")
+async def orchestrate_stream(task_id: str, request: Request):
+    """
+    Phase 2 — Live Execution Feed (SSE)
+
+    Streams real-time task execution events as Server-Sent Events.
+    Frontend connects here after receiving a task_id from the orchestrator.
+    Events: task_started, step_started, step_completed, step_failed,
+            checkpoint_created, approval_required, retry_started,
+            task_completed, task_failed, task_cancelled.
+    """
+    from ..orchestration.live_updates import event_stream as _event_stream
+    from starlette.responses import StreamingResponse as _SR
+
+    async def _gen():
+        async for chunk in _event_stream(task_id, timeout=300.0):
+            if await request.is_disconnected():
+                break
+            yield chunk
+
+    return _SR(
+        _gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/api/creation/export")
+async def creation_export(req: CreationExportRequest):
+    """
+    Creation Record Export
+
+    Generates a structured, timestamped creation record for a project.
+    Disclaimer is ALWAYS embedded — no conditionals.
+
+    Returns:
+      - JSON payload (default) or plain-text string (export_format="txt")
+    """
+    from .creation_record import build_export as _build_export
+    from datetime import datetime, timezone as _tz
+
+    history_raw = [{"role": m.role, "content": m.content} for m in (req.history or [])]
+    created_at  = req.created_at or datetime.now(_tz.utc).isoformat()
+
+    result = _build_export(
+        project_id=req.project_id,
+        project_title=req.project_title,
+        created_at=created_at,
+        history=history_raw,
+        creator_name=req.creator_name,
+        description=req.description,
+        notes=req.notes,
+        export_format=req.export_format,
+    )
+
+    if req.export_format == "txt":
+        from starlette.responses import PlainTextResponse
+        import re as _cr_re
+        filename = _cr_re.sub(r"[^a-zA-Z0-9_\-]", "_", req.project_title)[:40] or "creation_record"
+        return PlainTextResponse(
+            content=result,
+            headers={"Content-Disposition": f'attachment; filename="{filename}.txt"'},
+        )
+
+    return result
 
 
 @app.get("/api/health")

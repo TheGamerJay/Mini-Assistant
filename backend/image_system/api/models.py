@@ -99,6 +99,26 @@ class VisualReviewRequest(BaseModel):
     session_id: Optional[str] = None
 
 
+class OrchestrationRequest(BaseModel):
+    message: str
+    session_id: Optional[str] = None
+    mode: str = "chat"               # "chat" | "builder" | "image"
+    history: Optional[List[ChatHistoryMessage]] = []
+    has_existing_code: bool = False
+    vibe_mode: bool = False
+
+
+class CreationExportRequest(BaseModel):
+    project_id:    str
+    project_title: str = "Untitled Project"
+    created_at:    str = ""
+    history:       Optional[List[ChatHistoryMessage]] = []
+    creator_name:  Optional[str] = None
+    description:   Optional[str] = None
+    notes:         Optional[str] = None
+    export_format: str = "json"      # "json" | "txt"
+
+
 # ---------------------------------------------------------------------------
 # Response models
 # ---------------------------------------------------------------------------

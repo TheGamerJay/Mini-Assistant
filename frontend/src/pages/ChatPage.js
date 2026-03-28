@@ -16,6 +16,10 @@ import CognitiveStream from '../components/CognitiveStream';
 import ApprovalModal from '../components/ApprovalModal';
 import RightPanel from '../components/RightPanel';
 import ComparisonBubble from '../components/ComparisonBubble';
+import ThinkingSequence from '../components/orchestration/ThinkingSequence';
+import TaskSummaryCard from '../components/orchestration/TaskSummaryCard';
+import { useOrchestration, ORCH_STATUS } from '../hooks/useOrchestration';
+import ExportRecordModal from '../components/creation/ExportRecordModal';
 import api from '../api/client';
 
 // ---------------------------------------------------------------------------
@@ -384,6 +388,13 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
   const { send, sendStream, cancel, loading } = useChat();
   const [messages, setMessages]       = useState([]);
   const [pendingApproval, setPendingApproval] = useState(null);
+
+  // ── Orchestration (Phase 1) ─────────────────────────────────────────────
+  const { analyze: orchAnalyze, analysis: orchAnalysis, status: orchStatus, reset: orchReset } = useOrchestration();
+  const [orchPendingSubmit, setOrchPendingSubmit] = useState(null); // holds {text, imgs, preferredModel} waiting for user approval
+
+  // ── Creation Record Export ───────────────────────────────────────────────
+  const [showExportRecordModal, setShowExportRecordModal] = useState(false);
   const [rightPanelOpen, setRightPanelOpen]   = useState(() => localStorage.getItem('rightPanelOpen') === 'true');
   const [imageLimitOpen, setImageLimitOpen]   = useState(false);
   const [chatMode, setChatMode]               = useState(() => {
@@ -545,6 +556,34 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
 
     submittingRef.current = true;
     lastUserTextRef.current = text;
+
+    // ── Phase 1 Orchestration gate ───────────────────────────────────────────
+    // Only run for builder mode or when there's existing code — chat is always fast-path.
+    const _orchMode = chatMode === 'build' ? 'builder' : chatMode === 'image' ? 'image' : 'chat';
+    const _hasCode  = !!lastHtmlRef.current;
+    const _needsOrch = (_orchMode === 'builder') && !vibeMode && !imgs.length;
+
+    if (_needsOrch) {
+      // Run analysis in background — don't block user message appearing
+      orchAnalyze({
+        message:         text,
+        sessionId:       sessionIdRef.current,
+        mode:            _orchMode,
+        history:         messages,
+        hasExistingCode: _hasCode,
+        vibeMode,
+      }).then(result => {
+        if (!result) return;
+        // Fast path: act immediately — no card needed
+        if (result.proceed_immediately && result.decision === 'act') {
+          orchReset();
+          return;
+        }
+        // Slow path: show card — pause execution until user confirms
+        submittingRef.current = false;
+        setOrchPendingSubmit({ text, imgs, preferredModel });
+      });
+    }
 
     // Generate a unique request_id for this submission (used for image deduplication)
     const requestId = crypto.randomUUID();
@@ -910,6 +949,47 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         />
       )}
 
+      {/* Creation Record Export modal */}
+      {showExportRecordModal && (() => {
+        const _chat = chats.find(c => c.id === activeChatId);
+        return (
+          <ExportRecordModal
+            projectTitle={_chat?.title || 'Chat Export'}
+            onCancel={() => setShowExportRecordModal(false)}
+            onExport={async ({ creatorName, description, notes }) => {
+              setShowExportRecordModal(false);
+              try {
+                const history = (_chat?.messages || [])
+                  .filter(m => m.role === 'user' || m.role === 'assistant')
+                  .map(m => ({ role: m.role, content: m.content || '' }));
+                const res = await api.post('/api/creation/export', {
+                  project_id:    activeChatId,
+                  project_title: _chat?.title || 'Chat',
+                  created_at:    _chat?.createdAt || new Date().toISOString(),
+                  history,
+                  creator_name:  creatorName,
+                  description,
+                  notes,
+                  export_format: 'json',
+                });
+                const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' });
+                const url  = URL.createObjectURL(blob);
+                const slug = (_chat?.title || 'record').replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                const a    = document.createElement('a');
+                a.href     = url;
+                a.download = `${slug}_creation_record.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+                toast.success('Creation record exported.');
+              } catch (err) {
+                console.error('[CreationRecord] export failed:', err);
+                toast.error('Export failed — please try again.');
+              }
+            }}
+          />
+        );
+      })()}
+
       {/* ── Chat center column ── */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         {/* Chat header — title + export */}
@@ -934,6 +1014,14 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
               >
                 <Download size={12} />
                 HTML
+              </button>
+              <button
+                onClick={() => setShowExportRecordModal(true)}
+                title="Export Creation Record"
+                className="flex items-center gap-1 text-[11px] text-slate-600 hover:text-violet-400 transition-colors px-2 py-1 rounded hover:bg-white/5"
+              >
+                <Download size={12} />
+                Record
               </button>
             </div>
           </div>
@@ -1113,6 +1201,50 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
               </span>
             </div>
           )}
+          {/* ── Orchestration UI (Phase 1) ─────────────────────────────── */}
+          {orchStatus === ORCH_STATUS.ANALYZING && (
+            <div className="px-2 pb-2">
+              <ThinkingSequence status={orchStatus} />
+            </div>
+          )}
+          {orchStatus === ORCH_STATUS.DONE && orchAnalysis && !orchAnalysis.proceed_immediately && (
+            <div className="px-2 pb-2">
+              <TaskSummaryCard
+                analysis={orchAnalysis}
+                onProceed={() => {
+                  const pending = orchPendingSubmit;
+                  orchReset();
+                  setOrchPendingSubmit(null);
+                  if (pending) handleSubmit(pending.text, pending.imgs, pending.preferredModel);
+                }}
+                onModify={() => {
+                  orchReset();
+                  setOrchPendingSubmit(null);
+                  submittingRef.current = false;
+                }}
+                onSplit={() => {
+                  // Auto-split: add "[split into steps]" suffix and re-submit
+                  const pending = orchPendingSubmit;
+                  orchReset();
+                  setOrchPendingSubmit(null);
+                  if (pending) handleSubmit(`${pending.text}\n\n[Please break this into clear numbered steps and do them one at a time, pausing to confirm after each.]`, pending.imgs, pending.preferredModel);
+                }}
+                onClarify={(choice) => {
+                  // User selected an interpretation — re-submit with chosen wording
+                  const pending = orchPendingSubmit;
+                  orchReset();
+                  setOrchPendingSubmit(null);
+                  if (pending) handleSubmit(choice, pending.imgs, pending.preferredModel);
+                }}
+                onDismiss={() => {
+                  orchReset();
+                  setOrchPendingSubmit(null);
+                  submittingRef.current = false;
+                }}
+              />
+            </div>
+          )}
+
           <div className="relative">
             <ChatInput
               variant="chat"
@@ -1169,9 +1301,11 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
             content: `🔧 Auto-Fix complete:\n\`\`\`html\n${fixedHtml}\n\`\`\`\n\nAll bugs patched — give it a try! 🎮`,
             timestamp: Date.now(),
           };
-          const withFix = [...messages, fixMsg];
-          setMessages(withFix);
-          if (activeChatId) updateChatMessages(activeChatId, withFix);
+          setMessages(prev => {
+            const updated = [...prev, fixMsg];
+            if (activeChatId) updateChatMessages(activeChatId, updated);
+            return updated;
+          });
         }}
         onRestoreCode={(restoredHtml) => {
           const restoreMsg = {
@@ -1179,9 +1313,24 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
             content: `↩️ Restored to previous version:\n\`\`\`html\n${restoredHtml}\n\`\`\``,
             timestamp: Date.now(),
           };
-          const withRestore = [...messages, restoreMsg];
-          setMessages(withRestore);
-          if (activeChatId) updateChatMessages(activeChatId, withRestore);
+          setMessages(prev => {
+            const updated = [...prev, restoreMsg];
+            if (activeChatId) updateChatMessages(activeChatId, updated);
+            return updated;
+          });
+        }}
+        onBuildScreenshot={(screenshotB64, analysisText) => {
+          const shotMsg = {
+            role: 'assistant', type: 'screenshot',
+            content: analysisText || '📸 Here\'s what was built:',
+            imageB64: screenshotB64,
+            timestamp: Date.now(),
+          };
+          setMessages(prev => {
+            const updated = [...prev, shotMsg];
+            if (activeChatId) updateChatMessages(activeChatId, updated);
+            return updated;
+          });
         }}
         onDebugSummary={(passes) => {
           if (!passes?.length) return;

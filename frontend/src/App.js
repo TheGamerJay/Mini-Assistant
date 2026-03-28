@@ -50,6 +50,7 @@ import RefundPage from './pages/legal/RefundPage';
 import ProhibitedPage from './pages/legal/ProhibitedPage';
 import DmcaPage from './pages/legal/DmcaPage';
 import ContactPage from './pages/legal/ContactPage';
+import CreationRecordInfo from './pages/creation/CreationRecordInfo';
 
 // Existing tool components (kept for backward compat via 'tool-X' pages)
 import Dashboard from './pages/Dashboard';
@@ -143,12 +144,13 @@ const TOOL_PAGES = {
 };
 
 const LEGAL_PAGES = {
-  'legal-terms':     { component: TermsPage,     title: 'Terms of Service' },
-  'legal-privacy':   { component: PrivacyPage,   title: 'Privacy Policy' },
-  'legal-refund':    { component: RefundPage,     title: 'Refund Policy' },
-  'legal-prohibited':{ component: ProhibitedPage, title: 'Prohibited Items' },
-  'legal-dmca':      { component: DmcaPage,       title: 'DMCA & Copyright' },
-  'legal-contact':   { component: ContactPage,    title: 'Contact Us' },
+  'legal-terms':           { component: TermsPage,          title: 'Terms of Service' },
+  'legal-privacy':         { component: PrivacyPage,         title: 'Privacy Policy' },
+  'legal-refund':          { component: RefundPage,          title: 'Refund Policy' },
+  'legal-prohibited':      { component: ProhibitedPage,      title: 'Prohibited Items' },
+  'legal-dmca':            { component: DmcaPage,            title: 'DMCA & Copyright' },
+  'legal-contact':         { component: ContactPage,         title: 'Contact Us' },
+  'creation-record-info':  { component: CreationRecordInfo,  title: 'Creation Record' },
 };
 
 function pageTitle(page) {
