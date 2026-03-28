@@ -490,25 +490,39 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
               <Clock size={16} />
             </button>
           )}
-          {/* Attach image */}
-          <button
-            type="button"
-            onClick={openFilePicker}
-            disabled={loading}
-            className={`flex-shrink-0 p-1.5 rounded-lg transition-colors mb-0.5
-              ${attachedImages.length
-                ? 'text-cyan-400 hover:text-cyan-300 hover:bg-white/5'
-                : 'text-slate-600 hover:text-slate-400 hover:bg-white/5'}`}
-            title="Attach image or file as reference"
-          >
-            <Paperclip size={16} />
-          </button>
+          {/* Attach image — hidden in Generate mode, prominent in Edit mode */}
+          {chatMode !== 'image' && (
+            <button
+              type="button"
+              onClick={openFilePicker}
+              disabled={loading}
+              className={`flex-shrink-0 p-1.5 rounded-lg transition-colors mb-0.5
+                ${chatMode === 'image_edit'
+                  ? attachedImages.length
+                    ? 'text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 bg-amber-500/10'
+                    : 'text-amber-500 hover:text-amber-400 hover:bg-amber-500/10 ring-1 ring-amber-500/40'
+                  : attachedImages.length
+                    ? 'text-cyan-400 hover:text-cyan-300 hover:bg-white/5'
+                    : 'text-slate-600 hover:text-slate-400 hover:bg-white/5'}`}
+              title={chatMode === 'image_edit' ? 'Attach image to edit (required)' : 'Attach image or file as reference'}
+            >
+              <Paperclip size={16} />
+            </button>
+          )}
           {/* Textarea */}
           <textarea
             ref={textareaRef}
             className={`flex-1 bg-transparent text-[15px] font-sans placeholder-slate-600 resize-none outline-none border-none leading-6 max-h-[144px] py-0.5
               ${isSlash ? 'text-cyan-300 font-mono' : 'text-slate-200'}`}
-            placeholder={attachedImages.length ? `Ask about ${attachedImages.length > 1 ? 'these images' : 'this image'}…` : attachedDoc ? 'Ask about this document…' : resolvedPlaceholder}
+            placeholder={
+              chatMode === 'image_edit' && attachedImages.length
+                ? 'Describe the change you want to make…'
+                : attachedImages.length
+                  ? `Ask about ${attachedImages.length > 1 ? 'these images' : 'this image'}…`
+                  : attachedDoc
+                    ? 'Ask about this document…'
+                    : resolvedPlaceholder
+            }
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
