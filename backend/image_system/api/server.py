@@ -1771,434 +1771,59 @@ async def chat(req: ChatRequest, request: Request):
     logger.info("[MODEL ROUTER] chat → Claude %s", _active_model)
 
     if execution_intent == "image_edit":
-        logger.info("[MODEL ROUTER] image_edit")
+        logger.info("[CEO] image_edit — delegating to ImageCEO")
         _edit_start = time.perf_counter()
-
-        # ── Smart edit routing via GPT analyzer ──────────────────────────────
-        # GPT breaks the request into ordered steps (color first, then structural).
-        # Steps are chained: each step's output is the next step's input image.
-        _edit_steps = None
         try:
-            from mini_assistant.phase2.prompt_enhancer import analyze_edit_request
-            _edit_steps = await analyze_edit_request(effective_msg.strip())
-            logger.info("[MODEL ROUTER] analyze_edit_request → %d steps", len(_edit_steps) if _edit_steps else 0)
-        except Exception as _ae:
-            logger.warning("analyze_edit_request failed (%s) — using fallback routing", _ae)
-
-        # If no steps from GPT, try a local regex extraction before giving up
-        if not _edit_steps:
-            _msg_lower = effective_msg.lower()
-            _COLOR_WORDS = r"(red|orange|yellow|green|blue|purple|pink|brown|black|white|gray|grey|cyan|magenta|violet|gold|silver|teal|navy|maroon|coral|lime|indigo|turquoise|beige|tan|lavender|crimson)"
-            _REGION_WORDS = r"(skin|fur|body|hair|eyes?|eye|shirt|hoodie|jacket|pants|shoes?|sneakers?|boots?|tail|ears?|nose)"
-            _color_from_to = re.search(
-                rf"\b{_COLOR_WORDS}\s+(?:color\s+)?(?:to|into|→)\s+{_COLOR_WORDS}\b"
-                rf"|make\s+(?:his|her|its?|their|the)?\s*(?:\w+\s+)?(?:{_REGION_WORDS}\s+)?(?:color\s+)?{_COLOR_WORDS}\b"
-                rf"|change\s+(?:\w+\s+)?(?:{_REGION_WORDS}\s+)?(?:color\s+)?(?:from\s+)?{_COLOR_WORDS}\s+(?:to|into)\s+{_COLOR_WORDS}",
-                _msg_lower,
+            from ..orchestration.image_ceo import ImageCEO as _ImageCEO
+            from ..orchestration.image_models import ImageTaskRequest as _ITR
+            from ..services.dalle_client import DalleClient as _DC
+            _ceo = _ImageCEO()
+            _ceo_req = _ITR(
+                user_message=effective_msg.strip(),
+                session_id=session_id,
+                image_bytes=attached_image_bytes,
             )
-            _region_match = re.search(_REGION_WORDS, _msg_lower)
-            _region_name = _region_match.group(1) if _region_match else None
-            # Determine edit type based on region
-            _is_skin_kw = _region_name and re.search(r"skin|fur|body|tail|ears?", _region_name)
-            _fallback_etype = "color_change" if _color_from_to or _region_name else "structural_edit"
-            # Extract all color words from message and guess from/to
-            _all_colors = re.findall(rf"\b{_COLOR_WORDS}\b", _msg_lower)
-            _fb_from = _all_colors[0] if len(_all_colors) >= 2 else None
-            _fb_to   = _all_colors[-1] if _all_colors else None
-            _edit_steps = [{
-                "edit_type": _fallback_etype,
-                "region_description": _region_name or ("skin/fur" if _is_skin_kw else ""),
-                "from_color": _fb_from,
-                "to_color": _fb_to,
-                "primary_tier": "semantic" if _is_skin_kw else "semantic",
-                "color_overlap_risk": False,
-                "final_instruction": None,
-            }]
-            logger.info(
-                "[MODEL ROUTER] fallback regex extraction → etype=%s from=%s to=%s region=%s",
-                _fallback_etype, _fb_from, _fb_to, _region_name,
-            )
-
-        # ── Helper: build PIL mask from bounding box ──────────────────────────
-        def _build_mask(img_bytes: bytes, mask_box: dict) -> bytes | None:
-            try:
-                import io as _io2
-                from PIL import Image as _PILImg2
-                _img2 = _PILImg2.open(_io2.BytesIO(img_bytes)).convert("RGBA")
-                _W2, _H2 = _img2.size
-                _mask2 = _PILImg2.new("RGBA", (_W2, _H2), (0, 0, 0, 255))
-                _px2 = round(mask_box.get("left", 0) / 100 * _W2)
-                _py2 = round(mask_box.get("top", 0) / 100 * _H2)
-                _pw2 = round(mask_box.get("width", 100) / 100 * _W2)
-                _ph2 = round(mask_box.get("height", 100) / 100 * _H2)
-                _mpix = _mask2.load()
-                for _my2 in range(_py2, min(_py2 + _ph2, _H2)):
-                    for _mx2 in range(_px2, min(_px2 + _pw2, _W2)):
-                        _mpix[_mx2, _my2] = (0, 0, 0, 0)
-                _mbuf = _io2.BytesIO()
-                _mask2.save(_mbuf, format="PNG")
-                return _mbuf.getvalue()
-            except Exception as _me:
-                logger.warning("mask build failed: %s", _me)
-                return None
-
-        # ── 4-Tier pipeline ───────────────────────────────────────────────────
-        from ..services.dalle_client import DalleClient
-        _dalle = DalleClient()
-        _current_bytes = attached_image_bytes   # updated after each step
-        _current_b64: str | None = None
-        _step_metadata: list[dict] = []
-        _tier_errors: list[str] = []  # collect errors for debug reply
-        _cached_preserve_els: list[str] = []  # from pre-flight scan, shared across tiers
-        _suggested_retries: list[str] = []    # auto-generated retry prompts on failure
-
-        for _step_i, _step in enumerate(_edit_steps):
-            _etype            = _step.get("edit_type", "structural_edit")
-            _from_color       = (_step.get("from_color") or "").lower().strip() or None
-            _to_color         = (_step.get("to_color")   or "").lower().strip() or None
-            _region_desc      = (_step.get("region_description") or "").lower().strip()
-            _mask_box         = _step.get("mask_box")
-            _overlap_risk     = bool(_step.get("color_overlap_risk", False))
-            _preserve_regions = _step.get("preserve_regions", [])
-            # allow_reconstruction_fallback: default True for unnamed edits,
-            # default False when planner explicitly sets it (named-region exact edits).
-            _allow_recon_flag = _step.get("allow_reconstruction_fallback", None)
-
-            # Named-region: any edit targeting a specific body/clothing area.
-            # Reconstruction is allowed as a last resort (T1+T2 both failed) UNLESS
-            # the planner explicitly blocks it (allow_reconstruction_fallback: false).
-            # RULE 3 exception (explicit skin isolation) sets allow_reconstruction_fallback=false.
-            _is_named_region = bool(_region_desc)
-            if _allow_recon_flag is None:
-                _allow_reconstruction = True  # allow T3 as last resort for any edit
-            else:
-                _allow_reconstruction = bool(_allow_recon_flag)
-
-            logger.info(
-                "[MODEL ROUTER] step %d/%d → etype=%s from=%s to=%s region='%s' named=%s preserve=%s allow_recon=%s",
-                _step_i + 1, len(_edit_steps), _etype,
-                _from_color, _to_color, _region_desc, _is_named_region,
-                _preserve_regions, _allow_reconstruction,
-            )
-
-            _step_meta = {
-                "step": _step_i + 1,
-                "method_used": "unknown",
-                "source_preserved": False,
-                "reconstruction_fallback_used": False,
-                "confidence_score": 0.0,
-                "notes": "",
-            }
-            _step_success = False
-            # Shared across tier closures: T2 populates on no_op, T3 reads it
-            _t2_diagnosis: dict | None = None
-
-            # ── Pre-step: Vision scan → mask_box + preserve list ──────────────
-            # Asks GPT-4o to locate the target region in the actual image and
-            # return a tight bounding box.  For color_change edits we ALWAYS
-            # run this scan — even when the planner supplied a box — because
-            # the image-specific tight box is much more accurate than a generic
-            # percentage estimate, and it returns the preserve_elements list
-            # which tells us which same-colored regions must not change.
-            if _is_named_region and _current_bytes and (_etype == "color_change" or not _mask_box):
+            _openai_client = _DC()._get_client()
+            _ceo_result = await _ceo.process_edit(_ceo_req, _openai_client)
+        except Exception as _ceo_err:
+            logger.error("[CEO] ImageCEO.process_edit failed: %s", _ceo_err)
+            reply = f"Image edit failed: {_ceo_err}"
+        else:
+            _edit_elapsed_ms = round((time.perf_counter() - _edit_start) * 1000, 1)
+            if not _ceo_result.success:
+                reply = _ceo_result.reply
+            elif _ceo_result.image_b64:
                 try:
-                    from ..services.dalle_client import analyze_region_colors as _arc
-                    _scan = await _arc(
-                        _dalle._get_client(),
-                        _current_bytes,
-                        _from_color or (_to_color or "color"),
-                        _region_desc,
+                    from mini_credits import log_image_generated as _log_img
+                    await _log_img(
+                        request.headers.get("authorization"),
+                        request_id=getattr(req, "request_id", None),
                     )
-                    _mask_box = _scan.get("mask_box") or _mask_box
-                    _scan_preserve = _scan.get("preserve_elements", [])
-                    if _scan_preserve:
-                        _cached_preserve_els = _scan_preserve
-                    _scan_desc = _scan.get("full_description", "")
-                    if _scan_desc:
-                        if len(_edit_desc_cache) >= _EDIT_DESC_CACHE_MAX:
-                            _edit_desc_cache.pop(next(iter(_edit_desc_cache)))
-                        _edit_desc_cache[session_id] = _scan_desc
-                    logger.info(
-                        "[MODEL ROUTER] vision scan → mask_box=%s preserve=%d elements",
-                        _mask_box, len(_cached_preserve_els),
-                    )
-                except Exception as _scan_err:
-                    logger.warning("pre-step vision scan failed (non-fatal): %s", _scan_err)
-
-            # Build pixel-level segmentation mask (falls back to coarse box mask)
-            # Refined mask: color-cluster inside box + edge detection + feathering
-            _msk: bytes | None = None
-            _msk_box_fallback: bytes | None = None
-            if _mask_box and _current_bytes:
-                try:
-                    from ..services.dalle_client import build_refined_mask as _brm
-                    _msk = _brm(_current_bytes, _mask_box)
-                except Exception as _brm_err:
-                    logger.warning("build_refined_mask import failed: %s", _brm_err)
-                if _msk is None:
-                    # Fallback: coarse bounding-box mask
-                    _msk = _build_mask(_current_bytes, _mask_box)
-                    logger.info("[MODEL ROUTER] using coarse box mask (refined mask unavailable)")
-                else:
-                    logger.info("[MODEL ROUTER] using refined pixel-level mask")
-
-            # ── TIER 1: Masked AI edit (dall-e-2 + mask, source-preserving) ───
-            async def _try_tier1() -> bool:
-                nonlocal _current_b64, _current_bytes
-                # Skip T1 for color_change edits — dall-e-2 inpaint regenerates
-                # pixels rather than shifting colors; it cannot reliably do hue
-                # or desaturation changes. T2 (PIL) is far more accurate for this.
-                if _etype == "color_change":
-                    _tier_errors.append("T1:skipped — color_change uses T2 (PIL recolor)")
-                    return False
-                # REQUIRE mask — without it we cannot guarantee source preservation.
-                if not (_msk and _current_bytes):
-                    _tier_errors.append("T1:no_mask:skipped (mask required for source-preserving edit)")
-                    logger.warning("[MODEL ROUTER] T1 skipped: no mask available")
-                    return False
-                # Focused prompt: describe what goes IN the masked region.
-                # The unmasked image provides full character context to dall-e-2.
-                # dall-e-2 will ONLY touch the transparent pixels in the mask.
-                _t1_target = _to_color or effective_msg.strip()
-                _t1_region = _region_desc or "region"
-                _t1_prompt = (
-                    f"{_t1_target} {_t1_region}. "
-                    "Match the art style, shading, texture, and lighting of the rest of the character. "
-                    "Blend seamlessly with the surrounding image."
-                )
-                try:
-                    _b64s = await _dalle.edit(_current_bytes, _t1_prompt, mask_bytes=_msk)
-                    _current_b64 = _b64s
-                    _current_bytes = base64.b64decode(_b64s)
-                    _step_meta["method_used"]                  = "masked_ai_edit"
-                    _step_meta["source_preserved"]             = True
-                    _step_meta["reconstruction_fallback_used"] = False
-                    _step_meta["confidence_score"]             = 0.85
-                    logger.info("[MODEL ROUTER] step %d T1/masked_ai_edit OK", _step_i + 1)
-                    return True
-                except Exception as _t1e:
-                    logger.error("step %d T1/masked_ai_edit FAILED: %s | type=%s", _step_i + 1, _t1e, type(_t1e).__name__)
-                    _tier_errors.append(f"T1:{type(_t1e).__name__}:{str(_t1e)[:120]}")
-                    return False
-
-            # ── TIER 2: Masked PIL recolor (hue-shift, source-preserving) ─────
-            # Shifts the hue of pixels within mask_box. Zero API cost.
-            # Source pixels outside the box are completely untouched.
-            async def _try_tier2() -> bool:
-                nonlocal _current_b64, _current_bytes, _t2_diagnosis
-                if not (_mask_box and _from_color and _to_color and _current_bytes):
-                    _why = ("no mask_box" if not _mask_box else
-                            "no from_color" if not _from_color else
-                            "no to_color" if not _to_color else "no image")
-                    logger.warning("[MODEL ROUTER] T2 skipped: %s", _why)
-                    return False
-                try:
-                    _b64s = _dalle.color_replace_region(
-                        _current_bytes, _from_color, _to_color, _mask_box,
-                        pixel_mask_bytes=_msk,   # refined pixel mask — same one as T1
-                    )
-                    if _b64s is None:
-                        return False
-                    _result_bytes = base64.b64decode(_b64s)
-
-                    # ── Post-edit validation: did the target actually change? ──
-                    try:
-                        from ..services.dalle_client import validate_edit_result as _ver
-                        _vr = _ver(_step_original_bytes, _result_bytes, _mask_box)
-                        _step_meta["target_change_score"]      = _vr["target_change_score"]
-                        _step_meta["preserve_integrity_score"] = _vr["preserve_integrity_score"]
-                        _step_meta["changed_pixels"]           = _vr.get("changed_pixels", 0)
-                        if _vr["result_status"] == "no_op":
-                            logger.warning(
-                                "[MODEL ROUTER] T2 no_op: score=%.4f changed_px=%d — "
-                                "target region didn't visibly change",
-                                _vr["target_change_score"], _vr.get("changed_pixels", 0),
-                            )
-                            # Auto-diagnose: sample actual color + build retry prompts
-                            try:
-                                from ..services.dalle_client import (
-                                    diagnose_failed_region_edit as _diag
-                                )
-                                # Count edit pixels in mask (alpha < 128)
-                                _msk_px = 0
-                                if _msk:
-                                    try:
-                                        import numpy as _npd
-                                        _msk_px = int(_npd.sum(
-                                            _npd.frombuffer(_msk, dtype=_npd.uint8) < 128
-                                        ))
-                                    except Exception:
-                                        pass
-                                _diagnosis = _diag(
-                                    original_bytes=_step_original_bytes,
-                                    mask_box=_mask_box,
-                                    region_description=_region_desc,
-                                    from_color=_from_color or "",
-                                    to_color=_to_color or "",
-                                    validation=_vr,
-                                    mask_pixel_count=_msk_px,
-                                )
-                                _t2_diagnosis = _diagnosis  # share with T3
-                                _suggested_retries.extend(
-                                    _diagnosis.get("suggested_retry_prompts", [])
-                                )
-                                _tier_errors.append(
-                                    f"T2:no_op:{_diagnosis.get('failure_code','unknown')} — "
-                                    f"{_diagnosis.get('failure_reason','no visible change')}"
-                                )
-                            except Exception as _de:
-                                logger.warning("diagnose_failed_region_edit error: %s", _de)
-                                _tier_errors.append(
-                                    f"T2:no_op — change score {_vr['target_change_score']:.4f}"
-                                )
-                            return False
-                    except Exception as _ve:
-                        logger.warning("T2 post-edit validation failed (non-fatal): %s", _ve)
-
-                    _current_b64   = _b64s
-                    _current_bytes = _result_bytes
-                    _step_meta["method_used"]                  = "masked_pil_recolor"
-                    _step_meta["source_preserved"]             = True
-                    _step_meta["reconstruction_fallback_used"] = False
-                    _step_meta["confidence_score"]             = 0.7
-                    logger.info("[MODEL ROUTER] step %d T2/masked_pil_recolor OK", _step_i + 1)
-                    return True
-                except Exception as _t2e:
-                    logger.warning("step %d T2/masked_pil_recolor failed (%s)", _step_i + 1, _t2e)
-                    return False
-
-            # ── TIER 3: Controlled reconstruction fallback (NOT source-preserving) ─
-            # Used when T1+T2 both fail.  For named-region (skin/fur) edits:
-            #   - _allow_reconstruction may be False (RULE 3 default), but we
-            #     still allow ONE reconstruction attempt after a T2 no_op as
-            #     long as (a) T2 produced a diagnosis with a confident
-            #     detected_color and (b) a cached image description exists.
-            #   - This gives visually-correct results with honest metadata
-            #     instead of hard-blocking the best fallback.
-            async def _try_tier3() -> bool:
-                nonlocal _current_b64, _current_bytes
-                # T3 is allowed if:
-                #   • _allow_reconstruction is True (unnamed / structural edits), OR
-                #   • T2 ran and produced a no_op diagnosis (named-region last resort)
-                _t3_allowed = _allow_reconstruction or (_t2_diagnosis is not None)
-                if not _t3_allowed:
-                    _tier_errors.append(
-                        "T3:reconstruction_blocked — explicitly disabled and T2 did not produce a diagnosis"
-                    )
-                    logger.warning("[MODEL ROUTER] T3 reconstruction blocked")
-                    return False
-                if not _current_bytes:
-                    return False
-                try:
-                    _cached = _edit_desc_cache.get(session_id)
-                    _t3_from = _from_color or "current color"
-                    _t3_to   = _to_color or effective_msg.strip()
-                    # Pull detected_color from T2 diagnosis if available (dark variant case)
-                    _t3_detected = _t2_diagnosis.get("detected_dominant_color") if _t2_diagnosis else None
-                    _t3_region = _region_desc or "skin/fur"
-                    logger.info(
-                        "[MODEL ROUTER] step %d T3/reconstruction_fallback %s→%s region=%s detected=%s",
-                        _step_i + 1, _t3_from, _t3_to, _t3_region, _t3_detected,
-                    )
-                    _b64s, _desc_used = await _dalle.describe_and_recolor(
-                        _current_bytes, _t3_from, _t3_to,
-                        region=_t3_region,
-                        cached_description=_cached,
-                        preserve_elements=_cached_preserve_els or None,
-                        detected_color=_t3_detected,
-                    )
-                    if len(_edit_desc_cache) >= _EDIT_DESC_CACHE_MAX:
-                        _edit_desc_cache.pop(next(iter(_edit_desc_cache)))
-                    _edit_desc_cache[session_id] = _desc_used
-                    _current_b64 = _b64s
-                    _current_bytes = base64.b64decode(_b64s)
-                    _step_meta["method_used"]                  = "reconstruction_fallback"
-                    _step_meta["source_preserved"]             = False
-                    _step_meta["reconstruction_fallback_used"] = True
-                    _step_meta["confidence_score"]             = 0.5
-                    _step_meta["notes"] = (
-                        "Used enhanced reconstruction for a cleaner result — "
-                        "character composition may vary slightly from the original."
-                    )
-                    logger.info("[MODEL ROUTER] step %d T3/reconstruction_fallback OK", _step_i + 1)
-                    return True
-                except Exception as _t3e:
-                    logger.error("step %d T3/reconstruction_fallback FAILED: %s", _step_i + 1, _t3e)
-                    _tier_errors.append(f"T3:{type(_t3e).__name__}:{str(_t3e)[:120]}")
-                    return False
-
-            # Save original image bytes for this step so validation can compare
-            _step_original_bytes = _current_bytes
-
-            # ── Dispatch: T1 (masked AI) → T2 (masked PIL) → T3 (if allowed) ─
-            _step_success = await _try_tier1()
-            if not _step_success:
-                _step_success = await _try_tier2()
-            if not _step_success:
-                _step_success = await _try_tier3()
-
-            _step_metadata.append(_step_meta)
-            logger.info(
-                "[MODEL ROUTER] step %d result: success=%s method=%s source_preserved=%s confidence=%.2f notes=%s",
-                _step_i + 1, _step_success,
-                _step_meta["method_used"], _step_meta["source_preserved"],
-                _step_meta["confidence_score"], _step_meta["notes"],
-            )
-
-            if not _step_success:
-                if _current_b64 is None:
-                    # All tiers failed — fail fast with a clear error.
-                    # We do NOT silently reconstruct (that would waste money and
-                    # return a different character, which is worse than failing).
-                    _reason = " | ".join(_tier_errors) if _tier_errors else "all methods failed"
-                    logger.warning("[MODEL ROUTER] step %d failed. errors: %s", _step_i + 1, _reason)
-                    # User-friendly message: prefer user_message from T2 diagnosis
-                    if _t2_diagnosis and _t2_diagnosis.get("user_message"):
-                        reply = _t2_diagnosis["user_message"]
-                    elif any("no_op" in e for e in _tier_errors):
-                        reply = "I isolated the target region, but the edit didn't produce a visible change."
-                    else:
-                        reply = (
-                            f"Could not apply this edit while preserving the source image. "
-                            f"Reason: {_reason}"
-                        )
-                break
-
-        _edit_elapsed_ms = round((time.perf_counter() - _edit_start) * 1000, 1)
-
-        if _current_b64:
-            try:
-                from mini_credits import log_image_generated as _log_img
-                await _log_img(request.headers.get("authorization"), request_id=getattr(req, "request_id", None))
-            except Exception:
-                pass
-            _recon_used = any(s.get("reconstruction_fallback_used", False) for s in _step_metadata)
-            _edit_reply = (
-                "Used enhanced reconstruction for a cleaner result — "
-                "character composition may vary slightly from the original."
-                if _recon_used else "Image edited."
-            )
-            return {
-                "image_base64":               _current_b64,
-                "reply":                      _edit_reply,
-                "intent":                     "image_edit",
-                "session_id":                 session_id,
-                "plan":                       phase1_plan.to_dict() if phase1_plan else {},
-                "method_used":                _step_metadata[-1]["method_used"] if _step_metadata else "unknown",
-                "source_preserved":           all(s.get("source_preserved", False) for s in _step_metadata),
-                "reconstruction_fallback_used": _recon_used,
-                "confidence_score":           min(s["confidence_score"] for s in _step_metadata) if _step_metadata else 0.0,
-                "target_change_score":        max((s.get("target_change_score", 0) for s in _step_metadata), default=0),
-                "result_status":              (
-                    "success" if all(s.get("target_change_score", 1) >= 0.03 or
-                                     "change_score" not in s for s in _step_metadata)
-                    else "partial"
-                ),
-                "notes":                      "; ".join(s["notes"] for s in _step_metadata if s.get("notes")),
-                "suggested_retry_prompts":    _suggested_retries,
-                "route_result":               "image_edit",
-                "generation_time_ms":         _edit_elapsed_ms,
-            }
+                except Exception:
+                    pass
+                _meta = _ceo_result.metadata
+                _steps_meta = _meta.get("steps", [])
+                return {
+                    "image_base64":               _ceo_result.image_b64,
+                    "reply":                      _ceo_result.reply,
+                    "intent":                     "image_edit",
+                    "session_id":                 session_id,
+                    "plan":                       phase1_plan.to_dict() if phase1_plan else {},
+                    "method_used":                _meta.get("method_used", "unknown"),
+                    "source_preserved":           _meta.get("source_preserved", False),
+                    "reconstruction_fallback_used": _meta.get("reconstruction_fallback_used", False),
+                    "confidence_score":           _meta.get("confidence_score", 0.0),
+                    "target_change_score":        max(
+                        (s.get("target_change_score", 0) for s in _steps_meta), default=0
+                    ),
+                    "result_status":              "success",
+                    "notes":                      "; ".join(
+                        s.get("notes", "") for s in _steps_meta if s.get("notes")
+                    ),
+                    "suggested_retry_prompts":    _ceo_result.suggested_retries,
+                    "route_result":               "image_edit",
+                    "generation_time_ms":         _edit_elapsed_ms,
+                }
 
     elif execution_intent == "image_generation":
         # ── PURE TEXT-TO-IMAGE: no reference image ────────────────────────────
