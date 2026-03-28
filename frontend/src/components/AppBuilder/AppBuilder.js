@@ -771,9 +771,41 @@ const AppBuilder = () => {
     }
   };
 
+  // ── Action-classification gate (client-side fast path) ─────────────────────
+  const _DISPLAY_VERB_RE = /\b(show|display|preview|open|render|view|test|run|launch|demo)\b/i;
+  const _DISPLAY_NOUN_RE = /\b(it|this|the|game|app|preview|project|result|output)\b/i;
+  const _EXPLAIN_ONLY_RE = /^\s*(explain|what does|how does|why (is|does|did)|describe|tell me (about|what)|what is)\b/i;
+
+  const classifyBuilderAction = (instr) => {
+    if (_DISPLAY_VERB_RE.test(instr) && _DISPLAY_NOUN_RE.test(instr)) return 'display_existing_artifact';
+    if (_EXPLAIN_ONLY_RE.test(instr)) return 'explain_only';
+    return 'edit_existing_artifact';
+  };
+
   const editApp = async () => {
     if (!editInput.trim() || editLoading || !generatedApp?.html) return;
     const instruction = editInput.trim();
+
+    // ── CONTROL GATE — classify before any API call ──────────────────────────
+    const chosenAction = classifyBuilderAction(instruction);
+    const writeAllowed = chosenAction === 'edit_existing_artifact';
+    console.log('[Builder Gate]', { chosenAction, writeAllowed, instruction: instruction.slice(0, 80) });
+
+    if (!writeAllowed) {
+      setEditInput('');
+      setEditHistory(prev => [...prev,
+        { role: 'user', content: instruction },
+        {
+          role: 'assistant',
+          content: chosenAction === 'display_existing_artifact'
+            ? 'Showing the current version of your app — no changes made.'
+            : 'Here to explain! Ask me anything about the code.',
+        },
+      ]);
+      if (chosenAction === 'display_existing_artifact') setActiveTab('preview');
+      return; // block all API calls — write_allowed is false
+    }
+
     setEditInput('');
     setEditHistory(prev => [...prev, { role: 'user', content: instruction }]);
     setEditLoading(true);

@@ -976,6 +976,52 @@ def _reconstruct_html(project: dict) -> str:
     return _pt_reconstruct_html(project)
 
 
+import re as _re_bl
+
+# ── Action-classification gate ────────────────────────────────────────────────
+_DISPLAY_VERB_RE = _re_bl.compile(
+    r'\b(show|display|preview|open|render|view|test|run|launch|demo)\b',
+    _re_bl.IGNORECASE,
+)
+_DISPLAY_NOUN_RE = _re_bl.compile(
+    r'\b(it|this|the|game|app|preview|project|result|output)\b',
+    _re_bl.IGNORECASE,
+)
+_EXPLAIN_RE = _re_bl.compile(
+    r'^\s*(explain|what does|how does|why (is|does|did)|describe|tell me (about|what)|what is)\b',
+    _re_bl.IGNORECASE,
+)
+
+_BUILDER_ACTION_LOG = logging.getLogger("builder.action")
+
+
+def _classify_builder_action(instruction: str) -> dict:
+    """
+    Deterministic control-layer gate.  Classifies every builder instruction into
+    exactly one chosen_action before any write or AI call occurs.
+
+    Returns:
+        {
+            "chosen_action": one of the 5 action types,
+            "write_allowed": bool,
+        }
+    """
+    instr = instruction.strip()
+    if _DISPLAY_VERB_RE.search(instr) and _DISPLAY_NOUN_RE.search(instr):
+        chosen = "display_existing_artifact"
+    elif _EXPLAIN_RE.search(instr):
+        chosen = "explain_only"
+    else:
+        chosen = "edit_existing_artifact"
+
+    write_allowed = chosen in ("edit_existing_artifact", "create_new_artifact")
+    _BUILDER_ACTION_LOG.info(
+        "[BUILDER GATE] chosen_action=%s write_allowed=%s instruction=%.80s",
+        chosen, write_allowed, instr,
+    )
+    return {"chosen_action": chosen, "write_allowed": write_allowed}
+
+
 def _route_edit(instruction: str) -> str:
     """Decide which project file an edit instruction targets."""
     lower = instruction.lower()
@@ -1227,10 +1273,38 @@ class AppBuilderEditRequest(BaseModel):
     instruction: str
     locked_files: List[str] = []        # file names that must not be edited
 
+async def _ai_edit(prompt: str) -> str:
+    """
+    Call Claude claude-sonnet-4-6 (primary) or OpenAI GPT-4o (fallback) to
+    perform a code edit.  Returns the raw model response string.
+    """
+    import anthropic as _anthropic, openai as _openai
+    _ant_key = os.environ.get("ANTHROPIC_API_KEY")
+    _oai_key = os.environ.get("OPENAI_API_KEY")
+
+    if _ant_key:
+        _ant = _anthropic.AsyncAnthropic(api_key=_ant_key)
+        msg = await _ant.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=8192,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return msg.content[0].text
+
+    if _oai_key:
+        _oai = _openai.AsyncOpenAI(api_key=_oai_key)
+        resp = await _oai.chat.completions.create(
+            model="gpt-4o",
+            max_tokens=8192,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return resp.choices[0].message.content or ""
+
+    raise HTTPException(status_code=503, detail="No AI API key configured (ANTHROPIC_API_KEY or OPENAI_API_KEY required)")
+
+
 @api_router.post("/app-builder/edit")
 async def edit_app(request: AppBuilderEditRequest):
-    if not ollama_client:
-        raise HTTPException(status_code=503, detail="Ollama service not available")
     try:
         # Resolve project — accept v1 flat or v2 tree; migrate to v2
         if request.project:
@@ -1243,6 +1317,33 @@ async def edit_app(request: AppBuilderEditRequest):
         index_html = _pt_get_content(project, 'index.html')
         style_css  = _pt_get_content(project, 'style.css')
         script_js  = _pt_get_content(project, 'script.js')
+
+        # ── ACTION-CLASSIFICATION GATE ────────────────────────────────────────
+        _gate = _classify_builder_action(request.instruction)
+        _chosen_action = _gate["chosen_action"]
+        _write_allowed = _gate["write_allowed"]
+
+        # display / explain → return existing artifact unchanged; never write
+        if not _write_allowed:
+            _reconstructed_existing = _reconstruct_html(project)
+            _existing_preview_id = str(uuid.uuid4())
+            _app_previews[_existing_preview_id] = _reconstructed_existing
+            _reply = (
+                "Showing the current version of your app — no changes were made."
+                if _chosen_action == "display_existing_artifact"
+                else "I'll explain without making any changes."
+            )
+            return {
+                "chosen_action":  _chosen_action,
+                "write_allowed":  False,
+                "render_existing": True,
+                "project":        project,
+                "html":           _reconstructed_existing,
+                "file_changed":   None,
+                "build_id":       _existing_preview_id,
+                "preview_url":    f"/api/preview/{_existing_preview_id}",
+                "chat_reply":     _reply,
+            }
 
         # Route the edit to the most appropriate file
         target_file = _route_edit(request.instruction)
@@ -1277,24 +1378,20 @@ The file you must edit is: {target_file}
 USER'S CHANGE REQUEST:
 {request.instruction}
 
---- RULES ---
+--- STRICT SCOPE OBEDIENCE RULES ---
+- Make ONLY the exact change the user requested. Nothing more.
+- Do NOT refactor, rename, reorganize, improve, or touch ANYTHING outside the requested change.
+- Do NOT add features, fix unrelated bugs, or apply "helpful" improvements.
+- If the user asked to change one element, change ONLY that element.
+- Treat every unrequested modification as forbidden.
 - Return ONLY the complete updated content of {target_file}.
 - No markdown. No code fences. No explanation before or after.
 - Return the FULL file — never truncate.
-- Keep everything that was not changed exactly as it was.
-- If the user reports a bug, fix the root cause — do not comment it out.
-- Layout/content changes → index.html
-- Visual/design changes → style.css
-- Logic/behavior/game changes → script.js
+- If the user reports a bug, fix the root cause only — do not comment it out or refactor around it.
 
 Now output the updated {target_file}:"""
 
-        response = ollama_client.chat(
-            model=_default_model,
-            messages=[{"role": "user", "content": prompt}]
-        )
-
-        updated_content = response['message']['content'].strip()
+        updated_content = (await _ai_edit(prompt)).strip()
         # Strip markdown fences
         updated_content = _app_re.sub(r'^```[a-zA-Z]*\n?', '', updated_content)
         updated_content = _app_re.sub(r'\n?```\s*$', '', updated_content)
@@ -1318,27 +1415,26 @@ Now output the updated {target_file}:"""
         # Generate a short conversational reply describing what changed
         chat_reply = ""
         try:
-            reply_resp = ollama_client.chat(
-                model=_default_model,
-                messages=[{"role": "user", "content":
-                    f"A developer asked you to: \"{request.instruction}\"\n"
-                    f"You just updated {target_file} to implement this.\n"
-                    f"Write 1-2 friendly sentences describing what you changed and why. "
-                    f"Be specific but brief. Don't say 'certainly' or 'of course'. "
-                    f"Sound like a helpful teammate, not a robot."
-                }]
+            _reply_prompt = (
+                f"A developer asked you to: \"{request.instruction}\"\n"
+                f"You just updated {target_file} to implement this.\n"
+                f"Write 1-2 friendly sentences describing what you changed and why. "
+                f"Be specific but brief. Don't say 'certainly' or 'of course'. "
+                f"Sound like a helpful teammate, not a robot."
             )
-            chat_reply = reply_resp['message']['content'].strip()
+            chat_reply = (await _ai_edit(_reply_prompt)).strip()
         except Exception:
             chat_reply = f"Done! I updated `{target_file}` based on your request. Review the changes below."
 
         return {
-            "project": updated_project,
-            "html": reconstructed,
-            "file_changed": target_file,
-            "build_id": build_id,
-            "preview_url": f"/api/preview/{build_id}",
-            "chat_reply": chat_reply,
+            "chosen_action": _chosen_action,
+            "write_allowed": True,
+            "project":       updated_project,
+            "html":          reconstructed,
+            "file_changed":  target_file,
+            "build_id":      build_id,
+            "preview_url":   f"/api/preview/{build_id}",
+            "chat_reply":    chat_reply,
         }
     except HTTPException:
         raise
