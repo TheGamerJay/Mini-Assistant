@@ -380,7 +380,7 @@ class DalleClient:
             logger.info("describe_and_recolor: analyzing reference image (%s→%s)", from_color, to_color)
             vision = await client.chat.completions.create(
                 model="gpt-4o",
-                max_tokens=600,
+                max_tokens=900,
                 messages=[{
                     "role": "user",
                     "content": [
@@ -391,12 +391,20 @@ class DalleClient:
                         {
                             "type": "text",
                             "text": (
-                                "Describe this character/image in precise detail for exact recreation. "
-                                "Include: art style, character type/species, "
-                                f"{region} color, hair/fur color, eye color, "
-                                "every clothing piece with its exact color, accessories, "
-                                "pose, expression, background, lighting. "
-                                "Output ONLY the description — no preamble, no commentary."
+                                "Describe this character image in exhaustive detail so it can be recreated exactly. "
+                                "Be highly specific about:\n"
+                                "1. ART STYLE: rendering style (e.g. 3D CGI, flat cartoon, anime, pixel art, watercolor, photorealistic)\n"
+                                "2. CHARACTER SPECIES/TYPE: exact species or character type (e.g. anthropomorphic fox, human, robot, dragon)\n"
+                                "3. BODY: exact body proportions, build, and posture\n"
+                                "4. FACE: facial structure, expression, eye shape, eye color, nose/muzzle type\n"
+                                f"5. {region.upper()} COLOR: exact current color with any gradients or markings\n"
+                                "6. HAIR/FUR DETAILS: texture, length, style of hair or fur pattern\n"
+                                "7. CLOTHING: every item with exact color, style, and fit\n"
+                                "8. ACCESSORIES: any jewelry, bags, weapons, props\n"
+                                "9. POSE: exact body position and limb placement\n"
+                                "10. BACKGROUND: setting, colors, elements\n"
+                                "11. LIGHTING: light direction, shadow style, ambient color\n"
+                                "Output ONLY the description. No preamble or commentary."
                             ),
                         },
                     ],
@@ -451,11 +459,17 @@ class DalleClient:
 
         # ── Step 3: Regenerate with DALL-E 3 ────────────────────────────────
         prompt = (
-            f"Recreate this character with ONE change only — the {region} color is now {to_color} "
-            f"instead of {from_color}. All clothing, accessories, art style, pose, expression, "
-            f"and background must remain IDENTICAL to the original.\n\n"
+            f"Recreate this EXACT character changing ONLY the {region} color from {from_color} to {to_color}. "
+            f"Everything else — species, art style, face, body proportions, clothing, accessories, "
+            f"pose, expression, background, lighting — must be PIXEL-PERFECT identical to the original.\n\n"
+            f"CRITICAL RULES:\n"
+            f"- Keep the EXACT same character species and design (do NOT change to a different creature or person)\n"
+            f"- Keep the EXACT same art style (3D CGI stays 3D CGI, cartoon stays cartoon, etc.)\n"
+            f"- Keep the EXACT same face shape, eyes, and expression\n"
+            f"- Keep ALL clothing colors and styles unchanged\n"
+            f"- Only the {region} changes: {from_color} → {to_color}\n\n"
             f"Character description:\n{modified}\n\n"
-            "Show the full character head-to-toe. Do not crop, zoom in, or reframe."
+            "Render the full character. Do not crop or reframe."
         )
         b64_image = await self.generate(prompt)
         return b64_image, description

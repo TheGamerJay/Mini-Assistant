@@ -1610,7 +1610,7 @@ def _route_edit_tier(
     )
 
     if _SKIN_RE.search(r):
-        return "vision"
+        return "semantic"   # try gpt-image-1 edit first; fall back to vision on moderation
     if _HAIR_EYE_RE.search(r):
         return "semantic"
     if _CLOTHING_RE.search(r):
