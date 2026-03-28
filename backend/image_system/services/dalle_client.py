@@ -29,8 +29,9 @@ logger = logging.getLogger(__name__)
 VALID_SIZES = {"1024x1024", "1024x1792", "1792x1024"}
 DEFAULT_SIZE = "1024x1024"
 
-# Image edit model — dall-e-2 is universally available; override with IMAGE_MODEL env var
-_IMAGE_EDIT_MODEL = os.getenv("IMAGE_MODEL", "dall-e-2")
+# Image EDIT model — OpenAI /v1/images/edits only supports dall-e-2.
+# gpt-image-1 cannot be used here regardless of IMAGE_MODEL env var.
+_IMAGE_EDIT_MODEL = "dall-e-2"
 
 # DALL-E 3 hard prompt limit (OpenAI enforces this server-side)
 _PROMPT_MAX = 4000
