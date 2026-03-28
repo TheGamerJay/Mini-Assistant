@@ -1008,10 +1008,32 @@ class DalleClient:
                 lambda m: m.group(1) + to_color, swapped, flags=re.IGNORECASE,
             )
             # Fallback: replace any remaining standalone from_color that is NOT
-            # preceded by a clothing keyword
+            # followed by a non-skin body feature (hair, eyes, etc.) and NOT
+            # preceded by a clothing keyword.
+            # Negative lookahead protects "blue hair", "blue eyes", "blue headset"
+            # from being swapped to the target color.
+            _NON_SKIN_FEATURES = (
+                r"hair|eye(?:s|brow|lash)?|lash|headset|ring|ear(?:ring)?|"
+                r"tail|horn|wing|whisker|claw|nail|beak|antler|spike"
+            )
             _CLOTHING = re.compile(
                 r"\b(shirt|hoodie|jacket|pants|jeans|shorts|shoes|sneakers|boots|"
                 r"gloves|hat|cap|vest|dress|outfit|clothing|coat|scarf|belt|bag)\s+",
+                re.IGNORECASE,
+            )
+            # Build preserve pattern from preserve_elements if provided
+            _extra_noswap: list[str] = []
+            if preserve_elements:
+                for _pe in preserve_elements:
+                    # Extract the last word of each preserve element (e.g. "blue hair" → "hair")
+                    _pe_word = _pe.strip().split()[-1] if _pe.strip() else ""
+                    if _pe_word and _pe_word.lower() not in _NON_SKIN_FEATURES:
+                        _extra_noswap.append(re.escape(_pe_word))
+            _no_swap_lookahead = _NON_SKIN_FEATURES
+            if _extra_noswap:
+                _no_swap_lookahead += "|" + "|".join(_extra_noswap)
+            _fallback_pat = re.compile(
+                rf"\b{re.escape(from_color)}\b(?!\s+(?:{_no_swap_lookahead}))",
                 re.IGNORECASE,
             )
             parts = _CLOTHING.split(swapped)
@@ -1025,7 +1047,7 @@ class DalleClient:
                     result.append(part)
                     skip_next = True  # don't swap color in next segment
                 else:
-                    result.append(re.sub(rf"\b{re.escape(from_color)}\b", to_color, part, flags=re.IGNORECASE))
+                    result.append(_fallback_pat.sub(to_color, part))
             swapped = "".join(result)
             return swapped
 
