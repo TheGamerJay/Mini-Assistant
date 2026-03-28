@@ -2045,11 +2045,23 @@ async def chat(req: ChatRequest, request: Request):
                     except Exception:
                         _instr = effective_msg.strip()
 
-                _strict_prompt = (
-                    f"Apply ONLY this change: {_instr}. "
-                    "DO NOT modify clothing, accessories, background, pose, lighting, or identity. "
-                    "Preserve everything else pixel-perfectly."
-                )
+                # For skin/fur color changes where from_color may overlap other elements,
+                # be very explicit about keeping non-skin elements their original color.
+                _is_skin_region = bool(re.search(r"\b(skin|fur|body|complexion|tone)\b", _region_desc or "", re.I))
+                if _is_skin_region and _from_color and _to_color:
+                    _strict_prompt = (
+                        f"Change ONLY the character's {_region_desc or 'skin/fur'} color from {_from_color} to {_to_color}. "
+                        f"Every other element that is currently {_from_color} — including eyes, shoes, clothing, "
+                        f"accessories, headset, rings, trim, outlines — must STAY {_from_color}. "
+                        "Only the skin/fur/body surface changes. "
+                        "Do NOT change anything else. Preserve pose, expression, art style, background."
+                    )
+                else:
+                    _strict_prompt = (
+                        f"Apply ONLY this change: {_instr}. "
+                        "DO NOT modify clothing, accessories, background, pose, lighting, or identity. "
+                        "Preserve everything else pixel-perfectly."
+                    )
                 _msk = None
                 if _current_bytes and _mask_box:
                     _msk = _build_mask(_current_bytes, _mask_box)
