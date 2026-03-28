@@ -12,6 +12,7 @@ import asyncio
 import base64
 import logging
 import os
+import re
 import time
 import uuid
 from pathlib import Path
@@ -1569,6 +1570,56 @@ async def analyze_image(req: AnalyzeRequest, request: Request):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# ── Image-edit description cache (session_id → last GPT-4o description) ──────
+# Capped at 200 entries; oldest entry evicted when full.
+_edit_desc_cache: dict[str, str] = {}
+_EDIT_DESC_CACHE_MAX = 200
+
+
+def _route_edit_tier(
+    etype: str,
+    region: str,
+    from_color: str | None,
+    overlap_risk: bool,
+) -> str:
+    """
+    Determine the processing tier for a single image-edit step.
+
+    Returns one of: "semantic", "vision", "region_pil", "pil_global"
+
+    Routing logic (evaluated top-down, first match wins):
+    - skin/fur/body/complexion/tone in region    → "vision"
+    - hair/eye/brow in region                    → "semantic"
+    - clothing keywords in region                → "semantic"
+    - color_change step AND no overlap risk      → "region_pil"  (fast, no API)
+    - color_change step AND overlap risk         → "vision"
+    - default                                    → "semantic"
+    """
+    r = (region or "").lower()
+
+    _SKIN_RE = re.compile(
+        r"\b(skin|fur|body|complexion|tone)\b", re.IGNORECASE
+    )
+    _HAIR_EYE_RE = re.compile(
+        r"\b(hair|eye|eyes|brow|eyebrow)\b", re.IGNORECASE
+    )
+    _CLOTHING_RE = re.compile(
+        r"\b(shirt|hoodie|jacket|pants|jeans|shoes|sneakers|boots|hat|cap|"
+        r"vest|dress|outfit|coat|gloves|accessory|accessories)\b",
+        re.IGNORECASE,
+    )
+
+    if _SKIN_RE.search(r):
+        return "vision"
+    if _HAIR_EYE_RE.search(r):
+        return "semantic"
+    if _CLOTHING_RE.search(r):
+        return "semantic"
+    if etype == "color_change":
+        return "vision" if overlap_risk else "region_pil"
+    return "semantic"
+
+
 @app.post("/api/chat")
 async def chat(req: ChatRequest, request: Request):
     """
@@ -1913,6 +1964,7 @@ async def chat(req: ChatRequest, request: Request):
 
     if execution_intent == "image_edit":
         logger.info("[MODEL ROUTER] image_edit")
+        _edit_start = time.perf_counter()
 
         # ── Smart edit routing via GPT analyzer ──────────────────────────────
         # GPT breaks the request into ordered steps (color first, then structural).
@@ -1952,107 +2004,196 @@ async def chat(req: ChatRequest, request: Request):
                 logger.warning("mask build failed: %s", _me)
                 return None
 
-        # ── Chain through each edit step ──────────────────────────────────────
+        # ── 4-Tier pipeline ───────────────────────────────────────────────────
         from ..services.dalle_client import DalleClient
         _dalle = DalleClient()
-        _current_bytes = attached_image_bytes  # updated after each step
+        _current_bytes = attached_image_bytes   # updated after each step
         _current_b64: str | None = None
+        _step_metadata: list[dict] = []
 
         for _step_i, _step in enumerate(_edit_steps):
-            _etype = _step.get("edit_type")
-            logger.info("[MODEL ROUTER] step %d/%d → %s", _step_i + 1, len(_edit_steps), _etype)
+            _etype        = _step.get("edit_type", "structural_edit")
+            _from_color   = (_step.get("from_color") or "").lower().strip() or None
+            _to_color     = (_step.get("to_color")   or "").lower().strip() or None
+            _region_desc  = (_step.get("region_description") or "").lower()
+            _mask_box     = _step.get("mask_box")
+            _overlap_risk = bool(_step.get("color_overlap_risk", False))
 
-            if _etype == "color_change" and _current_bytes:
-                # ── PIL color replacement ─────────────────────────────────────
-                _from_color = (_step.get("from_color") or "").lower() or None
-                _to_color = (_step.get("to_color") or "").lower() or None
-                if _to_color:
-                    try:
-                        _b64_step = _dalle.color_replace(_current_bytes, _from_color, _to_color)
-                        if _b64_step:
-                            import base64 as _b64mod
-                            _current_b64 = _b64_step
-                            _current_bytes = _b64mod.b64decode(_b64_step)
-                            logger.info("[MODEL ROUTER] step %d color_replace OK: %s→%s", _step_i + 1, _from_color, _to_color)
-                            continue
-                        logger.warning("step %d color_replace returned None — skipping step", _step_i + 1)
-                        continue
-                    except Exception as _pe:
-                        logger.warning("step %d color_replace failed (%s) — skipping", _step_i + 1, _pe)
-                        continue
+            # Determine primary tier — honour analyzer hint if present, otherwise compute
+            _analyzer_tier = _step.get("primary_tier") or ""
+            _computed_tier = _route_edit_tier(_etype, _region_desc, _from_color, _overlap_risk)
+            _primary_tier  = _analyzer_tier if _analyzer_tier in ("semantic", "vision", "region_pil", "pil_global") else _computed_tier
 
-            # ── Skin/fur color: vision-guided recolor (describe + regenerate) ──
-            # structural_edit steps that carry from_color/to_color are semantic
-            # color changes (skin, fur) that PIL can't isolate. Use GPT-4o to
-            # describe the character, swap the color in text, then regenerate.
-            _sb_from = (_step.get("from_color") or "").lower() or None
-            _sb_to   = (_step.get("to_color")   or "").lower() or None
-            _sb_region = (_step.get("region_description") or "skin/fur").lower()
-            if _etype == "structural_edit" and _sb_from and _sb_to and _current_bytes:
-                try:
-                    logger.info("[MODEL ROUTER] step %d describe_and_recolor %s→%s", _step_i + 1, _sb_from, _sb_to)
-                    _b64_step = await _dalle.describe_and_recolor(_current_bytes, _sb_from, _sb_to, region=_sb_region)
-                    if _b64_step:
-                        import base64 as _b64mod
-                        _current_b64 = _b64_step
-                        _current_bytes = _b64mod.b64decode(_b64_step)
-                        logger.info("[MODEL ROUTER] step %d describe_and_recolor OK", _step_i + 1)
-                        continue
-                except Exception as _dre:
-                    logger.warning("step %d describe_and_recolor failed (%s) — falling through to gpt-image-1", _step_i + 1, _dre)
-
-            # ── gpt-image-1 structural edit ───────────────────────────────────
-            if _step.get("final_instruction"):
-                _edit_instruction = _step["final_instruction"]
-            else:
-                try:
-                    from mini_assistant.phase2.prompt_enhancer import enhance_edit_instruction
-                    _edit_instruction = await enhance_edit_instruction(effective_msg.strip())
-                except Exception:
-                    _edit_instruction = effective_msg.strip()
-
-            _mask_bytes = None
-            if _current_bytes and _step.get("mask_box"):
-                _mask_bytes = _build_mask(_current_bytes, _step["mask_box"])
-
-            _edit_prompt = (
-                f"Apply ONLY this change: {_edit_instruction}\n\n"
-                "Rules:\n"
-                "• Change ONLY what is explicitly requested — nothing else\n"
-                "• Keep every other element pixel-identical: face, hair, eyes, mouth, "
-                "body shape, clothing, shoes, accessories, pose, expression, "
-                "art style, lighting, background\n"
-                "• Show the FULL character head-to-toe — do NOT crop, zoom in, cut off, "
-                "or reframe any part of the body; match the original framing exactly\n"
-                "• Do not reinterpret, stylize, or add any detail not already present"
+            logger.info(
+                "[MODEL ROUTER] step %d/%d → etype=%s tier=%s from=%s to=%s overlap_risk=%s",
+                _step_i + 1, len(_edit_steps), _etype, _primary_tier,
+                _from_color, _to_color, _overlap_risk,
             )
-            try:
-                if _current_bytes:
-                    _b64_step = await _dalle.edit(_current_bytes, _edit_prompt, mask_bytes=_mask_bytes)
-                else:
-                    _b64_step = await _dalle.generate(_edit_prompt)
-                import base64 as _b64mod
-                _current_b64 = _b64_step
-                _current_bytes = _b64mod.b64decode(_b64_step)
-                logger.info("[MODEL ROUTER] step %d structural edit OK", _step_i + 1)
-            except Exception as _se:
-                logger.error("step %d structural edit failed: %s", _step_i + 1, _se)
-                # Moderation fallback: if gpt-image-1 is blocked by safety filter AND
-                # this step has color info (skin/fur color change), fall back to PIL.
-                _is_moderation = "moderation_blocked" in str(_se) or "safety system" in str(_se).lower()
-                _fb_from = _step.get("from_color")
-                _fb_to   = _step.get("to_color")
-                if _is_moderation and _fb_from and _fb_to and _current_bytes:
-                    logger.info("step %d moderation fallback → PIL color_replace %s→%s", _step_i + 1, _fb_from, _fb_to)
-                    _b64_pil = _dalle.color_replace(_current_bytes, _fb_from, _fb_to)
-                    if _b64_pil:
-                        import base64 as _b64mod
-                        _current_b64 = _b64_pil
-                        _current_bytes = _b64mod.b64decode(_b64_pil)
-                        continue  # PIL succeeded — move to next step
+
+            _step_meta = {"step": _step_i + 1, "tier": _primary_tier, "method_used": "unknown",
+                          "confidence_score": 0.0, "notes": ""}
+            _step_success = False
+
+            # ── TIER 1: Semantic (gpt-image-1 edit) ──────────────────────────
+            async def _try_tier1() -> bool:
+                nonlocal _current_b64, _current_bytes
+                _instr = _step.get("final_instruction")
+                if not _instr:
+                    try:
+                        from mini_assistant.phase2.prompt_enhancer import enhance_edit_instruction
+                        _instr = await enhance_edit_instruction(effective_msg.strip())
+                    except Exception:
+                        _instr = effective_msg.strip()
+
+                _strict_prompt = (
+                    f"Apply ONLY this change: {_instr}. "
+                    "DO NOT modify clothing, accessories, background, pose, lighting, or identity. "
+                    "Preserve everything else pixel-perfectly."
+                )
+                _msk = None
+                if _current_bytes and _mask_box:
+                    _msk = _build_mask(_current_bytes, _mask_box)
+                try:
+                    if _current_bytes:
+                        _b64s = await _dalle.edit(_current_bytes, _strict_prompt, mask_bytes=_msk)
+                    else:
+                        _b64s = await _dalle.generate(_strict_prompt)
+                    _current_b64   = _b64s
+                    _current_bytes = base64.b64decode(_b64s)
+                    _step_meta["method_used"]      = "semantic"
+                    _step_meta["confidence_score"] = 0.9
+                    logger.info("[MODEL ROUTER] step %d tier1/semantic OK", _step_i + 1)
+                    return True
+                except Exception as _t1e:
+                    _is_mod = "moderation_blocked" in str(_t1e) or "safety system" in str(_t1e).lower()
+                    logger.warning("step %d tier1/semantic failed (%s) is_moderation=%s", _step_i + 1, _t1e, _is_mod)
+                    return False
+
+            # ── TIER 2: Vision reconstruction ────────────────────────────────
+            async def _try_tier2() -> bool:
+                nonlocal _current_b64, _current_bytes
+                if not (_from_color and _to_color and _current_bytes):
+                    return False
+                try:
+                    _cached = _edit_desc_cache.get(session_id)
+                    logger.info(
+                        "[MODEL ROUTER] step %d tier2/vision %s→%s (cached_desc=%s)",
+                        _step_i + 1, _from_color, _to_color, _cached is not None,
+                    )
+                    _b64s, _desc_used = await _dalle.describe_and_recolor(
+                        _current_bytes, _from_color, _to_color,
+                        region=_region_desc or "skin/fur",
+                        cached_description=_cached,
+                    )
+                    # Cache the description for this session
+                    if len(_edit_desc_cache) >= _EDIT_DESC_CACHE_MAX:
+                        # Evict the oldest entry
+                        _oldest = next(iter(_edit_desc_cache))
+                        del _edit_desc_cache[_oldest]
+                    _edit_desc_cache[session_id] = _desc_used
+
+                    _current_b64   = _b64s
+                    _current_bytes = base64.b64decode(_b64s)
+                    _step_meta["method_used"]      = "vision"
+                    _step_meta["confidence_score"] = 0.75
+                    logger.info("[MODEL ROUTER] step %d tier2/vision OK", _step_i + 1)
+                    return True
+                except Exception as _t2e:
+                    logger.warning("step %d tier2/vision failed (%s)", _step_i + 1, _t2e)
+                    return False
+
+            # ── TIER 3: Region-constrained PIL ───────────────────────────────
+            async def _try_tier3() -> bool:
+                nonlocal _current_b64, _current_bytes
+                if not (_mask_box and _from_color and _to_color and _current_bytes):
+                    return False
+                try:
+                    _b64s = _dalle.color_replace_region(
+                        _current_bytes, _from_color, _to_color, _mask_box
+                    )
+                    if _b64s is None:
+                        return False
+                    _current_b64   = _b64s
+                    _current_bytes = base64.b64decode(_b64s)
+                    _step_meta["method_used"]      = "region_pil"
+                    _step_meta["confidence_score"] = 0.5
+                    logger.info("[MODEL ROUTER] step %d tier3/region_pil OK", _step_i + 1)
+                    return True
+                except Exception as _t3e:
+                    logger.warning("step %d tier3/region_pil failed (%s)", _step_i + 1, _t3e)
+                    return False
+
+            # ── TIER 4: Global PIL (last resort) ─────────────────────────────
+            async def _try_tier4() -> bool:
+                nonlocal _current_b64, _current_bytes
+                if not (_from_color and _to_color and _current_bytes):
+                    return False
+                try:
+                    _b64s = _dalle.color_replace(_current_bytes, _from_color, _to_color)
+                    if _b64s is None:
+                        return False
+                    _current_b64   = _b64s
+                    _current_bytes = base64.b64decode(_b64s)
+                    _step_meta["method_used"]      = "pil_global"
+                    _step_meta["confidence_score"] = 0.2
+                    _step_meta["notes"] = (
+                        "Low-precision fallback. All pixels matching source color were replaced."
+                    )
+                    logger.warning(
+                        "[MODEL ROUTER] step %d Low precision fallback: global PIL color_replace used",
+                        _step_i + 1,
+                    )
+                    return True
+                except Exception as _t4e:
+                    logger.warning("step %d tier4/pil_global failed (%s)", _step_i + 1, _t4e)
+                    return False
+
+            # ── Dispatch based on primary tier, cascade on failure ────────────
+            if _primary_tier == "semantic":
+                _step_success = await _try_tier1()
+                if not _step_success:
+                    _step_success = await _try_tier2()
+                if not _step_success:
+                    _step_success = await _try_tier3()
+                if not _step_success:
+                    _step_success = await _try_tier4()
+
+            elif _primary_tier == "vision":
+                _step_success = await _try_tier2()
+                if not _step_success:
+                    _step_success = await _try_tier1()
+                if not _step_success:
+                    _step_success = await _try_tier3()
+                if not _step_success:
+                    _step_success = await _try_tier4()
+
+            elif _primary_tier == "region_pil":
+                _step_success = await _try_tier3()
+                if not _step_success:
+                    _step_success = await _try_tier4()
+                if not _step_success:
+                    _step_success = await _try_tier2()
+
+            else:  # pil_global or unknown — try global PIL first, then escalate
+                _step_success = await _try_tier4()
+                if not _step_success:
+                    _step_success = await _try_tier2()
+                if not _step_success:
+                    _step_success = await _try_tier1()
+
+            _step_metadata.append(_step_meta)
+            logger.info(
+                "[MODEL ROUTER] step %d result: success=%s method=%s confidence=%.2f notes=%s",
+                _step_i + 1, _step_success,
+                _step_meta["method_used"], _step_meta["confidence_score"], _step_meta["notes"],
+            )
+
+            if not _step_success:
                 if _current_b64 is None:
-                    reply = f"Image generation failed: {_se}"
-                break  # use best result so far
+                    reply = "Image editing failed — all tiers exhausted."
+                break
+
+        _edit_elapsed_ms = round((time.perf_counter() - _edit_start) * 1000, 1)
 
         if _current_b64:
             try:
@@ -2061,11 +2202,16 @@ async def chat(req: ChatRequest, request: Request):
             except Exception:
                 pass
             return {
-                "image_base64": _current_b64,
-                "reply": "Image edited.",
-                "intent": "image_edit",
-                "session_id": session_id,
-                "plan": phase1_plan.to_dict() if phase1_plan else {},
+                "image_base64":      _current_b64,
+                "reply":             "Image edited.",
+                "intent":            "image_edit",
+                "session_id":        session_id,
+                "plan":              phase1_plan.to_dict() if phase1_plan else {},
+                "method_used":       _step_metadata[-1]["method_used"] if _step_metadata else "unknown",
+                "confidence_score":  min(s["confidence_score"] for s in _step_metadata) if _step_metadata else 0.0,
+                "notes":             "; ".join(s["notes"] for s in _step_metadata if s.get("notes")),
+                "route_result":      "image_edit",
+                "generation_time_ms": _edit_elapsed_ms,
             }
 
     elif execution_intent == "image_generation":

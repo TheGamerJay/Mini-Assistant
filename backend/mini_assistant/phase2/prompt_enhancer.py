@@ -63,6 +63,20 @@ RULE 4 — MULTI-STEP:
 - Order: color changes first, then structural changes.
 - Each step is one focused edit.
 
+RULE 5 — PRIMARY TIER ROUTING:
+Assign primary_tier to each step using this routing table:
+- hair color → "semantic"    (gpt-image-1; hair is usually isolated)
+- eye color  → "semantic"
+- eyebrow color → "semantic"
+- skin/fur/body/complexion/tone color → "vision"  (PIL cannot isolate skin from same-colored clothing)
+- clothing/accessory color → "semantic"  (gpt-image-1 understands clothing semantics)
+- unknown/ambiguous color region → "semantic"
+
+RULE 6 — COLOR OVERLAP RISK:
+Set color_overlap_risk: true when the from_color is likely shared between skin/fur AND clothing
+(e.g. character has blue skin AND is wearing blue clothing — replacing "blue" globally would
+affect both). If the from_color appears only on a clearly isolated region, set it to false.
+
 OUTPUT: Return ONLY valid JSON, no explanation, no markdown.
 
 Always return this wrapper:
@@ -78,6 +92,8 @@ color_change step:
   "region_description": "<what body part/area>",
   "from_color": "<exact color name to replace>",
   "to_color": "<exact color name to apply>",
+  "primary_tier": "semantic" | "vision" | "region_pil" | "pil_global",
+  "color_overlap_risk": true | false,
   "confidence": 0.0-1.0
 }
 
@@ -89,6 +105,8 @@ structural_edit step:
   "final_instruction": "<precise instruction for gpt-image-1>",
   "from_color": "<source color if this is a skin/fur color change, else null>",
   "to_color": "<target color if this is a skin/fur color change, else null>",
+  "primary_tier": "semantic" | "vision" | "region_pil" | "pil_global",
+  "color_overlap_risk": true | false,
   "confidence": 0.0-1.0
 }
 """

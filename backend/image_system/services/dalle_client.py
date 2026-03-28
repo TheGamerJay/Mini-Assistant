@@ -160,6 +160,46 @@ def _log_trim(original: int, final: int, method: str) -> None:
 
 # ─────────────────────────────────────────────────────────────────────────────
 
+_CLOTHING_KW_RE = re.compile(
+    r"\b(shirt|hoodie|jacket|pants|jeans|shoes|sneakers|boots|hat|cap|vest|"
+    r"dress|outfit|coat|gloves)\b",
+    re.IGNORECASE,
+)
+
+
+def _has_color_overlap(description: str, from_color: str) -> bool:
+    """
+    Module-level helper.  Returns True when `from_color` appears within 60
+    characters of a clothing/accessory keyword in the vision description,
+    indicating that a global text swap would also recolor clothing.
+
+    Args:
+        description: Raw GPT-4o vision description of the image.
+        from_color:  The color being replaced (e.g. "blue").
+
+    Returns:
+        True if color overlap is detected in a clothing context.
+    """
+    color_pat = re.compile(rf"\b{re.escape(from_color)}\b", re.IGNORECASE)
+    clothing_pat = re.compile(
+        r"\b(shirt|hoodie|jacket|pants|jeans|shoes|sneakers|boots|hat|cap|"
+        r"vest|dress|outfit|coat|gloves)\b",
+        re.IGNORECASE,
+    )
+
+    for color_match in color_pat.finditer(description):
+        start = color_match.start()
+        # Check 60-char window around the color occurrence
+        window_start = max(0, start - 60)
+        window_end   = min(len(description), start + 60)
+        window = description[window_start:window_end]
+        if clothing_pat.search(window):
+            return True
+    return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
 class DalleClient:
     """Async wrapper around the OpenAI images.generate endpoint."""
 
@@ -303,7 +343,8 @@ class DalleClient:
         from_color: str,
         to_color: str,
         region: str = "skin/fur",
-    ) -> str:
+        cached_description: str | None = None,
+    ) -> tuple[str, str]:
         """
         Vision-guided recolor: analyze the image with GPT-4o to get a precise
         character description, swap the target color in the description text,
@@ -314,47 +355,61 @@ class DalleClient:
         them separately from clothing.
 
         Args:
-            image_bytes: Raw reference image bytes.
-            from_color:  Color to replace (e.g. "blue").
-            to_color:    New color (e.g. "yellow").
-            region:      Human label for the region (e.g. "skin/fur", "hair").
+            image_bytes:        Raw reference image bytes.
+            from_color:         Color to replace (e.g. "blue").
+            to_color:           New color (e.g. "yellow").
+            region:             Human label for the region (e.g. "skin/fur", "hair").
+            cached_description: If provided, skip the GPT-4o vision call and use
+                                this description directly (consistency mode).
 
         Returns:
-            base64 PNG string of the regenerated image.
+            Tuple of (base64 PNG string of the regenerated image, raw description used).
         """
         import base64 as _b64
         client = self._get_client()
 
-        img_b64 = _b64.b64encode(image_bytes).decode()
-
         # ── Step 1: Describe the character precisely with GPT-4o vision ──────
-        logger.info("describe_and_recolor: analyzing reference image (%s→%s)", from_color, to_color)
-        vision = await client.chat.completions.create(
-            model="gpt-4o",
-            max_tokens=600,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{img_b64}", "detail": "high"},
-                    },
-                    {
-                        "type": "text",
-                        "text": (
-                            "Describe this character/image in precise detail for exact recreation. "
-                            "Include: art style, character type/species, "
-                            f"{region} color, hair/fur color, eye color, "
-                            "every clothing piece with its exact color, accessories, "
-                            "pose, expression, background, lighting. "
-                            "Output ONLY the description — no preamble, no commentary."
-                        ),
-                    },
-                ],
-            }],
-        )
-        description = vision.choices[0].message.content or ""
-        logger.info("describe_and_recolor: description (%d chars)", len(description))
+        if cached_description is not None:
+            description = cached_description
+            logger.info(
+                "describe_and_recolor: using cached description (%d chars) — skipping vision call",
+                len(description),
+            )
+        else:
+            img_b64 = _b64.b64encode(image_bytes).decode()
+            logger.info("describe_and_recolor: analyzing reference image (%s→%s)", from_color, to_color)
+            vision = await client.chat.completions.create(
+                model="gpt-4o",
+                max_tokens=600,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{img_b64}", "detail": "high"},
+                        },
+                        {
+                            "type": "text",
+                            "text": (
+                                "Describe this character/image in precise detail for exact recreation. "
+                                "Include: art style, character type/species, "
+                                f"{region} color, hair/fur color, eye color, "
+                                "every clothing piece with its exact color, accessories, "
+                                "pose, expression, background, lighting. "
+                                "Output ONLY the description — no preamble, no commentary."
+                            ),
+                        },
+                    ],
+                }],
+            )
+            description = vision.choices[0].message.content or ""
+            logger.info("describe_and_recolor: description (%d chars)", len(description))
+
+        # ── Overlap detection ─────────────────────────────────────────────────
+        if _has_color_overlap(description, from_color):
+            logger.warning(
+                "color_overlap detected in description — text swap may affect clothing"
+            )
 
         # ── Step 2: Swap the target color only in region references ──────────
         # Replace "blue skin", "blue fur", "blue body" etc. but NOT "blue hoodie"
@@ -402,7 +457,154 @@ class DalleClient:
             f"Character description:\n{modified}\n\n"
             "Show the full character head-to-toe. Do not crop, zoom in, or reframe."
         )
-        return await self.generate(prompt)
+        b64_image = await self.generate(prompt)
+        return b64_image, description
+
+    def color_replace_region(
+        self,
+        image_bytes: bytes,
+        from_color: str,
+        to_color: str,
+        mask_box: dict,
+        tolerance: int = 30,
+    ) -> str | None:
+        """
+        Programmatic hue-based color replacement restricted to a bounding box region.
+
+        Identical logic to color_replace but ONLY modifies pixels that fall within
+        the mask_box rectangle. Pixels outside the box are left completely untouched.
+
+        Args:
+            image_bytes: Raw image bytes (any PIL-supported format).
+            from_color:  Color name to replace (e.g. "blue").
+            to_color:    Color name to shift to   (e.g. "purple").
+            mask_box:    Dict with top/left/width/height as percentages 0-100.
+            tolerance:   Hue tolerance in degrees around the center hue.
+
+        Returns base64 PNG string, or None if PIL unavailable / color unknown.
+        """
+        if not _PIL_AVAILABLE:
+            return None
+
+        _HUE_CENTER: dict[str, int] = {
+            "red":     0,
+            "orange":  30,
+            "yellow":  55,
+            "green":   120,
+            "cyan":    180,
+            "teal":    175,
+            "blue":    220,
+            "navy":    230,
+            "indigo":  255,
+            "violet":  270,
+            "purple":  275,
+            "magenta": 300,
+            "pink":    320,
+            "rose":    340,
+        }
+
+        fc = from_color.lower().strip()
+        tc = to_color.lower().strip()
+        from_hue = _HUE_CENTER.get(fc)
+        to_hue   = _HUE_CENTER.get(tc)
+        if from_hue is None or to_hue is None:
+            logger.warning("color_replace_region: unknown color '%s' or '%s'", fc, tc)
+            return None
+
+        import io as _io
+        import numpy as _np
+
+        try:
+            img = _PILImage.open(_io.BytesIO(image_bytes)).convert("RGBA")
+            W, H = img.size
+            arr = _np.array(img, dtype=_np.float32)
+
+            # ── Convert mask_box percentages to pixel coordinates ─────────────
+            box_left   = round(mask_box.get("left",   0) / 100 * W)
+            box_top    = round(mask_box.get("top",    0) / 100 * H)
+            box_width  = round(mask_box.get("width",  100) / 100 * W)
+            box_height = round(mask_box.get("height", 100) / 100 * H)
+            box_right  = min(box_left + box_width,  W)
+            box_bottom = min(box_top  + box_height, H)
+
+            # ── Build a boolean spatial mask for the bounding box ─────────────
+            region_mask = _np.zeros((H, W), dtype=bool)
+            region_mask[box_top:box_bottom, box_left:box_right] = True
+
+            r, g, b, a = arr[..., 0], arr[..., 1], arr[..., 2], arr[..., 3]
+
+            # Convert RGB → HSV (0-1 range)
+            r01, g01, b01 = r / 255.0, g / 255.0, b / 255.0
+            cmax  = _np.maximum(_np.maximum(r01, g01), b01)
+            cmin  = _np.minimum(_np.minimum(r01, g01), b01)
+            delta = cmax - cmin
+
+            hue = _np.zeros_like(r01)
+            mask_r = (cmax == r01) & (delta > 0)
+            mask_g = (cmax == g01) & (delta > 0)
+            mask_b = (cmax == b01) & (delta > 0)
+            hue[mask_r] = (60 * ((g01[mask_r] - b01[mask_r]) / delta[mask_r])) % 360
+            hue[mask_g] = (60 * ((b01[mask_g] - r01[mask_g]) / delta[mask_g]) + 120) % 360
+            hue[mask_b] = (60 * ((r01[mask_b] - g01[mask_b]) / delta[mask_b]) + 240) % 360
+
+            sat = _np.where(cmax > 0, delta / cmax, 0.0)
+            val = cmax
+
+            lo = (from_hue - tolerance) % 360
+            hi = (from_hue + tolerance) % 360
+            if lo <= hi:
+                hue_match = (hue >= lo) & (hue <= hi)
+            else:
+                hue_match = (hue >= lo) | (hue <= hi)
+
+            # Apply color match only within the bounding box region
+            target_mask = hue_match & (sat > 0.25) & (val > 0.15) & region_mask
+
+            if not _np.any(target_mask):
+                logger.warning("color_replace_region: no matching pixels in region for '%s'", fc)
+                return None
+
+            hue_shift = (to_hue - from_hue) % 360
+            new_hue   = (hue + hue_shift * target_mask) % 360
+
+            h6  = new_hue / 60.0
+            hi_ = _np.floor(h6).astype(int) % 6
+            f   = h6 - _np.floor(h6)
+            p   = val * (1 - sat)
+            q   = val * (1 - f * sat)
+            t_  = val * (1 - (1 - f) * sat)
+
+            new_r = _np.select(
+                [hi_ == 0, hi_ == 1, hi_ == 2, hi_ == 3, hi_ == 4, hi_ == 5],
+                [val, q, p, p, t_, val]
+            )
+            new_g = _np.select(
+                [hi_ == 0, hi_ == 1, hi_ == 2, hi_ == 3, hi_ == 4, hi_ == 5],
+                [t_, val, val, q, p, p]
+            )
+            new_b = _np.select(
+                [hi_ == 0, hi_ == 1, hi_ == 2, hi_ == 3, hi_ == 4, hi_ == 5],
+                [p, p, t_, val, val, q]
+            )
+
+            out = arr.copy()
+            out[target_mask, 0] = new_r[target_mask] * 255
+            out[target_mask, 1] = new_g[target_mask] * 255
+            out[target_mask, 2] = new_b[target_mask] * 255
+
+            out_img = _PILImage.fromarray(out.astype(_np.uint8), "RGBA")
+            buf = _io.BytesIO()
+            out_img.save(buf, format="PNG")
+            b64 = __import__("base64").b64encode(buf.getvalue()).decode()
+            logger.info(
+                "color_replace_region: %s → %s | %d pixels changed (box %d,%d %dx%d)",
+                fc, tc, int(_np.sum(target_mask)), box_left, box_top, box_width, box_height,
+            )
+            return b64
+
+        except Exception as exc:
+            logger.error("color_replace_region failed: %s", exc)
+            return None
 
     def color_replace(
         self,
