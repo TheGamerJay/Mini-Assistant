@@ -935,7 +935,44 @@ class DalleClient:
             Tuple of (base64 PNG string of the regenerated image, raw description used).
         """
         import base64 as _b64
+        import io as _sio
         client = self._get_client()
+
+        # ── Step 0: Try gpt-image-1 semantic edit (fast, source-preserving) ──
+        # gpt-image-1 understands semantic regions; it edits only what you name.
+        # No mask, no regeneration — much better color isolation than DALL-E 3.
+        try:
+            _sem_prompt = (
+                f"Change ONLY the {region} color from {from_color} to {to_color}. "
+                f"Keep EVERY OTHER element — clothing, shoes, accessories, eyes, "
+                f"background, art style, and body proportions — pixel-perfect."
+            )
+            _img_prep = image_bytes
+            if _PIL_AVAILABLE:
+                try:
+                    _pi = _PILImage.open(_sio.BytesIO(image_bytes)).convert("RGBA")
+                    _pb = _sio.BytesIO()
+                    _pi.save(_pb, format="PNG")
+                    _img_prep = _pb.getvalue()
+                except Exception:
+                    pass
+            _img_file = _sio.BytesIO(_img_prep)
+            _img_file.name = "image.png"
+            _sem_resp = await client.images.edit(
+                model="gpt-image-1",
+                image=_img_file,
+                prompt=_sem_prompt,
+                size="1024x1024",
+            )
+            _sem_b64 = (_sem_resp.data[0].b64_json
+                        if _sem_resp.data and _sem_resp.data[0].b64_json
+                        else None)
+            if _sem_b64:
+                _sem_desc = f"gpt-image-1 semantic: {region} {from_color}→{to_color}"
+                logger.info("describe_and_recolor: gpt-image-1 semantic edit OK")
+                return _sem_b64, _sem_desc
+        except Exception as _sem_err:
+            logger.warning("describe_and_recolor: gpt-image-1 semantic failed (%s) — falling back to DALL-E 3", _sem_err)
 
         # ── Step 1: Describe the character precisely with GPT-4o vision ──────
         if cached_description is not None:
