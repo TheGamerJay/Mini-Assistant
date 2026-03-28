@@ -1930,6 +1930,12 @@ async def chat(req: ChatRequest, request: Request):
             # ── TIER 1: Masked AI edit (dall-e-2 + mask, source-preserving) ───
             async def _try_tier1() -> bool:
                 nonlocal _current_b64, _current_bytes
+                # Skip T1 for color_change edits — dall-e-2 inpaint regenerates
+                # pixels rather than shifting colors; it cannot reliably do hue
+                # or desaturation changes. T2 (PIL) is far more accurate for this.
+                if _etype == "color_change":
+                    _tier_errors.append("T1:skipped — color_change uses T2 (PIL recolor)")
+                    return False
                 # REQUIRE mask — without it we cannot guarantee source preservation.
                 if not (_msk and _current_bytes):
                     _tier_errors.append("T1:no_mask:skipped (mask required for source-preserving edit)")

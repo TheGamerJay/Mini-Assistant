@@ -770,13 +770,36 @@ class DalleClient:
             "pink":    320,
             "rose":    340,
         }
+        # Achromatic/metallic targets — cannot be produced by hue rotation.
+        # Each entry is a target (R, G, B) that matched pixels are blended toward.
+        _ACHROMATIC_TARGETS: dict[str, tuple] = {
+            "silver":   (172, 172, 175),
+            "metallic": (172, 172, 175),
+            "chrome":   (180, 180, 186),
+            "gold":     (212, 175,  55),
+            "bronze":   (140, 100,  50),
+            "white":    (238, 238, 238),
+            "black":    ( 22,  22,  22),
+            "gray":     (130, 130, 130),
+            "grey":     (130, 130, 130),
+            "dark":     ( 40,  40,  40),
+            "brown":    (101,  67,  33),
+            "tan":      (210, 180, 140),
+            "beige":    (245, 245, 220),
+            "cream":    (255, 253, 208),
+            "peach":    (255, 218, 185),
+        }
 
         fc = from_color.lower().strip()
         tc = to_color.lower().strip()
         from_hue = _HUE_CENTER.get(fc)
+        _achromatic_target = _ACHROMATIC_TARGETS.get(tc)
         to_hue   = _HUE_CENTER.get(tc)
-        if from_hue is None or to_hue is None:
-            logger.warning("color_replace_region: unknown color '%s' or '%s'", fc, tc)
+        if from_hue is None:
+            logger.warning("color_replace_region: unknown source color '%s'", fc)
+            return None
+        if _achromatic_target is None and to_hue is None:
+            logger.warning("color_replace_region: unknown target color '%s'", tc)
             return None
 
         import io as _io
@@ -842,40 +865,68 @@ class DalleClient:
             else:
                 hue_match = (hue >= lo) | (hue <= hi)
 
-            # Apply color match only within the bounding box region
-            target_mask = hue_match & (sat > 0.25) & (val > 0.15) & region_mask
+            # Saturation threshold: 0.10 catches lightly-saturated skin/fur tones
+            # (e.g. pale blue, desaturated orange). 0.25 was too high and missed them.
+            target_mask = hue_match & (sat > 0.10) & (val > 0.10) & region_mask
 
             if not _np.any(target_mask):
                 logger.warning("color_replace_region: no matching pixels in region for '%s'", fc)
                 return None
 
-            hue_shift = (to_hue - from_hue) % 360
-            new_hue   = (hue + hue_shift * target_mask) % 360
-
-            h6  = new_hue / 60.0
-            hi_ = _np.floor(h6).astype(int) % 6
-            f   = h6 - _np.floor(h6)
-            p   = val * (1 - sat)
-            q   = val * (1 - f * sat)
-            t_  = val * (1 - (1 - f) * sat)
-
-            new_r = _np.select(
-                [hi_ == 0, hi_ == 1, hi_ == 2, hi_ == 3, hi_ == 4, hi_ == 5],
-                [val, q, p, p, t_, val]
-            )
-            new_g = _np.select(
-                [hi_ == 0, hi_ == 1, hi_ == 2, hi_ == 3, hi_ == 4, hi_ == 5],
-                [t_, val, val, q, p, p]
-            )
-            new_b = _np.select(
-                [hi_ == 0, hi_ == 1, hi_ == 2, hi_ == 3, hi_ == 4, hi_ == 5],
-                [p, p, t_, val, val, q]
-            )
-
             out = arr.copy()
-            out[target_mask, 0] = new_r[target_mask] * 255
-            out[target_mask, 1] = new_g[target_mask] * 255
-            out[target_mask, 2] = new_b[target_mask] * 255
+
+            if _achromatic_target is not None:
+                # ── Achromatic / metallic target (silver, gold, white, black…) ──
+                # Hue rotation cannot produce these — instead we blend each matched
+                # pixel's luminance with the target RGB, preserving lighting variation.
+                tr, tg, tb = _achromatic_target
+                # Weighted luminance of original pixel (perceptual brightness)
+                lum = (0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2]) / 255.0
+                # Normalised target luminance so we can scale the target color
+                t_lum = (0.299 * tr + 0.587 * tg + 0.114 * tb) / 255.0
+                # Scale factor preserves per-pixel light/shadow from the original
+                scale = _np.where(t_lum > 0.01, lum / t_lum, 1.0)
+                # Blend: 70% target-scaled-to-match-luminance, 30% desaturated original
+                # This keeps shading and contact shadows from the source art.
+                orig_lum = lum[..., _np.newaxis] * 255.0  # broadcast-ready
+                target_rgb = _np.stack([
+                    _np.clip(tr * scale, 0, 255),
+                    _np.clip(tg * scale, 0, 255),
+                    _np.clip(tb * scale, 0, 255),
+                ], axis=-1)
+                desaturated = _np.stack([orig_lum[..., 0]] * 3, axis=-1)
+                blended = 0.7 * target_rgb + 0.3 * desaturated
+                out[target_mask, 0] = _np.clip(blended[target_mask, 0], 0, 255)
+                out[target_mask, 1] = _np.clip(blended[target_mask, 1], 0, 255)
+                out[target_mask, 2] = _np.clip(blended[target_mask, 2], 0, 255)
+            else:
+                # ── Chromatic target — shift hue, preserve saturation + value ──
+                hue_shift = (to_hue - from_hue) % 360
+                new_hue   = (hue + hue_shift * target_mask) % 360
+
+                h6  = new_hue / 60.0
+                hi_ = _np.floor(h6).astype(int) % 6
+                f   = h6 - _np.floor(h6)
+                p   = val * (1 - sat)
+                q   = val * (1 - f * sat)
+                t_  = val * (1 - (1 - f) * sat)
+
+                new_r = _np.select(
+                    [hi_ == 0, hi_ == 1, hi_ == 2, hi_ == 3, hi_ == 4, hi_ == 5],
+                    [val, q, p, p, t_, val]
+                )
+                new_g = _np.select(
+                    [hi_ == 0, hi_ == 1, hi_ == 2, hi_ == 3, hi_ == 4, hi_ == 5],
+                    [t_, val, val, q, p, p]
+                )
+                new_b = _np.select(
+                    [hi_ == 0, hi_ == 1, hi_ == 2, hi_ == 3, hi_ == 4, hi_ == 5],
+                    [p, p, t_, val, val, q]
+                )
+
+                out[target_mask, 0] = new_r[target_mask] * 255
+                out[target_mask, 1] = new_g[target_mask] * 255
+                out[target_mask, 2] = new_b[target_mask] * 255
 
             out_img = _PILImage.fromarray(out.astype(_np.uint8), "RGBA")
             buf = _io.BytesIO()
