@@ -153,6 +153,9 @@ async def analyze_edit_request(user_msg: str) -> list[dict] | None:
         if not steps:
             # Fallback: model returned old single-step format
             steps = [parsed]
+        # Discard if every step is missing edit_type — model returned junk
+        if not any(s.get("edit_type") for s in steps):
+            return None
         logger.info(
             "analyze_edit_request | %d step(s): %s",
             len(steps),

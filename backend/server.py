@@ -1259,11 +1259,15 @@ async def _ai_chat(prompt: str, system: str | None = None) -> str:
         _ant = _anthropic.AsyncAnthropic(api_key=_ant_key)
         kw = {"system": system} if system else {}
         msg = await _ant.messages.create(model="claude-sonnet-4-6", max_tokens=8192, messages=_msgs, **kw)
+        if not msg.content:
+            return ""
         return msg.content[0].text
     if _oai_key:
         _oai = _openai.AsyncOpenAI(api_key=_oai_key)
         oms = ([{"role": "system", "content": system}] if system else []) + _msgs
         resp = await _oai.chat.completions.create(model="gpt-4o", max_tokens=8192, messages=oms)
+        if not resp.choices:
+            return ""
         return resp.choices[0].message.content or ""
     raise HTTPException(status_code=503, detail="No AI API key configured (ANTHROPIC_API_KEY or OPENAI_API_KEY required)")
 
@@ -1284,7 +1288,7 @@ async def _ai_chat_stream(prompt: str, system: str | None = None):
         oms = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
         async with await _oai.chat.completions.create(model="gpt-4o", max_tokens=8192, messages=oms, stream=True) as s:
             async for chunk in s:
-                if chunk.choices[0].delta.content:
+                if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
 
 
