@@ -173,6 +173,21 @@ export function AppProvider({ children }) {
     return localStorage.getItem('ma_active_chat_id') || null;
   });
 
+  // ---- Per-mode chat memory — remembers which chat was last open for each mode ----
+  const [modeChatIds, setModeChatIds] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ma_mode_chat_ids') || '{}'); }
+    catch { return {}; }
+  });
+
+  const saveModeChatId = useCallback((mode, chatId) => {
+    if (!mode) return;
+    setModeChatIds(prev => {
+      const next = { ...prev, [mode]: chatId };
+      try { localStorage.setItem('ma_mode_chat_ids', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
+
   const newChat = useCallback(() => {
     const id = crypto.randomUUID();
     const chat = {
@@ -995,6 +1010,9 @@ export function AppProvider({ children }) {
     pendingChatMode,
     setPendingChatMode,
     clearPendingChatMode,
+    // per-mode chat memory
+    modeChatIds,
+    saveModeChatId,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

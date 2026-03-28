@@ -333,6 +333,7 @@ function ChatPage() {
     activeChatId,
     chats,
     newChat,
+    selectChat,
     renameChat,
     updateChatMessages,
     updateChatPreviewImage,
@@ -347,6 +348,8 @@ function ChatPage() {
     plan,
     imageUsage,
     incrementImageUsage,
+    modeChatIds,
+    saveModeChatId,
   } = useApp();
 
   const handleExport = useCallback((format = 'md') => {
@@ -402,6 +405,27 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     return ['image', 'build', 'chat'].includes(saved) ? saved : null;
   }); // null | 'image' | 'build' | 'chat' — persisted across refreshes
   const vibeMode = chatMode === 'build'; // legacy compat — still used in sendStream body
+
+  // Per-mode chat isolation: save current chat for old mode, restore saved chat for new mode
+  const handleModeChange = useCallback((newMode) => {
+    // Save current chat under the outgoing mode
+    if (chatMode && activeChatId) {
+      saveModeChatId(chatMode, activeChatId);
+    }
+    // Switch mode
+    setChatMode(newMode);
+    if (newMode) localStorage.setItem('chatMode', newMode);
+    else localStorage.removeItem('chatMode');
+    // Restore or create a chat for the new mode
+    if (newMode) {
+      const savedId = modeChatIds[newMode];
+      if (savedId && chats.find(c => c.id === savedId)) {
+        selectChat(savedId);
+      } else {
+        newChat();
+      }
+    }
+  }, [chatMode, activeChatId, modeChatIds, chats, saveModeChatId, selectChat, newChat, setChatMode]);
   const [previewImage, setPreviewImage]       = useState(null); // latest generated image → shown in RightPanel
 
   // Streaming text state (non-image responses)
@@ -484,6 +508,11 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
       setPreviewImage(chat?.previewImage || null);
     }
   }, [activeChatId, chats]);
+
+  // Keep per-mode chat pointer current whenever the active chat changes
+  useEffect(() => {
+    if (chatMode && activeChatId) saveModeChatId(chatMode, activeChatId);
+  }, [activeChatId, chatMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-scroll to bottom on new message, loading change, or streaming text
   useEffect(() => {
@@ -934,7 +963,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         loading={loading}
         lastTopic={lastUserTextRef.current || null}
         chatMode={chatMode}
-        onChatModeChange={mode => { setChatMode(mode); if (mode) localStorage.setItem('chatMode', mode); else localStorage.removeItem('chatMode'); }}
+        onChatModeChange={handleModeChange}
       />
     );
   }
@@ -1266,7 +1295,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
                 'Message Mini Assistant…'
               }
               chatMode={chatMode}
-              onChatModeChange={mode => { setChatMode(mode); if (mode) localStorage.setItem('chatMode', mode); else localStorage.removeItem('chatMode'); }}
+              onChatModeChange={handleModeChange}
             />
           </div>
           <div className="flex items-center justify-between mt-2">
