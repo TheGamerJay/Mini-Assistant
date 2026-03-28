@@ -960,13 +960,12 @@ class DalleClient:
                     _img_prep = _pb.getvalue()
                 except Exception:
                     pass
-            _img_file = _sio.BytesIO(_img_prep)
-            _img_file.name = "image.png"
             # gpt-image-1 edit: no mask, no size, no response_format
             # (gpt-image-1 does NOT accept response_format — always returns b64 by default)
+            # Pass as tuple (filename, data, content_type) so SDK sets correct MIME type
             _sem_resp = await client.images.edit(
                 model="gpt-image-1",
-                image=_img_file,
+                image=("image.png", _img_prep, "image/png"),
                 prompt=_sem_prompt,
             )
             _sem_b64 = None
