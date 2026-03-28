@@ -1900,7 +1900,7 @@ async def chat(req: ChatRequest, request: Request):
                     return True
                 except Exception as _t1e:
                     _is_mod = "moderation_blocked" in str(_t1e) or "safety system" in str(_t1e).lower()
-                    logger.warning("step %d tier1/semantic failed (%s) is_moderation=%s", _step_i + 1, _t1e, _is_mod)
+                    logger.error("step %d tier1/semantic FAILED: %s | type=%s | is_moderation=%s", _step_i + 1, _t1e, type(_t1e).__name__, _is_mod)
                     return False
 
             # ── TIER 2: Vision reconstruction ────────────────────────────────
@@ -1938,7 +1938,7 @@ async def chat(req: ChatRequest, request: Request):
                     logger.info("[MODEL ROUTER] step %d tier2/vision OK", _step_i + 1)
                     return True
                 except Exception as _t2e:
-                    logger.warning("step %d tier2/vision failed (%s)", _step_i + 1, _t2e)
+                    logger.error("step %d tier2/vision FAILED: %s | type=%s", _step_i + 1, _t2e, type(_t2e).__name__)
                     return False
 
             # ── TIER 3: Region-constrained PIL ───────────────────────────────
@@ -2029,7 +2029,19 @@ async def chat(req: ChatRequest, request: Request):
 
             if not _step_success:
                 if _current_b64 is None:
-                    reply = "Image editing failed — all tiers exhausted."
+                    # Last-resort: DALL-E 3 generation from user instruction alone
+                    logger.warning("[MODEL ROUTER] all tiers exhausted — attempting DALL-E 3 last-resort generation")
+                    try:
+                        _lr_prompt = (
+                            f"{effective_msg.strip()}. "
+                            "High quality, detailed character art, full body visible."
+                        )
+                        _current_b64 = await _dalle.generate(_lr_prompt)
+                        _current_bytes = base64.b64decode(_current_b64)
+                        logger.info("[MODEL ROUTER] last-resort DALL-E 3 generation succeeded")
+                    except Exception as _lr_err:
+                        logger.error("[MODEL ROUTER] last-resort generation also failed: %s", _lr_err)
+                        reply = f"Image editing failed. Please try again or rephrase your request."
                 break
 
         _edit_elapsed_ms = round((time.perf_counter() - _edit_start) * 1000, 1)
