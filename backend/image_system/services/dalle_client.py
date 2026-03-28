@@ -1072,15 +1072,39 @@ class DalleClient:
         logger.info("describe_and_recolor: swapped description (%d chars)", len(modified))
 
         # ── Step 3: Regenerate with DALL-E 3 ────────────────────────────────
-        # Build explicit preserve note from scan results
+        # Extract explicit color constraints from the ORIGINAL description so DALL-E 3
+        # knows the exact colors of clothing/accessories it must preserve.
+        _ITEM_COLORS = re.compile(
+            r"\b(red|orange|yellow|green|blue|purple|pink|brown|black|white|gray|grey|"
+            r"cyan|magenta|gold|silver|teal|navy|maroon|crimson|scarlet|coral)\b"
+            r"[\w\s-]{0,20}?"  # optional adjectives/modifiers
+            r"\b(shirt|hoodie|jacket|pants|jeans|shorts|shoes|sneakers|boots|"
+            r"gloves|hat|cap|vest|dress|outfit|coat|scarf|belt|bag|eyes?|bracelet|watch)\b",
+            re.IGNORECASE,
+        )
+        _explicit_constraints: list[str] = []
+        for _m in _ITEM_COLORS.finditer(description):
+            _item_color = _m.group(1).lower()
+            _item_name = _m.group(2).lower()
+            # Only add as constraint if this item's color is NOT what we're changing
+            if _item_color != from_color.lower():
+                _explicit_constraints.append(f"{_item_name}: {_item_color}")
+        _explicit_constraints = list(dict.fromkeys(_explicit_constraints))  # dedupe
+
+        # Build preserve note
         if preserve_elements:
             _pres_note = (
                 "DO NOT recolor any of these — they must keep their original colors: " +
                 ", ".join(preserve_elements) + "."
             )
+        elif _explicit_constraints:
+            _pres_note = (
+                "These items must keep their EXACT original colors — do NOT change them: " +
+                "; ".join(_explicit_constraints) + "."
+            )
         else:
             _pres_note = (
-                "DO NOT recolor: eyes, headset ring, shoes, clothing, accessories, outlines — "
+                "DO NOT recolor: eyes, shoes, clothing, accessories, outlines — "
                 "these must keep their exact original colors."
             )
 
