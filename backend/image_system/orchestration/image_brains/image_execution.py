@@ -44,14 +44,22 @@ class ImageExecutionBrain:
             return t1
 
         # ── T2: PIL masked recolor ────────────────────────────────────────────
-        t2 = await self._try_tier2(dalle, step, image_bytes, scan, tier_errors)
-        if t2.success:
-            return t2
-        t2_diag = t2.t2_diagnosis  # populated on no_op
+        # Skip T2 on the second attempt when we already know it's a no_op
+        # (t2_diagnosis comes from the CEO's prior attempt diagnosis).
+        t2_diag: dict | None = None
+        if t2_diagnosis is None:
+            t2 = await self._try_tier2(dalle, step, image_bytes, scan, tier_errors)
+            if t2.success:
+                return t2  # genuine T2 success — no prior no_op, return it
+            t2_diag = t2.t2_diagnosis
+        else:
+            tier_errors.append("T2:skipped — prior no_op diagnosis, going to T3")
 
         # ── T3: Controlled reconstruction ─────────────────────────────────────
-        # Allowed if: step.allow_reconstruction=True OR T2 produced a no_op diagnosis
-        t3_allowed = step.allow_reconstruction or (t2_diag is not None)
+        # Allowed if: step.allow_reconstruction=True
+        #          OR T2 produced a no_op diagnosis this attempt
+        #          OR a prior attempt already showed T2 was a no_op
+        t3_allowed = step.allow_reconstruction or (t2_diag is not None) or (t2_diagnosis is not None)
         if t3_allowed:
             prior_diag = t2_diag or t2_diagnosis
             t3 = await self._try_tier3(dalle, step, image_bytes, scan, ctx, prior_diag, tier_errors)
