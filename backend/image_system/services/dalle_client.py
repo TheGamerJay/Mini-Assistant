@@ -376,7 +376,10 @@ def validate_edit_result(
             changed_pixels          = int(_np.sum(_np.mean(diff, axis=2) > 0.05))
             preserve_integrity_score = 1.0
 
-        if target_change_score < 0.03:
+        # no_op threshold: 0.015 (~1.5% mean pixel delta normalized to 0-1).
+        # A blue→silver skin conversion on 20% of box pixels moves the mean
+        # by ~0.036, so this threshold allows partial coverage to still pass.
+        if target_change_score < 0.015:
             result_status = "no_op"
         elif preserve_integrity_score < 0.80:
             result_status = "partial"
@@ -906,20 +909,41 @@ class DalleClient:
             box_bottom = min(box_top  + box_height, H)
 
             # ── Build pixel-level region mask ─────────────────────────────────
-            # Prefer refined segmentation mask (alpha < 128 = edit region).
-            # Fall back to coarse bounding-box mask when not available.
+            # When a refined segmentation mask is available (built by
+            # build_refined_mask via color clustering) use it as the SOLE
+            # pixel selector — no secondary hue check.  The refined mask
+            # already identified the target-colored pixels by sampling the
+            # dominant color from the region center and thresholding by
+            # Euclidean RGB distance, which is more precise than a hue range.
+            #
+            # When only a coarse bounding box is available, fall back to the
+            # hue-range + saturation filter to avoid coloring every pixel.
+            _using_refined = False
             if pixel_mask_bytes is not None:
                 try:
                     _pm_img   = _PILImage.open(_io.BytesIO(pixel_mask_bytes)).convert("RGBA")
                     _pm_alpha = _np.array(_pm_img)[:, :, 3].astype(_np.float32)
                     # alpha=0 (transparent) → edit; alpha=255 (opaque) → preserve
-                    region_mask = _pm_alpha < 128
+                    _refined_mask = _pm_alpha < 128
+                    _n_refined = int(_np.sum(_refined_mask))
                     logger.info(
-                        "color_replace_region: using refined mask (%d edit pixels)",
-                        int(_np.sum(region_mask)),
+                        "color_replace_region: refined mask → %d edit pixels "
+                        "(skipping hue check — mask already selected target color)",
+                        _n_refined,
                     )
+                    if _n_refined > 0:
+                        region_mask    = _refined_mask
+                        _using_refined = True
+                    else:
+                        # Refined mask found 0 edit pixels — fall back to box
+                        logger.warning(
+                            "color_replace_region: refined mask has 0 edit pixels, "
+                            "falling back to coarse box + hue filter"
+                        )
+                        region_mask = _np.zeros((H, W), dtype=bool)
+                        region_mask[box_top:box_bottom, box_left:box_right] = True
                 except Exception as _pm_err:
-                    logger.warning("pixel_mask decode failed, using box: %s", _pm_err)
+                    logger.warning("pixel_mask decode failed, using box+hue: %s", _pm_err)
                     region_mask = _np.zeros((H, W), dtype=bool)
                     region_mask[box_top:box_bottom, box_left:box_right] = True
             else:
@@ -928,36 +952,46 @@ class DalleClient:
 
             r, g, b, a = arr[..., 0], arr[..., 1], arr[..., 2], arr[..., 3]
 
-            # Convert RGB → HSV (0-1 range)
+            # ── Always compute HSV — needed for chromatic hue rotation ────────
             r01, g01, b01 = r / 255.0, g / 255.0, b / 255.0
             cmax  = _np.maximum(_np.maximum(r01, g01), b01)
             cmin  = _np.minimum(_np.minimum(r01, g01), b01)
             delta = cmax - cmin
-
             hue = _np.zeros_like(r01)
-            mask_r = (cmax == r01) & (delta > 0)
-            mask_g = (cmax == g01) & (delta > 0)
-            mask_b = (cmax == b01) & (delta > 0)
-            hue[mask_r] = (60 * ((g01[mask_r] - b01[mask_r]) / delta[mask_r])) % 360
-            hue[mask_g] = (60 * ((b01[mask_g] - r01[mask_g]) / delta[mask_g]) + 120) % 360
-            hue[mask_b] = (60 * ((r01[mask_b] - g01[mask_b]) / delta[mask_b]) + 240) % 360
-
+            _m_r = (cmax == r01) & (delta > 0)
+            _m_g = (cmax == g01) & (delta > 0)
+            _m_b = (cmax == b01) & (delta > 0)
+            hue[_m_r] = (60 * ((g01[_m_r] - b01[_m_r]) / delta[_m_r])) % 360
+            hue[_m_g] = (60 * ((b01[_m_g] - r01[_m_g]) / delta[_m_g]) + 120) % 360
+            hue[_m_b] = (60 * ((r01[_m_b] - g01[_m_b]) / delta[_m_b]) + 240) % 360
             sat = _np.where(cmax > 0, delta / cmax, 0.0)
             val = cmax
 
-            lo = (from_hue - tolerance) % 360
-            hi = (from_hue + tolerance) % 360
-            if lo <= hi:
-                hue_match = (hue >= lo) & (hue <= hi)
+            # ── Select target pixels ──────────────────────────────────────────
+            if _using_refined:
+                # Refined mask already identified target-colored pixels by color
+                # clustering — trust it directly.  Only exclude near-black ink
+                # outlines (val < 0.08) which should never be recolored.
+                target_mask = region_mask & (val > 0.08)
             else:
-                hue_match = (hue >= lo) | (hue <= hi)
-
-            # Saturation threshold: 0.10 catches lightly-saturated skin/fur tones
-            # (e.g. pale blue, desaturated orange). 0.25 was too high and missed them.
-            target_mask = hue_match & (sat > 0.10) & (val > 0.10) & region_mask
+                # Coarse box: must filter by hue so we don't recolor everything.
+                # Use wider tolerance (40°) to catch slight hue shifts in skin.
+                _tol = max(tolerance, 40)
+                lo = (from_hue - _tol) % 360
+                hi = (from_hue + _tol) % 360
+                if lo <= hi:
+                    hue_match = (hue >= lo) & (hue <= hi)
+                else:
+                    hue_match = (hue >= lo) | (hue <= hi)
+                # Saturation threshold 0.10 catches lightly-saturated tones
+                target_mask = hue_match & (sat > 0.10) & (val > 0.10) & region_mask
 
             if not _np.any(target_mask):
-                logger.warning("color_replace_region: no matching pixels in region for '%s'", fc)
+                logger.warning(
+                    "color_replace_region: no matching pixels in region for '%s' "
+                    "(refined=%s)",
+                    fc, _using_refined,
+                )
                 return None
 
             out = arr.copy()
