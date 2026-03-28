@@ -2039,8 +2039,8 @@ async def chat(req: ChatRequest, request: Request):
                                     _diagnosis.get("suggested_retry_prompts", [])
                                 )
                                 _tier_errors.append(
-                                    f"T2:no_op:{_diagnosis['failure_code']} — "
-                                    f"{_diagnosis['failure_reason']}"
+                                    f"T2:no_op:{_diagnosis.get('failure_code','unknown')} — "
+                                    f"{_diagnosis.get('failure_reason','no visible change')}"
                                 )
                             except Exception as _de:
                                 logger.warning("diagnose_failed_region_edit error: %s", _de)

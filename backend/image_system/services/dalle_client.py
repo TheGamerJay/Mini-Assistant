@@ -376,10 +376,12 @@ def validate_edit_result(
             changed_pixels          = int(_np.sum(_np.mean(diff, axis=2) > 0.05))
             preserve_integrity_score = 1.0
 
-        # no_op threshold: 0.015 (~1.5% mean pixel delta normalized to 0-1).
-        # A blue→silver skin conversion on 20% of box pixels moves the mean
-        # by ~0.036, so this threshold allows partial coverage to still pass.
-        if target_change_score < 0.015:
+        # no_op threshold: 0.008 (~0.8% mean pixel delta, normalized 0-1).
+        # The mean is diluted by the whole box area — skin may be only 15-25%
+        # of the box (rest is background/accessories). Even a large color change
+        # on 15% of box pixels gives score ≈ 0.015. Use 0.008 so partial
+        # coverage still passes, and rely on changed_pixels count for fine detail.
+        if target_change_score < 0.008 and changed_pixels < 50:
             result_status = "no_op"
         elif preserve_integrity_score < 0.80:
             result_status = "partial"
@@ -511,6 +513,16 @@ def diagnose_failed_region_edit(
     failure_code   = "unknown"
     failure_reason = "The target region did not visibly change."
 
+    # ── Clean region label: strip instruction text after common delimiters ──
+    # region_description from the planner can be verbose (e.g. "skin/body only
+    # — not hair, not clothing, not accessories..."). Extract just the noun.
+    import re as _re
+    _clean = region_description or "skin"
+    _clean = _re.split(r'\s*(?:/| — | only| \(|, not|\bexclude\b)', _clean, maxsplit=1)[0].strip()
+    # Remove trailing qualifiers like "body", "color", "area" if preceded by a noun
+    _clean = _re.sub(r'\s*(body|area|color|region|surface)\s*$', '', _clean, flags=_re.IGNORECASE).strip()
+    _clean_region = _clean or "skin"
+
     if _PIL_AVAILABLE and original_bytes and mask_box:
         try:
             import io as _io
@@ -532,68 +544,95 @@ def diagnose_failed_region_edit(
         except Exception as _de:
             logger.debug("diagnose: color sampling failed: %s", _de)
 
+    # ── Check if detected color is in the same family as from_color ──────
+    # "dark blue" and "blue" are the same family — don't treat as mismatch.
+    _fc_words = set(from_color.lower().split())
+    _det_words = set(detected_color.lower().replace('-', ' ').split())
+    _same_family = bool(_fc_words & _det_words)   # any word in common
+
     # Determine failure code
     tc_score = validation.get("target_change_score", 0)
     pi_score = validation.get("preserve_integrity_score", 1)
     ch_px    = validation.get("changed_pixels", 0)
 
-    if ch_px == 0:
+    if ch_px == 0 and not _same_family:
         failure_code   = "source_color_mismatch"
         failure_reason = (
-            f"The system found the region but detected no pixels matching '{from_color}'. "
-            f"The dominant color in that area appears to be {detected_color}."
+            f"The system found the {_clean_region} region but detected no matching pixels. "
+            f"The dominant color there appears to be {detected_color}, not '{from_color}'. "
+            f"Try naming the exact shade you see."
         )
-    elif tc_score < 0.015 and mask_pixel_count < 50:
+    elif ch_px == 0 and _same_family:
+        # Same color family but pixels didn't change — likely a dark/light variant
+        # that the refined mask threshold excluded.
+        failure_code   = "dark_variant"
+        failure_reason = (
+            f"The {_clean_region} appears to be {detected_color} — a darker/lighter "
+            f"shade of '{from_color}'. Use the exact shade name in your retry."
+        )
+    elif mask_pixel_count > 0 and mask_pixel_count < 80:
         failure_code   = "weak_mask"
         failure_reason = (
-            f"The target region was too small or too narrow to produce a visible change "
-            f"({mask_pixel_count} pixels in mask). The region may not have been properly isolated."
+            f"The isolated region only covered {mask_pixel_count} pixels — "
+            f"too small to produce a visible change. "
+            f"Try specifying the region more broadly."
         )
-    elif tc_score < 0.015:
-        # Check if requested target is already close to detected
+    elif tc_score < 0.008:
+        # Check if target is already close to detected
         if any(kw in to_color.lower() for kw in ("silver", "gray", "grey", "white")) and \
            any(kw in detected_color.lower() for kw in ("gray", "silver", "light", "white")):
             failure_code   = "already_close"
             failure_reason = (
-                f"The detected color ({detected_color}) is already close to the requested "
+                f"The {_clean_region} ({detected_color}) is already close to "
                 f"'{to_color}', so the change wasn't large enough to register."
             )
         else:
-            failure_code   = "source_color_mismatch"
+            failure_code   = "low_change"
             failure_reason = (
-                f"The dominant color in the {region_description} region appears to be "
-                f"{detected_color}, not '{from_color}'. The recolor threshold may not "
-                f"have matched enough pixels."
+                f"The edit ran but produced a very small change "
+                f"(score: {tc_score:.3f}). The {_clean_region} is {detected_color}. "
+                f"Try naming the exact shade."
             )
     else:
         failure_code   = "unknown"
-        failure_reason = f"The edit was applied but the change score was too low ({tc_score:.3f})."
+        failure_reason = f"The edit score was too low ({tc_score:.3f})."
 
-    # Generate retry prompts
-    region = region_description or "skin"
+    # Generate retry prompts using clean region name + detected color
+    region = _clean_region
     retries = []
 
     if failure_code == "source_color_mismatch":
         retries = [
             f"Change only the {detected_color} {region} to {to_color}, keep everything else unchanged",
             f"Make only the {region} {to_color} — the {region} color is {detected_color}",
-            f"Recolor only the {detected_color} {region} to {to_color}, do not touch the rest",
+            f"Recolor only the {detected_color} {region} to {to_color}, do not touch anything else",
+        ]
+    elif failure_code == "dark_variant":
+        retries = [
+            f"Change only the {detected_color} {region} to {to_color}, keep everything else unchanged",
+            f"The {region} is {detected_color} — make it {to_color} only, not the rest",
+            f"Recolor only the {detected_color} {region} to {to_color}",
         ]
     elif failure_code == "weak_mask":
         retries = [
-            f"Change only the {from_color} {region} to {to_color} — isolate just the {region} area",
-            f"Make the entire {region} {to_color}, keep eyes, hair, and accessories unchanged",
-            f"Recolor only the body {region} to {to_color}, nothing else",
+            f"Change only the {detected_color} {region} to {to_color}, keep eyes, hair, and accessories unchanged",
+            f"Make the entire {region} {to_color}, do not change anything else",
+            f"Recolor only the {region} from {detected_color} to {to_color}",
         ]
     elif failure_code == "already_close":
         retries = [
-            f"Make the {region} visibly {to_color} (it is currently {detected_color}, push it further)",
-            f"Force the {region} to pure {to_color}, ignore how close it already is",
+            f"Make the {region} visibly {to_color} — it is currently {detected_color}, push it further",
+            f"Force the {region} to pure {to_color}, it should look noticeably different",
+        ]
+    elif failure_code == "low_change":
+        retries = [
+            f"Change only the {detected_color} {region} to {to_color}, keep everything else unchanged",
+            f"The {region} is {detected_color} — recolor only the {region} to {to_color}",
         ]
     else:
         retries = [
-            f"Change only the {from_color} {region} to {to_color}, keep all other regions unchanged",
-            f"Make only the {region} {to_color} — {region} color is {from_color}",
+            f"Change only the {detected_color} {region} to {to_color}, keep everything else unchanged",
+            f"Make only the {region} {to_color} — the {region} is currently {detected_color}",
         ]
 
     user_message = (
