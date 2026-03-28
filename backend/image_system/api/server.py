@@ -2068,16 +2068,24 @@ async def chat(req: ChatRequest, request: Request):
                     return False
 
             # ── TIER 3: Controlled reconstruction fallback (NOT source-preserving) ─
-            # Used when T1+T2 both fail. For named-region edits, uses diagnosis
-            # context (detected_color) so the model understands the actual source
-            # color. Blocked only when planner explicitly sets allow_reconstruction_fallback=false.
+            # Used when T1+T2 both fail.  For named-region (skin/fur) edits:
+            #   - _allow_reconstruction may be False (RULE 3 default), but we
+            #     still allow ONE reconstruction attempt after a T2 no_op as
+            #     long as (a) T2 produced a diagnosis with a confident
+            #     detected_color and (b) a cached image description exists.
+            #   - This gives visually-correct results with honest metadata
+            #     instead of hard-blocking the best fallback.
             async def _try_tier3() -> bool:
                 nonlocal _current_b64, _current_bytes
-                if not _allow_reconstruction:
+                # T3 is allowed if:
+                #   • _allow_reconstruction is True (unnamed / structural edits), OR
+                #   • T2 ran and produced a no_op diagnosis (named-region last resort)
+                _t3_allowed = _allow_reconstruction or (_t2_diagnosis is not None)
+                if not _t3_allowed:
                     _tier_errors.append(
-                        "T3:reconstruction_blocked — explicitly disabled for this edit"
+                        "T3:reconstruction_blocked — explicitly disabled and T2 did not produce a diagnosis"
                     )
-                    logger.warning("[MODEL ROUTER] T3 reconstruction blocked (allow_reconstruction_fallback=false)")
+                    logger.warning("[MODEL ROUTER] T3 reconstruction blocked")
                     return False
                 if not _current_bytes:
                     return False
@@ -2086,7 +2094,7 @@ async def chat(req: ChatRequest, request: Request):
                     _t3_from = _from_color or "current color"
                     _t3_to   = _to_color or effective_msg.strip()
                     # Pull detected_color from T2 diagnosis if available (dark variant case)
-                    _t3_detected = _t2_diagnosis.get("detected_color") if _t2_diagnosis else None
+                    _t3_detected = _t2_diagnosis.get("detected_dominant_color") if _t2_diagnosis else None
                     _t3_region = _region_desc or "skin/fur"
                     logger.info(
                         "[MODEL ROUTER] step %d T3/reconstruction_fallback %s→%s region=%s detected=%s",
@@ -2144,15 +2152,11 @@ async def chat(req: ChatRequest, request: Request):
                     # return a different character, which is worse than failing).
                     _reason = " | ".join(_tier_errors) if _tier_errors else "all methods failed"
                     logger.warning("[MODEL ROUTER] step %d failed. errors: %s", _step_i + 1, _reason)
-                    # User-friendly message: use diagnosis if available
-                    _no_op_err = next((e for e in _tier_errors if "no_op" in e), None)
-                    if _no_op_err:
-                        # Extract the human-readable part after the failure_code
-                        _diag_msg = _no_op_err.split(" — ", 1)[-1] if " — " in _no_op_err else ""
-                        reply = (
-                            f"I isolated the target region, but the edit didn't produce a visible change. "
-                            f"{_diag_msg}"
-                        )
+                    # User-friendly message: prefer user_message from T2 diagnosis
+                    if _t2_diagnosis and _t2_diagnosis.get("user_message"):
+                        reply = _t2_diagnosis["user_message"]
+                    elif any("no_op" in e for e in _tier_errors):
+                        reply = "I isolated the target region, but the edit didn't produce a visible change."
                     else:
                         reply = (
                             f"Could not apply this edit while preserving the source image. "

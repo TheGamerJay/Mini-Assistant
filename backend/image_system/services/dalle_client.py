@@ -513,13 +513,19 @@ def diagnose_failed_region_edit(
     failure_code   = "unknown"
     failure_reason = "The target region did not visibly change."
 
-    # ── Clean region label: strip instruction text after common delimiters ──
-    # region_description from the planner can be verbose (e.g. "skin/body only
-    # — not hair, not clothing, not accessories..."). Extract just the noun.
+    # ── Clean region label: extract just the noun from verbose planner text ──
+    # Planner sends e.g. "character's skin/body color only — not hair, not clothing..."
+    # Goal: extract a clean short noun like "skin".
     import re as _re
     _clean = region_description or "skin"
-    _clean = _re.split(r'\s*(?:/| — | only| \(|, not|\bexclude\b)', _clean, maxsplit=1)[0].strip()
-    # Remove trailing qualifiers like "body", "color", "area" if preceded by a noun
+    # Step 1: split at instruction separators (not "/" — that's part of "skin/body")
+    _clean = _re.split(r'\s*(?:—|–)\s*|\s+only\b|\s*\(|,\s*not\b|\bexclude\b', _clean, maxsplit=1)[0].strip()
+    # Step 2: strip leading possessives / articles ("character's ", "the ")
+    _clean = _re.sub(r"^(?:the\s+|(?:[a-zA-Z]+'s?\s+))", '', _clean, flags=_re.IGNORECASE).strip()
+    # Step 3: if compound noun with "/" take the first part (skin/body → skin)
+    if '/' in _clean:
+        _clean = _clean.split('/')[0].strip()
+    # Step 4: strip trailing filler words
     _clean = _re.sub(r'\s*(body|area|color|region|surface)\s*$', '', _clean, flags=_re.IGNORECASE).strip()
     _clean_region = _clean or "skin"
 
