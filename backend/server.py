@@ -16,7 +16,6 @@ import uuid
 from datetime import datetime, timezone
 import json
 import asyncio
-from ollama import Client
 from faster_whisper import WhisperModel
 from gtts import gTTS
 from duckduckgo_search import DDGS
@@ -379,20 +378,8 @@ async def _on_startup():
     except Exception as _auto_err:
         logging.warning("Email automation startup failed (non-fatal): %s", _auto_err)
 
-# Default model for basic endpoints (override with FAST_MODEL env var)
-_default_model = os.environ.get('FAST_MODEL', 'glm-4.7:cloud')
-
-# Initialize Ollama client using OLLAMA_HOST / OLLAMA_API_KEY env vars
-_ollama_host = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
-_ollama_api_key = os.environ.get('OLLAMA_API_KEY', '')
-_ollama_headers = {"Authorization": f"Bearer {_ollama_api_key}"} if _ollama_api_key else {}
-
-try:
-    ollama_client = Client(host=_ollama_host, headers=_ollama_headers)
-    print(f"[OK] Ollama client initialised (host={_ollama_host})")
-except Exception as e:
-    print(f"[ERR] Failed to initialise Ollama client: {e}")
-    ollama_client = None
+# Default model label kept for reference; actual AI calls go to Claude/OpenAI
+_default_model = os.environ.get('FAST_MODEL', 'claude-sonnet-4-6')
 
 # Initialize Whisper model for STT (lazy loading)
 whisper_model = None
@@ -574,8 +561,6 @@ def _auto_select_model(message: str, has_search_context: bool = False) -> str:
 
 @api_router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    if not ollama_client:
-        raise HTTPException(status_code=503, detail=f"Ollama service not available. Please ensure Ollama is reachable at {_ollama_host}")
 
     try:
         from datetime import date as _date
@@ -612,15 +597,19 @@ async def chat(request: ChatRequest):
         )
         print(f"[CHAT] model={resolved_model} (requested={request.model})")
 
+        # Extract system message and user messages for _ai_chat
+        _sys_content = next((m["content"] for m in messages if m["role"] == "system"), None)
+        _user_msgs_only = [m for m in messages if m["role"] != "system"]
+        # Rebuild prompt from all messages as a combined prompt string
+        _combined_prompt = "\n\n".join(
+            f"[{m['role'].upper()}]: {m['content']}" for m in _user_msgs_only
+        )
         if request.stream:
             response_text = ""
-            stream = ollama_client.chat(model=resolved_model, messages=messages, stream=True)
-            for chunk in stream:
-                if 'message' in chunk and 'content' in chunk['message']:
-                    response_text += chunk['message']['content']
+            async for _chunk in _ai_chat_stream(_combined_prompt, system=_sys_content):
+                response_text += _chunk
         else:
-            response = ollama_client.chat(model=resolved_model, messages=messages)
-            response_text = response['message']['content']
+            response_text = await _ai_chat(_combined_prompt, system=_sys_content)
 
         return ChatResponse(response=response_text, model=resolved_model)
     except Exception as e:
@@ -828,8 +817,6 @@ async def generate_image(request: ImageGenRequest):
 # FixLoop - Error analysis
 @api_router.post("/fixloop/analyze")
 async def analyze_error(request: FixLoopRequest, authorization: str = Header(None)):
-    if not ollama_client:
-        raise HTTPException(status_code=503, detail="Ollama service not available")
 
     try:
         from mini_credits import check_and_deduct as _deduct
@@ -852,13 +839,10 @@ Provide:
 2. Suggested fix (exact command or code change)
 3. Explanation"""
         
-        response = ollama_client.chat(
-            model=_default_model,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        
+        response_text = await _ai_chat(prompt)
+
         return {
-            "analysis": response['message']['content'],
+            "analysis": response_text,
             "command": request.command
         }
     except Exception as e:
@@ -1057,8 +1041,6 @@ _security_logger = logging.getLogger("security")
 
 @api_router.post("/app-builder/generate")
 async def generate_app(request: AppBuilderRequest, authorization: str = Header(None)):
-    if not ollama_client:
-        raise HTTPException(status_code=503, detail="Ollama service not available")
 
     # ── Credit gate ────────────────────────────────────────────────────────
     try:
@@ -1136,12 +1118,7 @@ FOR DATA/VISUALIZATION APPS:
 
 Now generate the complete HTML file:"""
 
-        response = ollama_client.chat(
-            model=_default_model,
-            messages=[{"role": "user", "content": prompt}]
-        )
-
-        content = response['message']['content'].strip()
+        content = (await _ai_chat(prompt)).strip()
 
         # Strip markdown fences if the model added them (handles ```html, ```htm, ``` etc.)
         import re as _re
@@ -1182,11 +1159,7 @@ OUTPUT FORMAT:
 - First line must be: const express = require('express');
 - Last line must close the server or export it."""
 
-                server_resp = ollama_client.chat(
-                    model=_default_model,
-                    messages=[{"role": "user", "content": server_prompt}]
-                )
-                server_js = server_resp['message']['content'].strip()
+                server_js = (await _ai_chat(server_prompt)).strip()
                 # Strip fences
                 import re as _re2
                 server_js = _re2.sub(r'^```[a-zA-Z]*\n?', '', server_js)
@@ -1273,34 +1246,46 @@ class AppBuilderEditRequest(BaseModel):
     instruction: str
     locked_files: List[str] = []        # file names that must not be edited
 
-async def _ai_edit(prompt: str) -> str:
+async def _ai_chat(prompt: str, system: str | None = None) -> str:
     """
-    Call Claude claude-sonnet-4-6 (primary) or OpenAI GPT-4o (fallback) to
-    perform a code edit.  Returns the raw model response string.
+    Call Claude claude-sonnet-4-6 (primary) or OpenAI GPT-4o (fallback).
+    Returns the raw model response string.
     """
     import anthropic as _anthropic, openai as _openai
     _ant_key = os.environ.get("ANTHROPIC_API_KEY")
     _oai_key = os.environ.get("OPENAI_API_KEY")
-
+    _msgs = [{"role": "user", "content": prompt}]
     if _ant_key:
         _ant = _anthropic.AsyncAnthropic(api_key=_ant_key)
-        msg = await _ant.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=8192,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        kw = {"system": system} if system else {}
+        msg = await _ant.messages.create(model="claude-sonnet-4-6", max_tokens=8192, messages=_msgs, **kw)
         return msg.content[0].text
-
     if _oai_key:
         _oai = _openai.AsyncOpenAI(api_key=_oai_key)
-        resp = await _oai.chat.completions.create(
-            model="gpt-4o",
-            max_tokens=8192,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        oms = ([{"role": "system", "content": system}] if system else []) + _msgs
+        resp = await _oai.chat.completions.create(model="gpt-4o", max_tokens=8192, messages=oms)
         return resp.choices[0].message.content or ""
-
     raise HTTPException(status_code=503, detail="No AI API key configured (ANTHROPIC_API_KEY or OPENAI_API_KEY required)")
+
+
+async def _ai_chat_stream(prompt: str, system: str | None = None):
+    """Streaming version of _ai_chat — yields text chunks."""
+    import anthropic as _anthropic, openai as _openai
+    _ant_key = os.environ.get("ANTHROPIC_API_KEY")
+    _oai_key = os.environ.get("OPENAI_API_KEY")
+    if _ant_key:
+        _ant = _anthropic.AsyncAnthropic(api_key=_ant_key)
+        kw = {"system": system} if system else {}
+        async with _ant.messages.stream(model="claude-sonnet-4-6", max_tokens=8192, messages=[{"role": "user", "content": prompt}], **kw) as s:
+            async for text in s.text_stream:
+                yield text
+    elif _oai_key:
+        _oai = _openai.AsyncOpenAI(api_key=_oai_key)
+        oms = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
+        async with await _oai.chat.completions.create(model="gpt-4o", max_tokens=8192, messages=oms, stream=True) as s:
+            async for chunk in s:
+                if chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
 
 
 @api_router.post("/app-builder/edit")
@@ -1391,7 +1376,7 @@ USER'S CHANGE REQUEST:
 
 Now output the updated {target_file}:"""
 
-        updated_content = (await _ai_edit(prompt)).strip()
+        updated_content = (await _ai_chat(prompt)).strip()
         # Strip markdown fences
         updated_content = _app_re.sub(r'^```[a-zA-Z]*\n?', '', updated_content)
         updated_content = _app_re.sub(r'\n?```\s*$', '', updated_content)
@@ -1422,7 +1407,7 @@ Now output the updated {target_file}:"""
                 f"Be specific but brief. Don't say 'certainly' or 'of course'. "
                 f"Sound like a helpful teammate, not a robot."
             )
-            chat_reply = (await _ai_edit(_reply_prompt)).strip()
+            chat_reply = (await _ai_chat(_reply_prompt)).strip()
         except Exception:
             chat_reply = f"Done! I updated `{target_file}` based on your request. Review the changes below."
 
@@ -1561,8 +1546,6 @@ class FormatFileRequest(BaseModel):
 @api_router.post("/app-builder/format")
 async def format_file(req: FormatFileRequest):
     """Format/prettify a file's content using AI."""
-    if not ollama_client:
-        raise HTTPException(status_code=503, detail="Ollama not available")
     if req.language == "json":
         try:
             return {"formatted": json.dumps(json.loads(req.content), indent=2)}
@@ -1574,8 +1557,7 @@ async def format_file(req: FormatFileRequest):
 Return ONLY the formatted code. No explanation. No markdown fences.
 
 {req.content[:8000]}"""
-    resp = ollama_client.chat(model=_default_model, messages=[{"role": "user", "content": prompt}])
-    raw = resp["message"]["content"].strip()
+    raw = (await _ai_chat(prompt)).strip()
     import re as _ref
     raw = _ref.sub(r'^```[a-zA-Z]*\n?', '', raw)
     raw = _ref.sub(r'\n?```\s*$', '', raw).strip()
@@ -1591,8 +1573,6 @@ class ExplainDiffRequest(BaseModel):
 @api_router.post("/app-builder/explain-diff")
 async def explain_diff(req: ExplainDiffRequest):
     """AI explains what changed between two versions of a file."""
-    if not ollama_client:
-        raise HTTPException(status_code=503, detail="Ollama not available")
     prompt = f"""A developer made changes to {req.file_name}.
 {f'Edit instruction: "{req.instruction}"' if req.instruction else ''}
 
@@ -1604,8 +1584,7 @@ AFTER:
 
 Explain what changed in plain English. Be specific — mention function names, elements, or rules that changed.
 Keep it under 6 bullet points. Use plain language, no jargon."""
-    resp = ollama_client.chat(model=_default_model, messages=[{"role": "user", "content": prompt}])
-    return {"explanation": resp["message"]["content"].strip()}
+    return {"explanation": (await _ai_chat(prompt)).strip()}
 
 
 class ExplainArchRequest(BaseModel):
@@ -1615,8 +1594,6 @@ class ExplainArchRequest(BaseModel):
 @api_router.post("/app-builder/explain-architecture")
 async def explain_architecture(req: ExplainArchRequest):
     """AI gives an architecture overview of the full project."""
-    if not ollama_client:
-        raise HTTPException(status_code=503, detail="Ollama not available")
     p = req.project
     files_summary = []
     if p.get("index_html"): files_summary.append(f"index.html ({len(p['index_html'])} chars)")
@@ -1644,8 +1621,7 @@ Give a concise architecture overview covering:
 5. How someone would extend it
 
 Be specific to THIS codebase. Plain English. Max 300 words."""
-    resp = ollama_client.chat(model=_default_model, messages=[{"role": "user", "content": prompt}])
-    return {"overview": resp["message"]["content"].strip()}
+    return {"overview": (await _ai_chat(prompt)).strip()}
 
 
 class GenerateChangelogRequest(BaseModel):
@@ -1655,8 +1631,6 @@ class GenerateChangelogRequest(BaseModel):
 @api_router.post("/app-builder/generate-changelog")
 async def generate_changelog(req: GenerateChangelogRequest):
     """Generate a markdown changelog from version history."""
-    if not ollama_client:
-        raise HTTPException(status_code=503, detail="Ollama not available")
     entries = []
     for v in req.versions[-20:]:  # last 20 versions
         line = f"- [{v.get('savedAt','?')[:10]}] {v.get('eventType','manual').upper()} — {v.get('name','Unnamed')}"
@@ -1674,8 +1648,7 @@ Format as:
 - What changed (inferred from the version name and context)
 
 Group by date if multiple on same day. Be concise. No fabricated details."""
-    resp = ollama_client.chat(model=_default_model, messages=[{"role": "user", "content": prompt}])
-    return {"changelog": resp["message"]["content"].strip()}
+    return {"changelog": (await _ai_chat(prompt)).strip()}
 
 
 # ── Phase 4: GitHub push & Vercel deploy ──────────────────────────────────────
@@ -2159,8 +2132,6 @@ class AppBuilderExplainRequest(BaseModel):
 @api_router.post("/app-builder/explain")
 async def explain_file(req: AppBuilderExplainRequest):
     """Ask AI to explain a project file in plain English."""
-    if not ollama_client:
-        raise HTTPException(status_code=503, detail="Ollama service not available")
     level_map = {
         "beginner": "Use very simple language. Avoid jargon. Assume no programming knowledge.",
         "advanced": "Be technical. Use proper terminology. Explain internal mechanics and trade-offs.",
@@ -2179,8 +2150,7 @@ Do not repeat the code back. Only explain it.
 FILE CONTENT:
 {req.content[:8000]}"""
     try:
-        res = ollama_client.chat(model=_default_model, messages=[{"role": "user", "content": prompt}])
-        return {"explanation": res["message"]["content"].strip(), "file": req.file}
+        return {"explanation": (await _ai_chat(prompt)).strip(), "file": req.file}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Explain error: {str(e)}")
 
@@ -2193,8 +2163,6 @@ class AppBuilderReadmeRequest(BaseModel):
 @api_router.post("/app-builder/generate-readme")
 async def generate_readme(req: AppBuilderReadmeRequest):
     """Generate a comprehensive README from the structured project files."""
-    if not ollama_client:
-        raise HTTPException(status_code=503, detail="Ollama service not available")
     html_snippet  = (req.project.get("index_html") or "")[:3000]
     css_snippet   = (req.project.get("style_css")  or "")[:1500]
     js_snippet    = (req.project.get("script_js")  or "")[:3000]
@@ -2223,8 +2191,7 @@ Write the README in Markdown. Include:
 
 Output only the Markdown. No preamble."""
     try:
-        res = ollama_client.chat(model=_default_model, messages=[{"role": "user", "content": prompt}])
-        readme = res["message"]["content"].strip()
+        readme = (await _ai_chat(prompt)).strip()
         return {"readme": readme}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"README generation error: {str(e)}")
@@ -2238,8 +2205,6 @@ class ProjectBriefRequest(BaseModel):
 @api_router.post("/app-builder/project-brief")
 async def generate_project_brief(req: ProjectBriefRequest):
     """Generate a structured build brief + file plan before generation."""
-    if not ollama_client:
-        raise HTTPException(status_code=503, detail="Ollama service not available")
     type_context = {
         "game":      "a browser-based game",
         "dashboard": "a data dashboard or analytics app",
@@ -2275,8 +2240,7 @@ Generate a structured project brief in JSON with this exact shape:
 
 Output ONLY valid JSON. No markdown. No preamble."""
     try:
-        res = ollama_client.chat(model=_default_model, messages=[{"role": "user", "content": prompt}])
-        raw = res["message"]["content"].strip()
+        raw = (await _ai_chat(prompt)).strip()
         import re as _re2
         raw = _re2.sub(r'^```[a-zA-Z]*\n?', '', raw)
         raw = _re2.sub(r'\n?```\s*$', '', raw).strip()
@@ -2456,8 +2420,6 @@ class AutoFixRequest(BaseModel):
 @api_router.post("/app-builder/sessions/{session_id}/auto-fix")
 async def auto_fix_session(session_id: str, req: AutoFixRequest):
     """Apply AI fixes for the top errors (up to max_attempts). Save updated project."""
-    if not ollama_client:
-        raise HTTPException(status_code=503, detail="Ollama service not available")
 
     pg = await _get_pg()
     if not pg:
@@ -2496,8 +2458,7 @@ Current {target}:
 Return ONLY the complete corrected {target}. No markdown. No explanation. Start outputting the file immediately."""
         try:
             import re as _fr
-            res = ollama_client.chat(model=_default_model, messages=[{"role": "user", "content": prompt}])
-            fixed = res["message"]["content"].strip()
+            fixed = (await _ai_chat(prompt)).strip()
             fixed = _fr.sub(r'^```[a-zA-Z]*\n?', '', fixed)
             fixed = _fr.sub(r'\n?```\s*$', '', fixed).strip()
             if fixed:
@@ -2654,8 +2615,6 @@ class SnippetCreate(BaseModel):
 
 @api_router.post("/code-review/analyze")
 async def review_code(request: CodeReviewRequest, authorization: str = Header(None)):
-    if not ollama_client:
-        raise HTTPException(status_code=503, detail="Ollama service not available")
 
     try:
         from mini_credits import check_and_deduct as _deduct
@@ -2690,12 +2649,7 @@ Format response as JSON:
   "fixed_code": "Fixed version of the code..."
 }}"""
         
-        response = ollama_client.chat(
-            model=_default_model,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        
-        content = response['message']['content']
+        content = await _ai_chat(prompt)
         try:
             # Extract JSON from markdown code blocks if present
             if "```json" in content:
@@ -3124,8 +3078,6 @@ class SummarizeRequest(BaseModel):
 
 @api_router.post("/chat/summarize")
 async def summarize_conversation(request: SummarizeRequest):
-    if not ollama_client:
-        raise HTTPException(status_code=503, detail="Ollama service not available")
     
     try:
         conversation_text = "\n".join([f"{msg.role}: {msg.content}" for msg in request.messages])
@@ -3140,12 +3092,7 @@ Conversation:
 
 Summary:"""
         
-        response = ollama_client.chat(
-            model=request.model,
-            messages=[{"role": "user", "content": summary_prompt}]
-        )
-        
-        return {"summary": response['message']['content']}
+        return {"summary": await _ai_chat(summary_prompt)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Summarization error: {str(e)}")
 
@@ -3824,7 +3771,7 @@ async def fixloop_start(request: ErrorFixRequest):
         
         # If errors found and auto_fix enabled, try to generate fixes
         suggested_fixes = []
-        if errors_found and request.auto_fix and ollama_client:
+        if errors_found and request.auto_fix:
             try:
                 fix_prompt = f"""Analyze these errors from a web app and suggest specific fixes.
 
@@ -3841,11 +3788,7 @@ For each error, provide:
 
 Format as a numbered list. Be specific — do not give generic advice."""
 
-                response = ollama_client.chat(
-                    model=request.model,
-                    messages=[{"role": "user", "content": fix_prompt}]
-                )
-                suggested_fixes = [{"suggestion": response['message']['content']}]
+                suggested_fixes = [{"suggestion": await _ai_chat(fix_prompt)}]
             except:
                 pass
         
@@ -3948,7 +3891,7 @@ async def tester_run(request: TestRequest):
         
         # Generate AI-powered test suggestions
         ai_suggestions = []
-        if ollama_client:
+        if True:
             try:
                 suggest_prompt = f"""Based on this URL and test results, suggest additional test cases:
 
@@ -3958,11 +3901,7 @@ Current Results: {json.dumps(test_results, indent=2)}
 
 Suggest 3-5 specific test cases that would improve coverage. Format as a numbered list."""
 
-                response = ollama_client.chat(
-                    model=request.model,
-                    messages=[{"role": "user", "content": suggest_prompt}]
-                )
-                ai_suggestions = response['message']['content']
+                ai_suggestions = await _ai_chat(suggest_prompt)
             except:
                 pass
         
@@ -3996,8 +3935,6 @@ Suggest 3-5 specific test cases that would improve coverage. Format as a numbere
 @api_router.post("/tester/generate")
 async def tester_generate_tests(request: TestRequest, authorization: str = Header(None)):
     """Generate test cases using AI"""
-    if not ollama_client:
-        raise HTTPException(status_code=503, detail="Ollama not available")
 
     try:
         from mini_credits import check_and_deduct as _deduct
@@ -4030,12 +3967,7 @@ Generate a JSON array of test cases with this structure:
 
 Generate 5-10 realistic test cases."""
 
-        response = ollama_client.chat(
-            model=request.model,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        
-        return {"generated_tests": response['message']['content']}
+        return {"generated_tests": await _ai_chat(prompt)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Test generation error: {str(e)}")
 
@@ -4079,7 +4011,7 @@ async def health_check(deep: bool = False):
             pass
         return {
             "status":  "healthy",
-            "ollama":  "connected" if ollama_client else "disconnected",
+            "ollama":  "replaced_by_claude_openai",
             "comfyui": comfyui_status,
             "openai":  "connected" if os.environ.get("OPENAI_API_KEY") else "disconnected",
             "whisper": "loaded" if whisper_model else "not_loaded",
@@ -4359,9 +4291,6 @@ class AgentRunRequest(BaseModel):
 @api_router.post("/agent/run")
 async def agent_run(request: AgentRunRequest):
     """Stream multi-brain agent pipeline execution via SSE."""
-    if not ollama_client:
-        raise HTTPException(status_code=503, detail="Ollama not available")
-
     loop = asyncio.get_event_loop()
     queue: asyncio.Queue = asyncio.Queue()
 
@@ -4370,7 +4299,7 @@ async def agent_run(request: AgentRunRequest):
 
     async def generate():
         pipeline_task = asyncio.create_task(
-            run_agent_pipeline(request.task, ollama_client, on_update)
+            run_agent_pipeline(request.task, None, on_update)
         )
         try:
             while True:

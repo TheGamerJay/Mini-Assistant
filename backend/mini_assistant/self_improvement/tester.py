@@ -31,7 +31,8 @@ import tempfile
 from dataclasses import dataclass, field
 from typing import Optional
 
-from ..config import MODELS, make_ollama_client, CODE_TIMEOUT
+import os
+from ..config import MODELS, CODE_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -85,15 +86,9 @@ Rules:
 
 def generate_tests(code: str, task_description: str) -> str:
     """
-    Call the coder brain to generate pytest tests for `code`.
-
-    Returns the raw test code as a string.
+    Call Claude/OpenAI to generate pytest tests for `code`.
     Falls back to a minimal placeholder if generation fails.
     """
-    import ollama
-    client = make_ollama_client(ollama)
-    model  = MODELS.get("fast", MODELS["fallback"])  # fast model for test gen
-
     prompt = (
         f"Task: {task_description}\n\n"
         f"Code to test:\n```python\n{code[:4000]}\n```\n\n"
@@ -101,22 +96,38 @@ def generate_tests(code: str, task_description: str) -> str:
     )
 
     try:
-        resp = client.chat(
-            model=model,
-            messages=[
-                {"role": "system", "content": _TEST_GEN_SYSTEM},
-                {"role": "user",   "content": prompt},
-            ],
-            options={"temperature": 0.2},
-        )
-        raw = resp["message"]["content"].strip()
+        ant_key = os.getenv("ANTHROPIC_API_KEY")
+        oai_key = os.getenv("OPENAI_API_KEY")
+        if ant_key:
+            import anthropic
+            client = anthropic.Anthropic(api_key=ant_key)
+            msg = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=4096,
+                system=_TEST_GEN_SYSTEM,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = msg.content[0].text.strip()
+        elif oai_key:
+            import openai
+            client = openai.OpenAI(api_key=oai_key)
+            resp = client.chat.completions.create(
+                model="gpt-4o",
+                max_tokens=4096,
+                messages=[
+                    {"role": "system", "content": _TEST_GEN_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            raw = (resp.choices[0].message.content or "").strip()
+        else:
+            raise RuntimeError("No AI key")
         # Strip any accidental fences
         raw = re.sub(r"```(?:python)?", "", raw).replace("```", "").strip()
         return raw[:MAX_TEST_CHARS]
 
     except Exception as exc:
         logger.warning("Test generation LLM failed: %s", exc)
-        # Return minimal test that at least verifies the code runs
         return (
             "def test_code_imports_without_error():\n"
             "    pass  # Code imported successfully\n"

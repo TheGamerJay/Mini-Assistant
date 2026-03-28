@@ -38,17 +38,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-try:
-    import ollama
-except ImportError as _e:
-    import logging as _log
-    _log.getLogger(__name__).error(
-        "DEPENDENCY ERROR: 'ollama' is not installed – reflection lesson generation unavailable. "
-        "Run: pip install ollama  (%s)", _e,
-    )
-    ollama = None  # type: ignore[assignment]
-
-from ..config import MODELS, make_ollama_client
+from ..config import MODELS
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +71,7 @@ Respond with ONLY the lesson text. No preamble.
 
 
 def _generate_lesson(task: str, errors: list[str], fixes: list[str]) -> str:
-    """Ask the fast model to synthesise a lesson from the task outcomes."""
+    """Ask Claude/OpenAI to synthesise a lesson from the task outcomes."""
     if not errors and not fixes:
         return "Task completed successfully without issues."
 
@@ -92,16 +82,31 @@ def _generate_lesson(task: str, errors: list[str], fixes: list[str]) -> str:
         "What is the key lesson from this task?"
     )
     try:
-        client = make_ollama_client(ollama)
-        resp = client.chat(
-            model=MODELS.get("fast", MODELS["fallback"]),
-            messages=[
-                {"role": "system", "content": _LESSON_SYSTEM},
-                {"role": "user",   "content": prompt},
-            ],
-            options={"temperature": 0.3},
-        )
-        return resp["message"]["content"].strip()
+        ant_key = os.getenv("ANTHROPIC_API_KEY")
+        oai_key = os.getenv("OPENAI_API_KEY")
+        if ant_key:
+            import anthropic
+            client = anthropic.Anthropic(api_key=ant_key)
+            msg = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=512,
+                system=_LESSON_SYSTEM,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return msg.content[0].text.strip()
+        if oai_key:
+            import openai
+            client = openai.OpenAI(api_key=oai_key)
+            resp = client.chat.completions.create(
+                model="gpt-4o",
+                max_tokens=512,
+                messages=[
+                    {"role": "system", "content": _LESSON_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            return (resp.choices[0].message.content or "").strip()
+        raise RuntimeError("No AI key")
     except Exception as exc:
         logger.warning("Lesson generation failed: %s", exc)
         if fixes:

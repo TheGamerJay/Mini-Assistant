@@ -2,31 +2,65 @@
 base_agent.py – Abstract Base Agent
 ──────────────────────────────────────
 Every swarm agent inherits from BaseAgent.
-
-Subclasses must define:
-  agent_name  – display name used in logs
-  agent_type  – key into config.AGENT_MODELS (e.g. "coding", "research")
-  run()       – execute a SwarmTask and return a TaskResult
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
-try:
-    import ollama
-except ImportError as _e:
-    import logging as _log
-    _log.getLogger(__name__).error(
-        "DEPENDENCY ERROR: 'ollama' is not installed – swarm agents will be unavailable. "
-        "Run: pip install ollama  (%s)", _e,
-    )
-    ollama = None  # type: ignore[assignment]
-
-from ..config import AGENT_MODELS, MODELS, make_ollama_client
+from ..config import AGENT_MODELS, MODELS
 from .task_models import SwarmTask, TaskResult
+
+
+def _sync_ai_call(
+    user_prompt: str,
+    system_prompt: str = "",
+    images: Optional[list[str]] = None,
+) -> str:
+    """Synchronous Claude/OpenAI call for swarm agents."""
+    ant_key = os.getenv("ANTHROPIC_API_KEY")
+    oai_key = os.getenv("OPENAI_API_KEY")
+
+    user_content: Any = user_prompt
+    if images:
+        # Build multi-modal content for vision (Claude supports this)
+        user_content = [{"type": "text", "text": user_prompt}]
+        for img_b64 in images:
+            user_content.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/png", "data": img_b64},
+            })
+
+    if ant_key:
+        import anthropic
+        client = anthropic.Anthropic(api_key=ant_key)
+        kw = {"system": system_prompt} if system_prompt else {}
+        msgs = [{"role": "user", "content": user_content}]
+        msg = client.messages.create(model="claude-sonnet-4-6", max_tokens=4096, messages=msgs, **kw)
+        return msg.content[0].text
+
+    if oai_key:
+        import openai
+        client = openai.OpenAI(api_key=oai_key)
+        if images:
+            # OpenAI vision format
+            oai_content = [{"type": "text", "text": user_prompt}]
+            for img_b64 in images:
+                oai_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{img_b64}"},
+                })
+            user_msg: Any = {"role": "user", "content": oai_content}
+        else:
+            user_msg = {"role": "user", "content": user_prompt}
+        oms = ([{"role": "system", "content": system_prompt}] if system_prompt else []) + [user_msg]
+        resp = client.chat.completions.create(model="gpt-4o", max_tokens=4096, messages=oms)
+        return resp.choices[0].message.content or ""
+
+    raise RuntimeError("No AI API key configured (ANTHROPIC_API_KEY or OPENAI_API_KEY required)")
 
 
 class BaseAgent(ABC):
@@ -34,17 +68,16 @@ class BaseAgent(ABC):
     Abstract base for all swarm agents.
 
     Provides:
-      _call_llm()          – call the agent's assigned Ollama model
+      _call_llm()          – call the agent's assigned AI model
       _inject_context()    – build a prompt that includes dependency outputs
       _make_result()       – convenient TaskResult factory
     """
 
     agent_name: str = "base_agent"
-    agent_type: str = "fast"   # override to pick the right model
+    agent_type: str = "fast"
 
     def __init__(self):
         self._model  = AGENT_MODELS.get(self.agent_type, MODELS["fallback"])
-        self._client = make_ollama_client(ollama)
         self._logger = logging.getLogger(f"swarm.{self.agent_name}")
         self._logger.debug("Initialised %s → model=%s", self.agent_name, self._model)
 
@@ -57,46 +90,16 @@ class BaseAgent(ABC):
         temperature: float = 0.1,
         images: Optional[list[str]] = None,
     ) -> str:
-        """
-        Call the agent's assigned Ollama model and return the response text.
-        Falls back to MODELS["fallback"] on any error.
-        """
-        messages: list[dict] = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-
-        user_msg: dict[str, Any] = {"role": "user", "content": user_prompt}
-        if images:
-            user_msg["images"] = images
-        messages.append(user_msg)
-
-        def _chat(model: str) -> str:
-            resp = self._client.chat(
-                model=model,
-                messages=messages,
-                options={"temperature": temperature},
-            )
-            return resp["message"]["content"].strip()
-
+        """Call Claude/OpenAI and return the response text."""
         try:
-            return _chat(self._model)
+            return _sync_ai_call(user_prompt, system_prompt=system_prompt, images=images)
         except Exception as exc:
-            self._logger.warning(
-                "Primary model %s failed (%s) – falling back to %s.",
-                self._model, exc, MODELS["fallback"],
-            )
-            try:
-                return _chat(MODELS["fallback"])
-            except Exception as exc2:
-                self._logger.error("Fallback model also failed: %s", exc2)
-                return f"[{self.agent_name}] LLM unavailable: {exc2}"
+            self._logger.error("AI call failed: %s", exc)
+            return f"[{self.agent_name}] AI unavailable: {exc}"
 
     # ── Context injection ─────────────────────────────────────────────────────
 
     def _inject_context(self, task: SwarmTask, context: dict[str, TaskResult]) -> str:
-        """
-        Build the user prompt by appending outputs from dependency tasks.
-        """
         parts: list[str] = [task.description]
         for dep_id in task.depends_on:
             dep_result = context.get(dep_id)
@@ -129,13 +132,6 @@ class BaseAgent(ABC):
 
     @abstractmethod
     def run(self, task: SwarmTask, context: dict[str, TaskResult]) -> TaskResult:
-        """
-        Execute the task and return a TaskResult.
-
-        Args:
-            task:    The task to execute.
-            context: Map of task_id → TaskResult for completed dependency tasks.
-        """
         ...
 
     def __repr__(self) -> str:

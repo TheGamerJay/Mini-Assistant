@@ -2,41 +2,47 @@
 planner.py – Task Planner
 ──────────────────────────
 Converts a user request into a structured list of executable steps.
-
-Each step specifies:
-  - id:         unique step identifier
-  - task:       human-readable description
-  - tool:       optional tool name ("search", "python", "file_read", "image_gen",
-                "screenshot", "computer")
-  - brain:      optional brain name to call ("coding", "vision", "research", "fast")
-  - depends_on: list of step ids whose outputs this step needs
-  - args:       static arguments resolved at plan time
-
-If the LLM planner fails (model not available, parse error) a single-step
-fallback plan is returned so the system always has something to execute.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-try:
-    import ollama
-except ImportError as _e:
-    import logging as _log
-    _log.getLogger(__name__).error(
-        "DEPENDENCY ERROR: 'ollama' is not installed – task planner will be unavailable. "
-        "Run: pip install ollama  (%s)", _e,
-    )
-    ollama = None  # type: ignore[assignment]
-
-from .config import MODELS, make_ollama_client
+from .config import MODELS
 
 logger = logging.getLogger(__name__)
+
+
+def _ai_call(system: str, user: str) -> str:
+    """Synchronous Claude/OpenAI call."""
+    ant_key = os.getenv("ANTHROPIC_API_KEY")
+    oai_key = os.getenv("OPENAI_API_KEY")
+    if ant_key:
+        import anthropic
+        client = anthropic.Anthropic(api_key=ant_key)
+        msg = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4096,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        return msg.content[0].text
+    if oai_key:
+        import openai
+        client = openai.OpenAI(api_key=oai_key)
+        resp = client.chat.completions.create(
+            model="gpt-4o",
+            max_tokens=4096,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+        )
+        return resp.choices[0].message.content or ""
+    raise RuntimeError("No AI API key configured")
+
 
 # ─── Data types ───────────────────────────────────────────────────────────────
 
@@ -45,8 +51,8 @@ class Step:
     """A single executable unit in a plan."""
     id: str
     task: str
-    tool: Optional[str] = None        # "search" | "python" | "file_read" | "image_gen" | "screenshot" | "computer"
-    brain: Optional[str] = None       # "coding" | "vision" | "research" | "fast"
+    tool: Optional[str] = None
+    brain: Optional[str] = None
     args: dict = field(default_factory=dict)
     depends_on: list[str] = field(default_factory=list)
 
@@ -56,7 +62,7 @@ class Plan:
     """Ordered sequence of steps to fulfil a user request."""
     goal: str
     steps: list[Step]
-    raw: dict = field(default_factory=dict)   # raw LLM JSON for debugging
+    raw: dict = field(default_factory=dict)
 
     def is_single_step(self) -> bool:
         return len(self.steps) == 1
@@ -106,14 +112,6 @@ Respond with ONLY valid JSON (no markdown):
       "brain": null,
       "args": {"query": "best GPUs for AI 2024"},
       "depends_on": []
-    },
-    {
-      "id": "s2",
-      "task": "Summarise and compare the GPU results",
-      "tool": null,
-      "brain": "research",
-      "args": {},
-      "depends_on": ["s1"]
     }
   ]
 }
@@ -135,32 +133,11 @@ def plan(
     brain_hint: Optional[str] = None,
     force_simple: bool = False,
 ) -> Plan:
-    """
-    Convert a user message into a structured Plan.
-
-    Args:
-        message:      The user's request.
-        brain_hint:   Brain suggested by the router (used for fallback).
-        force_simple: Skip LLM, return a single-step plan immediately.
-
-    Returns:
-        A Plan instance with one or more Steps.
-    """
     if force_simple or len(message) < 30:
         return _fallback_plan(message, brain=brain_hint or "fast")
 
     try:
-        client = make_ollama_client(ollama)
-        resp = client.chat(
-            model=MODELS.get("fast", MODELS["fallback"]),   # planner uses fast model
-            messages=[
-                {"role": "system", "content": _PLANNER_SYSTEM},
-                {"role": "user",   "content": message},
-            ],
-            options={"temperature": 0.0},
-        )
-        raw_text = resp["message"]["content"].strip()
-        # Strip optional markdown fences
+        raw_text = _ai_call(_PLANNER_SYSTEM, message).strip()
         raw_text = re.sub(r"```(?:json)?", "", raw_text).replace("```", "").strip()
         data = json.loads(raw_text)
         steps_data = data.get("steps", [])

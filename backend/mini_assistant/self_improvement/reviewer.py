@@ -21,21 +21,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from typing import Optional
 
-try:
-    import ollama
-except ImportError as _e:
-    import logging as _log
-    _log.getLogger(__name__).error(
-        "DEPENDENCY ERROR: 'ollama' is not installed – reviewer/FixLoop will be unavailable. "
-        "Run: pip install ollama  (%s)", _e,
-    )
-    ollama = None  # type: ignore[assignment]
-
-from ..config import MODELS, make_ollama_client
+from ..config import MODELS
 
 logger = logging.getLogger(__name__)
 
@@ -85,13 +76,34 @@ class Reviewer:
     """Evaluate assistant outputs against user requests."""
 
     def __init__(self):
-        if ollama is None:
-            raise ImportError(
-                "DEPENDENCY ERROR: 'ollama' is not installed – Reviewer/FixLoop unavailable. "
-                "Run: pip install ollama"
+        pass  # no client needed — uses Claude/OpenAI via env keys
+
+    def _call(self, user_prompt: str) -> str:
+        ant_key = os.getenv("ANTHROPIC_API_KEY")
+        oai_key = os.getenv("OPENAI_API_KEY")
+        if ant_key:
+            import anthropic
+            client = anthropic.Anthropic(api_key=ant_key)
+            msg = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=2048,
+                system=_REVIEWER_SYSTEM,
+                messages=[{"role": "user", "content": user_prompt}],
             )
-        self._client = make_ollama_client(ollama)
-        self._model  = MODELS.get("fast", MODELS["fallback"])
+            return msg.content[0].text
+        if oai_key:
+            import openai
+            client = openai.OpenAI(api_key=oai_key)
+            resp = client.chat.completions.create(
+                model="gpt-4o",
+                max_tokens=2048,
+                messages=[
+                    {"role": "system", "content": _REVIEWER_SYSTEM},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+            return resp.choices[0].message.content or ""
+        raise RuntimeError("No AI API key configured")
 
     def evaluate(
         self,
@@ -99,20 +111,9 @@ class Reviewer:
         response: str,
         context: Optional[str] = None,
     ) -> ReviewResult:
-        """
-        Review a response against the original request.
-
-        Args:
-            request:  The user's original message.
-            response: The assistant's generated response.
-            context:  Optional additional context (e.g. tool outputs).
-
-        Returns:
-            ReviewResult with pass/fail, score, and actionable feedback.
-        """
         prompt_parts = [
             f"REQUEST:\n{request}",
-            f"\nRESPONSE:\n{response[:3000]}",  # cap to avoid huge prompts
+            f"\nRESPONSE:\n{response[:3000]}",
         ]
         if context:
             prompt_parts.append(f"\nCONTEXT:\n{context[:1000]}")
@@ -120,15 +121,7 @@ class Reviewer:
         user_prompt = "\n".join(prompt_parts)
 
         try:
-            resp = self._client.chat(
-                model=self._model,
-                messages=[
-                    {"role": "system", "content": _REVIEWER_SYSTEM},
-                    {"role": "user",   "content": user_prompt},
-                ],
-                options={"temperature": 0.0},
-            )
-            raw = resp["message"]["content"].strip()
+            raw = self._call(user_prompt).strip()
             raw = re.sub(r"```(?:json)?", "", raw).replace("```", "").strip()
             data = json.loads(raw)
 

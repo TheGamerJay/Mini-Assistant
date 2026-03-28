@@ -2,28 +2,95 @@
 base.py – BaseBrain
 ────────────────────
 All brains inherit from this. Handles:
-  - Ollama API calls (with automatic model fallback)
+  - Claude/OpenAI API calls (with fallback)
   - Conversation history management
   - Tool result injection into context
   - Streaming support
 """
 
 import logging
-from typing import Generator, Optional
+import os
+from typing import Generator, Iterator, Optional
 
-try:
-    import ollama
-except ImportError as _e:
-    import logging as _log
-    _log.getLogger(__name__).error(
-        "DEPENDENCY ERROR: 'ollama' is not installed – all brains will be unavailable. "
-        "Run: pip install ollama  (%s)", _e,
-    )
-    ollama = None  # type: ignore[assignment]
-
-from ..config import MODELS, make_ollama_client
+from ..config import MODELS
 
 logger = logging.getLogger(__name__)
+
+
+def _sync_ai_call(messages: list, system: str | None = None) -> str:
+    """Synchronous Claude (primary) / OpenAI (fallback) call."""
+    ant_key = os.getenv("ANTHROPIC_API_KEY")
+    oai_key = os.getenv("OPENAI_API_KEY")
+
+    # Filter out system messages from messages list; pass as system param for Claude
+    user_messages = [m for m in messages if m.get("role") != "system"]
+    # If no explicit system arg, extract from messages
+    if system is None:
+        for m in messages:
+            if m.get("role") == "system":
+                system = m["content"]
+                break
+
+    if ant_key:
+        import anthropic
+        client = anthropic.Anthropic(api_key=ant_key)
+        kw = {"system": system} if system else {}
+        msg = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=8192,
+            messages=user_messages,
+            **kw,
+        )
+        return msg.content[0].text
+
+    if oai_key:
+        import openai
+        client = openai.OpenAI(api_key=oai_key)
+        oms = ([{"role": "system", "content": system}] if system else []) + user_messages
+        resp = client.chat.completions.create(model="gpt-4o", max_tokens=8192, messages=oms)
+        return resp.choices[0].message.content or ""
+
+    raise RuntimeError("No AI API key configured (ANTHROPIC_API_KEY or OPENAI_API_KEY required)")
+
+
+def _sync_ai_stream(messages: list, system: str | None = None) -> Iterator[str]:
+    """Synchronous streaming Claude (primary) / OpenAI (fallback) call."""
+    ant_key = os.getenv("ANTHROPIC_API_KEY")
+    oai_key = os.getenv("OPENAI_API_KEY")
+
+    user_messages = [m for m in messages if m.get("role") != "system"]
+    if system is None:
+        for m in messages:
+            if m.get("role") == "system":
+                system = m["content"]
+                break
+
+    if ant_key:
+        import anthropic
+        client = anthropic.Anthropic(api_key=ant_key)
+        kw = {"system": system} if system else {}
+        with client.messages.stream(
+            model="claude-sonnet-4-6",
+            max_tokens=8192,
+            messages=user_messages,
+            **kw,
+        ) as stream:
+            yield from stream.text_stream
+        return
+
+    if oai_key:
+        import openai
+        client = openai.OpenAI(api_key=oai_key)
+        oms = ([{"role": "system", "content": system}] if system else []) + user_messages
+        for chunk in client.chat.completions.create(
+            model="gpt-4o", max_tokens=8192, messages=oms, stream=True
+        ):
+            content = chunk.choices[0].delta.content
+            if content:
+                yield content
+        return
+
+    raise RuntimeError("No AI API key configured (ANTHROPIC_API_KEY or OPENAI_API_KEY required)")
 
 
 class BaseBrain:
@@ -31,58 +98,32 @@ class BaseBrain:
     system_prompt: str = "You are a helpful AI assistant."
 
     def __init__(self, model: str):
-        if ollama is None:
-            raise ImportError(
-                "DEPENDENCY ERROR: 'ollama' is not installed. "
-                "Run: pip install ollama"
-            )
         self.model = model
-        self._client = make_ollama_client(ollama)
         self._history: list[dict] = []
 
-    # ── Internal: call Ollama with fallback ───────────────────────────────────
+    # ── Internal: call AI with fallback ───────────────────────────────────────
 
     def _call(
         self,
         messages: list[dict],
         stream: bool = False,
         options: Optional[dict] = None,
-    ) -> str | Generator:
-        opts = options or {"temperature": 0.7}
-
-        def _try(model: str):
-            return self._client.chat(
-                model=model,
-                messages=messages,
-                stream=stream,
-                options=opts,
-            )
-
+    ) -> str | Iterator:
         try:
-            response = _try(self.model)
-        except Exception as primary_err:
+            if stream:
+                return _sync_ai_stream(messages)
+            return _sync_ai_call(messages)
+        except Exception as exc:
             logger.warning(
-                "%s brain: model %s unavailable (%s). Falling back to %s.",
-                self.name, self.model, primary_err, MODELS["fallback"],
+                "%s brain: AI call failed (%s).",
+                self.name, exc,
             )
-            try:
-                response = _try(MODELS["fallback"])
-            except Exception as fallback_err:
-                raise RuntimeError(
-                    f"Both {self.model} and fallback {MODELS['fallback']} failed: {fallback_err}"
-                ) from fallback_err
-
-        if stream:
-            return self._stream_generator(response)
-
-        return response["message"]["content"]
+            raise RuntimeError(f"AI call failed: {exc}") from exc
 
     @staticmethod
     def _stream_generator(response) -> Generator[str, None, None]:
-        for chunk in response:
-            content = chunk.get("message", {}).get("content", "")
-            if content:
-                yield content
+        """Compatibility shim — response is already a generator."""
+        yield from response
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -92,14 +133,14 @@ class BaseBrain:
         tool_results: Optional[list[dict]] = None,
         images: Optional[list[str]] = None,
         stream: bool = False,
-    ) -> str | Generator:
+    ) -> str | Iterator:
         """
         Generate a response for a user message.
 
         Args:
             user_message:  The user's text.
             tool_results:  Optional list of {"tool": name, "result": data} from pre-executed tools.
-            images:        Optional list of base64-encoded images.
+            images:        Optional list of base64-encoded images (passed as text description for Claude).
             stream:        If True, returns a token generator instead of a full string.
         """
         # Build system message
@@ -112,10 +153,8 @@ class BaseBrain:
             )
             user_message = f"{user_message}\n\n{tool_block}"
 
-        # Build user message (with optional images)
+        # Build user message
         user_msg: dict = {"role": "user", "content": user_message}
-        if images:
-            user_msg["images"] = images
 
         self._history.append(user_msg)
 

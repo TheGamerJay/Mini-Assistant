@@ -19,24 +19,41 @@ No changes to any other file needed.
 
 import json
 import logging
+import os
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional
 
-try:
-    import ollama
-except ImportError as _e:
-    import logging as _log
-    _log.getLogger(__name__).error(
-        "DEPENDENCY ERROR: 'ollama' is not installed – LLM routing will be unavailable. "
-        "Run: pip install ollama  (%s)", _e,
-    )
-    ollama = None  # type: ignore[assignment]
-
-from .config import MODELS, TASK_TYPES, make_ollama_client
+from .config import MODELS, TASK_TYPES
 
 logger = logging.getLogger(__name__)
+
+
+def _ai_call(system: str, user: str) -> str:
+    """Synchronous Claude/OpenAI call."""
+    ant_key = os.getenv("ANTHROPIC_API_KEY")
+    oai_key = os.getenv("OPENAI_API_KEY")
+    if ant_key:
+        import anthropic
+        client = anthropic.Anthropic(api_key=ant_key)
+        msg = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        return msg.content[0].text
+    if oai_key:
+        import openai
+        client = openai.OpenAI(api_key=oai_key)
+        resp = client.chat.completions.create(
+            model="gpt-4o",
+            max_tokens=1024,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+        )
+        return resp.choices[0].message.content or ""
+    raise RuntimeError("No AI API key configured")
 
 
 # ─── Data types ───────────────────────────────────────────────────────────────
@@ -222,18 +239,8 @@ _ROUTER_SYSTEM = (
 
 
 def _llm_classify(ctx: RoutingContext) -> RouteResult:
-    router_model = MODELS["router"]
     try:
-        client = make_ollama_client(ollama)
-        resp = client.chat(
-            model=router_model,
-            messages=[
-                {"role": "system", "content": _ROUTER_SYSTEM},
-                {"role": "user",   "content": ctx.message},
-            ],
-            options={"temperature": 0.0},
-        )
-        raw  = resp["message"]["content"].strip()
+        raw  = _ai_call(_ROUTER_SYSTEM, ctx.message).strip()
         raw  = re.sub(r"```(?:json)?", "", raw).replace("```", "").strip()
         data = json.loads(raw)
         brain = data.get("brain", "fast")

@@ -38,7 +38,8 @@ from .file_analyst_agent import FileAnalystAgent
 from .vision_agent    import VisionAgent
 from .base_agent      import BaseAgent
 
-from ..config import AGENT_MODELS, MODELS, make_ollama_client
+import os
+from ..config import AGENT_MODELS, MODELS
 
 if TYPE_CHECKING:
     from ..main import MiniAssistant
@@ -279,14 +280,7 @@ class SwarmManager:
         tasks: list[SwarmTask],
         context: dict[str, TaskResult],
     ) -> str:
-        """
-        Ask the manager model to combine all task outputs into a final answer.
-        """
-        import ollama
-        client = make_ollama_client(ollama)
-        model  = AGENT_MODELS.get("manager", MODELS["fallback"])
-
-        # Build a concise summary of all task outputs
+        """Ask Claude/OpenAI to combine all task outputs into a final answer."""
         parts: list[str] = [f"User request: {request}\n\nAgent results:"]
         for task in tasks:
             result = context.get(task.id)
@@ -299,18 +293,33 @@ class SwarmManager:
         combined = "\n".join(parts)
 
         try:
-            resp = client.chat(
-                model    = model,
-                messages = [
-                    {"role": "system", "content": _SYNTHESIS_SYSTEM},
-                    {"role": "user",   "content": combined},
-                ],
-                options  = {"temperature": 0.2},
-            )
-            return resp["message"]["content"].strip()
+            ant_key = os.getenv("ANTHROPIC_API_KEY")
+            oai_key = os.getenv("OPENAI_API_KEY")
+            if ant_key:
+                import anthropic
+                client = anthropic.Anthropic(api_key=ant_key)
+                msg = client.messages.create(
+                    model="claude-sonnet-4-6",
+                    max_tokens=4096,
+                    system=_SYNTHESIS_SYSTEM,
+                    messages=[{"role": "user", "content": combined}],
+                )
+                return msg.content[0].text.strip()
+            if oai_key:
+                import openai
+                client = openai.OpenAI(api_key=oai_key)
+                resp = client.chat.completions.create(
+                    model="gpt-4o",
+                    max_tokens=4096,
+                    messages=[
+                        {"role": "system", "content": _SYNTHESIS_SYSTEM},
+                        {"role": "user", "content": combined},
+                    ],
+                )
+                return (resp.choices[0].message.content or "").strip()
+            raise RuntimeError("No AI key")
         except Exception as exc:
             logger.warning("Synthesis LLM failed (%s) – concatenating outputs.", exc)
-            # Graceful fallback: concatenate task outputs directly
             return "\n\n---\n\n".join(
                 f"**{t.description[:60]}**\n\n{context[t.id].output}"
                 for t in tasks

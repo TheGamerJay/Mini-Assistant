@@ -1,18 +1,12 @@
 import os
 
 # ─── Service endpoints ───────────────────────────────────────────────────────
-# All three point at permanent Cloudflare tunnel domains in production.
-# Fall back to localhost for local development.
-OLLAMA_HOST    = os.getenv("OLLAMA_HOST",    "http://localhost:11434")
-OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "")
-LOCAL_AI       = os.getenv("LOCAL_AI",       "http://localhost:8000")   # FastAPI brain backend
-IMAGE_API      = os.getenv("IMAGE_API",      os.getenv("COMFYUI_URL", "http://localhost:8188"))  # ComfyUI
+LOCAL_AI  = os.getenv("LOCAL_AI",  "http://localhost:8000")   # FastAPI brain backend
+IMAGE_API = os.getenv("IMAGE_API", os.getenv("COMFYUI_URL", "http://localhost:8188"))  # ComfyUI
 
-
-def make_ollama_client(ollama_module):
-    """Create an ollama.Client with optional API key authentication."""
-    headers = {"Authorization": f"Bearer {OLLAMA_API_KEY}"} if OLLAMA_API_KEY else {}
-    return ollama_module.Client(host=OLLAMA_HOST, headers=headers)
+# ─── AI API keys ─────────────────────────────────────────────────────────────
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY", "")
 
 # ─── Assistant execution mode ─────────────────────────────────────────────────
 # "single" – classic single-agent pipeline (router → planner → executor)
