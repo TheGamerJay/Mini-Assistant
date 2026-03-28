@@ -416,6 +416,10 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     setChatMode(newMode);
     if (newMode) localStorage.setItem('chatMode', newMode);
     else localStorage.removeItem('chatMode');
+    // Close right panel when leaving build mode (prevents preview bleed-through)
+    if (chatMode === 'build' && newMode !== 'build') {
+      setRightPanelOpen(false);
+    }
     // Restore or create a chat for the new mode
     if (newMode) {
       const savedId = modeChatIds[newMode];
@@ -425,7 +429,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         newChat();
       }
     }
-  }, [chatMode, activeChatId, modeChatIds, chats, saveModeChatId, selectChat, newChat, setChatMode]);
+  }, [chatMode, activeChatId, modeChatIds, chats, saveModeChatId, selectChat, newChat, setChatMode, setRightPanelOpen]);
   const [previewImage, setPreviewImage]       = useState(null); // latest generated image → shown in RightPanel
 
   // Streaming text state (non-image responses)
@@ -519,6 +523,15 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
       selectChat(savedId);
     }
   }, [chats]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-restore when activeChatId is reset to null (e.g. auth resolves and wipes it)
+  useEffect(() => {
+    if (!chatMode || activeChatId !== null || !chats.length) return;
+    const savedId = modeChatIds[chatMode];
+    if (savedId && chats.find(c => c.id === savedId)) {
+      selectChat(savedId);
+    }
+  }, [activeChatId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep per-mode chat pointer current whenever the active chat changes
   useEffect(() => {
