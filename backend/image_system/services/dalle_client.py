@@ -962,12 +962,12 @@ class DalleClient:
                     pass
             _img_file = _sio.BytesIO(_img_prep)
             _img_file.name = "image.png"
-            # gpt-image-1 edit: no mask, no size constraint — let the model decide
+            # gpt-image-1 edit: no mask, no size, no response_format
+            # (gpt-image-1 does NOT accept response_format — always returns b64 by default)
             _sem_resp = await client.images.edit(
                 model="gpt-image-1",
                 image=_img_file,
                 prompt=_sem_prompt,
-                response_format="b64_json",
             )
             _sem_b64 = None
             if _sem_resp.data:
