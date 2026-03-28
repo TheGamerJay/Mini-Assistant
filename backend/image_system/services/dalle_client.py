@@ -1033,15 +1033,20 @@ class DalleClient:
                 r"gloves|hat|cap|vest|dress|outfit|clothing|coat|scarf|belt|bag)\s+",
                 re.IGNORECASE,
             )
+            # Clothing words also protect "red sneakers" from being swapped —
+            # the color comes BEFORE the clothing word in natural descriptions.
+            _CLOTHING_WORDS = (
+                r"shirt|hoodie|jacket|pants|jeans|shorts|shoes|sneakers|boots|"
+                r"gloves|hat|cap|vest|dress|outfit|clothing|coat|scarf|belt|bag"
+            )
             # Build preserve pattern from preserve_elements if provided
             _extra_noswap: list[str] = []
             if preserve_elements:
                 for _pe in preserve_elements:
-                    # Extract the last word of each preserve element (e.g. "blue hair" → "hair")
                     _pe_word = _pe.strip().split()[-1] if _pe.strip() else ""
                     if _pe_word and _pe_word.lower() not in _NON_SKIN_FEATURES:
                         _extra_noswap.append(re.escape(_pe_word))
-            _no_swap_lookahead = _NON_SKIN_FEATURES
+            _no_swap_lookahead = _NON_SKIN_FEATURES + "|" + _CLOTHING_WORDS
             if _extra_noswap:
                 _no_swap_lookahead += "|" + "|".join(_extra_noswap)
             _fallback_pat = re.compile(
