@@ -134,7 +134,6 @@ class ImageCEO:
                 )
 
                 if not tier.success:
-                    prior_t2_diag = tier.t2_diagnosis
                     logger.warning("[CEO] all tiers failed on attempt %d", attempt + 1)
                     if tier.t2_diagnosis:
                         diag = tier.t2_diagnosis
@@ -146,7 +145,20 @@ class ImageCEO:
                             "user_message": diag.get("user_message", ""),
                         }
                     qa = None  # no QA result when tiers all failed
-                    break  # no image to validate
+
+                    # On first attempt: retry with T3 enabled.
+                    # T3 (DALL-E 3 reconstruction) is the last resort when T1+T2 both fail.
+                    if attempt < _MAX_ATTEMPTS - 1:
+                        prior_t2_diag = tier.t2_diagnosis or {
+                            "failure_code": "all_tiers_failed",
+                            "detected_dominant_color": None,
+                        }
+                        revised = EditStep(**step.__dict__)
+                        revised.allow_reconstruction = True
+                        step = revised
+                        logger.info("[CEO] all tiers failed — enabling T3 for correction pass")
+                        continue  # retry with T3 unlocked
+                    break  # second attempt also failed — give up
 
                 # Delegate to QA Brain
                 qa: QAResult = self.qa.validate_edit(
