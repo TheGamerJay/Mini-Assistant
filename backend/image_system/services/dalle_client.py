@@ -967,14 +967,25 @@ class DalleClient:
                 model="gpt-image-1",
                 image=_img_file,
                 prompt=_sem_prompt,
+                response_format="b64_json",
             )
-            _sem_b64 = (_sem_resp.data[0].b64_json
-                        if _sem_resp.data and _sem_resp.data[0].b64_json
-                        else None)
+            _sem_b64 = None
+            if _sem_resp.data:
+                _item = _sem_resp.data[0]
+                _sem_b64 = getattr(_item, "b64_json", None)
+                if not _sem_b64:
+                    # Some SDK versions put it under different attribute
+                    _sem_b64 = getattr(_item, "url", None)
+                    if _sem_b64 and _sem_b64.startswith("http"):
+                        # Download URL and convert to b64
+                        import urllib.request as _ur
+                        with _ur.urlopen(_sem_b64) as _r:
+                            _sem_b64 = _b64.b64encode(_r.read()).decode()
             if _sem_b64:
                 _sem_desc = f"gpt-image-1 semantic: {region} {from_color}→{to_color}"
                 logger.info("describe_and_recolor: gpt-image-1 semantic edit OK")
                 return _sem_b64, _sem_desc
+            logger.warning("describe_and_recolor: gpt-image-1 edit returned empty data")
         except Exception as _sem_err:
             logger.warning("describe_and_recolor: gpt-image-1 semantic failed (%s) — falling back to DALL-E 3", _sem_err)
 
