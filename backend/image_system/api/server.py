@@ -1853,8 +1853,22 @@ async def chat(req: ChatRequest, request: Request):
                 except Exception as _scan_err:
                     logger.warning("pre-step vision scan failed (non-fatal): %s", _scan_err)
 
-            # Build PIL mask (transparent = edit here, opaque = preserve exactly)
-            _msk = _build_mask(_current_bytes, _mask_box) if (_mask_box and _current_bytes) else None
+            # Build pixel-level segmentation mask (falls back to coarse box mask)
+            # Refined mask: color-cluster inside box + edge detection + feathering
+            _msk: bytes | None = None
+            _msk_box_fallback: bytes | None = None
+            if _mask_box and _current_bytes:
+                try:
+                    from ..services.dalle_client import build_refined_mask as _brm
+                    _msk = _brm(_current_bytes, _mask_box)
+                except Exception as _brm_err:
+                    logger.warning("build_refined_mask import failed: %s", _brm_err)
+                if _msk is None:
+                    # Fallback: coarse bounding-box mask
+                    _msk = _build_mask(_current_bytes, _mask_box)
+                    logger.info("[MODEL ROUTER] using coarse box mask (refined mask unavailable)")
+                else:
+                    logger.info("[MODEL ROUTER] using refined pixel-level mask")
 
             # ── TIER 1: Masked AI edit (dall-e-2 + mask, source-preserving) ───
             async def _try_tier1() -> bool:
@@ -1902,7 +1916,8 @@ async def chat(req: ChatRequest, request: Request):
                     return False
                 try:
                     _b64s = _dalle.color_replace_region(
-                        _current_bytes, _from_color, _to_color, _mask_box
+                        _current_bytes, _from_color, _to_color, _mask_box,
+                        pixel_mask_bytes=_msk,   # refined pixel mask — same one as T1
                     )
                     if _b64s is None:
                         return False

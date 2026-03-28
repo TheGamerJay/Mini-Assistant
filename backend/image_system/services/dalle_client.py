@@ -201,6 +201,119 @@ def _has_color_overlap(description: str, from_color: str) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def build_refined_mask(
+    image_bytes: bytes,
+    mask_box: dict,
+    tolerance: int = 50,
+    feather_px: int = 3,
+) -> bytes | None:
+    """
+    Pixel-level segmentation mask refined from a bounding box.
+
+    Algorithm:
+      1. Crop to mask_box region of interest
+      2. Sample dominant color from center 25% of box
+      3. Threshold pixels by Euclidean RGB distance from dominant color
+      4. Apply edge map — exclude pixels sitting on sharp boundaries
+         so the mask respects clothing/skin transitions
+      5. Feather edges with Gaussian blur for natural blending
+
+    Returns PNG mask bytes:
+      alpha=0   (transparent) → DALL-E edits these pixels
+      alpha=255 (opaque)      → DALL-E preserves these exactly
+      0<alpha<255             → feathered blend zone at region boundary
+
+    Falls back to None if PIL or numpy is unavailable, or on any error —
+    caller should use the coarse bounding-box mask in that case.
+    """
+    if not _PIL_AVAILABLE:
+        return None
+
+    try:
+        import io as _io
+        import numpy as _np
+        from PIL import ImageFilter as _IF
+
+        img = _PILImage.open(_io.BytesIO(image_bytes)).convert("RGBA")
+        W, H = img.size
+        arr = _np.array(img, dtype=_np.float32)
+
+        # ── Convert mask_box % → pixel coordinates ────────────────────────
+        bx  = max(0, round(mask_box.get("left",   0) / 100 * W))
+        by  = max(0, round(mask_box.get("top",    0) / 100 * H))
+        bw  = max(1, round(mask_box.get("width",  100) / 100 * W))
+        bh  = max(1, round(mask_box.get("height", 100) / 100 * H))
+        bx2 = min(W, bx + bw)
+        by2 = min(H, by + bh)
+
+        if bx2 <= bx or by2 <= by:
+            return None
+
+        # ── Sample dominant color from center 25% of box ──────────────────
+        # Using median over a central patch avoids outlier influence.
+        cw = max(1, (bx2 - bx) // 4)
+        ch = max(1, (by2 - by) // 4)
+        cx, cy = (bx + bx2) // 2, (by + by2) // 2
+        sx1 = max(bx, cx - cw);  sy1 = max(by, cy - ch)
+        sx2 = min(bx2, cx + cw); sy2 = min(by2, cy + ch)
+        sample = arr[sy1:sy2, sx1:sx2, :3]
+        if sample.size == 0:
+            return None
+        dominant = _np.median(sample.reshape(-1, 3), axis=0)
+
+        # ── Color-distance threshold within the box ───────────────────────
+        # Euclidean distance in RGB space — pixels close to dominant color
+        # are in the target region.
+        box_rgb     = arr[by:by2, bx:bx2, :3]
+        dist        = _np.sqrt(_np.sum((box_rgb - dominant) ** 2, axis=-1))
+        color_match = dist < tolerance
+
+        # ── Edge map — exclude pixels on sharp color boundaries ───────────
+        # Sobel-like edge strength from PIL FIND_EDGES.  Strong edges mark
+        # clothing/skin transitions; we do NOT include those in the mask
+        # so the edit doesn't bleed across material boundaries.
+        gray_arr = _np.dot(arr[by:by2, bx:bx2, :3],
+                           [0.299, 0.587, 0.114]).astype(_np.uint8)
+        gray_img = _PILImage.fromarray(gray_arr, "L")
+        edge_arr = _np.array(gray_img.filter(_IF.FIND_EDGES)).astype(_np.float32)
+        not_edge = edge_arr < 20.0   # True = not a strong edge
+
+        # ── Refined region: color-close AND not on an edge ───────────────
+        refined = (color_match & not_edge)   # bool array, shape (bh, bw)
+
+        # ── Build full-image alpha channel ─────────────────────────────────
+        # 255 = preserve, 0 = edit.  Start fully preserved.
+        alpha = _np.full((H, W), 255, dtype=_np.uint8)
+        alpha[by:by2, bx:bx2] = _np.where(refined, 0, 255)
+
+        # ── Feather: Gaussian blur on alpha softens the 0↔255 boundary ───
+        # This prevents harsh boxy edges in the final composited image.
+        alpha_img     = _PILImage.fromarray(alpha, "L")
+        alpha_blurred = _np.array(alpha_img.filter(_IF.GaussianBlur(radius=feather_px)),
+                                  dtype=_np.uint8)
+
+        # ── Compose: RGBA mask (RGB=black, alpha=feathered) ──────────────
+        mask_arr          = _np.zeros((H, W, 4), dtype=_np.uint8)
+        mask_arr[:, :, 3] = alpha_blurred
+        result = _PILImage.fromarray(mask_arr, "RGBA")
+        buf = _io.BytesIO()
+        result.save(buf, format="PNG")
+
+        n_edit_px = int(_np.sum(alpha_blurred < 128))
+        logger.info(
+            "build_refined_mask: box=%dx%d dominant=RGB%s edit_px=%d feather=%dpx",
+            bw, bh, dominant.astype(int).tolist(), n_edit_px, feather_px,
+        )
+        return buf.getvalue()
+
+    except Exception as exc:
+        logger.warning("build_refined_mask failed (caller uses box mask): %s", exc)
+        return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 async def analyze_region_colors(
     client,
     image_bytes: bytes,
@@ -593,19 +706,26 @@ class DalleClient:
         to_color: str,
         mask_box: dict,
         tolerance: int = 30,
+        pixel_mask_bytes: bytes | None = None,
     ) -> str | None:
         """
-        Programmatic hue-based color replacement restricted to a bounding box region.
+        Programmatic hue-based color replacement restricted to a region mask.
 
-        Identical logic to color_replace but ONLY modifies pixels that fall within
-        the mask_box rectangle. Pixels outside the box are left completely untouched.
+        When pixel_mask_bytes is provided (a refined segmentation mask PNG),
+        only pixels where mask alpha < 128 (transparent = edit) are recolored.
+        This gives pixel-level precision — hoodie pixels inside the box but
+        outside the skin region are left untouched.
+
+        When pixel_mask_bytes is None, falls back to the coarse bounding box.
 
         Args:
-            image_bytes: Raw image bytes (any PIL-supported format).
-            from_color:  Color name to replace (e.g. "blue").
-            to_color:    Color name to shift to   (e.g. "purple").
-            mask_box:    Dict with top/left/width/height as percentages 0-100.
-            tolerance:   Hue tolerance in degrees around the center hue.
+            image_bytes:      Raw image bytes (any PIL-supported format).
+            from_color:       Color name to replace (e.g. "blue").
+            to_color:         Color name to shift to   (e.g. "purple").
+            mask_box:         Dict with top/left/width/height as percentages 0-100.
+            tolerance:        Hue tolerance in degrees around the center hue.
+            pixel_mask_bytes: Optional refined segmentation mask PNG. Alpha channel
+                              encodes the edit region (0=edit, 255=preserve).
 
         Returns base64 PNG string, or None if PIL unavailable / color unknown.
         """
@@ -653,9 +773,26 @@ class DalleClient:
             box_right  = min(box_left + box_width,  W)
             box_bottom = min(box_top  + box_height, H)
 
-            # ── Build a boolean spatial mask for the bounding box ─────────────
-            region_mask = _np.zeros((H, W), dtype=bool)
-            region_mask[box_top:box_bottom, box_left:box_right] = True
+            # ── Build pixel-level region mask ─────────────────────────────────
+            # Prefer refined segmentation mask (alpha < 128 = edit region).
+            # Fall back to coarse bounding-box mask when not available.
+            if pixel_mask_bytes is not None:
+                try:
+                    _pm_img   = _PILImage.open(_io.BytesIO(pixel_mask_bytes)).convert("RGBA")
+                    _pm_alpha = _np.array(_pm_img)[:, :, 3].astype(_np.float32)
+                    # alpha=0 (transparent) → edit; alpha=255 (opaque) → preserve
+                    region_mask = _pm_alpha < 128
+                    logger.info(
+                        "color_replace_region: using refined mask (%d edit pixels)",
+                        int(_np.sum(region_mask)),
+                    )
+                except Exception as _pm_err:
+                    logger.warning("pixel_mask decode failed, using box: %s", _pm_err)
+                    region_mask = _np.zeros((H, W), dtype=bool)
+                    region_mask[box_top:box_bottom, box_left:box_right] = True
+            else:
+                region_mask = _np.zeros((H, W), dtype=bool)
+                region_mask[box_top:box_bottom, box_left:box_right] = True
 
             r, g, b, a = arr[..., 0], arr[..., 1], arr[..., 2], arr[..., 3]
 
