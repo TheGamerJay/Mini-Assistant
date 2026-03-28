@@ -1812,7 +1812,7 @@ async def chat(req: ChatRequest, request: Request):
                     r"\b(skin|fur|body|complexion|tone)\b", _region_desc or "", re.I
                 ))
 
-                if _is_skin_region and _from_color and _to_color and _current_bytes:
+                if _is_skin_region and _to_color and _current_bytes:
                     # Pre-flight vision scan: identify every from_color element by name
                     # so we can explicitly preserve non-skin elements in the prompt.
                     _preserve_list: list[str] = []
@@ -1835,15 +1835,16 @@ async def chat(req: ChatRequest, request: Request):
                         logger.warning("pre-flight scan failed (non-fatal): %s", _scan_err)
 
                     # Build explicit per-element preservation lines so the model
-                    # cannot interpret "change blue → pink" as a global swap.
+                    # cannot interpret this as a global color swap.
+                    _orig_color = _from_color or "their current"
                     if _preserve_list:
                         _preserve_lines = " ".join(
-                            f"The {el} must stay {_from_color}." for el in _preserve_list
+                            f"The {el} must stay {_orig_color} color." for el in _preserve_list
                         )
                     else:
                         _preserve_lines = (
                             f"The eyes, shoes, headset, clothing trim, outlines, and all "
-                            f"accessories must keep their current {_from_color} color exactly."
+                            f"accessories must keep their current colors exactly."
                         )
 
                     _strict_prompt = (
@@ -1889,16 +1890,21 @@ async def chat(req: ChatRequest, request: Request):
             # ── TIER 2: Vision reconstruction ────────────────────────────────
             async def _try_tier2() -> bool:
                 nonlocal _current_b64, _current_bytes
-                if not (_from_color and _to_color and _current_bytes):
+                # Only needs the image + a target color (or at least the user instruction)
+                if not _current_bytes:
+                    return False
+                if not (_to_color or effective_msg):
                     return False
                 try:
                     _cached = _edit_desc_cache.get(session_id)
+                    _t2_from = _from_color or "current"
+                    _t2_to   = _to_color or effective_msg.strip()
                     logger.info(
                         "[MODEL ROUTER] step %d tier2/vision %s→%s (cached_desc=%s)",
-                        _step_i + 1, _from_color, _to_color, _cached is not None,
+                        _step_i + 1, _t2_from, _t2_to, _cached is not None,
                     )
                     _b64s, _desc_used = await _dalle.describe_and_recolor(
-                        _current_bytes, _from_color, _to_color,
+                        _current_bytes, _t2_from, _t2_to,
                         region=_region_desc or "skin/fur",
                         cached_description=_cached,
                     )
