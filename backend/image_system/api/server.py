@@ -1850,6 +1850,7 @@ async def chat(req: ChatRequest, request: Request):
         _step_metadata: list[dict] = []
         _tier_errors: list[str] = []  # collect errors for debug reply
         _cached_preserve_els: list[str] = []  # from pre-flight scan, shared across tiers
+        _suggested_retries: list[str] = []    # auto-generated retry prompts on failure
 
         for _step_i, _step in enumerate(_edit_steps):
             _etype            = _step.get("edit_type", "structural_edit")
@@ -2010,10 +2011,42 @@ async def chat(req: ChatRequest, request: Request):
                                 "target region didn't visibly change",
                                 _vr["target_change_score"], _vr.get("changed_pixels", 0),
                             )
-                            _tier_errors.append(
-                                f"T2:no_op — target region change score {_vr['target_change_score']:.4f} "
-                                f"(threshold 0.03) — the edit didn't visibly change that region"
-                            )
+                            # Auto-diagnose: sample actual color + build retry prompts
+                            try:
+                                from ..services.dalle_client import (
+                                    diagnose_failed_region_edit as _diag
+                                )
+                                # Count edit pixels in mask (alpha < 128)
+                                _msk_px = 0
+                                if _msk:
+                                    try:
+                                        import numpy as _npd
+                                        _msk_px = int(_npd.sum(
+                                            _npd.frombuffer(_msk, dtype=_npd.uint8) < 128
+                                        ))
+                                    except Exception:
+                                        pass
+                                _diagnosis = _diag(
+                                    original_bytes=_step_original_bytes,
+                                    mask_box=_mask_box,
+                                    region_description=_region_desc,
+                                    from_color=_from_color or "",
+                                    to_color=_to_color or "",
+                                    validation=_vr,
+                                    mask_pixel_count=_msk_px,
+                                )
+                                _suggested_retries.extend(
+                                    _diagnosis.get("suggested_retry_prompts", [])
+                                )
+                                _tier_errors.append(
+                                    f"T2:no_op:{_diagnosis['failure_code']} — "
+                                    f"{_diagnosis['failure_reason']}"
+                                )
+                            except Exception as _de:
+                                logger.warning("diagnose_failed_region_edit error: %s", _de)
+                                _tier_errors.append(
+                                    f"T2:no_op — change score {_vr['target_change_score']:.4f}"
+                                )
                             return False
                     except Exception as _ve:
                         logger.warning("T2 post-edit validation failed (non-fatal): %s", _ve)
@@ -2097,14 +2130,14 @@ async def chat(req: ChatRequest, request: Request):
                     # return a different character, which is worse than failing).
                     _reason = " | ".join(_tier_errors) if _tier_errors else "all methods failed"
                     logger.warning("[MODEL ROUTER] step %d failed. errors: %s", _step_i + 1, _reason)
-                    # User-friendly message for the most common failure cases
-                    if any("no_op" in e for e in _tier_errors):
+                    # User-friendly message: use diagnosis if available
+                    _no_op_err = next((e for e in _tier_errors if "no_op" in e), None)
+                    if _no_op_err:
+                        # Extract the human-readable part after the failure_code
+                        _diag_msg = _no_op_err.split(" — ", 1)[-1] if " — " in _no_op_err else ""
                         reply = (
-                            "The edit ran but the target region didn't visibly change. "
-                            "This usually means the target color wasn't detected in that region, "
-                            "or the region's pixels are already close to the requested color. "
-                            "Try being more specific — name the exact color you see (e.g. 'light blue', 'teal') "
-                            "and the exact region (e.g. 'face skin', 'body fur')."
+                            f"I isolated the target region, but the edit didn't produce a visible change. "
+                            f"{_diag_msg}"
                         )
                     else:
                         reply = (
@@ -2138,6 +2171,7 @@ async def chat(req: ChatRequest, request: Request):
                     else "partial"
                 ),
                 "notes":                      "; ".join(s["notes"] for s in _step_metadata if s.get("notes")),
+                "suggested_retry_prompts":    _suggested_retries,
                 "route_result":               "image_edit",
                 "generation_time_ms":         _edit_elapsed_ms,
             }
@@ -2534,12 +2568,20 @@ async def chat(req: ChatRequest, request: Request):
             logger.warning("Phase 1+2 Critic/Composer failed (%s) — returning raw reply.", _c_err)
 
     # Legacy fallback response shape (Phase 1 unavailable)
-    return {
+    _base_resp = {
         "reply":        reply,
         "intent":       execution_intent,
         "route_result": route_result,
         "session_id":   session_id,
     }
+    # Include retry prompts if the image_edit pipeline populated them
+    if "suggested_retry_prompts" not in _base_resp:
+        try:
+            if _suggested_retries:
+                _base_resp["suggested_retry_prompts"] = _suggested_retries
+        except NameError:
+            pass
+    return _base_resp
 
 
 @app.post("/api/chat/stream")

@@ -402,6 +402,219 @@ def validate_edit_result(
                 "preserve_integrity_score": 1.0, "changed_pixels": 0}
 
 
+def _classify_rgb_color(r: float, g: float, b: float) -> str:
+    """
+    Convert an average RGB (0-255) into a descriptive color family name.
+    Returns strings like "medium blue", "blue-cyan", "teal", "lavender-blue", etc.
+    """
+    # Normalise to 0-1
+    r1, g1, b1 = r / 255.0, g / 255.0, b / 255.0
+    cmax  = max(r1, g1, b1)
+    cmin  = min(r1, g1, b1)
+    delta = cmax - cmin
+
+    # Value and saturation
+    val = cmax
+    sat = (delta / cmax) if cmax > 0 else 0.0
+
+    # Lightness descriptor
+    if val < 0.15:
+        light = "very dark "
+    elif val < 0.35:
+        light = "dark "
+    elif val < 0.55:
+        light = "medium "
+    elif val < 0.75:
+        light = ""          # "normal" — omit for readability
+    else:
+        light = "light "
+
+    # Near-achromatic
+    if sat < 0.12:
+        if val < 0.15:
+            return "near-black"
+        elif val < 0.35:
+            return "dark gray"
+        elif val < 0.65:
+            return "gray"
+        elif val < 0.85:
+            return "light gray"
+        else:
+            return "near-white"
+
+    # Hue in degrees
+    if delta == 0:
+        hue = 0.0
+    elif cmax == r1:
+        hue = (60 * ((g1 - b1) / delta)) % 360
+    elif cmax == g1:
+        hue = (60 * ((b1 - r1) / delta) + 120) % 360
+    else:
+        hue = (60 * ((r1 - g1) / delta) + 240) % 360
+
+    # Map hue to family
+    if hue < 15 or hue >= 345:
+        family = "red"
+    elif hue < 40:
+        family = "orange"
+    elif hue < 65:
+        family = "yellow"
+    elif hue < 80:
+        family = "yellow-green"
+    elif hue < 150:
+        family = "green"
+    elif hue < 175:
+        family = "teal" if sat > 0.4 else "blue-green"
+    elif hue < 195:
+        family = "cyan"
+    elif hue < 215:
+        family = "blue-cyan"
+    elif hue < 240:
+        family = "blue"
+    elif hue < 255:
+        family = "blue-purple" if sat > 0.5 else "lavender-blue"
+    elif hue < 280:
+        family = "purple"
+    elif hue < 310:
+        family = "magenta"
+    elif hue < 330:
+        family = "pink"
+    else:
+        family = "red-pink"
+
+    return f"{light}{family}".strip()
+
+
+def diagnose_failed_region_edit(
+    original_bytes: bytes,
+    mask_box: "dict | None",
+    region_description: str,
+    from_color: str,
+    to_color: str,
+    validation: dict,
+    mask_pixel_count: int = 0,
+) -> dict:
+    """
+    Auto-diagnose a failed named-region edit and generate suggested retry prompts.
+
+    Returns:
+        {
+          "detected_dominant_color": str,   # e.g. "medium blue-cyan"
+          "failure_reason": str,            # human-readable cause
+          "failure_code": str,              # "source_color_mismatch" | "weak_mask" |
+                                            #   "already_close" | "unknown"
+          "suggested_retry_prompts": list[str],
+          "user_message": str,              # full message to show the user
+        }
+    """
+    detected_color = from_color   # default: use what was requested
+    failure_code   = "unknown"
+    failure_reason = "The target region did not visibly change."
+
+    if _PIL_AVAILABLE and original_bytes and mask_box:
+        try:
+            import io as _io
+            import numpy as _np
+            img = _PILImage.open(_io.BytesIO(original_bytes)).convert("RGB")
+            W, H = img.size
+            bx  = max(0, round(mask_box.get("left",   0) / 100 * W))
+            by  = max(0, round(mask_box.get("top",    0) / 100 * H))
+            bw  = max(1, round(mask_box.get("width",  100) / 100 * W))
+            bh  = max(1, round(mask_box.get("height", 100) / 100 * H))
+            bx2 = min(W, bx + bw)
+            by2 = min(H, by + bh)
+            crop = _np.array(img)[by:by2, bx:bx2, :]
+            if crop.size > 0:
+                med = _np.median(crop.reshape(-1, 3), axis=0)
+                detected_color = _classify_rgb_color(
+                    float(med[0]), float(med[1]), float(med[2])
+                )
+        except Exception as _de:
+            logger.debug("diagnose: color sampling failed: %s", _de)
+
+    # Determine failure code
+    tc_score = validation.get("target_change_score", 0)
+    pi_score = validation.get("preserve_integrity_score", 1)
+    ch_px    = validation.get("changed_pixels", 0)
+
+    if ch_px == 0:
+        failure_code   = "source_color_mismatch"
+        failure_reason = (
+            f"The system found the region but detected no pixels matching '{from_color}'. "
+            f"The dominant color in that area appears to be {detected_color}."
+        )
+    elif tc_score < 0.015 and mask_pixel_count < 50:
+        failure_code   = "weak_mask"
+        failure_reason = (
+            f"The target region was too small or too narrow to produce a visible change "
+            f"({mask_pixel_count} pixels in mask). The region may not have been properly isolated."
+        )
+    elif tc_score < 0.015:
+        # Check if requested target is already close to detected
+        if any(kw in to_color.lower() for kw in ("silver", "gray", "grey", "white")) and \
+           any(kw in detected_color.lower() for kw in ("gray", "silver", "light", "white")):
+            failure_code   = "already_close"
+            failure_reason = (
+                f"The detected color ({detected_color}) is already close to the requested "
+                f"'{to_color}', so the change wasn't large enough to register."
+            )
+        else:
+            failure_code   = "source_color_mismatch"
+            failure_reason = (
+                f"The dominant color in the {region_description} region appears to be "
+                f"{detected_color}, not '{from_color}'. The recolor threshold may not "
+                f"have matched enough pixels."
+            )
+    else:
+        failure_code   = "unknown"
+        failure_reason = f"The edit was applied but the change score was too low ({tc_score:.3f})."
+
+    # Generate retry prompts
+    region = region_description or "skin"
+    retries = []
+
+    if failure_code == "source_color_mismatch":
+        retries = [
+            f"Change only the {detected_color} {region} to {to_color}, keep everything else unchanged",
+            f"Make only the {region} {to_color} — the {region} color is {detected_color}",
+            f"Recolor only the {detected_color} {region} to {to_color}, do not touch the rest",
+        ]
+    elif failure_code == "weak_mask":
+        retries = [
+            f"Change only the {from_color} {region} to {to_color} — isolate just the {region} area",
+            f"Make the entire {region} {to_color}, keep eyes, hair, and accessories unchanged",
+            f"Recolor only the body {region} to {to_color}, nothing else",
+        ]
+    elif failure_code == "already_close":
+        retries = [
+            f"Make the {region} visibly {to_color} (it is currently {detected_color}, push it further)",
+            f"Force the {region} to pure {to_color}, ignore how close it already is",
+        ]
+    else:
+        retries = [
+            f"Change only the {from_color} {region} to {to_color}, keep all other regions unchanged",
+            f"Make only the {region} {to_color} — {region} color is {from_color}",
+        ]
+
+    user_message = (
+        f"I isolated the {region} region but the edit didn't produce a visible change. "
+        f"{failure_reason} "
+        f"Try one of the suggestions below."
+    )
+
+    logger.info(
+        "diagnose_failed_region_edit: code=%s detected=%s region=%s tc=%.4f px=%d",
+        failure_code, detected_color, region, tc_score, mask_pixel_count,
+    )
+    return {
+        "detected_dominant_color":  detected_color,
+        "failure_reason":           failure_reason,
+        "failure_code":             failure_code,
+        "suggested_retry_prompts":  retries,
+        "user_message":             user_message,
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 

@@ -809,7 +809,7 @@ function RateLimitCountdown({ seconds, onDone }) {
 
 function ChatMessage({ message, onRetry, onRate, onFork, onPin, onSendToBuilder, onSuggest }) {
   const { settings, user, avatar } = useApp();
-  const { role, type, content, image_base64, prompt, route_result, generation_time_ms, retry_used, prompt_warnings, model_used, memory_stored, rating, pinned, timestamp, suggestions } = message;
+  const { role, type, content, image_base64, prompt, route_result, generation_time_ms, retry_used, prompt_warnings, model_used, memory_stored, rating, pinned, timestamp, suggestions, suggested_retry_prompts } = message;
   const { images_base64 } = message;
   const [rateLimitDone, setRateLimitDone] = useState(false);
   const allImages = images_base64 && images_base64.length > 1 ? images_base64 : (image_base64 ? [image_base64] : []);
@@ -941,6 +941,24 @@ function ChatMessage({ message, onRetry, onRate, onFork, onPin, onSendToBuilder,
         {/* Follow-up suggestion pills */}
         {!isError && !isImage && (
           <SuggestionPills suggestions={suggestions} onSuggest={onSuggest} />
+        )}
+
+        {/* Auto-suggested retry prompts (image edit failures) */}
+        {suggested_retry_prompts && suggested_retry_prompts.length > 0 && onSuggest && (
+          <div className="mt-3 space-y-1.5">
+            <p className="text-[10px] font-mono text-slate-500 uppercase tracking-wide">Suggested retries</p>
+            <div className="flex flex-col gap-1.5">
+              {suggested_retry_prompts.map((prompt, i) => (
+                <button
+                  key={i}
+                  onClick={() => onSuggest(prompt)}
+                  className="text-left text-xs text-amber-300 hover:text-amber-200 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 hover:border-amber-500/40 px-3 py-2 rounded-lg transition-colors leading-snug"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
 
         {/* Error retry button / rate limit countdown */}

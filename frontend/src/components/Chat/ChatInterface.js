@@ -307,6 +307,7 @@ const ChatInterface = () => {
           route_result: data.route_result,
           generation_time_ms: data.generation_time_ms,
           prompt_warnings: data.prompt_warnings,
+          suggested_retry_prompts: data.suggested_retry_prompts || [],
         };
       }
 
