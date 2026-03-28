@@ -445,6 +445,15 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
   const iframeRef = useRef(null);
   const rawHtml = useMemo(() => buildPreviewHtml(blocks), [blocks]);
   const lastHtmlRef = useRef(null);
+  const lastSessionRef = useRef(sessionId);
+
+  // Clear the cached HTML whenever the session changes (mode switch / new chat).
+  // lastHtmlRef is only meant to prevent mid-stream flicker within the same session,
+  // not to bleed builder code into image mode or a fresh chat.
+  if (sessionId !== lastSessionRef.current) {
+    lastSessionRef.current = sessionId;
+    lastHtmlRef.current = null;
+  }
   if (rawHtml) lastHtmlRef.current = rawHtml;
   const html = rawHtml || lastHtmlRef.current;
 
