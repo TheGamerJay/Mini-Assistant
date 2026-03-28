@@ -50,7 +50,16 @@ RULE 2 — STRUCTURAL EDITS — use for ALL of the following:
 - edit_type: "structural_edit"
 
 RULE 3 — DECISION LOGIC:
-- Skin color / fur color → ALWAYS RULE 2 (structural_edit with gpt-image-1 — PIL cannot distinguish skin from same-colored clothing)
+- Skin color / fur color — DEFAULT → RULE 2 (structural_edit)
+  EXCEPTION → RULE 1 (color_change) when the user EXPLICITLY says to change ONLY the skin/fur AND
+  specifies that other same-colored elements (hair, clothing, background) must NOT change.
+  Trigger phrases: "only the skin", "just the skin", "not the hair", "not the rest", "only his/her/its skin",
+  "keep everything else", "skin color only", "body color only (not the hair)", etc.
+  When this exception fires:
+    • edit_type: "color_change"
+    • mask_box: top=15, left=10, width=80, height=75  ← excludes hair at top; covers face + body
+    • primary_tier: "region_pil"
+    • color_overlap_risk: true
 - Isolated clothing/accessory color where that color is unique to that item → RULE 1
 - Shape/structure/add/remove → RULE 2
 - If ambiguous → RULE 2
