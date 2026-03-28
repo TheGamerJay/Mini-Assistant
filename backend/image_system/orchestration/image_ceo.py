@@ -122,6 +122,7 @@ class ImageCEO:
             step_succeeded = False
 
             # ── 2b. Attempt loop (1 main + 1 correction pass) ─────────────────
+            qa: QAResult | None = None  # initialise so it's always bound after the loop
             for attempt in range(_MAX_ATTEMPTS):
                 total_attempts += 1
                 logger.info("[CEO] step %d attempt %d", step_i + 1, attempt + 1)
@@ -144,6 +145,7 @@ class ImageCEO:
                             "failure_code": diag.get("failure_code"),
                             "user_message": diag.get("user_message", ""),
                         }
+                    qa = None  # no QA result when tiers all failed
                     break  # no image to validate
 
                 # Delegate to QA Brain
