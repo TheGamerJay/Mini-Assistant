@@ -5,7 +5,7 @@
  */
 
 import React, { useEffect } from 'react';
-import { X, RefreshCw, FileText, Shield, RotateCcw, AlertOctagon, Copyright, Mail, ChevronRight } from 'lucide-react';
+import { X, RefreshCw, FileText, Shield, RotateCcw, AlertOctagon, Copyright, Mail, ChevronRight, BookOpen } from 'lucide-react';
 import AIDataUsageSetting from '../components/settings/AIDataUsageSetting';
 import { toast } from 'sonner';
 import { useApp } from '../context/AppContext';
@@ -53,6 +53,7 @@ const LEGAL_LINKS = [
   { page: 'legal-prohibited', icon: AlertOctagon,  label: 'Prohibited Content' },
   { page: 'legal-dmca',       icon: Copyright,     label: 'DMCA & Copyright' },
   { page: 'legal-contact',    icon: Mail,          label: 'Contact Us' },
+  { page: 'creation-record-info', icon: BookOpen,  label: 'Creation Record' },
 ];
 
 function SettingsModal({ onClose }) {
