@@ -328,15 +328,38 @@ _APP_BUILDER_CODING_STANDARDS = """
 
 ### JavaScript — write JS like a senior engineer, not a beginner
 - Use const/let — never var.
-- State is a plain object at the top of the script. Mutate it directly, then call a render function.
-  Example pattern:
-    const state = { items: [], filter: 'all', darkMode: true };
-    function render() { /* read state, update DOM */ }
+
+- ONE `<script>` tag only. Multiple `<script>` tags cause `const` redeclaration errors
+  because they share the same global scope inside the HTML file.
+  Put ALL JavaScript in a single `<script>` block at the end of `<body>`.
+
+- Wrap ALL script content in an IIFE to prevent global `const` conflicts:
+  ```
+  (function () {
+    const state = { ... };
+    function render() { ... }
+    // ... all other code ...
+    render();
+  })();
+  ```
+  This is mandatory — it prevents `Identifier already declared` errors on preview refresh.
+
+- State object: name it `state` (lowercase). Never `STATE`, `AppState`, `STORE`, or similar.
+  const state = { items: [], filter: 'all', darkMode: true };
+  function render() { /* read state, update DOM */ }
+
+- Never call functions that are not defined in THIS file. Examples of FORBIDDEN calls:
+  lsGet(), lsSet(), isStack(), getState(), dispatch(), store.get() — none of these exist.
+  Use the real APIs directly:
+    localStorage.getItem('key')          — NOT lsGet('key')
+    localStorage.setItem('key', value)   — NOT lsSet('key', value)
+
+- LocalStorage persistence: on state change, localStorage.setItem('app_state', JSON.stringify(state)).
+  On load: try { Object.assign(state, JSON.parse(localStorage.getItem('app_state') || '{}')); } catch {}
+
 - Never innerHTML += — always build a string or array then set innerHTML once.
 - Use event delegation for lists: one listener on the container, check e.target.closest('[data-action]').
 - Use template literals for all HTML generation.
-- LocalStorage persistence: on state change, localStorage.setItem('app_state', JSON.stringify(state)).
-  On load: try { Object.assign(state, JSON.parse(localStorage.getItem('app_state') || '{}')); } catch {}
 - Animations: use CSS classes + requestAnimationFrame, not setTimeout chains.
 - Error handling: wrap async operations in try/catch. Show inline error messages, not console.error only.
 - Functions should be short and do one thing. Split large functions.
@@ -2461,7 +2484,20 @@ async def chat_stream(req: ChatRequest, request: Request):
             phase1_plan = None  # skip routing entirely
         if req.chat_mode == "chat":
             execution_intent = "chat"
-            phase1_plan = None  # skip all intent routing
+            # Still run the planner so web_search intent is detected — but don't
+            # let it override execution_intent (chat mode stays as chat).
+            try:
+                from mini_assistant.phase1.command_parser import parse as _cp_parse
+                from mini_assistant.phase1.intent_planner import plan as _cp_plan
+                _cp_parsed = _cp_parse(clean_message)
+                phase1_plan = _cp_plan(
+                    message=clean_message,
+                    parsed_command=_cp_parsed,
+                    history=req.history or [],
+                )
+            except Exception as _cp_err:
+                logger.debug("Chat-mode planner skipped: %s", _cp_err)
+                phase1_plan = None
 
         # ── Phase 1 intent routing (fast regex, then LLM fallback) ──────────
         # Skip entirely when chat_mode forces the intent already
@@ -2731,19 +2767,9 @@ async def chat_stream(req: ChatRequest, request: Request):
         user_content = (rt_context + effective_msg) if rt_context else effective_msg
 
         # ── Web search injection — fetch live results when needed ────────────────
-        # In chat mode phase1_plan is None, so detect web-search intent locally.
-        _WEB_INTENT_RE = _re.compile(
-            r"\b(search|look up|find online|latest|current news|today.?s|right now|"
-            r"as of|recent|up to date|what.?s the|stock price|weather|currency|"
-            r"exchange rate|news about|who is|when did|how many|what year|"
-            r"current|price of|cost of|value of|rate of|score|standings|"
-            r"headlines|trending|happened|just announced)\b",
-            _re.IGNORECASE,
-        )
-        _needs_web = (
-            (phase1_plan and phase1_plan.intent == "web_search")
-            or (req.chat_mode == "chat" and bool(_WEB_INTENT_RE.search(effective_msg)))
-        )
+        # Intent planner (which runs even in chat mode now) classifies web_search
+        # correctly regardless of how the user phrases the request.
+        _needs_web = bool(phase1_plan and phase1_plan.intent == "web_search")
         if _needs_web and not req.image_base64 and not req.images_base64:
             try:
                 from mini_assistant.tools.docs_retriever import doc_aware_search, is_tech_query

@@ -648,6 +648,8 @@ function parseQuestions(text) {
   const egRe = /\(e\.g\.[,.]?\s*([^)]+)\)/i;
   const abcRe = /^\s*[a-dA-D][).]\s+(.+)/;
 
+  // First pass: collect ALL numbered list items
+  const listItems = [];
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
@@ -655,25 +657,29 @@ function parseQuestions(text) {
     if (numMatch) {
       const questionText = numMatch[2].trim();
       let options = [];
-      // Extract from "(e.g., ...)" inline
       const egMatch = line.match(egRe);
       if (egMatch) {
         options = egMatch[1].split(',').map(o => o.trim().replace(/^["']|["']$/g, '')).filter(o => o.length > 1);
       }
-      // Also look for a) b) c) on next lines
       let j = i + 1;
       while (j < lines.length && abcRe.test(lines[j])) {
         const m = lines[j].match(abcRe);
         if (m) options.push(m[1].trim());
         j++;
       }
-      questions.push({ num: parseInt(numMatch[1]), text: questionText, options });
+      listItems.push({ num: parseInt(numMatch[1]), text: questionText, options, isQuestion: line.trimEnd().endsWith('?') });
       i = j;
     } else {
       i++;
     }
   }
-  return questions.length >= 2 ? questions : null;
+
+  // Only render as interactive Q&A if ≥70% of items are actual questions
+  if (listItems.length < 2) return null;
+  const questionCount = listItems.filter(item => item.isQuestion).length;
+  if (questionCount / listItems.length < 0.7) return null;
+
+  return listItems;
 }
 
 function InteractiveChoices({ text, onSuggest }) {

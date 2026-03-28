@@ -318,9 +318,11 @@ Every app you build must meet these standards. Non-negotiable.
 - This line is non-negotiable. Every single build. Every single patch. Always.
 
 ### STRUCTURE
-- One self-contained HTML file: CSS inside <style>, JS inside <script>
-- <!DOCTYPE html> → <html> → <head> → <body> → <script>
+- One self-contained HTML file: CSS inside <style>, JS inside ONE <script> tag
+- <!DOCTYPE html> → <html> → <head> → <body> → ONE <script> at end of body
 - <meta charset="utf-8"> and <meta name="viewport" ...> always present
+- EXACTLY ONE <script> tag — NEVER split JS across multiple <script> blocks
+  (Multiple <script> blocks cause "Identifier already declared" SyntaxErrors on reload)
 
 ### COLORS & THEME
 - Define ALL colors as CSS custom properties at the top of :root {}
@@ -334,11 +336,31 @@ Every app you build must meet these standards. Non-negotiable.
 - Don't make the user scroll sideways on mobile
 
 ### JAVASCRIPT — THE MOST IMPORTANT PART
-- All state lives in JS variables at the TOP of the script, clearly labeled
-  Example: let score = 0; let lives = 3; let gameRunning = false;
-- Event listeners go in a DOMContentLoaded block OR at the very bottom of <script>
-  (NEVER inline onclick="" — use addEventListener)
-- Every button, input, and interactive element MUST have a working handler
+
+**MANDATORY: WRAP ALL JS IN AN IIFE**
+Every single script MUST be wrapped in an IIFE to prevent identifier collisions on reload:
+  (function() {
+    'use strict';
+    // ALL your code here — state, functions, event listeners, game loop
+  })();
+Never declare const/let/var at the top level of a <script> — always inside the IIFE.
+This prevents "Identifier 'X' has already been declared" SyntaxErrors.
+
+**STATE NAMING: USE LOWERCASE**
+- State object: const state = { score: 0, lives: 3, running: false };
+- NEVER use ALL_CAPS like STATE, GAME_STATE — these cause confusion and redeclaration errors
+- All state lives inside the IIFE at the top, clearly labeled
+
+**FORBIDDEN — NEVER USE THESE:**
+- lsGet(), lsSet(), isStack(), getState(), setState() — these do NOT exist, never call them
+- External helper functions not defined in this exact file
+- Multiple <script> blocks
+- Top-level const/let outside an IIFE
+- Inline onclick="" handlers — always use addEventListener
+
+**RULES:**
+- Event listeners go AFTER the DOM elements they target (end of IIFE body)
+- Every button, input, and interactive element MUST have a working addEventListener
 - No stubs like: // TODO: add logic here
 - No placeholder functions like: function doThing() { /* coming soon */ }
 - Test your logic mentally: if user clicks X, does Y actually happen?
@@ -355,21 +377,51 @@ Every app you build must meet these standards. Non-negotiable.
 - Empty states for lists and data areas (don't show blank space)
 
 ### GAME-SPECIFIC RULES (when building games)
-- Use requestAnimationFrame() for the game loop — never setInterval for animation
-- Keep a single source of truth for game state (one object or clear variables)
-- Separate: input handling → game update → render (these are three distinct phases)
-- Always implement: start screen, game over screen, score display, restart button
-- Canvas games: always clear before drawing (ctx.clearRect(0, 0, w, h))
-- Keyboard events: use keydown for immediate response, keyup to release
-- Touch support: add touchstart/touchend handlers for mobile
+Build a COMPLETE, FULLY PLAYABLE game — not a skeleton. Every feature listed below is mandatory.
+
+**ENGINE:**
+- requestAnimationFrame() for the game loop — NEVER setInterval for animation
+- Single state object inside the IIFE: const state = { score:0, lives:3, level:1, running:false, ... }
+- Three clean phases per frame: processInput() → update(dt) → render()
+- Delta-time (dt) based movement so speed is frame-rate independent
+
+**SCREENS (all required):**
+- Start screen: title, instructions, "Press Space / Tap to Start"
+- Game screen: HUD with score, lives, level
+- Game over screen: final score, high score, "Play Again" button
+- Level-up announcement (brief overlay, then game continues)
+
+**CONTROLS:**
+- Keyboard: arrow keys + WASD + Space (all relevant actions)
+- Touch: touchstart/touchend/touchmove handlers (mobile must be fully playable)
+- No dead keys — every control must do something
+
+**POLISH (mandatory, not optional):**
+- Particle effects (explosions, pickups, trails) via canvas
+- Smooth animations — nothing snaps or teleports
+- Sound effects via Web Audio API (oscillator-based, no external files)
+- Difficulty scaling: speed/spawn-rate increases with score or level
+- Visual feedback for every interaction (flash, shake, pulse)
+
+**COMPLETENESS CHECK:**
+- All canvas drawing uses correct coordinates — test mentally
+- Collision detection implemented and working
+- Score actually increments and displays
+- Lives decrement on hit, game over triggers correctly
+- Restart resets ALL state (score, lives, level, positions, particles)
+- Canvas: always ctx.clearRect(0, 0, canvas.width, canvas.height) before drawing
 
 ### BEFORE YOU OUTPUT
 Run this mental checklist:
-□ Does every button have a click handler that does something real?
+□ Is ALL JavaScript inside ONE <script> tag, wrapped in a single IIFE?
+□ Are there zero top-level const/let declarations outside the IIFE?
+□ Does every button have an addEventListener that does something real?
 □ Does every getElementById/querySelector match an actual element ID in the HTML?
 □ Are event listeners added after the DOM elements exist?
 □ Is all state initialized before it's used?
+□ Are there NO calls to lsGet/lsSet/isStack/getState/setState or any undefined helpers?
 □ Does the game/app actually start when expected?
+□ If it's a game: are all screens implemented? Does restart reset ALL state?
 □ Would this work if I pasted it in a browser right now?
 If any answer is NO — fix it before outputting.
 """
