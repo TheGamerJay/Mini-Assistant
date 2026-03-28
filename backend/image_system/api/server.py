@@ -2017,6 +2017,19 @@ async def chat(req: ChatRequest, request: Request):
                 logger.info("[MODEL ROUTER] step %d structural edit OK", _step_i + 1)
             except Exception as _se:
                 logger.error("step %d structural edit failed: %s", _step_i + 1, _se)
+                # Moderation fallback: if gpt-image-1 is blocked by safety filter AND
+                # this step has color info (skin/fur color change), fall back to PIL.
+                _is_moderation = "moderation_blocked" in str(_se) or "safety system" in str(_se).lower()
+                _fb_from = _step.get("from_color")
+                _fb_to   = _step.get("to_color")
+                if _is_moderation and _fb_from and _fb_to and _current_bytes:
+                    logger.info("step %d moderation fallback → PIL color_replace %s→%s", _step_i + 1, _fb_from, _fb_to)
+                    _b64_pil = _dalle.color_replace(_current_bytes, _fb_from, _fb_to)
+                    if _b64_pil:
+                        import base64 as _b64mod
+                        _current_b64 = _b64_pil
+                        _current_bytes = _b64mod.b64decode(_b64_pil)
+                        continue  # PIL succeeded — move to next step
                 if _current_b64 is None:
                     reply = f"Image generation failed: {_se}"
                 break  # use best result so far

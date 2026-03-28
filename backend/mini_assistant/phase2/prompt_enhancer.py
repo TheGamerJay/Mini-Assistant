@@ -87,6 +87,8 @@ structural_edit step:
   "region_description": "<what object/area>",
   "mask_box": {"top": 0-100, "left": 0-100, "width": 0-100, "height": 0-100},
   "final_instruction": "<precise instruction for gpt-image-1>",
+  "from_color": "<source color if this is a skin/fur color change, else null>",
+  "to_color": "<target color if this is a skin/fur color change, else null>",
   "confidence": 0.0-1.0
 }
 """
