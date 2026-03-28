@@ -57,9 +57,11 @@ RULE 3 — DECISION LOGIC:
   "keep everything else", "skin color only", "body color only (not the hair)", etc.
   When this exception fires:
     • edit_type: "color_change"
+    • preserve_regions: list every same-colored element the user said NOT to change
     • mask_box: top=15, left=10, width=80, height=75  ← excludes hair at top; covers face + body
     • primary_tier: "region_pil"
     • color_overlap_risk: true
+    • allow_reconstruction_fallback: false
 - Isolated clothing/accessory color where that color is unique to that item → RULE 1
 - Shape/structure/add/remove → RULE 2
 - If ambiguous → RULE 2
@@ -102,22 +104,28 @@ color_change step:
   "region_description": "<what body part/area>",
   "from_color": "<exact color name to replace>",
   "to_color": "<exact color name to apply>",
+  "preserve_regions": ["<other body parts / accessories that must NOT change, even if same color>"],
   "mask_box": {"top": 0-100, "left": 0-100, "width": 0-100, "height": 0-100},
-  "primary_tier": "semantic" | "vision" | "region_pil" | "pil_global",
+  "primary_tier": "region_pil",
   "color_overlap_risk": true | false,
+  "allow_reconstruction_fallback": false,
   "confidence": 0.0-1.0
 }
 
 MASK_BOX GUIDANCE for color_change steps — estimate where the region lives in a typical
 character portrait (values are % of full image dimension):
-  face / eyes / head:    top=5  left=25 width=50 height=30
-  hair:                  top=0  left=15 width=70 height=25
-  torso / shirt / body:  top=30 left=20 width=60 height=35
-  full body / skin / fur: top=5 left=10 width=80 height=90
-  arms / sleeves:        top=30 left=5  width=90 height=40
-  legs / pants:          top=60 left=20 width=60 height=35
-  shoes / feet:          top=80 left=20 width=60 height=20
-  tail:                  top=50 left=50 width=50 height=50
+  hair:                       top=0  left=15 width=70 height=25
+  face + head (no hair):      top=15 left=25 width=50 height=20
+  eyes only:                  top=18 left=30 width=40 height=12
+  torso / shirt / body:       top=30 left=20 width=60 height=35
+  skin body only (no eyes, no hair):  top=15 left=10 width=80 height=75
+  arms / sleeves:             top=30 left=5  width=90 height=40
+  legs / pants:               top=60 left=20 width=60 height=35
+  shoes / feet:               top=80 left=20 width=60 height=20
+  tail:                       top=50 left=50 width=50 height=50
+
+  ★ For skin/fur where you want to EXCLUDE the hair and eyes, use:
+    top=15 left=10 width=80 height=75 — this crops the top hair area and covers face+body
 
 structural_edit step:
 {

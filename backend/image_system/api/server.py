@@ -1852,23 +1852,31 @@ async def chat(req: ChatRequest, request: Request):
         _cached_preserve_els: list[str] = []  # from pre-flight scan, shared across tiers
 
         for _step_i, _step in enumerate(_edit_steps):
-            _etype        = _step.get("edit_type", "structural_edit")
-            _from_color   = (_step.get("from_color") or "").lower().strip() or None
-            _to_color     = (_step.get("to_color")   or "").lower().strip() or None
-            _region_desc  = (_step.get("region_description") or "").lower().strip()
-            _mask_box     = _step.get("mask_box")
-            _overlap_risk = bool(_step.get("color_overlap_risk", False))
+            _etype            = _step.get("edit_type", "structural_edit")
+            _from_color       = (_step.get("from_color") or "").lower().strip() or None
+            _to_color         = (_step.get("to_color")   or "").lower().strip() or None
+            _region_desc      = (_step.get("region_description") or "").lower().strip()
+            _mask_box         = _step.get("mask_box")
+            _overlap_risk     = bool(_step.get("color_overlap_risk", False))
+            _preserve_regions = _step.get("preserve_regions", [])
+            # allow_reconstruction_fallback: default True for unnamed edits,
+            # default False when planner explicitly sets it (named-region exact edits).
+            _allow_recon_flag = _step.get("allow_reconstruction_fallback", None)
 
             # Named-region: any edit targeting a specific body/clothing area.
-            # Reconstruction is FORBIDDEN for named-region edits — it destroys
-            # source identity. Only masked source-preserving methods are allowed.
-            _is_named_region      = bool(_region_desc)
-            _allow_reconstruction = not _is_named_region
+            # Reconstruction is FORBIDDEN for named-region edits unless the planner
+            # explicitly unlocks it.  It destroys source identity.
+            _is_named_region = bool(_region_desc)
+            if _allow_recon_flag is None:
+                _allow_reconstruction = not _is_named_region
+            else:
+                _allow_reconstruction = bool(_allow_recon_flag)
 
             logger.info(
-                "[MODEL ROUTER] step %d/%d → etype=%s from=%s to=%s region='%s' named=%s",
+                "[MODEL ROUTER] step %d/%d → etype=%s from=%s to=%s region='%s' named=%s preserve=%s allow_recon=%s",
                 _step_i + 1, len(_edit_steps), _etype,
                 _from_color, _to_color, _region_desc, _is_named_region,
+                _preserve_regions, _allow_reconstruction,
             )
 
             _step_meta = {
@@ -1883,9 +1891,12 @@ async def chat(req: ChatRequest, request: Request):
 
             # ── Pre-step: Vision scan → mask_box + preserve list ──────────────
             # Asks GPT-4o to locate the target region in the actual image and
-            # return a tight bounding box. Without a mask we cannot guarantee
-            # source preservation, so this scan is mandatory for named regions.
-            if _is_named_region and _current_bytes and not _mask_box:
+            # return a tight bounding box.  For color_change edits we ALWAYS
+            # run this scan — even when the planner supplied a box — because
+            # the image-specific tight box is much more accurate than a generic
+            # percentage estimate, and it returns the preserve_elements list
+            # which tells us which same-colored regions must not change.
+            if _is_named_region and _current_bytes and (_etype == "color_change" or not _mask_box):
                 try:
                     from ..services.dalle_client import analyze_region_colors as _arc
                     _scan = await _arc(
@@ -1984,8 +1995,31 @@ async def chat(req: ChatRequest, request: Request):
                     )
                     if _b64s is None:
                         return False
-                    _current_b64 = _b64s
-                    _current_bytes = base64.b64decode(_b64s)
+                    _result_bytes = base64.b64decode(_b64s)
+
+                    # ── Post-edit validation: did the target actually change? ──
+                    try:
+                        from ..services.dalle_client import validate_edit_result as _ver
+                        _vr = _ver(_step_original_bytes, _result_bytes, _mask_box)
+                        _step_meta["target_change_score"]      = _vr["target_change_score"]
+                        _step_meta["preserve_integrity_score"] = _vr["preserve_integrity_score"]
+                        _step_meta["changed_pixels"]           = _vr.get("changed_pixels", 0)
+                        if _vr["result_status"] == "no_op":
+                            logger.warning(
+                                "[MODEL ROUTER] T2 no_op: score=%.4f changed_px=%d — "
+                                "target region didn't visibly change",
+                                _vr["target_change_score"], _vr.get("changed_pixels", 0),
+                            )
+                            _tier_errors.append(
+                                f"T2:no_op — target region change score {_vr['target_change_score']:.4f} "
+                                f"(threshold 0.03) — the edit didn't visibly change that region"
+                            )
+                            return False
+                    except Exception as _ve:
+                        logger.warning("T2 post-edit validation failed (non-fatal): %s", _ve)
+
+                    _current_b64   = _b64s
+                    _current_bytes = _result_bytes
                     _step_meta["method_used"]                  = "masked_pil_recolor"
                     _step_meta["source_preserved"]             = True
                     _step_meta["reconstruction_fallback_used"] = False
@@ -2038,6 +2072,9 @@ async def chat(req: ChatRequest, request: Request):
                     _tier_errors.append(f"T3:{type(_t3e).__name__}:{str(_t3e)[:120]}")
                     return False
 
+            # Save original image bytes for this step so validation can compare
+            _step_original_bytes = _current_bytes
+
             # ── Dispatch: T1 (masked AI) → T2 (masked PIL) → T3 (if allowed) ─
             _step_success = await _try_tier1()
             if not _step_success:
@@ -2060,10 +2097,20 @@ async def chat(req: ChatRequest, request: Request):
                     # return a different character, which is worse than failing).
                     _reason = " | ".join(_tier_errors) if _tier_errors else "all methods failed"
                     logger.warning("[MODEL ROUTER] step %d failed. errors: %s", _step_i + 1, _reason)
-                    reply = (
-                        f"Could not apply this edit while preserving the source image. "
-                        f"Reason: {_reason}"
-                    )
+                    # User-friendly message for the most common failure cases
+                    if any("no_op" in e for e in _tier_errors):
+                        reply = (
+                            "The edit ran but the target region didn't visibly change. "
+                            "This usually means the target color wasn't detected in that region, "
+                            "or the region's pixels are already close to the requested color. "
+                            "Try being more specific — name the exact color you see (e.g. 'light blue', 'teal') "
+                            "and the exact region (e.g. 'face skin', 'body fur')."
+                        )
+                    else:
+                        reply = (
+                            f"Could not apply this edit while preserving the source image. "
+                            f"Reason: {_reason}"
+                        )
                 break
 
         _edit_elapsed_ms = round((time.perf_counter() - _edit_start) * 1000, 1)
@@ -2084,6 +2131,12 @@ async def chat(req: ChatRequest, request: Request):
                 "source_preserved":           all(s.get("source_preserved", False) for s in _step_metadata),
                 "reconstruction_fallback_used": any(s.get("reconstruction_fallback_used", False) for s in _step_metadata),
                 "confidence_score":           min(s["confidence_score"] for s in _step_metadata) if _step_metadata else 0.0,
+                "target_change_score":        max((s.get("target_change_score", 0) for s in _step_metadata), default=0),
+                "result_status":              (
+                    "success" if all(s.get("target_change_score", 1) >= 0.03 or
+                                     "change_score" not in s for s in _step_metadata)
+                    else "partial"
+                ),
                 "notes":                      "; ".join(s["notes"] for s in _step_metadata if s.get("notes")),
                 "route_result":               "image_edit",
                 "generation_time_ms":         _edit_elapsed_ms,

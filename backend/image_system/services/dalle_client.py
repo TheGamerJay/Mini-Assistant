@@ -315,6 +315,93 @@ def build_refined_mask(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def validate_edit_result(
+    original_bytes: bytes,
+    result_bytes: bytes,
+    mask_box: "dict | None" = None,
+) -> dict:
+    """
+    Compare original vs. result to determine if the edit actually took effect.
+
+    Returns:
+        {
+          "target_change_score":    float,  # 0-1 — mean pixel delta inside target box
+          "preserve_integrity_score": float,# 0-1 — how well pixels OUTSIDE box stayed
+          "changed_pixels":         int,    # pixels that moved > 5% in target region
+          "result_status":          str,    # "success" | "no_op" | "partial" | "unknown"
+        }
+
+    Thresholds:
+      no_op   → target_change_score < 0.03  (target region barely changed)
+      partial → preserve_integrity_score < 0.80  (outside region drifted noticeably)
+    """
+    if not _PIL_AVAILABLE:
+        return {"result_status": "unknown", "target_change_score": 0.0,
+                "preserve_integrity_score": 1.0, "changed_pixels": 0}
+    try:
+        import io as _io
+        import numpy as _np
+
+        orig = _PILImage.open(_io.BytesIO(original_bytes)).convert("RGB")
+        res  = _PILImage.open(_io.BytesIO(result_bytes)).convert("RGB")
+        if orig.size != res.size:
+            res = res.resize(orig.size, _PILImage.LANCZOS)
+        W, H = orig.size
+
+        orig_arr = _np.array(orig, dtype=_np.float32)
+        res_arr  = _np.array(res,  dtype=_np.float32)
+        diff     = _np.abs(orig_arr - res_arr) / 255.0  # 0-1 per channel
+
+        if mask_box:
+            bx  = max(0, round(mask_box.get("left",   0) / 100 * W))
+            by  = max(0, round(mask_box.get("top",    0) / 100 * H))
+            bw  = max(1, round(mask_box.get("width",  100) / 100 * W))
+            bh  = max(1, round(mask_box.get("height", 100) / 100 * H))
+            bx2 = min(W, bx + bw)
+            by2 = min(H, by + bh)
+
+            # How much did the target region actually change?
+            target_diff = diff[by:by2, bx:bx2, :]
+            target_change_score = float(_np.mean(target_diff))
+            changed_pixels = int(_np.sum(_np.mean(target_diff, axis=2) > 0.05))
+
+            # How well did everything outside stay the same?
+            n_outside = max(1, W * H - (bx2 - bx) * (by2 - by))
+            outside = diff.copy()
+            outside[by:by2, bx:bx2, :] = 0.0
+            outside_mean = float(_np.sum(outside)) / (n_outside * 3)
+            preserve_integrity_score = max(0.0, 1.0 - outside_mean * 20)
+        else:
+            target_change_score     = float(_np.mean(diff))
+            changed_pixels          = int(_np.sum(_np.mean(diff, axis=2) > 0.05))
+            preserve_integrity_score = 1.0
+
+        if target_change_score < 0.03:
+            result_status = "no_op"
+        elif preserve_integrity_score < 0.80:
+            result_status = "partial"
+        else:
+            result_status = "success"
+
+        logger.info(
+            "validate_edit_result: change=%.4f preserve=%.4f changed_px=%d → %s",
+            target_change_score, preserve_integrity_score, changed_pixels, result_status,
+        )
+        return {
+            "target_change_score":      round(target_change_score, 4),
+            "preserve_integrity_score": round(preserve_integrity_score, 4),
+            "changed_pixels":           changed_pixels,
+            "result_status":            result_status,
+        }
+    except Exception as exc:
+        logger.warning("validate_edit_result failed: %s", exc)
+        return {"result_status": "unknown", "target_change_score": 0.0,
+                "preserve_integrity_score": 1.0, "changed_pixels": 0}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 async def analyze_region_colors(
     client,
     image_bytes: bytes,
