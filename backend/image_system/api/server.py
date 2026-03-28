@@ -496,6 +496,37 @@ You are a creative coding partner, not a robot. You genuinely care about whether
 """
 
 # ---------------------------------------------------------------------------
+# Chat mode image redirect rule — injected when chat_mode == "chat"
+# Prevents chat from offering to generate images (that belongs in Image Mode)
+# ---------------------------------------------------------------------------
+_CHAT_MODE_IMAGE_RULE = """
+## IMAGE REQUESTS IN CHAT MODE — IMPORTANT
+
+You are currently in CHAT mode. You do NOT generate images here.
+
+If the user asks you to generate, draw, create, or make an image:
+- Do NOT offer to generate one
+- Do NOT say "let me create that for you"
+- Instead, warmly redirect them to Image Mode with a ready-to-use prompt
+
+Response format when user asks for image generation:
+"To get that image, switch to **Image Mode** (the picture icon) and type:
+> [write a detailed, ready-to-use image prompt based on what they asked for]
+Or if you have an image in mind, paste a link here and I'll analyze it for you!"
+
+If the user asks you to FIND an image online:
+- Search the web for it using your live search
+- If you find a direct link, share it
+- If the search doesn't turn up a direct usable link, say:
+  "I couldn't pull a direct image link for that. To get one made for you, switch to Image Mode and type:
+  > [ready-to-use prompt]
+  Or try searching [specific site like Google Images / Reddit / official source]."
+
+NEVER say "I can generate this for you" in chat mode.
+NEVER offer image generation as an option in chat mode.
+"""
+
+# ---------------------------------------------------------------------------
 # Lyrics specialist system prompt — injected when lyrics intent is detected
 # ---------------------------------------------------------------------------
 _LYRICS_SYSTEM_PROMPT = """\
@@ -2231,6 +2262,8 @@ async def chat(req: ChatRequest, request: Request):
             _sys_prompt = _MINI_SYSTEM_PROMPT
             if _LYRICS_INTENT.search(effective_msg):
                 _sys_prompt = _MINI_SYSTEM_PROMPT + "\n\n" + _LYRICS_SYSTEM_PROMPT
+            if req.chat_mode == "chat":
+                _sys_prompt = _sys_prompt + _CHAT_MODE_IMAGE_RULE
             if _gpt_code_ctx:
                 _sys_prompt = _sys_prompt + "\n\n[TASK CONTEXT — GPT-5.4 ANALYSIS]\n" + _gpt_code_ctx
 
@@ -2801,6 +2834,10 @@ async def chat_stream(req: ChatRequest, request: Request):
             _sys_prompt_stream = _MINI_SYSTEM_PROMPT + _CODE_ASSISTANT_PROMPT
         else:
             _sys_prompt_stream = _MINI_SYSTEM_PROMPT
+
+        # In chat mode: append image redirect rule so Claude never offers to generate images
+        if req.chat_mode == "chat" and not _is_build_intent:
+            _sys_prompt_stream = _sys_prompt_stream + _CHAT_MODE_IMAGE_RULE
         history_msgs: list[dict] = [{"role": "system", "content": _sys_prompt_stream}]
         # Use stored conversation as source of truth; fall back to req.history when empty.
         _history_to_build = (
