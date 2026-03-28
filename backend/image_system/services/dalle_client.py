@@ -906,6 +906,7 @@ class DalleClient:
         region: str = "skin/fur",
         cached_description: str | None = None,
         preserve_elements: list | None = None,
+        detected_color: str | None = None,
     ) -> tuple[str, str]:
         """
         Vision-guided recolor: analyze the image with GPT-4o to get a precise
@@ -1045,10 +1046,21 @@ class DalleClient:
             if any(kw in _first_line.lower() for kw in ("3d", "cgi", "cartoon", "anime", "pixel", "render", "watercolor", "realistic")):
                 _art_style_hint = f"Art style: {_first_line}. "
 
+        # When a prior PIL edit detected the actual color, surface that so the
+        # model understands it's a dark/unusual shade, not a literal mismatch.
+        _detected_note = ""
+        if detected_color and detected_color.lower() != from_color.lower():
+            _detected_note = (
+                f"NOTE: Analysis of the source image shows the {region} is actually "
+                f"{detected_color} (a variant of {from_color}). Treat the {region} as "
+                f"{detected_color} for the source, and recolor it to {to_color}.\n"
+            )
+
         prompt = (
             f"{_art_style_hint}"
             f"Recreate this EXACT character with {to_color} {region} instead of {from_color} {region}.\n\n"
             f"WHAT CHANGES: only the {region} surface color: {from_color} → {to_color}.\n"
+            f"{_detected_note}"
             f"WHAT DOES NOT CHANGE: {_pres_note}\n\n"
             f"CRITICAL — maintain EXACTLY:\n"
             f"- Same character species and design (do NOT substitute a different creature)\n"

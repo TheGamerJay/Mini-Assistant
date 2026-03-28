@@ -1865,11 +1865,12 @@ async def chat(req: ChatRequest, request: Request):
             _allow_recon_flag = _step.get("allow_reconstruction_fallback", None)
 
             # Named-region: any edit targeting a specific body/clothing area.
-            # Reconstruction is FORBIDDEN for named-region edits unless the planner
-            # explicitly unlocks it.  It destroys source identity.
+            # Reconstruction is allowed as a last resort (T1+T2 both failed) UNLESS
+            # the planner explicitly blocks it (allow_reconstruction_fallback: false).
+            # RULE 3 exception (explicit skin isolation) sets allow_reconstruction_fallback=false.
             _is_named_region = bool(_region_desc)
             if _allow_recon_flag is None:
-                _allow_reconstruction = not _is_named_region
+                _allow_reconstruction = True  # allow T3 as last resort for any edit
             else:
                 _allow_reconstruction = bool(_allow_recon_flag)
 
@@ -1889,6 +1890,8 @@ async def chat(req: ChatRequest, request: Request):
                 "notes": "",
             }
             _step_success = False
+            # Shared across tier closures: T2 populates on no_op, T3 reads it
+            _t2_diagnosis: dict | None = None
 
             # ── Pre-step: Vision scan → mask_box + preserve list ──────────────
             # Asks GPT-4o to locate the target region in the actual image and
@@ -1982,7 +1985,7 @@ async def chat(req: ChatRequest, request: Request):
             # Shifts the hue of pixels within mask_box. Zero API cost.
             # Source pixels outside the box are completely untouched.
             async def _try_tier2() -> bool:
-                nonlocal _current_b64, _current_bytes
+                nonlocal _current_b64, _current_bytes, _t2_diagnosis
                 if not (_mask_box and _from_color and _to_color and _current_bytes):
                     _why = ("no mask_box" if not _mask_box else
                             "no from_color" if not _from_color else
@@ -2035,6 +2038,7 @@ async def chat(req: ChatRequest, request: Request):
                                     validation=_vr,
                                     mask_pixel_count=_msk_px,
                                 )
+                                _t2_diagnosis = _diagnosis  # share with T3
                                 _suggested_retries.extend(
                                     _diagnosis.get("suggested_retry_prompts", [])
                                 )
@@ -2063,17 +2067,17 @@ async def chat(req: ChatRequest, request: Request):
                     logger.warning("step %d T2/masked_pil_recolor failed (%s)", _step_i + 1, _t2e)
                     return False
 
-            # ── TIER 3: Reconstruction fallback (NOT source-preserving) ───────
-            # FORBIDDEN for named-region edits — it destroys character identity.
-            # Only allowed for unnamed/structural edits where the user's intent
-            # is to change the overall composition anyway.
+            # ── TIER 3: Controlled reconstruction fallback (NOT source-preserving) ─
+            # Used when T1+T2 both fail. For named-region edits, uses diagnosis
+            # context (detected_color) so the model understands the actual source
+            # color. Blocked only when planner explicitly sets allow_reconstruction_fallback=false.
             async def _try_tier3() -> bool:
                 nonlocal _current_b64, _current_bytes
                 if not _allow_reconstruction:
                     _tier_errors.append(
-                        "T3:reconstruction_blocked — named-region edit requires source preservation"
+                        "T3:reconstruction_blocked — explicitly disabled for this edit"
                     )
-                    logger.warning("[MODEL ROUTER] T3 reconstruction blocked (named-region edit)")
+                    logger.warning("[MODEL ROUTER] T3 reconstruction blocked (allow_reconstruction_fallback=false)")
                     return False
                 if not _current_bytes:
                     return False
@@ -2081,27 +2085,37 @@ async def chat(req: ChatRequest, request: Request):
                     _cached = _edit_desc_cache.get(session_id)
                     _t3_from = _from_color or "current color"
                     _t3_to   = _to_color or effective_msg.strip()
-                    logger.info("[MODEL ROUTER] step %d T3/reconstruction %s→%s", _step_i + 1, _t3_from, _t3_to)
+                    # Pull detected_color from T2 diagnosis if available (dark variant case)
+                    _t3_detected = _t2_diagnosis.get("detected_color") if _t2_diagnosis else None
+                    _t3_region = _region_desc or "skin/fur"
+                    logger.info(
+                        "[MODEL ROUTER] step %d T3/reconstruction_fallback %s→%s region=%s detected=%s",
+                        _step_i + 1, _t3_from, _t3_to, _t3_region, _t3_detected,
+                    )
                     _b64s, _desc_used = await _dalle.describe_and_recolor(
                         _current_bytes, _t3_from, _t3_to,
-                        region=_region_desc or "skin/fur",
+                        region=_t3_region,
                         cached_description=_cached,
                         preserve_elements=_cached_preserve_els or None,
+                        detected_color=_t3_detected,
                     )
                     if len(_edit_desc_cache) >= _EDIT_DESC_CACHE_MAX:
                         _edit_desc_cache.pop(next(iter(_edit_desc_cache)))
                     _edit_desc_cache[session_id] = _desc_used
                     _current_b64 = _b64s
                     _current_bytes = base64.b64decode(_b64s)
-                    _step_meta["method_used"]                  = "reconstruction"
+                    _step_meta["method_used"]                  = "reconstruction_fallback"
                     _step_meta["source_preserved"]             = False
                     _step_meta["reconstruction_fallback_used"] = True
                     _step_meta["confidence_score"]             = 0.5
-                    _step_meta["notes"] = "Reconstruction used — character composition may vary."
-                    logger.info("[MODEL ROUTER] step %d T3/reconstruction OK", _step_i + 1)
+                    _step_meta["notes"] = (
+                        "Used enhanced reconstruction for a cleaner result — "
+                        "character composition may vary slightly from the original."
+                    )
+                    logger.info("[MODEL ROUTER] step %d T3/reconstruction_fallback OK", _step_i + 1)
                     return True
                 except Exception as _t3e:
-                    logger.error("step %d T3/reconstruction FAILED: %s", _step_i + 1, _t3e)
+                    logger.error("step %d T3/reconstruction_fallback FAILED: %s", _step_i + 1, _t3e)
                     _tier_errors.append(f"T3:{type(_t3e).__name__}:{str(_t3e)[:120]}")
                     return False
 
@@ -2154,15 +2168,21 @@ async def chat(req: ChatRequest, request: Request):
                 await _log_img(request.headers.get("authorization"), request_id=getattr(req, "request_id", None))
             except Exception:
                 pass
+            _recon_used = any(s.get("reconstruction_fallback_used", False) for s in _step_metadata)
+            _edit_reply = (
+                "Used enhanced reconstruction for a cleaner result — "
+                "character composition may vary slightly from the original."
+                if _recon_used else "Image edited."
+            )
             return {
                 "image_base64":               _current_b64,
-                "reply":                      "Image edited.",
+                "reply":                      _edit_reply,
                 "intent":                     "image_edit",
                 "session_id":                 session_id,
                 "plan":                       phase1_plan.to_dict() if phase1_plan else {},
                 "method_used":                _step_metadata[-1]["method_used"] if _step_metadata else "unknown",
                 "source_preserved":           all(s.get("source_preserved", False) for s in _step_metadata),
-                "reconstruction_fallback_used": any(s.get("reconstruction_fallback_used", False) for s in _step_metadata),
+                "reconstruction_fallback_used": _recon_used,
                 "confidence_score":           min(s["confidence_score"] for s in _step_metadata) if _step_metadata else 0.0,
                 "target_change_score":        max((s.get("target_change_score", 0) for s in _step_metadata), default=0),
                 "result_status":              (
