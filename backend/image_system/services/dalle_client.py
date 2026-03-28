@@ -1125,20 +1125,28 @@ class DalleClient:
                 f"{detected_color} for the source, and recolor it to {to_color}.\n"
             )
 
+        # Build explicit "keep X color" constraint line for the items extracted
+        _keep_lines = ""
+        if _explicit_constraints:
+            _keep_lines = "COLOR LOCKS (these are FORBIDDEN from changing):\n" + \
+                "\n".join(f"  • {c} ← must stay this color" for c in _explicit_constraints) + "\n"
+
         prompt = (
+            f"SINGLE CHANGE ONLY: recolor the {region} from {from_color} to {to_color}. "
+            f"EVERYTHING ELSE IS FROZEN — no other color changes allowed.\n\n"
+            f"{_keep_lines}"
+            f"{_pres_note}\n\n"
             f"{_art_style_hint}"
-            f"Recreate this EXACT character with {to_color} {region} instead of {from_color} {region}.\n\n"
-            f"WHAT CHANGES: only the {region} surface color: {from_color} → {to_color}.\n"
+            f"Recreate this EXACT character with {to_color} {region}.\n"
             f"{_detected_note}"
-            f"WHAT DOES NOT CHANGE: {_pres_note}\n\n"
             f"CRITICAL — maintain EXACTLY:\n"
-            f"- Same character species and design (do NOT substitute a different creature)\n"
-            f"- Same art style (3D CGI stays 3D CGI, flat cartoon stays flat cartoon, etc.)\n"
-            f"- Same face shape, eyes, and expression\n"
+            f"- Same character species and design\n"
+            f"- Same art style and rendering\n"
+            f"- Same face shape, eyes, expression\n"
             f"- Same body proportions and pose\n"
-            f"- Same clothing colors, patterns, and styles\n"
+            f"- Same clothing: every garment keeps its ORIGINAL color\n"
             f"- Same background and lighting\n\n"
-            f"Character description (final state with {to_color} {region}):\n{modified}\n\n"
+            f"Character description (with {to_color} {region}, all else unchanged):\n{modified}\n\n"
             "Render the full character head-to-toe. Do not crop or reframe."
         )
         b64_image = await self.generate(prompt)
