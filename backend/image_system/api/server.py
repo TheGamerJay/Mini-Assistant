@@ -1402,9 +1402,17 @@ async def chat(req: ChatRequest, request: Request):
     attached_image_bytes: Optional[bytes] = None
     if req.image_base64:
         try:
-            attached_image_bytes = base64.b64decode(req.image_base64)
-        except Exception:
-            logger.warning("Could not decode attached image_base64 — ignoring.")
+            _raw_b64 = req.image_base64
+            # Strip data-URI prefix ("data:image/png;base64,…") if present
+            if _raw_b64.startswith("data:"):
+                _raw_b64 = _raw_b64.split(",", 1)[-1]
+            # Fix padding
+            _raw_b64 = _raw_b64.strip()
+            _raw_b64 += "=" * ((-len(_raw_b64)) % 4)
+            attached_image_bytes = base64.b64decode(_raw_b64)
+            logger.info("attached image decoded: %d bytes", len(attached_image_bytes))
+        except Exception as _img_err:
+            logger.error("Could not decode attached image_base64 — %s: %s", type(_img_err).__name__, _img_err)
 
     # ── Phase 1 Step 1: Command Parser ─────────────────────────────────────────
     phase1_plan        = None

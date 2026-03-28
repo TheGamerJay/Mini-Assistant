@@ -221,6 +221,12 @@ async def analyze_region_colors(
     import base64 as _b64
     import json as _json
 
+    # Detect actual image mime type from magic bytes
+    _mime = "image/png"
+    if image_bytes[:3] == b"\xff\xd8\xff":
+        _mime = "image/jpeg"
+    elif image_bytes[:4] == b"RIFF":
+        _mime = "image/webp"
     img_b64 = _b64.b64encode(image_bytes).decode()
     prompt = (
         f"I need to change ONLY the character's {target_region} color from {target_color} "
@@ -241,7 +247,7 @@ async def analyze_region_colors(
         messages=[{
             "role": "user",
             "content": [
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}", "detail": "high"}},
+                {"type": "image_url", "image_url": {"url": f"data:{_mime};base64,{img_b64}", "detail": "high"}},
                 {"type": "text", "text": prompt},
             ],
         }],
@@ -438,8 +444,13 @@ class DalleClient:
                 len(description),
             )
         else:
+            _dr_mime = "image/png"
+            if image_bytes[:3] == b"\xff\xd8\xff":
+                _dr_mime = "image/jpeg"
+            elif image_bytes[:4] == b"RIFF":
+                _dr_mime = "image/webp"
             img_b64 = _b64.b64encode(image_bytes).decode()
-            logger.info("describe_and_recolor: analyzing reference image (%s→%s)", from_color, to_color)
+            logger.info("describe_and_recolor: analyzing reference image (%s→%s, mime=%s)", from_color, to_color, _dr_mime)
             vision = await client.chat.completions.create(
                 model="gpt-4o",
                 max_tokens=900,
@@ -448,7 +459,7 @@ class DalleClient:
                     "content": [
                         {
                             "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{img_b64}", "detail": "high"},
+                            "image_url": {"url": f"data:{_dr_mime};base64,{img_b64}", "detail": "high"},
                         },
                         {
                             "type": "text",
