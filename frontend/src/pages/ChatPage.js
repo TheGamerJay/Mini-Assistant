@@ -547,9 +547,13 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     if (!text && !imgs.length) return;
 
     // Image generation limit gate — uses server-authoritative imageUsage (not localStorage)
-    const _isImgRequest = imgs.length > 0 || isImageIntent(text);
+    // Only block if this is a pure generation request (no reference image attached).
+    // When a reference image is attached the message falls through to the vision/chat brain,
+    // which can analyze/describe the image without consuming an image credit.
+    const _isImgRequest = !imgs.length && (chatMode === 'image' || isImageIntent(text));
     if (_isImgRequest && !canGenerateImage(imageUsage)) {
       setImageLimitOpen(true);
+      toast.error(`Image limit reached (${imageUsage.used}/${imageUsage.limit}). Upgrade for more.`);
       submittingRef.current = false;
       return;
     }
@@ -611,11 +615,13 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     if (chatMode === 'build' || isBuildIntent(text, null)) setRightPanelOpen(true);
 
     // chatMode overrides all auto-detection:
-    // 'image' → always generate image, 'build' → always stream to builder
+    // 'image' → always generate image (unless a reference image is attached — DALL-E 3 can't do img2img,
+    //            so fall through to vision brain which can analyse/describe the reference)
+    // 'build' → always stream to builder
     const imageIntentDetected = chatMode === 'image' || (chatMode === null && isImageIntent(text));
 
     // ── IMAGE path: non-streaming endpoint (generation only, not analysis) ──
-    // Blocked in build mode — in build mode every message goes to the builder
+    // Blocked when a reference image is attached (DALL-E 3 has no img2img) or in build mode
     if (imageIntentDetected && !imgs.length && chatMode !== 'build') {
       if (imageIntentDetected) {
         setMessages([...nextMessages, {
