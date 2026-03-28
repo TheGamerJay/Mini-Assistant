@@ -422,27 +422,40 @@ def _run_text_search(query: str, max_results: int = 6) -> list[dict]:
 
 
 def _run_shopping_search(query: str, max_results: int = 8) -> list[dict]:
-    """Use DuckDuckGo shopping search — returns price + image data."""
+    """
+    Product-focused search using site:amazon.com / site:newegg.com queries
+    to get real listing pages with prices embedded in snippets.
+    ddgs has no .shopping() method — we use targeted text queries instead.
+    """
+    all_results: list[dict] = []
     try:
-        from ddgs import DDGS
-        results = []
+        try:
+            from ddgs import DDGS
+        except ImportError:
+            from duckduckgo_search import DDGS
+
+        # Run 2 targeted queries in parallel to get listing-level results
+        queries_to_run = [
+            f"site:amazon.com {query}",
+            f"{query} buy price",
+        ]
         with DDGS(timeout=15) as ddgs:
-            for r in ddgs.shopping(query, max_results=max_results):
-                results.append({
-                    "title":    r.get("title", ""),
-                    "url":      r.get("url", ""),
-                    "body":     r.get("description", ""),
-                    "price":    r.get("price"),
-                    "currency": r.get("currency", "USD"),
-                    "source":   r.get("vendor") or r.get("source", ""),
-                    "image":    r.get("image", ""),
-                    "source_type": "shopping",
-                })
-        logger.info("Shopping search: query=%r results=%d", query, len(results))
-        return results
+            for q in queries_to_run:
+                try:
+                    for r in ddgs.text(q, max_results=max_results // 2 + 2):
+                        all_results.append({
+                            "title":       r.get("title", ""),
+                            "url":         r.get("href", ""),
+                            "body":        r.get("body", ""),
+                            "source_type": "listing" if "amazon.com" in r.get("href", "") else "shopping",
+                        })
+                except Exception:
+                    pass
+        logger.info("Shopping search: query=%r results=%d", query, len(all_results))
     except Exception as exc:
         logger.warning("Shopping search failed (%s), falling back to text", exc)
-        return _run_text_search(query, max_results)
+        all_results = _run_text_search(query, max_results)
+    return all_results
 
 
 # ─── Reliability Orchestrator ──────────────────────────────────────────────────

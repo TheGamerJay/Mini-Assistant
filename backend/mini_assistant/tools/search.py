@@ -17,9 +17,12 @@ logger = logging.getLogger(__name__)
 # ─── DuckDuckGo ───────────────────────────────────────────────────────────────
 
 def _ddg_search(query: str, max_results: int) -> list[dict]:
-    from ddgs import DDGS
+    try:
+        from ddgs import DDGS  # new package name (duckduckgo_search renamed)
+    except ImportError:
+        from duckduckgo_search import DDGS  # legacy fallback
     results = []
-    with DDGS(timeout=10) as ddgs:
+    with DDGS(timeout=12) as ddgs:
         for r in ddgs.text(query, max_results=max_results):
             results.append({
                 "title": r.get("title", ""),
