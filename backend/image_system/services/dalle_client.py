@@ -382,6 +382,7 @@ class DalleClient:
             image=image_file,
             prompt=prompt,
             size=size,  # type: ignore[arg-type]
+            response_format="b64_json",
         )
 
         if mask_bytes is not None:
