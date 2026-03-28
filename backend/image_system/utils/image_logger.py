@@ -83,33 +83,19 @@ def log_router_decision(
 
 def log_comfyui_execution(
     session_id: Optional[str],
-    checkpoint: str,
-    workflow: str,
-    width: int,
-    height: int,
-    steps: int,
-    cfg: float,
-    seed: int,
-    elapsed_ms: float,
-    output_path: Optional[str],
+    checkpoint: str = "",
+    workflow: str = "",
+    width: int = 0,
+    height: int = 0,
+    steps: int = 0,
+    cfg: float = 0.0,
+    seed: int = -1,
+    elapsed_ms: float = 0.0,
+    output_path: Optional[str] = None,
     error: Optional[str] = None,
 ) -> None:
-    """Log a ComfyUI generation execution."""
-    comfyui_log.info(json.dumps({
-        "event":       "comfyui_execution",
-        "ts":          _ts(),
-        "session_id":  session_id,
-        "checkpoint":  checkpoint,
-        "workflow":    workflow,
-        "width":       width,
-        "height":      height,
-        "steps":       steps,
-        "cfg":         cfg,
-        "seed":        seed,
-        "elapsed_ms":  round(elapsed_ms, 1),
-        "output_path": output_path,
-        "error":       error,
-    }))
+    """No-op stub — ComfyUI removed. Image generation uses OpenAI DALL-E."""
+    pass
 
 
 def log_review_event(

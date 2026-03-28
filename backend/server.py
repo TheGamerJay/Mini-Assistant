@@ -810,7 +810,7 @@ async def delete_profile(profile_id: str):
 async def generate_image(request: ImageGenRequest):
     return {
         "success": False,
-        "message": "Image generation requires local Stable Diffusion setup. Please install and configure ComfyUI or Automatic1111.",
+        "message": "Image generation uses OpenAI DALL-E API.",
         "prompt": request.prompt
     }
 
@@ -3982,7 +3982,7 @@ async def tester_history():
 async def health_check(deep: bool = False):
     """
     Health check endpoint.
-    ?deep=true runs full dependency probes (Ollama, ComfyUI, Redis, MongoDB).
+    ?deep=true runs full dependency probes (Ollama, Redis, MongoDB).
     """
     try:
         from mini_assistant.phase10.health_checks import run_health_checks
@@ -3991,28 +3991,15 @@ async def health_check(deep: bool = False):
         # Add legacy flat keys expected by the frontend status bar
         checks_by_name = {c["name"]: c for c in report.get("checks", [])}
         ollama_check  = checks_by_name.get("ollama",  {})
-        comfyui_check = checks_by_name.get("comfyui", {})
         report["ollama"]  = "connected" if ollama_check.get("status") == "ok" and ollama_check.get("http_status", 0) == 200 else "disconnected"
-        report["comfyui"] = "connected" if comfyui_check.get("status") == "ok" and comfyui_check.get("http_status", 0) == 200 else "disconnected"
+        report["comfyui"] = "not_used"
         report["openai"]  = "connected" if os.environ.get("OPENAI_API_KEY") else "disconnected"
         return report
     except Exception:
-        # Fallback to legacy check if Phase 10 unavailable
-        comfyui_status = "disconnected"
-        try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(
-                    f"{os.environ.get('COMFYUI_URL', 'http://localhost:8188')}/system_stats",
-                    timeout=2.0,
-                )
-                if resp.status_code == 200:
-                    comfyui_status = "connected"
-        except Exception:
-            pass
         return {
             "status":  "healthy",
             "ollama":  "replaced_by_claude_openai",
-            "comfyui": comfyui_status,
+            "comfyui": "not_used",
             "openai":  "connected" if os.environ.get("OPENAI_API_KEY") else "disconnected",
             "whisper": "loaded" if whisper_model else "not_loaded",
         }

@@ -92,7 +92,7 @@ def _friendly_error(exc) -> str:
 
 app = FastAPI(
     title="Mini Assistant Image System",
-    description="Local image generation using Ollama brains + ComfyUI",
+    description="Image generation using OpenAI DALL-E",
     version="1.0.0",
 )
 
@@ -244,7 +244,6 @@ _vision_brain = None
 _embed_brain = None
 _critic_brain = None
 _prompt_builder = None
-_comfyui_client = None
 _ollama_client = None
 
 # ---------------------------------------------------------------------------
@@ -843,15 +842,6 @@ def _get_prompt_builder():
     return _prompt_builder
 
 
-def _get_comfyui():
-    global _comfyui_client
-    if _comfyui_client is None:
-        from ..services.comfyui_client import ComfyUIClient
-        comfyui_url = os.environ.get("COMFYUI_URL", "http://localhost:8188")
-        _comfyui_client = ComfyUIClient(base_url=comfyui_url)
-    return _comfyui_client
-
-
 def _get_ollama():
     global _ollama_client
     if _ollama_client is None:
@@ -1292,255 +1282,6 @@ async def generate_image(req: GenerateRequest, request: Request):
         review=None,
         retry_used=False,
         critic_result=None,
-        session_id=session_id,
-        generation_time_ms=round(elapsed, 1),
-        prompt_warnings=prompt_warnings,
-    )
-
-    # ---- dead code below kept for reference; remove after DALL-E is stable ----
-    try:
-        pb = _get_prompt_builder()
-        prompts = await pb.build(clean_prompt, route_result)
-        positive_prompt = prompts["positive"]
-        negative_prompt = prompts["negative"]
-        width = req.override_width or 0
-        height = req.override_height or 0
-        if not (width and height):
-            width, height = pb.size_for_visual_mode(
-                route_result.get("visual_mode", "portrait"), checkpoint_type, quality
-            )
-        steps = req.override_steps or pb.steps_for_quality(quality, checkpoint_type)
-        cfg = req.override_cfg or pb.cfg_for_style(route_result.get("style_family", "anime"))
-        seed = req.override_seed
-    except Exception as exc:
-        logger.error("PromptBuilder failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Prompt build error: {exc}")
-
-    # Collect which overrides were applied
-    overrides_applied: Dict[str, Any] = {}
-    for field in ("checkpoint", "workflow", "width", "height", "steps", "cfg", "seed"):
-        attr = f"override_{field}"
-        val = getattr(req, attr, None)
-        if val is not None:
-            overrides_applied[field] = val
-
-    plan = GenerationPlan(
-        checkpoint=checkpoint_key,
-        checkpoint_file=checkpoint_file,
-        workflow=workflow_key,
-        positive_prompt=positive_prompt,
-        negative_prompt=negative_prompt,
-        width=width,
-        height=height,
-        steps=steps,
-        cfg=cfg,
-        seed=seed,
-        quality=quality,
-        overrides_applied=overrides_applied,
-    )
-
-    # ---- Step 5: Dry run — return plan without generating ----
-    if req.dry_run:
-        elapsed = (time.perf_counter() - start_time) * 1000
-        return DryRunResponse(
-            session_id=session_id,
-            route_result=route_result,
-            plan=plan,
-            prompt_warnings=prompt_warnings,
-        )
-
-    # ---- Step 6: ComfyUI generation (with timeout + cancellation) ----
-    comfyui = _get_comfyui()
-
-    # ---- Step 6a: Build workflow based on ComfyUI routing mode ----
-    from ..services.comfyui_router import WORKFLOW_GENERATE
-    if comfy_decision.workflow == WORKFLOW_GENERATE or not any([reference_bytes, mask_bytes, pose_bytes, style_bytes]):
-        # Standard text-to-image
-        workflow = comfyui.build_standard_workflow(
-            checkpoint=checkpoint_file,
-            positive_prompt=positive_prompt,
-            negative_prompt=negative_prompt,
-            width=width,
-            height=height,
-            steps=steps,
-            cfg=cfg,
-            seed=seed,
-        )
-    else:
-        # Reference-guided or edit/inpaint — load JSON workflow + upload images
-        try:
-            workflow = comfyui.load_workflow(comfy_decision.workflow)
-            # Inject text params first
-            workflow = comfyui.inject_params(workflow, {
-                "checkpoint":       checkpoint_file,
-                "positive_prompt":  positive_prompt,
-                "negative_prompt":  negative_prompt,
-                "steps":            steps,
-                "cfg":              cfg,
-                "seed":             seed if seed is not None else __import__("random").randint(0, 2**32 - 1),
-                "denoise":          req.denoise_strength if req.denoise_strength is not None else 0.75,
-            })
-
-            # Upload images and inject filenames into LoadImage nodes
-            # Primary reference image (reference mode) or init image (edit mode)
-            primary_img = reference_bytes or pose_bytes or style_bytes
-            if primary_img:
-                stored_name = await comfyui.upload_image(primary_img, "reference_input.png")
-                workflow = comfyui.inject_params(workflow, {"init_image_filename": stored_name})
-
-            # Mask image (edit/inpaint mode)
-            if mask_bytes:
-                mask_name = await comfyui.upload_image(mask_bytes, "mask_input.png")
-                workflow = comfyui.inject_params(workflow, {"mask_image_filename": mask_name})
-
-        except Exception as exc:
-            logger.error("Workflow load/inject failed (%s) — falling back to standard workflow", exc)
-            workflow = comfyui.build_standard_workflow(
-                checkpoint=checkpoint_file,
-                positive_prompt=positive_prompt,
-                negative_prompt=negative_prompt,
-                width=width,
-                height=height,
-                steps=steps,
-                cfg=cfg,
-                seed=seed,
-            )
-
-    image_bytes: Optional[bytes] = None
-    review: Optional[dict] = None
-    critic_result: Optional[dict] = None
-    retry_used = False
-    gen_start = time.perf_counter()
-
-    try:
-        gen_task = asyncio.ensure_future(comfyui.generate(workflow, timeout=300))
-        _active_generations[session_id] = gen_task
-        try:
-            images = await gen_task
-            image_bytes = images[0] if images else None
-        except asyncio.CancelledError:
-            logger.info("Generation cancelled: session_id=%s", session_id)
-            raise HTTPException(status_code=499, detail="Generation cancelled by client")
-        finally:
-            _active_generations.pop(session_id, None)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("ComfyUI generation failed: %s", exc, exc_info=True)
-        gen_elapsed = (time.perf_counter() - gen_start) * 1000
-        image_logger.log_comfyui_execution(
-            session_id, checkpoint_key, workflow_key,
-            width, height, steps, cfg, seed or -1,
-            gen_elapsed, None, error=str(exc),
-        )
-        raise HTTPException(status_code=502, detail=f"ComfyUI error: {exc}")
-
-    gen_elapsed = (time.perf_counter() - gen_start) * 1000
-    image_logger.log_comfyui_execution(
-        session_id, checkpoint_key, workflow_key,
-        width, height, steps, cfg, seed or -1,
-        gen_elapsed, None,
-    )
-
-    # ---- Step 7: Review (skip for fast quality) ----
-    review_start = time.perf_counter()
-    if image_bytes and quality != "fast":
-        try:
-            from ..services.image_reviewer import ImageReviewer
-            reviewer = ImageReviewer()
-            review = await reviewer.review_image(image_bytes, clean_prompt, route_result)
-        except Exception as exc:
-            logger.warning("Image review failed: %s", exc)
-            review = None
-
-    # ---- Step 8: Critic evaluation + single retry ----
-    if review and image_bytes:
-        try:
-            critic = _get_critic()
-            critic_result = await critic.evaluate(clean_prompt, route_result, review)
-
-            if critic_result.get("should_retry"):
-                adjusted = critic_result.get("adjusted_params", {})
-                alt_checkpoint_key = critic_result.get("alt_checkpoint") or checkpoint_key
-                try:
-                    registry = _load_registry()
-                    checkpoint_info_retry = registry["image_checkpoints"].get(alt_checkpoint_key, {})
-                    retry_checkpoint_file = checkpoint_info_retry.get("file", checkpoint_file)
-                except Exception:
-                    retry_checkpoint_file = checkpoint_file
-
-                retry_workflow = comfyui.build_standard_workflow(
-                    checkpoint=retry_checkpoint_file,
-                    positive_prompt=positive_prompt,
-                    negative_prompt=negative_prompt,
-                    width=width,
-                    height=height,
-                    steps=adjusted.get("steps", steps),
-                    cfg=adjusted.get("cfg", cfg),
-                    seed=adjusted.get("seed"),
-                )
-
-                retry_images = await comfyui.generate(retry_workflow, timeout=300)
-                if retry_images:
-                    image_bytes = retry_images[0]
-                    retry_used = True
-                    logger.info("Retry completed with checkpoint=%s", alt_checkpoint_key)
-        except Exception as exc:
-            logger.warning("Critic/retry failed: %s", exc)
-
-    review_elapsed = (time.perf_counter() - review_start) * 1000
-    quality_score = review.get("quality_score", 0.7) if review else 0.7
-    image_logger.log_review_event(
-        session_id, quality_score, retry_used,
-        review.get("retry_reason") if review else None,
-        critic_result.get("alt_checkpoint") if critic_result else None,
-        2 if retry_used else 1,
-        review_elapsed,
-        None,
-    )
-
-    # ---- Step 9: Store successful route ----
-    if image_bytes and quality_score >= 0.5:
-        try:
-            await _get_embed().store_successful_route(clean_prompt, route_result, quality_score)
-        except Exception as exc:
-            logger.warning("EmbedBrain store failed: %s", exc)
-
-    # ---- Step 10: Save image + metadata sidecar ----
-    out_path = None
-    if image_bytes:
-        try:
-            out_path = metadata_writer.save_output_image(image_bytes, session_id, seed or -1)
-            meta = metadata_writer.build_metadata(
-                original_prompt=req.prompt,
-                positive_prompt=positive_prompt,
-                negative_prompt=negative_prompt,
-                route=route_result,
-                checkpoint=checkpoint_key,
-                workflow=workflow_key,
-                seed=seed or -1,
-                width=width,
-                height=height,
-                steps=steps,
-                cfg=cfg,
-                quality=quality,
-                review_result=review,
-                session_id=session_id,
-                generation_ms=(time.perf_counter() - start_time) * 1000,
-            )
-            metadata_writer.save_metadata(out_path, meta)
-        except Exception as exc:
-            logger.warning("Metadata/image save failed: %s", exc)
-
-    elapsed = (time.perf_counter() - start_time) * 1000
-    image_b64 = base64.b64encode(image_bytes).decode("utf-8") if image_bytes else None
-
-    return GenerateResponse(
-        image_base64=image_b64,
-        route_result={**route_result, "comfyui_mode": comfy_decision.mode, "target_tab": comfy_decision.target_tab},
-        review=review,
-        retry_used=retry_used,
-        critic_result=critic_result,
         session_id=session_id,
         generation_time_ms=round(elapsed, 1),
         prompt_warnings=prompt_warnings,

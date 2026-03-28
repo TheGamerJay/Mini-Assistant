@@ -6,7 +6,6 @@ structured report used by GET /api/health (upgraded) and the monitoring layer.
 
 Dependencies checked:
   - Ollama (HTTP GET /api/tags)
-  - ComfyUI (HTTP GET /)
   - Redis (PING)
   - MongoDB (server_info)
   - Phase modules (import availability)
@@ -26,7 +25,6 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _OLLAMA_URL  = os.environ.get("OLLAMA_URL") or os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-_COMFY_URL   = os.environ.get("COMFYUI_URL", "http://localhost:8188")
 _TIMEOUT     = 5.0   # seconds per probe
 
 
@@ -142,7 +140,6 @@ async def run_health_checks(include_slow: bool = False) -> Dict[str, Any]:
 
     probes = [
         _probe_http("ollama",  f"{_OLLAMA_URL}/api/tags"),
-        _probe_http("comfyui", f"{_COMFY_URL}/"),
         _probe_redis(),
     ]
     if include_slow:

@@ -6,5 +6,5 @@ from .json_validator import (
 from .file_lock import thread_lock, FileLock, safe_write
 from .prompt_safety import sanitize, validate as validate_prompt
 from .routing_guard import validate_route, enforce_confidence, are_compatible, fix_incompatible_pair
-from .image_logger import log_router_decision, log_comfyui_execution, log_review_event
+from .image_logger import log_router_decision, log_review_event
 from .metadata_writer import build_metadata, save_metadata, save_output_image

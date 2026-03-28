@@ -156,7 +156,7 @@ def _detect_stack() -> dict[str, Any]:
     has_redis    = _grep_first("backend/requirements.txt", r"redis")
     has_ollama   = _grep_first("backend/requirements.txt", r"ollama")
     has_whisper  = _grep_first("backend/requirements.txt", r"faster.whisper|whisper")
-    has_comfyui  = _exists("backend/image_system")
+    has_image_system = _exists("backend/image_system")
 
     databases = []
     if has_mongo:    databases.append("MongoDB")
@@ -172,7 +172,7 @@ def _detect_stack() -> dict[str, Any]:
         "databases": databases,
         "llm_runtime": "Ollama" if has_ollama else "unknown",
         "speech_to_text": "faster-whisper" if has_whisper else "none",
-        "image_gen": "ComfyUI" if has_comfyui else "none",
+        "image_gen": "DALL-E" if has_image_system else "none",
         "deployment": "Railway / Docker" if _exists("Dockerfile") else "unknown",
     }
 
@@ -222,9 +222,8 @@ def _build_feature_map() -> list[FeatureFiles]:
     # ── 2. Image generation ───────────────────────────────────────────────────
     img_gen_files = [f for f in [
         "backend/image_system/api/server.py",           # /api/image/generate
-        "backend/image_system/brains/router_brain.py",  # ComfyUI workflow selector
-        "backend/image_system/brains/coding_brain.py",  # workflow JSON builder
-        "backend/image_system/services/comfyui_client.py",
+        "backend/image_system/brains/router_brain.py",  # router brain
+        "backend/image_system/services/dalle_client.py",
         "backend/image_system/services/prompt_builder.py",
         "backend/image_system/services/image_reviewer.py",
         "backend/mini_assistant/tools/image_gen.py",    # ← DUPLICATE RISK
@@ -233,7 +232,7 @@ def _build_feature_map() -> list[FeatureFiles]:
     ] if _exists(f)]
     features.append(FeatureFiles(
         feature="image_generation",
-        description="ComfyUI-powered image generation pipeline",
+        description="DALL-E 3 powered image generation pipeline",
         files=img_gen_files,
         status="present",
     ))
@@ -453,7 +452,7 @@ def _detect_duplicate_risks() -> list[DuplicateRisk]:
             recommendation=(
                 "Two separate image generation paths exist. "
                 "mini_assistant/tools/image_gen.py should delegate to the image_system API "
-                "rather than calling ComfyUI directly. Unify before adding new generation features."
+                "rather than calling DALL-E directly. Unify before adding new generation features."
             ),
         ))
 

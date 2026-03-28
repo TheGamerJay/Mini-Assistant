@@ -140,7 +140,7 @@ register(Skill(
 
 register(Skill(
     name        = "generate_project_logo",
-    description = "Generate a logo image for a project or product via ComfyUI.",
+    description = "Generate a logo image for a project or product via DALL-E 3.",
     intents     = ["image_generate"],
     trigger_patterns = [
         r"\b(project|app|product|company|brand|startup)\s+(logo|icon|brand)\b",
@@ -148,7 +148,6 @@ register(Skill(
         r"\bdesign\s+(a\s+)?(logo|icon|brand identity)\b",
     ],
     required_brains = ["image_gen"],
-    required_tools  = ["comfyui"],
     input_fields    = ["project_name", "style_keywords"],
     steps = [
         {"id": "s1", "task": "build_logo_prompt",            "brain": "fast",      "depends_on": []},
@@ -235,33 +234,6 @@ register(Skill(
     fallback         = "fall_through_to_planner",
     validation_rules = ["patch targets ChatInput.js or VoiceControl.js", "no duplicate MediaRecorder init"],
     min_confidence   = 0.65,
-    category         = "standard",
-    status           = "active",
-))
-
-register(Skill(
-    name        = "connect_comfyui_image_generation",
-    description = "Wire or fix ComfyUI image generation integration — endpoint, workflow JSON, prompts.",
-    intents     = ["debugging", "code_runner"],
-    trigger_patterns = [
-        r"\bcomfyui\b",
-        r"\bimage.?gen(eration)?\s*(not\s*(working|connecting)|broken|fail)\b",
-        r"\bworkflow[._]api\.json\b",
-        r"\bstable.?diffusion\s*(not|connection|broken)\b",
-        r"\b8188\b",   # default ComfyUI port
-    ],
-    required_brains = ["coding"],
-    input_fields    = ["error_message", "comfyui_url"],
-    steps = [
-        {"id": "s1", "task": "check_comfyui_health",          "tool": "scanner",   "depends_on": []},
-        {"id": "s2", "task": "diagnose_connection_issue",      "brain": "coding",   "depends_on": ["s1"]},
-        {"id": "s3", "task": "propose_fix_or_config_update",   "brain": "coding",   "depends_on": ["s2"]},
-        {"id": "s4", "task": "critic_validate",                "brain": "critic",   "depends_on": ["s3"]},
-    ],
-    output_fields    = ["diagnosis", "fix_steps", "config_changes"],
-    fallback         = "fall_through_to_planner",
-    validation_rules = ["response mentions COMFYUI_URL", "response includes health check guidance"],
-    min_confidence   = 0.70,
     category         = "standard",
     status           = "active",
 ))

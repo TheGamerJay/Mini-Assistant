@@ -1,8 +1,8 @@
 """
 Coding Brain for the Mini Assistant image system.
 
-Uses Claude claude-sonnet-4-6 for coding tasks, ComfyUI workflow generation,
-workflow debugging, and prompt improvement suggestions.
+Uses Claude claude-sonnet-4-6 for coding tasks, workflow debugging,
+and prompt improvement suggestions.
 
 [MODEL ROUTER] coding → Claude claude-sonnet-4-6
 """
@@ -30,17 +30,8 @@ class CodingBrain:
         "Always include type hints and docstrings."
     )
 
-    _WORKFLOW_SYSTEM = (
-        "You are an expert ComfyUI workflow engineer. "
-        "You write ComfyUI API-format workflow JSON objects. "
-        "The format uses node IDs as keys. Each node has: class_type, inputs, _meta.title. "
-        "Node connections use [node_id, output_index] tuples. "
-        "Always include: CheckpointLoaderSimple, CLIPTextEncode x2, EmptyLatentImage, "
-        "KSampler, VAEDecode, SaveImage. Return ONLY valid JSON, no markdown."
-    )
-
     _DEBUG_SYSTEM = (
-        "You are a ComfyUI workflow debugger. "
+        "You are an image generation workflow debugger. "
         "Given a broken workflow and an error message, explain the issue and provide a fixed workflow. "
         "Return JSON: {\"analysis\": \"...\", \"fixed_workflow\": {...}}"
     )
@@ -90,33 +81,6 @@ class CodingBrain:
             messages=[{"role": "user", "content": prompt}],
         )
         return response.content[0].text
-
-    # ------------------------------------------------------------------
-    # ComfyUI workflow generation
-    # ------------------------------------------------------------------
-
-    async def generate_comfyui_workflow(self, description: str) -> dict:
-        """
-        Generate a ComfyUI API-format workflow JSON for the given description.
-        """
-        prompt = (
-            f"Generate a ComfyUI API-format workflow JSON for:\n{description}\n\n"
-            "Return ONLY the JSON object, no explanations."
-        )
-        logger.info(
-            "[MODEL ROUTER] workflow_gen → Claude %s | desc='%s...'",
-            _CODING_MODEL, description[:80],
-        )
-
-        client = self._get_client()
-        response = await client.messages.create(
-            model=_CODING_MODEL,
-            max_tokens=2048,
-            system=self._WORKFLOW_SYSTEM,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = response.content[0].text
-        return self._parse_json_safe(raw) or {}
 
     # ------------------------------------------------------------------
     # Workflow debugging

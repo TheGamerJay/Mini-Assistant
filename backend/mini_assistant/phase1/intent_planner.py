@@ -294,7 +294,7 @@ def _build_tasks(intent: str) -> tuple[list, list]:
     if intent == "image_generate":
         seq = [
             {"id": "t1", "task": "validate_and_enhance_prompt", "brain": "fast",      "depends_on": []},
-            {"id": "t2", "task": "route_to_comfyui_workflow",   "brain": "image_gen", "depends_on": ["t1"]},
+            {"id": "t2", "task": "generate_image_with_dalle",   "brain": "image_gen", "depends_on": ["t1"]},
             {"id": "t3", "task": "quality_review",              "brain": "critic",    "depends_on": ["t2"]},
         ]
 

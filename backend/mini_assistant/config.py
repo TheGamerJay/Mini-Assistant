@@ -2,7 +2,6 @@ import os
 
 # ─── Service endpoints ───────────────────────────────────────────────────────
 LOCAL_AI  = os.getenv("LOCAL_AI",  "http://localhost:8000")   # FastAPI brain backend
-IMAGE_API = os.getenv("IMAGE_API", os.getenv("COMFYUI_URL", "http://localhost:8188"))  # ComfyUI
 
 # ─── AI API keys ─────────────────────────────────────────────────────────────
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
@@ -44,10 +43,7 @@ SEARCH_ENGINE   = os.getenv("SEARCH_ENGINE", "duckduckgo")   # or "tavily" / "br
 TAVILY_API_KEY  = os.getenv("TAVILY_API_KEY", "")
 BRAVE_API_KEY   = os.getenv("BRAVE_API_KEY", "")
 
-# Image generation  (ComfyUI via Cloudflare tunnel)
-# IMAGE_API is the canonical env var; COMFYUI_URL and SD_HOST are aliases for compatibility.
-SD_HOST         = os.getenv("IMAGE_API", os.getenv("COMFYUI_URL", os.getenv("SD_HOST", "http://localhost:8188")))
-SD_BACKEND      = os.getenv("SD_BACKEND", "comfyui")
+# Image generation — uses OpenAI DALL-E 3 via OPENAI_API_KEY
 
 # Code execution sandbox
 CODE_TIMEOUT    = int(os.getenv("CODE_TIMEOUT", "15"))        # seconds
