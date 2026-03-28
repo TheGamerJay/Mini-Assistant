@@ -950,19 +950,23 @@ class DalleClient:
             _img_prep = image_bytes
             if _PIL_AVAILABLE:
                 try:
-                    _pi = _PILImage.open(_sio.BytesIO(image_bytes)).convert("RGBA")
+                    # gpt-image-1 edit works best with RGB PNG (no alpha channel)
+                    _pi = _PILImage.open(_sio.BytesIO(image_bytes)).convert("RGB")
+                    # Cap at 1024x1024 to stay under the 4MB API limit
+                    if max(_pi.size) > 1024:
+                        _pi = _pi.resize((1024, 1024), _PILImage.LANCZOS)
                     _pb = _sio.BytesIO()
-                    _pi.save(_pb, format="PNG")
+                    _pi.save(_pb, format="PNG", optimize=True)
                     _img_prep = _pb.getvalue()
                 except Exception:
                     pass
             _img_file = _sio.BytesIO(_img_prep)
             _img_file.name = "image.png"
+            # gpt-image-1 edit: no mask, no size constraint — let the model decide
             _sem_resp = await client.images.edit(
                 model="gpt-image-1",
                 image=_img_file,
                 prompt=_sem_prompt,
-                size="1024x1024",
             )
             _sem_b64 = (_sem_resp.data[0].b64_json
                         if _sem_resp.data and _sem_resp.data[0].b64_json
