@@ -6,6 +6,7 @@
 
 import React, { useEffect } from 'react';
 import { X, RefreshCw, FileText, Shield, RotateCcw, AlertOctagon, Copyright, Mail, ChevronRight } from 'lucide-react';
+import AIDataUsageSetting from '../components/settings/AIDataUsageSetting';
 import { toast } from 'sonner';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/client';
@@ -154,6 +155,10 @@ function SettingsModal({ onClose }) {
               </div>
             </div>
           </div>
+
+          {/* --- AI Data Usage --- */}
+          <SectionHeader>AI Data &amp; Privacy</SectionHeader>
+          <AIDataUsageSetting />
 
           {/* --- Legal --- */}
           <SectionHeader>Legal</SectionHeader>

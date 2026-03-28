@@ -898,6 +898,13 @@ async def startup_event():
     import asyncio as _asyncio
     _asyncio.ensure_future(_warmup())
 
+    # Tier C retention purge — runs once at startup, non-blocking
+    try:
+        from ..privacy.retention_manager import schedule_background_purge as _purge
+        _purge()
+    except Exception as _exc:
+        logger.warning("Retention purge schedule failed: %s", _exc)
+
 
 # ---------------------------------------------------------------------------
 # Endpoints
@@ -1088,6 +1095,52 @@ async def creation_export(req: CreationExportRequest):
         )
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# User Settings endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/settings")
+async def get_user_settings():
+    """Return current user settings."""
+    from .user_settings import get_settings as _get_settings
+    return _get_settings()
+
+
+@app.patch("/api/settings")
+async def update_user_settings(body: dict):
+    """
+    Update one or more user settings.
+
+    Body: { "ai_data_usage_mode": "private" | "improve_system" }
+    """
+    from .user_settings import update_settings as _update_settings
+    try:
+        updated = _update_settings(body)
+        return updated
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Privacy / Retention endpoints
+# ---------------------------------------------------------------------------
+
+@app.post("/api/privacy/purge")
+async def privacy_purge():
+    """
+    Manually trigger a Tier C retention purge.
+
+    Deletes analytics records older than 30 days.
+    Returns counts of records kept and deleted per store.
+    """
+    from ..privacy.retention_manager import purge_all_tier_c as _purge
+    import asyncio as _asyncio
+    loop = _asyncio.get_running_loop()
+    results = await loop.run_in_executor(None, _purge)
+    total_deleted = sum(v["deleted"] for v in results.values())
+    return {"purged": total_deleted, "stores": results}
 
 
 @app.get("/api/health")
