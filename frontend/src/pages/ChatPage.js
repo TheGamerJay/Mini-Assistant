@@ -575,12 +575,11 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     let imgs = Array.isArray(imagesBase64) ? imagesBase64.filter(Boolean) : (imagesBase64 ? [imagesBase64] : []);
     if (!text && !imgs.length) return;
 
-    // Auto-attach last generated image as edit source when:
-    //   - in Image Mode with no user-attached image
-    //   - there's a previously generated image (previewImage)
-    //   - the message looks like an edit ("change", "make", "turn", etc.)
-    const _EDIT_KW_RE = /\b(change|edit|modify|fix|adjust|recolor|replace|remove|enhance|improve|turn\s+(him|her|it|them|this|that)|make\s+(him|her|it|them|this|that)|darker|brighter|lighter|add\s+(?!a\s+new|another)|give\s+(?:him|her|it|them))\b/i;
-    if (chatMode === 'image' && !imgs.length && previewImage && _EDIT_KW_RE.test(text)) {
+    // Auto-attach last generated image as edit source when in Image Mode.
+    // If the user has a generated image and types anything that isn't
+    // explicitly a brand-new generation request, treat it as an edit.
+    const _NEW_GEN_RE = /\b(generate\s+a|create\s+a|draw\s+a|make\s+a\s+new|make\s+me\s+a|new\s+image\s+of|imagine\s+a)\b/i;
+    if (chatMode === 'image' && !imgs.length && previewImage && !_NEW_GEN_RE.test(text)) {
       imgs = [previewImage];
     }
 

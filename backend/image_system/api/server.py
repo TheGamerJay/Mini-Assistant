@@ -1462,9 +1462,11 @@ async def chat(req: ChatRequest, request: Request):
         if attached_image_bytes and not (parsed_cmd and parsed_cmd.is_slash):
             _wants_edit   = bool(_EDIT_KW.search(effective_msg))    if effective_msg else False
             _wants_refgen = bool(_REF_GEN_KW.search(effective_msg)) if effective_msg else False
-            # Short prompt + image with no clear ref-gen keywords → treat as edit
-            _short_prompt = len((effective_msg or "").strip()) < 80
-            if _wants_edit or (_short_prompt and not _wants_refgen):
+            # Default to edit when image is attached — only use ref-gen if explicitly requested
+            # "make his skin pink", "change the color", "make it darker" → all edit
+            # Only "generate a new image", "create a scene of", "draw me" → ref-gen
+            _short_prompt = len((effective_msg or "").strip()) < 120
+            if _wants_edit or (not _wants_refgen):
                 # Modify the attached image — preserve identity
                 logger.info("[MODEL ROUTER] image_edit detected (edit_kw=%s short=%s)", _wants_edit, _short_prompt)
                 parsed_cmd = _PC(
