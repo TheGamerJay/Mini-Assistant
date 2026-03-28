@@ -18,7 +18,10 @@ import json
 import asyncio
 from faster_whisper import WhisperModel
 from gtts import gTTS
-from duckduckgo_search import DDGS
+try:
+    from ddgs import DDGS
+except ImportError:
+    from duckduckgo_search import DDGS
 import tempfile
 import subprocess
 import httpx
