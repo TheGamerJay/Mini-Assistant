@@ -215,10 +215,17 @@ _CODE = re.compile(
 # Web search
 _SEARCH = re.compile(
     r"\b("
-    r"search|look up|look up|find online|google|bing|latest|current news|"
+    r"search|look up|find online|google|bing|latest|current news|"
     r"today.?s|right now|as of|recent|up to date|what.?s the|"
     r"stock price|weather|currency|exchange rate|news about|"
-    r"who is|when did|how many|what year"
+    r"who is|when did|how many|what year|"
+    # Product / price / availability
+    r"price|cost|how much|cheapest|cheapest|best deal|on sale|discount|"
+    r"in stock|available|buy|order|purchase|shipping|"
+    r"amazon|ebay|walmart|best buy|newegg|etsy|aliexpress|"
+    r"release date|when (does|did|will|is)|specs|benchmark|review of|"
+    r"is there a|are there any|any .{1,20} (under|over|below|above)|"
+    r"find me|check if|can you find|show me"
     r")\b",
     re.IGNORECASE,
 )

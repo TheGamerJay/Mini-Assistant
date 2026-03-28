@@ -453,6 +453,7 @@ You are Mini Assistant — a smart, capable AI workspace assistant built for dev
 - Write, review, debug, and execute code in any programming language
 - Help build complete web apps, UI components, and full projects through the workspace
 - Fetch real-time weather data for any location
+- Search the live web for current prices, product availability, news, specs, and any real-time info
 - Plan and manage multi-step development tasks
 - Search and research topics, summarize documents, brainstorm ideas
 
@@ -483,9 +484,11 @@ You are a creative coding partner, not a robot. You genuinely care about whether
 ## General response rules:
 - Short greetings (hi, hello, hey) → respond warmly and briefly, ask what they need. Do NOT start responses with a greeting when the conversation is already in progress.
 - NEVER prefix a response with a greeting or your name if the user already sent a substantive message
-- If [REAL-TIME DATA] appears in the context, use it directly and accurately — NEVER say you don't have internet access when live data is present
-- If [NO REAL-TIME DATA] appears in the context, honestly tell the user you couldn't fetch that information right now — do NOT make up or estimate weather, time, prices, scores, or any live data
-- NEVER fabricate real-time information (weather, current time, stock prices, sports scores, news, etc.)
+- You have live web search built in — NEVER tell users you can't browse the internet or access real-time data
+- If [WEB SEARCH RESULTS] or [REAL-TIME DATA] appears in the context, use it directly and accurately to answer the question
+- If [NO REAL-TIME DATA] appears in the context, honestly tell the user the search failed right now and offer to try again
+- NEVER fabricate real-time information (weather, prices, scores, news) — use only what is in [WEB SEARCH RESULTS] or [REAL-TIME DATA]
+- If no search results are in context but the user asks for live data, say you're searching and ask them to resend if needed
 - You CAN generate images — NEVER tell users you cannot generate images
 - Code execution IS built into this platform — you actively help write and run code
 - For legal, medical, or financial topics: always recommend consulting a qualified professional
@@ -2484,17 +2487,31 @@ async def chat_stream(req: ChatRequest, request: Request):
             phase1_plan = None  # skip routing entirely
         if req.chat_mode == "chat":
             execution_intent = "chat"
-            # Still run the planner so web_search intent is detected — but don't
-            # let it override execution_intent (chat mode stays as chat).
+            # Run the planner so web_search intent is detected — but don't let
+            # it override execution_intent (chat mode stays as chat).
+            # If regex returns normal_chat, also try the LLM classifier so
+            # naturally-phrased queries ("can u check if theres any X on amazon")
+            # are correctly identified regardless of wording.
             try:
                 from mini_assistant.phase1.command_parser import parse as _cp_parse
-                from mini_assistant.phase1.intent_planner import plan as _cp_plan
+                from mini_assistant.phase1.intent_planner import (
+                    plan as _cp_plan,
+                    classify_intent_with_llm as _cp_llm,
+                )
                 _cp_parsed = _cp_parse(clean_message)
                 phase1_plan = _cp_plan(
                     message=clean_message,
                     parsed_command=_cp_parsed,
                     history=req.history or [],
                 )
+                # LLM fallback: regex returned normal_chat — let Haiku decide.
+                # No length gate: short queries like "any rtx 5090 under 2k on amazon?"
+                # are valid searches even if they're only 40 chars.
+                if phase1_plan.intent == "normal_chat":
+                    _llm_intent = await _cp_llm(clean_message)
+                    if _llm_intent == "web_search":
+                        phase1_plan.intent = "web_search"
+                        logger.info("Chat-mode LLM intent override → web_search")
             except Exception as _cp_err:
                 logger.debug("Chat-mode planner skipped: %s", _cp_err)
                 phase1_plan = None
