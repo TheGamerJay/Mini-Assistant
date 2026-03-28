@@ -11,8 +11,10 @@
 import React, { useEffect, useState } from 'react';
 import { ShieldCheck, Sparkles, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { IMAGE_API } from '../../api/client';
 
-const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:7860';
+// Settings endpoints live on the image system server, accessed via IMAGE_API proxy
+const SETTINGS_URL = `${IMAGE_API.replace(/\/api$/, '')}/api/settings`;
 
 const MODES = [
   {
@@ -59,7 +61,7 @@ export default function AIDataUsageSetting() {
 
   // Load current setting on mount
   useEffect(() => {
-    fetch(`${API_BASE}/api/settings`)
+    fetch(SETTINGS_URL)
       .then((r) => r.json())
       .then((d) => setMode(d.ai_data_usage_mode || 'private'))
       .catch(() => setMode('private'));
@@ -69,7 +71,7 @@ export default function AIDataUsageSetting() {
     if (newMode === mode || saving) return;
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/api/settings`, {
+      const res = await fetch(SETTINGS_URL, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ai_data_usage_mode: newMode }),
