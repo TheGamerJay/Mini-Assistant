@@ -22,13 +22,10 @@ import os
 
 logger = logging.getLogger(__name__)
 
-# ── Only enhance if an OpenAI key + reasoning model are configured ────────────
+# ── Available if any AI API key is configured (OpenAI or Anthropic) ──────────
 
 def _enhancer_available() -> bool:
-    return bool(
-        os.getenv("OPENAI_API_KEY") and
-        os.getenv("OPENAI_REASONING_MODEL")
-    )
+    return bool(os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY"))
 
 
 # ── Edit request analyzer (routes to PIL vs AI inpainting) ───────────────────

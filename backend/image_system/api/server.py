@@ -1718,9 +1718,39 @@ async def chat(req: ChatRequest, request: Request):
         except Exception as _ae:
             logger.warning("analyze_edit_request failed (%s) — using fallback routing", _ae)
 
-        # If no steps from GPT, create a single fallback structural step
+        # If no steps from GPT, try a local regex extraction before giving up
         if not _edit_steps:
-            _edit_steps = [{"edit_type": "structural_edit", "final_instruction": None}]
+            _msg_lower = effective_msg.lower()
+            _COLOR_WORDS = r"(red|orange|yellow|green|blue|purple|pink|brown|black|white|gray|grey|cyan|magenta|violet|gold|silver|teal|navy|maroon|coral|lime|indigo|turquoise|beige|tan|lavender|crimson)"
+            _REGION_WORDS = r"(skin|fur|body|hair|eyes?|eye|shirt|hoodie|jacket|pants|shoes?|sneakers?|boots?|tail|ears?|nose)"
+            _color_from_to = re.search(
+                rf"\b{_COLOR_WORDS}\s+(?:color\s+)?(?:to|into|→)\s+{_COLOR_WORDS}\b"
+                rf"|make\s+(?:his|her|its?|their|the)?\s*(?:\w+\s+)?(?:{_REGION_WORDS}\s+)?(?:color\s+)?{_COLOR_WORDS}\b"
+                rf"|change\s+(?:\w+\s+)?(?:{_REGION_WORDS}\s+)?(?:color\s+)?(?:from\s+)?{_COLOR_WORDS}\s+(?:to|into)\s+{_COLOR_WORDS}",
+                _msg_lower,
+            )
+            _region_match = re.search(_REGION_WORDS, _msg_lower)
+            _region_name = _region_match.group(1) if _region_match else None
+            # Determine edit type based on region
+            _is_skin_kw = _region_name and re.search(r"skin|fur|body|tail|ears?", _region_name)
+            _fallback_etype = "color_change" if _color_from_to or _region_name else "structural_edit"
+            # Extract all color words from message and guess from/to
+            _all_colors = re.findall(rf"\b{_COLOR_WORDS}\b", _msg_lower)
+            _fb_from = _all_colors[0] if len(_all_colors) >= 2 else None
+            _fb_to   = _all_colors[-1] if _all_colors else None
+            _edit_steps = [{
+                "edit_type": _fallback_etype,
+                "region_description": _region_name or ("skin/fur" if _is_skin_kw else ""),
+                "from_color": _fb_from,
+                "to_color": _fb_to,
+                "primary_tier": "semantic" if _is_skin_kw else "semantic",
+                "color_overlap_risk": False,
+                "final_instruction": None,
+            }]
+            logger.info(
+                "[MODEL ROUTER] fallback regex extraction → etype=%s from=%s to=%s region=%s",
+                _fallback_etype, _fb_from, _fb_to, _region_name,
+            )
 
         # ── Helper: build PIL mask from bounding box ──────────────────────────
         def _build_mask(img_bytes: bytes, mask_box: dict) -> bytes | None:
