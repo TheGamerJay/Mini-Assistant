@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 VALID_SIZES = {"1024x1024", "1024x1792", "1792x1024"}
 DEFAULT_SIZE = "1024x1024"
 
-# gpt-image-1 / gpt-image-1.5 — configurable via IMAGE_MODEL env var
-_IMAGE_EDIT_MODEL = os.getenv("IMAGE_MODEL", "gpt-image-1")
+# Image edit model — dall-e-2 is universally available; override with IMAGE_MODEL env var
+_IMAGE_EDIT_MODEL = os.getenv("IMAGE_MODEL", "dall-e-2")
 
 # DALL-E 3 hard prompt limit (OpenAI enforces this server-side)
 _PROMPT_MAX = 4000
@@ -370,12 +370,22 @@ class DalleClient:
             _IMAGE_EDIT_MODEL, size, len(prompt), mask_bytes is not None, prompt,
         )
 
-        # Ensure PNG format — gpt-image-1 accepts PNG/JPEG/WEBP but PNG is safest
+        # dall-e-2 edit requires: square RGBA PNG, max 4MB
         img_data = image_bytes
         if _PIL_AVAILABLE:
             try:
+                _pil = _PILImage.open(_io.BytesIO(image_bytes)).convert("RGBA")
+                # Make square (dall-e-2 requirement)
+                w, h = _pil.size
+                if w != h:
+                    side = min(w, h)
+                    _pil = _pil.crop(((w - side) // 2, (h - side) // 2,
+                                      (w + side) // 2, (h + side) // 2))
+                # Cap at 1024x1024
+                if _pil.width > 1024:
+                    _pil = _pil.resize((1024, 1024), _PILImage.LANCZOS)
                 buf = _io.BytesIO()
-                _PILImage.open(_io.BytesIO(image_bytes)).convert("RGBA").save(buf, format="PNG")
+                _pil.save(buf, format="PNG", optimize=True)
                 img_data = buf.getvalue()
             except Exception as _e:
                 logger.warning("PIL PNG conversion failed, passing raw bytes: %s", _e)
@@ -501,9 +511,10 @@ class DalleClient:
                 to_color, text, flags=re.IGNORECASE,
             )
             # Also replace region+color order: "skin is blue" / "skin color: blue"
+            # Use capturing group instead of variable-width look-behind
             swapped = re.sub(
-                rf"(?<={region}\s(?:is|are|color[:\s]+)){re.escape(from_color)}\b",
-                to_color, swapped, flags=re.IGNORECASE,
+                rf"({re.escape(region)}\s+(?:is|are|(?:color\s*[:\s]+))){re.escape(from_color)}\b",
+                lambda m: m.group(1) + to_color, swapped, flags=re.IGNORECASE,
             )
             # Fallback: replace any remaining standalone from_color that is NOT
             # preceded by a clothing keyword
