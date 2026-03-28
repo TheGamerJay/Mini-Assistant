@@ -49,12 +49,12 @@ export default function AdModeOverview({ onNav, profileExists, campaigns }) {
         <div className="flex items-center gap-2 mb-2">
           <Zap size={15} className="text-violet-400" />
           <span className="text-[10px] font-mono uppercase tracking-widest text-violet-400">
-            Ad Mode Active
+            AI Ad Generator
           </span>
         </div>
-        <h2 className="text-xl font-bold text-slate-100 mb-1">Your ads never sleep.</h2>
+        <h2 className="text-xl font-bold text-slate-100 mb-1">Create high-converting ads in seconds.</h2>
         <p className="text-sm text-slate-400">
-          Generate complete ad campaigns — copy, images, and creative angles — powered by Claude AI and DALL·E 3.
+          Generate scroll-stopping copy, images, and creative angles — powered by Claude AI and DALL·E 3.
         </p>
       </div>
 
@@ -80,7 +80,7 @@ export default function AdModeOverview({ onNav, profileExists, campaigns }) {
           />
           <QuickAction
             icon={Image}
-            label="Generate Ad Set"
+            label="Generate Ads"
             desc="Create hooks, headlines, captions, CTAs and images in one shot"
             onClick={() => onNav('generate')}
             color="cyan"

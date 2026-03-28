@@ -141,10 +141,12 @@ export default function AdModeCampaigns() {
 
   if (!campaigns.length) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-center gap-3">
+      <div className="flex flex-col items-center justify-center py-20 text-center gap-4">
         <Target size={28} className="text-slate-600" />
-        <p className="text-slate-300 font-medium">No Campaigns Yet</p>
-        <p className="text-sm text-slate-500">Generate your first ad set in the Generate Ads tab.</p>
+        <div>
+          <p className="text-slate-300 font-medium mb-1">Create your first ad in seconds.</p>
+          <p className="text-sm text-slate-500">Describe your product and let AI generate high-converting ads for you.</p>
+        </div>
       </div>
     );
   }

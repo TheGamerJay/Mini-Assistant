@@ -72,12 +72,16 @@ export default function AdModeLocked() {
             <Lock size={11} /> Add-On Required
           </div>
           <h1 className="text-3xl font-bold text-slate-100 mb-3 leading-tight">
-            Your ads never sleep.
+            AI Ad Generator
           </h1>
           <p className="text-slate-400 text-base leading-relaxed max-w-lg mx-auto">
-            Ad Mode uses Claude AI and DALL·E 3 to create complete ad campaigns —
-            copy, images, and creative angles — in minutes.
+            Create high-converting ads in seconds — powered by AI
           </p>
+          <div className="mt-4 flex flex-col gap-1.5 text-sm text-slate-500 max-w-sm mx-auto text-left">
+            <p>⚡ Generate scroll-stopping ad copy and visuals instantly</p>
+            <p>🎯 Test multiple ad angles with one click</p>
+            <p>🚀 Built for creators, brands, and businesses</p>
+          </div>
         </div>
 
         {/* Feature list */}
@@ -129,7 +133,7 @@ export default function AdModeLocked() {
                     : 'bg-white/8 hover:bg-white/12 text-slate-200 border border-white/10'}
                   disabled:opacity-50 disabled:cursor-not-allowed`}
               >
-                {loading === plan.id ? 'Opening checkout…' : 'Unlock Ad Mode'}
+                {loading === plan.id ? 'Opening checkout…' : 'Unlock AI Ad Generator'}
               </button>
             </div>
           ))}

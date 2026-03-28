@@ -515,9 +515,9 @@ export default function PricingPage() {
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400 text-xs font-medium mb-3">
               <Zap className="w-3 h-3" /> Add-On
             </div>
-            <h2 className="text-xl font-bold text-white mb-2">Ad Mode</h2>
+            <h2 className="text-xl font-bold text-white mb-2">AI Ad Generator</h2>
             <p className="text-sm text-slate-400 max-w-md mx-auto">
-              AI-powered ad creation. Generate complete ad campaigns with copy and images — works alongside any plan.
+              Generate scroll-stopping ads in seconds — copy, images, and creative angles. Works alongside any plan.
             </p>
           </div>
 
@@ -552,7 +552,7 @@ export default function PricingPage() {
                     onClick={() => setPage('ad-mode')}
                     className="w-full py-2 rounded-lg bg-violet-500/20 border border-violet-500/30 text-violet-300 text-xs font-semibold"
                   >
-                    Open Ad Mode
+                    Open AI Ad Generator
                   </button>
                 ) : (
                   <button
@@ -578,7 +578,7 @@ export default function PricingPage() {
                     onClick={() => setPage('ad-mode')}
                     className="w-full py-2 rounded-lg bg-violet-500/20 border border-violet-500/30 text-violet-300 text-xs font-semibold"
                   >
-                    Open Ad Mode
+                    Open AI Ad Generator
                   </button>
                 ) : (
                   <button

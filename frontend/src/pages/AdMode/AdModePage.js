@@ -49,10 +49,10 @@ export default function AdModePage() {
       <div className="flex-shrink-0 flex items-center gap-3 px-6 py-3 border-b border-white/8 bg-[#0d0d12]">
         <div className="flex items-center gap-2">
           <Zap size={15} className="text-violet-400" />
-          <span className="text-sm font-semibold text-slate-100">Ad Mode</span>
+          <span className="text-sm font-semibold text-slate-100">AI Ad Generator</span>
         </div>
         <div className="h-3 w-px bg-white/10 mx-1" />
-        <p className="text-xs text-slate-500">AI-powered ad creation</p>
+        <p className="text-xs text-slate-500">Create high-converting ads in seconds</p>
       </div>
 
       {/* Tab nav */}

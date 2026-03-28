@@ -706,10 +706,10 @@ function Sidebar() {
           {!sidebarCollapsed && <span className="font-medium">What I Know</span>}
         </button>
 
-        {/* Ad Mode */}
+        {/* Ad Generator */}
         <button
           onClick={() => navTo('ad-mode')}
-          title={hasAdMode ? 'Ad Mode — AI Ad Creation' : 'Ad Mode — Upgrade to unlock'}
+          title={hasAdMode ? 'AI Ad Generator — Create high-converting ads' : 'AI Ad Generator — Upgrade to unlock'}
           className={`w-full flex items-center gap-2 rounded-lg px-2 py-2 mb-1 text-xs transition-colors
             ${page === 'ad-mode'
               ? 'bg-violet-500/10 border border-violet-500/20 text-violet-300'
@@ -719,7 +719,7 @@ function Sidebar() {
           <Zap size={14} className="flex-shrink-0" />
           {!sidebarCollapsed && (
             <span className="font-medium flex items-center gap-1.5 flex-1">
-              Ad Mode
+              Ad Generator
               {!hasAdMode && <span className="text-[9px] font-mono text-violet-500 bg-violet-500/10 border border-violet-500/20 rounded px-1 py-px ml-auto">PRO</span>}
             </span>
           )}
