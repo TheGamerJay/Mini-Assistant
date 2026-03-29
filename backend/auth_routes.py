@@ -1689,6 +1689,9 @@ class RestoreAccessBody(BaseModel):
     subscription_credits: Optional[int] = None
     note: str = ""
 
+class SetPlanBody(BaseModel):
+    plan: str
+
 
 def _admin_require(authorization: Optional[str] = Header(default=None)):
     """Dependency: require admin role. Raises 403 if not admin."""
@@ -1728,6 +1731,40 @@ async def admin_unflag_user(
     )
     log.info("Admin %s unflagged user %s (%d flags cleared)", caller_uid, user_id, result.modified_count)
     return {"ok": True, "flags_cleared": result.modified_count, "user_id": user_id}
+
+
+@auth_router.patch("/admin/users/{user_id}/plan")
+async def admin_set_user_plan(
+    user_id: str,
+    body: SetPlanBody,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Change a user's plan — admin only."""
+    db = _get_db()
+    caller = _admin_require(authorization)
+    caller_uid = caller.get("sub")
+    caller_doc = await db["users"].find_one({"id": caller_uid}, {"role": 1})
+    if not caller_doc or caller_doc.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    from mini_credits import PLAN_CREDIT_LIMITS  # noqa: PLC0415
+    valid_plans = set(PLAN_CREDIT_LIMITS.keys())
+    if body.plan not in valid_plans:
+        raise HTTPException(status_code=400, detail=f"Invalid plan '{body.plan}'. Valid: {sorted(valid_plans)}")
+
+    new_credits = PLAN_CREDIT_LIMITS.get(body.plan, 50)
+    result = await db["users"].update_one(
+        {"id": user_id},
+        {"$set": {
+            "plan":                 body.plan,
+            "subscription_credits": new_credits,
+        }},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    log.info("Admin %s changed user %s plan → %s (credits=%d)", caller_uid, user_id, body.plan, new_credits)
+    return {"ok": True, "user_id": user_id, "plan": body.plan, "subscription_credits": new_credits}
 
 
 @auth_router.post("/admin/users/{user_id}/reset-enforcement")

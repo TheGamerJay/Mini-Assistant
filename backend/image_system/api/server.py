@@ -1912,14 +1912,16 @@ async def chat(req: ChatRequest, request: Request):
             if _PORTRAIT_KW.search(_gen_prompt):
                 _gen_size = "1024x1792"
                 # Strip terms that push DALL-E toward diagonal splash art
-                _gen_prompt = re.sub(r'\b(cinematic|splash art|dynamic pose|battle stance|action pose)\b', '', _gen_prompt, flags=re.IGNORECASE)
+                _gen_prompt = re.sub(r'\b(cinematic|splash art|dynamic pose|battle stance|action pose|anime cinematic style)\b', '', _gen_prompt, flags=re.IGNORECASE)
                 _gen_prompt = _gen_prompt.strip().rstrip(',').strip()
-                # Append framing overrides that force straight-on full-body composition
-                _gen_prompt += (
-                    ", character design sheet, front view, neutral standing pose, "
-                    "character facing directly toward viewer, full body visible head to toe, "
-                    "feet fully visible, no cropping, camera straight ahead"
-                )
+                # PREPEND framing — DALL-E reads left-to-right so framing MUST come first
+                # to override any action/cinematic keywords later in the prompt.
+                _gen_prompt = (
+                    "Character design reference sheet. Front view. Character faces directly "
+                    "toward viewer. Neutral standing pose. Full body visible head to toe. "
+                    "Feet fully visible. No cropping. Camera straight ahead. Portrait orientation. "
+                    "SUBJECT: "
+                ) + _gen_prompt
             else:
                 _gen_size = "1024x1024"
             _b64 = await _dalle.generate(_gen_prompt, size=_gen_size)
@@ -1980,13 +1982,15 @@ async def chat(req: ChatRequest, request: Request):
             _dalle = DalleClient()
             if _PORTRAIT_KW.search(dalle_prompt + " " + effective_msg):
                 _ref_size = "1024x1792"
-                dalle_prompt = re.sub(r'\b(cinematic|splash art|dynamic pose|battle stance|action pose)\b', '', dalle_prompt, flags=re.IGNORECASE)
+                dalle_prompt = re.sub(r'\b(cinematic|splash art|dynamic pose|battle stance|action pose|anime cinematic style)\b', '', dalle_prompt, flags=re.IGNORECASE)
                 dalle_prompt = dalle_prompt.strip().rstrip(',').strip()
-                dalle_prompt += (
-                    ", character design sheet, front view, neutral standing pose, "
-                    "character facing directly toward viewer, full body visible head to toe, "
-                    "feet fully visible, no cropping, camera straight ahead"
-                )
+                # PREPEND framing — DALL-E reads left-to-right; framing must come first
+                dalle_prompt = (
+                    "Character design reference sheet. Front view. Character faces directly "
+                    "toward viewer. Neutral standing pose. Full body visible head to toe. "
+                    "Feet fully visible. No cropping. Camera straight ahead. Portrait orientation. "
+                    "SUBJECT: "
+                ) + dalle_prompt
             else:
                 _ref_size = "1024x1024"
             _b64 = await _dalle.generate(dalle_prompt, size=_ref_size)
