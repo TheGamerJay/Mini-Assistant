@@ -1733,7 +1733,7 @@ async def admin_unflag_user(
     return {"ok": True, "flags_cleared": result.modified_count, "user_id": user_id}
 
 
-@auth_router.patch("/admin/users/{user_id}/plan")
+@admin_router.patch("/users/{user_id}/plan")
 async def admin_set_user_plan(
     user_id: str,
     body: SetPlanBody,
