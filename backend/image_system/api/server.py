@@ -837,12 +837,15 @@ async def _fetch_weather(location: str) -> Optional[str]:
         loc_str = ", ".join(filter(None, [name, admin, country]))
         tz_name = loc_info.get("timezone", "UTC")
 
-        # Step 2: Fetch weather
+        # Step 2: Fetch weather — current + today's daily forecast
         wx_url = (
             f"https://api.open-meteo.com/v1/forecast"
             f"?latitude={lat}&longitude={lon}"
             f"&current=temperature_2m,apparent_temperature,relative_humidity_2m,"
             f"wind_speed_10m,wind_direction_10m,weather_code,uv_index,visibility"
+            f"&daily=temperature_2m_max,temperature_2m_min,weather_code,"
+            f"precipitation_probability_max,wind_speed_10m_max"
+            f"&forecast_days=2"
             f"&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone={tz_name}"
         )
         async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as _c:
@@ -851,6 +854,7 @@ async def _fetch_weather(location: str) -> Optional[str]:
             return None
         wx_d = wx_r.json()
         cur  = wx_d.get("current", {})
+        daily = wx_d.get("daily", {})
         utc_offset_s = wx_d.get("utc_offset_seconds", 0)
 
         temp_f   = cur.get("temperature_2m", "?")
@@ -881,15 +885,39 @@ async def _fetch_weather(location: str) -> Optional[str]:
         tz_offset_h = utc_offset_s // 3600
         tz_label = f"UTC{'+' if tz_offset_h >= 0 else ''}{tz_offset_h}"
 
+        # Daily forecast lines (today + tomorrow)
+        daily_lines = ""
+        dates      = daily.get("time", [])
+        highs      = daily.get("temperature_2m_max", [])
+        lows       = daily.get("temperature_2m_min", [])
+        d_codes    = daily.get("weather_code", [])
+        precip_pct = daily.get("precipitation_probability_max", [])
+        wind_max   = daily.get("wind_speed_10m_max", [])
+        day_labels = ["Today", "Tomorrow"]
+        for i, label in enumerate(day_labels):
+            if i >= len(dates):
+                break
+            d_desc = _WMO_CODES.get(d_codes[i] if i < len(d_codes) else -1, "")
+            hi  = f"{round(highs[i])}°F" if i < len(highs) else "?"
+            lo  = f"{round(lows[i])}°F"  if i < len(lows)  else "?"
+            pp  = f"{precip_pct[i]}%"    if i < len(precip_pct) else "?"
+            wm  = f"{round(wind_max[i])} mph" if i < len(wind_max) else "?"
+            daily_lines += (
+                f"{label} ({dates[i]}): {d_desc} | High {hi} / Low {lo} | "
+                f"Precip chance {pp} | Max wind {wm}\n"
+            )
+
+        logger.info("Weather geocoded '%s' → %s (lat=%s lon=%s)", location, loc_str, lat, lon)
+
         return (
             f"[REAL-TIME DATA from Open-Meteo]\n"
-            f"Location: {loc_str}\n"
+            f"Location: {loc_str} (lat={lat}, lon={lon})\n"
             f"Local time: {local_time_str} ({tz_label})\n"
-            f"Condition: {desc}\n"
-            f"Temperature: {temp_f}°F ({temp_c}°C)  |  Feels Like: {feels_f}°F ({feels_c}°C)\n"
-            f"Humidity: {humidity}%  |  Wind: {wind_mph} mph {wind_dir}\n"
-            f"UV Index: {uv}  |  Visibility: {vis_str}\n"
+            f"Current: {desc} | {temp_f}°F ({temp_c}°C) | Feels like {feels_f}°F ({feels_c}°C)\n"
+            f"Humidity: {humidity}% | Wind: {wind_mph} mph {wind_dir} | UV: {uv} | Visibility: {vis_str}\n"
+            f"Forecast:\n{daily_lines}"
             f"[END REAL-TIME DATA]\n"
+            f"IMPORTANT: Only report data shown above. Do NOT add any weather details not present here.\n"
         )
     except Exception as _we:
         logger.warning("Weather fetch failed for '%s': %s", location, _we)
