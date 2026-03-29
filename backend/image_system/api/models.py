@@ -64,6 +64,7 @@ class ChatRequest(BaseModel):
     vibe_mode: bool = False                          # Vibe Code mode: skip Q&A, build immediately
     chat_mode: Optional[str] = None                  # explicit mode: 'image' | 'build' | None (auto)
     request_id: Optional[str] = None                 # client-generated UUID for deduplication
+    timezone: Optional[str] = None                   # IANA timezone (e.g. "America/New_York")
 
 
 class AutoFixRequest(BaseModel):

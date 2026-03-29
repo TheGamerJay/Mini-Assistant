@@ -105,6 +105,7 @@ export const api = {
     if (preferredModel) body.preferred_model = preferredModel;
     if (requestId)      body.request_id      = requestId;
     if (chatMode)       body.chat_mode       = chatMode;
+    try { body.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (_) {}
     return post(`${IMAGE_API}/chat`, body, 120000);
   },
 
@@ -117,6 +118,7 @@ export const api = {
     else if (imgs.length > 1) body.images_base64 = imgs;
     if (vibeMode) body.vibe_mode = true;
     if (chatMode) body.chat_mode = chatMode;
+    try { body.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (_) {}
     const _streamToken = getToken();
     const authHeaders = {
       ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),

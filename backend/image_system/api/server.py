@@ -2116,12 +2116,17 @@ async def chat(req: ChatRequest, request: Request):
                 except Exception:
                     _gpt_code_ctx = ""
 
-            # Inject current server datetime so the AI always knows the exact time
-            from datetime import datetime, timezone
-            import zoneinfo
-            _now_et = datetime.now(zoneinfo.ZoneInfo("America/New_York"))
+            # Inject current datetime in the user's local timezone (falls back to UTC)
+            from datetime import datetime as _dt_cls, timezone as _tz_cls
+            import zoneinfo as _zi_mod
+            try:
+                _user_tz = _zi_mod.ZoneInfo(req.timezone or "UTC")
+            except Exception:
+                _user_tz = _zi_mod.ZoneInfo("UTC")
+            _now_local = _dt_cls.now(_user_tz)
+            _tz_label = req.timezone or "UTC"
             _datetime_header = (
-                f"[CURRENT DATE/TIME: {_now_et.strftime('%A, %B %d, %Y — %I:%M %p')} Eastern Time]\n\n"
+                f"[CURRENT DATE/TIME: {_now_local.strftime('%A, %B %d, %Y — %I:%M %p')} {_tz_label}]\n\n"
             )
 
             # Build system prompt
@@ -2198,14 +2203,31 @@ async def chat(req: ChatRequest, request: Request):
 
             import anthropic as _am
             _ac = _am.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
-            logger.info("[MODEL ROUTER] chat → Claude claude-sonnet-4-6")
-            _resp = await _ac.messages.create(
-                model      = "claude-sonnet-4-6",
-                max_tokens = 4096,
-                system     = _sys_prompt,
-                messages   = claude_msgs,
+            logger.info("[MODEL ROUTER] chat → Claude claude-sonnet-4-6 (web_search enabled)")
+            _ws_tool = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]
+            try:
+                _resp = await _ac.messages.create(
+                    model         = "claude-sonnet-4-6",
+                    max_tokens    = 4096,
+                    system        = _sys_prompt,
+                    messages      = claude_msgs,
+                    tools         = _ws_tool,
+                    extra_headers = {"anthropic-beta": "web-search-2025-03-05"},
+                )
+            except Exception as _ws_exc:
+                # Beta not available on this key/tier — fall back to plain call
+                logger.warning("web_search beta unavailable (%s), falling back", _ws_exc)
+                _resp = await _ac.messages.create(
+                    model      = "claude-sonnet-4-6",
+                    max_tokens = 4096,
+                    system     = _sys_prompt,
+                    messages   = claude_msgs,
+                )
+            # Extract text from response (may contain tool_use/tool_result blocks)
+            reply = next(
+                (b.text for b in _resp.content if hasattr(b, "text") and b.text),
+                ""
             )
-            reply = _resp.content[0].text
         except Exception as exc:
             reply = _friendly_error(exc)
 
@@ -2718,12 +2740,17 @@ async def chat_stream(req: ChatRequest, request: Request):
         if req.chat_mode in ("image", "image_edit"):
             _sys_prompt_stream = _sys_prompt_stream + _IMAGE_MODE_ADDENDUM
 
-        # Prepend current server datetime so the AI always knows the exact time
-        from datetime import datetime as _dt
-        import zoneinfo as _zi
-        _now_et_s = _dt.now(_zi.ZoneInfo("America/New_York"))
+        # Prepend current datetime in the user's local timezone (falls back to UTC)
+        from datetime import datetime as _dts
+        import zoneinfo as _zis
+        try:
+            _user_tz_s = _zis.ZoneInfo(req.timezone or "UTC")
+        except Exception:
+            _user_tz_s = _zis.ZoneInfo("UTC")
+        _now_local_s = _dts.now(_user_tz_s)
+        _tz_label_s = req.timezone or "UTC"
         _dt_header = (
-            f"[CURRENT DATE/TIME: {_now_et_s.strftime('%A, %B %d, %Y — %I:%M %p')} Eastern Time]\n\n"
+            f"[CURRENT DATE/TIME: {_now_local_s.strftime('%A, %B %d, %Y — %I:%M %p')} {_tz_label_s}]\n\n"
         )
         _sys_prompt_stream = _dt_header + _sys_prompt_stream
         history_msgs: list[dict] = [{"role": "system", "content": _sys_prompt_stream}]
@@ -3150,11 +3177,14 @@ If all pass: PASS.
             try:
                 import anthropic as _am_plain
                 _ac_plain = _am_plain.AsyncAnthropic(api_key=_api_key_claude)
+                _ws_tool_s = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]
                 async with _ac_plain.messages.stream(
                     model="claude-sonnet-4-6",
                     max_tokens=8192,
                     system=_sys_prompt_stream,
                     messages=_c_msgs_plain,
+                    tools=_ws_tool_s,
+                    extra_headers={"anthropic-beta": "web-search-2025-03-05"},
                 ) as _cs_plain:
                     _plain_last_ping = asyncio.get_event_loop().time()
                     async for _ct in _cs_plain.text_stream:
