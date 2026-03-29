@@ -99,7 +99,9 @@ export const api = {
   chat(message, sessionId, history = [], imagesBase64 = null, preferredModel = null, requestId = null, chatMode = null) {
     const trimmedHistory = history.slice(-20).map(m => ({ role: m.role, content: m.content }));
     const body = { message, session_id: sessionId, history: trimmedHistory };
-    const imgs = Array.isArray(imagesBase64) ? imagesBase64.filter(Boolean) : (imagesBase64 ? [imagesBase64] : []);
+    const _MAX_IMG_B64 = 15 * 1024 * 1024; // 15 MB base64 ~ 11 MB actual file
+    const imgs = (Array.isArray(imagesBase64) ? imagesBase64.filter(Boolean) : (imagesBase64 ? [imagesBase64] : []))
+      .filter(b => { if (b.length > _MAX_IMG_B64) { console.warn('Image dropped: exceeds 15 MB limit'); return false; } return true; });
     if (imgs.length === 1) body.image_base64 = imgs[0];
     else if (imgs.length > 1) body.images_base64 = imgs;
     if (preferredModel) body.preferred_model = preferredModel;
@@ -113,7 +115,9 @@ export const api = {
   chatStream(message, sessionId, history = [], imagesBase64 = null, signal = null, vibeMode = false, chatMode = null) {
     const trimmedHistory = history.slice(-20).map(m => ({ role: m.role, content: m.content }));
     const body = { message, session_id: sessionId, history: trimmedHistory };
-    const imgs = Array.isArray(imagesBase64) ? imagesBase64.filter(Boolean) : (imagesBase64 ? [imagesBase64] : []);
+    const _MAX_IMG_B64 = 15 * 1024 * 1024;
+    const imgs = (Array.isArray(imagesBase64) ? imagesBase64.filter(Boolean) : (imagesBase64 ? [imagesBase64] : []))
+      .filter(b => { if (b.length > _MAX_IMG_B64) { console.warn('Image dropped: exceeds 15 MB limit'); return false; } return true; });
     if (imgs.length === 1) body.image_base64 = imgs[0];
     else if (imgs.length > 1) body.images_base64 = imgs;
     if (vibeMode) body.vibe_mode = true;

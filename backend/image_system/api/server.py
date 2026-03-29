@@ -2277,8 +2277,15 @@ async def chat(req: ChatRequest, request: Request):
 
             import anthropic as _am
             _ac = _am.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+            # Also skip web_search for pure time/date queries — datetime is already in context
+            _DATETIME_ONLY = _re.compile(
+                r"^(?:what(?:'?s| is)|tell me|whats)?\s*(?:the\s+)?(?:current\s+)?"
+                r"(?:time|date|day|today|datetime|clock)[\s?!.]*$",
+                _re.I
+            )
+            _skip_search_ns = _live_weather_injected_ns or bool(_DATETIME_ONLY.match(effective_msg.strip()))
             # Skip web_search when live weather/data already injected to avoid stale override
-            if _live_weather_injected_ns:
+            if _skip_search_ns:
                 logger.info("[MODEL ROUTER] chat → Claude claude-sonnet-4-6 (live data, no web_search)")
                 _resp = await _ac.messages.create(
                     model      = "claude-sonnet-4-6",
@@ -2287,7 +2294,7 @@ async def chat(req: ChatRequest, request: Request):
                     messages   = claude_msgs,
                 )
             else:
-                logger.info("[MODEL ROUTER] chat → Claude claude-sonnet-4-6 (web_search enabled)")
+                logger.info("[MODEL ROUTER] chat → Claude claude-sonnet-4-6 (web_search enabled, skip=%s)", _skip_search_ns)
                 _ws_tool = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]
                 try:
                     _resp = await _ac.messages.create(
@@ -3279,11 +3286,16 @@ If all pass: PASS.
             try:
                 import anthropic as _am_plain
                 _ac_plain = _am_plain.AsyncAnthropic(api_key=_api_key_claude)
-                # Skip web_search when live weather/data was already injected — prevents
-                # the AI from overriding accurate live data with stale search results.
+                # Skip web_search when live weather/data was injected or query is time/date only
+                _DATETIME_ONLY_S = _re.compile(
+                    r"^(?:what(?:'?s| is)|tell me|whats)?\s*(?:the\s+)?(?:current\s+)?"
+                    r"(?:time|date|day|today|datetime|clock)[\s?!.]*$",
+                    _re.I
+                )
+                _skip_search_s = _live_weather_injected or bool(_DATETIME_ONLY_S.match(effective_msg.strip()))
                 _stream_kwargs: dict = {"model": "claude-sonnet-4-6", "max_tokens": 8192,
                                         "system": _sys_prompt_stream, "messages": _c_msgs_plain}
-                if not _live_weather_injected:
+                if not _skip_search_s:
                     _stream_kwargs["tools"] = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]
                     _stream_kwargs["extra_headers"] = {"anthropic-beta": "web-search-2025-03-05"}
                 async with _ac_plain.messages.stream(**_stream_kwargs) as _cs_plain:

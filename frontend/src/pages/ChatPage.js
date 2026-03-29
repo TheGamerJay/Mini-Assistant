@@ -655,6 +655,15 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     submittingRef.current = true;
     lastUserTextRef.current = text;
 
+    // Safety valve: reset submittingRef after 5 minutes no matter what.
+    // Prevents deadlock if a request hangs and loading never resets.
+    const _safetyTimer = setTimeout(() => {
+      if (submittingRef.current) {
+        submittingRef.current = false;
+        console.warn('[ChatPage] submittingRef safety valve fired — request hung for 5 min');
+      }
+    }, 5 * 60 * 1000);
+
     // ── Phase 1 Orchestration gate ───────────────────────────────────────────
     // Only run for builder mode or when there's existing code — chat is always fast-path.
     const _orchMode = chatMode === 'build' ? 'builder' : chatMode === 'image' ? 'image' : 'chat';
@@ -783,6 +792,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         setMessages(withErr);
         updateChatMessages(chatId, withErr);
       } finally {
+        clearTimeout(_safetyTimer);
         submittingRef.current = false;
       }
       return;
@@ -865,6 +875,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
             setStreamActive(false);
           }
           setStreamingText(null);
+          clearTimeout(_safetyTimer);
           submittingRef.current = false;
           return;
         }
@@ -888,6 +899,8 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         setMessages(withFinal);
         updateChatMessages(chatIdRef_local, withFinal);
         setStreamingText(null);
+        streamAccumRef.current = '';  // clear after use — prevents unbounded memory growth
+        clearTimeout(_safetyTimer);
         submittingRef.current = false;
 
         // Background: fetch follow-up suggestions (non-blocking)
@@ -966,6 +979,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         setMessages(withErr);
         updateChatMessages(chatIdRef_local, withErr);
         setStreamingText(null);
+        clearTimeout(_safetyTimer);
         submittingRef.current = false;
       },
     });

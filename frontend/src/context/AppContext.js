@@ -647,14 +647,25 @@ export function AppProvider({ children }) {
       }).catch(() => {});
       return session;
     } catch (err) {
-      // Fallback: try legacy localStorage auth so existing accounts still work
+      // Only fall back to localStorage when the backend is genuinely unreachable
+      // (network error / 503+). Never bypass an explicit auth rejection (401/403/400).
+      const isNetworkError = !err.status || err.status === 0 || err.status >= 503;
+      if (!isNetworkError) throw err;
       const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
       const found = users.find(u => u.email.toLowerCase() === email.toLowerCase());
       if (!found) throw new Error(err.message || 'No account found with this email.');
       const encoder = new TextEncoder();
-      const buf = await crypto.subtle.digest('SHA-256', encoder.encode(password + 'ma_salt_2025'));
-      const hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-      if (found.passwordHash !== hash) throw new Error('Incorrect password.');
+      // Try per-user salt first (new registrations), then legacy salt for old accounts
+      const newBuf = await crypto.subtle.digest('SHA-256', encoder.encode(password + email.toLowerCase() + ':ma_v3'));
+      const newHash = Array.from(new Uint8Array(newBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      if (found.passwordHash === newHash) {
+        const session = { id: found.id, name: found.name, email: found.email, role: found.role || 'user' };
+        _setUser(session);
+        return session;
+      }
+      const legBuf = await crypto.subtle.digest('SHA-256', encoder.encode(password + 'ma_salt_2025'));
+      const legHash = Array.from(new Uint8Array(legBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      if (found.passwordHash !== legHash) throw new Error('Incorrect password.');
       const session = { id: found.id, name: found.name, email: found.email, role: found.role || 'user' };
       _setUser(session);
       return session;
@@ -669,17 +680,20 @@ export function AppProvider({ children }) {
       _setUser(session);
       return session;
     } catch (err) {
-      // Fallback: localStorage registration (used when backend is unavailable)
+      // Only fall back to localStorage when the backend is genuinely unreachable
+      const isNetworkError = !err.status || err.status === 0 || err.status >= 503;
+      if (!isNetworkError) throw err;
       const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
       if (users.find(u => u.email.toLowerCase() === email.toLowerCase())) {
         throw new Error(err.message || 'An account with this email already exists.');
       }
       const encoder = new TextEncoder();
-      const buf = await crypto.subtle.digest('SHA-256', encoder.encode(password + 'ma_salt_2025'));
+      // Per-user salt: email included so same password produces different hashes per account
+      const buf = await crypto.subtle.digest('SHA-256', encoder.encode(password + email.toLowerCase() + ':ma_v3'));
       const passwordHash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
       let securityAnswerHash = null;
       if (securityQuestion && securityAnswer) {
-        const aBuf = await crypto.subtle.digest('SHA-256', encoder.encode(securityAnswer.trim().toLowerCase() + 'ma_salt_2025'));
+        const aBuf = await crypto.subtle.digest('SHA-256', encoder.encode(securityAnswer.trim().toLowerCase() + email.toLowerCase() + ':ma_v3'));
         securityAnswerHash = Array.from(new Uint8Array(aBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
       }
       const isFirst = users.length === 0;
@@ -715,17 +729,21 @@ export function AppProvider({ children }) {
     try {
       await api.authResetPassword(email, answer, newPassword);
     } catch (err) {
-      // Fallback: localStorage
+      const isNetworkError = !err.status || err.status === 0 || err.status >= 503;
+      if (!isNetworkError) throw err;
       const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
       const found = users.find(u => u.email.toLowerCase() === email.toLowerCase());
       if (!found) throw new Error('No account found with this email.');
       if (!found.securityAnswerHash) throw new Error('No security question set for this account. Please contact support.');
       const encoder = new TextEncoder();
-      const buf = await crypto.subtle.digest('SHA-256', encoder.encode(answer.trim().toLowerCase() + 'ma_salt_2025'));
-      const hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-      if (found.securityAnswerHash !== hash) throw new Error('Incorrect answer. Please try again.');
-      const newBuf = await crypto.subtle.digest('SHA-256', encoder.encode(newPassword + 'ma_salt_2025'));
-      found.passwordHash = Array.from(new Uint8Array(newBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      // Try new per-user salt, then fall back to legacy salt for old accounts
+      const newSaltBuf = await crypto.subtle.digest('SHA-256', encoder.encode(answer.trim().toLowerCase() + email.toLowerCase() + ':ma_v3'));
+      const newSaltHash = Array.from(new Uint8Array(newSaltBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      const legBuf = await crypto.subtle.digest('SHA-256', encoder.encode(answer.trim().toLowerCase() + 'ma_salt_2025'));
+      const legHash = Array.from(new Uint8Array(legBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      if (found.securityAnswerHash !== newSaltHash && found.securityAnswerHash !== legHash) throw new Error('Incorrect answer. Please try again.');
+      const pwBuf = await crypto.subtle.digest('SHA-256', encoder.encode(newPassword + email.toLowerCase() + ':ma_v3'));
+      found.passwordHash = Array.from(new Uint8Array(pwBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
       localStorage.setItem('ma_users', JSON.stringify(users));
     }
   }, []);
@@ -773,16 +791,21 @@ export function AppProvider({ children }) {
     try {
       await api.authChangePassword(currentPwd, newPwd);
     } catch (err) {
-      // Fallback: localStorage
+      const isNetworkError = !err.status || err.status === 0 || err.status >= 503;
+      if (!isNetworkError) throw err;
       const users = JSON.parse(localStorage.getItem('ma_users') || '[]');
       const found = users.find(u => u.id === user.id);
       if (!found) throw new Error('Account not found.');
       const encoder = new TextEncoder();
-      const currentBuf = await crypto.subtle.digest('SHA-256', encoder.encode(currentPwd + 'ma_salt_2025'));
-      const currentHash = Array.from(new Uint8Array(currentBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
-      if (found.passwordHash !== currentHash) throw new Error('Current password is incorrect.');
-      const newBuf = await crypto.subtle.digest('SHA-256', encoder.encode(newPwd + 'ma_salt_2025'));
-      found.passwordHash = Array.from(new Uint8Array(newBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      const email = (found.email || '').toLowerCase();
+      // Try new salt, then legacy for old accounts
+      const newSaltBuf = await crypto.subtle.digest('SHA-256', encoder.encode(currentPwd + email + ':ma_v3'));
+      const newSaltHash = Array.from(new Uint8Array(newSaltBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      const legBuf = await crypto.subtle.digest('SHA-256', encoder.encode(currentPwd + 'ma_salt_2025'));
+      const legHash = Array.from(new Uint8Array(legBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      if (found.passwordHash !== newSaltHash && found.passwordHash !== legHash) throw new Error('Current password is incorrect.');
+      const pwBuf = await crypto.subtle.digest('SHA-256', encoder.encode(newPwd + email + ':ma_v3'));
+      found.passwordHash = Array.from(new Uint8Array(pwBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
       localStorage.setItem('ma_users', JSON.stringify(users));
     }
   }, [user]);

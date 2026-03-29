@@ -593,6 +593,21 @@ async def reliable_search(user_query: str, max_results: int = 8) -> ReliabilityO
 
 # ─── Response Formatter ────────────────────────────────────────────────────────
 
+_INJECTION_PATTERNS = re.compile(
+    r"(system\s*:|ignore\s+previous\s+instructions?|disregard\s+|you\s+are\s+now\s+|"
+    r"<\s*/?(?:system|instruction|prompt)\s*>|\[INST\]|\[\s*SYSTEM\s*\]|###\s*System)",
+    re.IGNORECASE,
+)
+
+def _safe_field(value: str, max_len: int = 300) -> str:
+    """Strip potential prompt-injection patterns from a search result field."""
+    if not value:
+        return ""
+    # Remove suspicious instruction-like patterns
+    cleaned = _INJECTION_PATTERNS.sub("[removed]", value)
+    return cleaned[:max_len]
+
+
 def format_for_injection(output: ReliabilityOutput) -> str:
     """
     Format ReliabilityOutput into a context string for LLM injection.
@@ -645,18 +660,18 @@ def format_for_injection(output: ReliabilityOutput) -> str:
         if r.confidence_score < 0.15:
             continue
         lines.append(f"Result {shown + 1}:")
-        lines.append(f"  Title: {r.title}")
+        lines.append(f"  Title: {_safe_field(r.title, 150)}")
         if r.price_str:
-            lines.append(f"  Price: {r.price_str}")
+            lines.append(f"  Price: {_safe_field(r.price_str, 50)}")
         if r.seller:
-            lines.append(f"  Seller/Source: {r.seller}")
+            lines.append(f"  Seller/Source: {_safe_field(r.seller, 100)}")
         if r.availability:
-            lines.append(f"  Availability: {r.availability}")
-        lines.append(f"  URL: {r.url}")
+            lines.append(f"  Availability: {_safe_field(r.availability, 80)}")
+        lines.append(f"  URL: {_safe_field(r.url, 300)}")
         if r.image_url:
-            lines.append(f"  Image: {r.image_url}")
+            lines.append(f"  Image: {_safe_field(r.image_url, 300)}")
         if r.snippet:
-            lines.append(f"  Snippet: {r.snippet[:200]}")
+            lines.append(f"  Snippet: {_safe_field(r.snippet, 200)}")
         lines.append(f"  Confidence: {r.confidence_score:.2f}")
         lines.append("")
         shown += 1
