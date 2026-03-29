@@ -13,7 +13,7 @@ import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import {
   Monitor, Code2, FolderOpen, X, RefreshCw,
   ChevronRight, File, Download, ListTodo, Diff, Plus, Trash2, CheckSquare, Square,
-  Bug, Zap, CheckCircle, AlertTriangle, StopCircle, Share2, Copy, ExternalLink, Users,
+  CheckCircle, AlertTriangle, Share2, Copy, ExternalLink, Users,
   Smartphone, Tablet, RotateCw, Save,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
@@ -414,7 +414,6 @@ function TabletFrame({ children, clockTime }) {
 // ---------------------------------------------------------------------------
 // Preview
 // ---------------------------------------------------------------------------
-const MAX_AUTOFIX_ITERATIONS = 5;
 
 /** Extract a short app title from conversation messages */
 function extractAppTitle(messages) {
@@ -464,13 +463,7 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
     prevIsStreamingRef.current = isStreaming;
     if (wasStreaming && !isStreaming && html) {
       setKey(k => k + 1);
-      // Auto-run debug agent after every build — give iframe 1.8s to mount first
-      const t = setTimeout(() => {
-        if (!fixingRef.current) runFixLoop();
-      }, 1800);
-      return () => clearTimeout(t);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStreaming, html]);
 
   // Saved badge for new images
@@ -504,30 +497,6 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
   // Clear errors when new code loads (key changes = iframe remounted)
   useEffect(() => { setIframeErrors([]); }, [key]);
 
-  // ── DOM Visual Inspector — request a snapshot from iframe ─────────────
-  const requestDomReport = useCallback(() => {
-    return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        window.removeEventListener('message', handler);
-        resolve('');
-      }, 2000);
-      const handler = (e) => {
-        if (e.data?.__maType === 'dom_report') {
-          clearTimeout(timeout);
-          window.removeEventListener('message', handler);
-          resolve(e.data.report || '');
-        }
-      };
-      window.addEventListener('message', handler);
-      try {
-        iframeRef.current?.contentWindow?.postMessage({ __maCmd: 'inspect' }, '*');
-      } catch {
-        clearTimeout(timeout);
-        window.removeEventListener('message', handler);
-        resolve('');
-      }
-    });
-  }, []);
 
   // ── Preview mode (phone / tablet / desktop) ────────────────────────────
   const [previewMode, setPreviewMode] = useState('desktop');
@@ -647,168 +616,6 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
     setCommunityPrompt(true);
   }, [currentFixHtml, html, communityLoading]);
 
-  // ── Auto-Fix loop state ────────────────────────────────────────────────
-  const [fixing, setFixing] = useState(false);
-  const [fixLog, setFixLog] = useState([]);          // [{pass, text, allClear}]
-  const [fixIteration, setFixIteration] = useState(0);
-  const [liveToken, setLiveToken] = useState('');
-  const fixAbortRef = useRef(null);
-  const fixingRef = useRef(false);
-
-  const stopFix = useCallback(() => {
-    fixAbortRef.current?.abort();
-    fixingRef.current = false;
-    setFixing(false);
-  }, []);
-
-  const runFixLoop = useCallback(async () => {
-    if (fixing || isStreaming) return;
-    const startHtml = currentFixHtml || html;
-    if (!startHtml) return;
-
-    setFixing(true);
-    fixingRef.current = true;
-    setFixLog([]);
-    setFixIteration(0);
-    setLiveToken('');
-
-    let workingHtml = startHtml;
-    let errors = [...iframeErrors];
-    const passLog = [];
-
-    for (let pass = 1; pass <= MAX_AUTOFIX_ITERATIONS; pass++) {
-      if (!fixingRef.current) break;
-      setFixIteration(pass);
-      setLiveToken('');
-
-      let accumulated = '';
-      let allClear = false;
-      let passError = null;
-
-      try {
-        const ctrl = new AbortController();
-        fixAbortRef.current = ctrl;
-        // Capture DOM snapshot before sending to Claude
-        const domReport = await requestDomReport();
-        const res = await api.autofixStream(workingHtml, errors, domReport, pass, sessionId, ctrl.signal);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-        const reader = res.body.getReader();
-        const dec = new TextDecoder();
-        let buf = '';
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += dec.decode(value, { stream: true });
-          const lines = buf.split('\n');
-          buf = lines.pop();
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const raw = line.slice(6).trim();
-            if (!raw) continue;
-            try {
-              const evt = JSON.parse(raw);
-              if (evt.done) {
-                allClear = evt.meta?.all_clear || false;
-                passError = evt.meta?.error || null;
-              } else if (evt.t) {
-                accumulated += evt.t;
-                setLiveToken(accumulated);
-              }
-            } catch {}
-          }
-        }
-      } catch (err) {
-        if (err.name === 'AbortError') break;
-        passError = err.message;
-      }
-
-      // Extract fixed HTML from Claude's response
-      // Use greedy match so we capture to the LAST closing ```, not the first
-      const fenceMatch = /```html\s*\n([\s\S]+)```/.exec(accumulated);
-      const rawMatch = /<!DOCTYPE\s+html/i.exec(accumulated);
-      let newHtml = null;
-      if (fenceMatch) newHtml = fenceMatch[1].trim();
-      else if (rawMatch) {
-        // Strip anything after the closing </html> tag
-        const slice = accumulated.slice(rawMatch.index);
-        const endTag = /(<\/html\s*>)/i.exec(slice);
-        newHtml = endTag ? slice.slice(0, endTag.index + endTag[1].length) : slice;
-      }
-
-      if (newHtml) {
-        workingHtml = newHtml;
-        setCurrentFixHtml(newHtml);
-        // Give iframe 2.5s to run and capture new errors
-        await new Promise(r => setTimeout(r, 2500));
-        errors = [...iframeErrors]; // collect fresh errors from new render
-      }
-
-      const passEntry = {
-        pass,
-        text: passError ? `Pass ${pass} error: ${passError}` : accumulated,
-        allClear,
-        fixed: !!newHtml,
-      };
-      passLog.push(passEntry);
-      setFixLog(prev => [...prev, passEntry]);
-
-      if (allClear || passError) break;
-      if (!newHtml) break; // Claude found nothing to fix — treat as all clear
-    }
-
-    // Notify parent with final code so it can add to chat history
-    if (onFixedHtml && workingHtml !== startHtml) onFixedHtml(workingHtml);
-
-    // Remount iframe so fixed code runs from a clean state (clears stale JS)
-    if (workingHtml !== startHtml) setKey(k => k + 1);
-
-    // Visual QA pass — disabled until guardrails prevent full-app replacement
-    // TODO: constrain to CSS-only fixes, validate response doesn't change app identity
-
-    // Post debug summary to chat (includes visual pass result)
-    if (onDebugSummary && passLog.length > 0) onDebugSummary(passLog);
-
-    // ── Screenshot → chat: capture what was built, send for visual analysis ──
-    if (onBuildScreenshot) {
-      try {
-        await new Promise(r => setTimeout(r, 800)); // let iframe settle
-        const h2c = (await import('html2canvas')).default;
-        const iframeDoc = iframeRef.current?.contentDocument;
-        if (iframeDoc?.body && iframeRef.current) {
-          const canvas = await h2c(iframeDoc.body, {
-            useCORS: true, allowTaint: true, scale: 0.6,
-            width: iframeRef.current.clientWidth || 420,
-            height: iframeRef.current.clientHeight || 600,
-            logging: false,
-          });
-          const screenshotB64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
-          // Send to visual review for text-only analysis (no HTML replacement)
-          let analysisText = null;
-          try {
-            const { IMAGE_API } = await import('../api/client');
-            const vRes = await fetch(`${IMAGE_API}/visual_review`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ html: workingHtml, screenshot_base64: screenshotB64 }),
-            });
-            if (vRes.ok) {
-              const vData = await vRes.json();
-              analysisText = vData.all_clear
-                ? '✅ Looks good — content fits and everything is visible.'
-                : (vData.issues || 'Some visual issues detected — let me know if you want them fixed.');
-            }
-          } catch {}
-          onBuildScreenshot(screenshotB64, analysisText);
-        }
-      } catch { /* screenshot is best-effort */ }
-    }
-
-    fixingRef.current = false;
-    setFixing(false);
-    setLiveToken('');
-  }, [fixing, isStreaming, html, currentFixHtml, iframeErrors, sessionId, onFixedHtml, onDebugSummary]);
 
   // Build the srcDoc — inject error capture into every render
   const srcDoc = useMemo(() => {
@@ -919,8 +726,6 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
     );
   }
 
-  const lastLog = fixLog[fixLog.length - 1];
-  const isAllClear = lastLog?.allClear;
 
   return (
     <div className="flex flex-col h-full relative">
@@ -929,20 +734,9 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
         <div className="flex items-center gap-1.5 flex-1 px-2 py-1 rounded bg-white/5 text-[10px] text-slate-600 font-mono">
           <Monitor size={9} />
           preview
-          {iframeErrors.length > 0 && !fixing && (
+          {iframeErrors.length > 0 && (
             <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 text-[9px]">
               {iframeErrors.length} error{iframeErrors.length > 1 ? 's' : ''}
-            </span>
-          )}
-          {fixing && (
-            <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-violet-500/20 text-violet-300 text-[9px] flex items-center gap-1">
-              <RefreshCw size={7} className="animate-spin" />
-              debug {fixIteration}/{MAX_AUTOFIX_ITERATIONS}
-            </span>
-          )}
-          {isAllClear && !fixing && (
-            <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[9px]">
-              ✅ all clear
             </span>
           )}
         </div>
@@ -967,16 +761,6 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
             </button>
           ))}
         </div>
-        {fixing && (
-          <button
-            onClick={stopFix}
-            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-red-500/15 text-red-400 hover:bg-red-500/25 border border-red-500/20 transition-all"
-            title="Stop debug agent"
-          >
-            <StopCircle size={10} />
-            Stop
-          </button>
-        )}
         <button
           onClick={handleShare}
           disabled={shareLoading || isStreaming}
@@ -999,7 +783,7 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
             : <Users size={10} />}
           Community
         </button>
-        <button onClick={() => { setCurrentFixHtml(null); setKey(k => k + 1); setIframeErrors([]); setFixLog([]); }}
+        <button onClick={() => { setCurrentFixHtml(null); setKey(k => k + 1); setIframeErrors([]); }}
           className="p-1 rounded hover:bg-white/5 text-slate-600 hover:text-slate-400 transition-colors" title="Refresh preview">
           <RefreshCw size={12} />
         </button>
@@ -1216,203 +1000,6 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
         .ma-cursor::after { content:'▋'; animation: ma-blink 1s step-end infinite; margin-left:2px; }
       `}</style>
 
-      {/* Auto-fix overlay — REMOVED: debug output now goes to chat via onDebugSummary */}
-      {false && (fixing || fixLog.length > 0) && (
-        <div
-          className="absolute inset-x-0 top-[41px] z-10 border-b border-violet-500/20 p-3 space-y-2 max-h-[55%] overflow-y-auto"
-          style={{
-            background: 'rgba(11,13,22,0.97)',
-            backdropFilter: 'blur(8px)',
-            animation: fixing ? 'ma-pulse-glow 2.5s ease-in-out infinite' : undefined,
-          }}
-        >
-          {/* Scanning line — only while active */}
-          {fixing && (
-            <div className="absolute inset-x-0 top-0 h-full overflow-hidden pointer-events-none" style={{ zIndex: 0 }}>
-              <div style={{
-                position: 'absolute', left: 0, right: 0, height: '2px',
-                background: 'linear-gradient(90deg, transparent, rgba(139,92,246,0.7), transparent)',
-                animation: 'ma-scan 2s ease-in-out infinite',
-              }} />
-            </div>
-          )}
-
-          {/* Header */}
-          <div className="relative flex items-center gap-2 mb-1" style={{ zIndex: 1 }}>
-            <Zap
-              size={11}
-              className="flex-shrink-0"
-              style={{
-                color: fixing ? '#a78bfa' : '#6d28d9',
-                filter: fixing ? 'drop-shadow(0 0 4px rgba(139,92,246,0.8))' : undefined,
-                animation: fixing ? 'ma-blink 2s ease-in-out infinite' : undefined,
-              }}
-            />
-            <span
-              className="text-[10px] font-mono font-semibold uppercase tracking-widest"
-              style={{
-                background: fixing
-                  ? 'linear-gradient(90deg, #c4b5fd, #818cf8, #c4b5fd)'
-                  : '#7c3aed',
-                backgroundSize: '200% 100%',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: fixing ? 'transparent' : undefined,
-                animation: fixing ? 'ma-shimmer 2s linear infinite' : undefined,
-              }}
-            >
-              Debug Agent {fixing ? `— Pass ${fixIteration}/${MAX_AUTOFIX_ITERATIONS}` : '— Done'}
-            </span>
-            {fixing && (
-              <div className="flex items-end gap-[3px] ml-auto" style={{ height: 12 }}>
-                {[0, 1, 2].map(i => (
-                  <div
-                    key={i}
-                    style={{
-                      width: 4, height: 4, borderRadius: '50%',
-                      background: '#a78bfa',
-                      boxShadow: '0 0 6px rgba(167,139,250,0.8)',
-                      animation: `ma-wave 1.1s ease-in-out ${i * 0.18}s infinite`,
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-            {!fixing && fixLog.length > 0 && (
-              <>
-                <span
-                  className="text-[9px] font-mono px-2 py-0.5 rounded-full"
-                  style={{
-                    background: fixLog[fixLog.length-1]?.allClear
-                      ? 'rgba(16,185,129,0.15)' : 'rgba(139,92,246,0.15)',
-                    color: fixLog[fixLog.length-1]?.allClear ? '#34d399' : '#a78bfa',
-                    border: `1px solid ${fixLog[fixLog.length-1]?.allClear ? 'rgba(16,185,129,0.3)' : 'rgba(139,92,246,0.3)'}`,
-                  }}
-                >
-                  {fixLog[fixLog.length-1]?.allClear ? '✓ clean' : `${fixLog.length} pass${fixLog.length > 1 ? 'es' : ''}`}
-                </span>
-                <button
-                  onClick={() => setFixLog([])}
-                  className="ml-auto p-0.5 rounded hover:bg-white/10 transition-colors"
-                  title="Dismiss"
-                  style={{ color: '#475569' }}
-                >
-                  <X size={11} />
-                </button>
-              </>
-            )}
-          </div>
-
-          {/* Completed passes */}
-          {fixLog.map((log, i) => (
-            <div
-              key={i}
-              className="ma-slide-up rounded-lg p-2 border text-[10px] font-mono leading-relaxed relative overflow-hidden"
-              style={{
-                animationDelay: `${i * 0.06}s`,
-                opacity: 0,
-                background: log.allClear
-                  ? 'rgba(16,185,129,0.08)' : log.fixed
-                  ? 'rgba(139,92,246,0.08)' : 'rgba(245,158,11,0.08)',
-                borderColor: log.allClear
-                  ? 'rgba(16,185,129,0.25)' : log.fixed
-                  ? 'rgba(139,92,246,0.2)' : 'rgba(245,158,11,0.2)',
-              }}
-            >
-              {/* Top accent line */}
-              <div style={{
-                position: 'absolute', top: 0, left: 0, right: 0, height: 1,
-                background: log.allClear
-                  ? 'linear-gradient(90deg, transparent, rgba(16,185,129,0.6), transparent)'
-                  : log.fixed
-                  ? 'linear-gradient(90deg, transparent, rgba(139,92,246,0.6), transparent)'
-                  : 'linear-gradient(90deg, transparent, rgba(245,158,11,0.6), transparent)',
-              }} />
-              <div className="flex items-center gap-1.5 mb-1">
-                {(log.allClear && log.fixed)
-                  ? <CheckCircle size={10} style={{ color: '#34d399', filter: 'drop-shadow(0 0 3px rgba(52,211,153,0.6))' }} />
-                  : log.fixed
-                  ? <Zap size={10} style={{ color: '#a78bfa', filter: 'drop-shadow(0 0 3px rgba(167,139,250,0.6))' }} />
-                  : log.allClear
-                  ? <CheckCircle size={10} style={{ color: '#64748b' }} />
-                  : <AlertTriangle size={10} style={{ color: '#fbbf24', filter: 'drop-shadow(0 0 3px rgba(251,191,36,0.6))' }} />}
-                <span style={{ color: log.fixed ? '#c4b5fd' : log.allClear ? '#94a3b8' : '#fcd34d', fontWeight: 600 }}>
-                  Pass {log.pass}
-                </span>
-                {log.allClear && log.fixed && <span style={{ color: '#34d399' }}> — Patched & clean</span>}
-                {log.fixed && !log.allClear && <span style={{ color: '#a78bfa' }}> — Patched</span>}
-                {log.allClear && !log.fixed && <span style={{ color: '#94a3b8' }}> — No issues found</span>}
-                {!log.fixed && !log.allClear && <span style={{ color: '#fbbf24' }}> — No output</span>}
-              </div>
-              <div className="text-slate-500 line-clamp-2">
-                {log.text.replace(/```html[\s\S]*?```/g, '[fixed code]').slice(0, 200)}
-              </div>
-            </div>
-          ))}
-
-          {/* Live streaming of current pass */}
-          {fixing && (
-            <div
-              className="rounded-lg p-2 text-[10px] font-mono text-slate-400 max-h-28 overflow-hidden relative"
-              style={{
-                background: '#0d0f1e',
-                border: '1px solid',
-                animation: 'ma-border-pulse 1.8s ease-in-out infinite',
-              }}
-            >
-              {/* Shimmer overlay */}
-              <div className="ma-shimmer absolute inset-0 rounded-lg pointer-events-none" />
-              <div className="relative" style={{ zIndex: 1 }}>
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  <div style={{
-                    width: 5, height: 5, borderRadius: '50%',
-                    background: '#818cf8',
-                    boxShadow: '0 0 8px rgba(129,140,248,0.9)',
-                    animation: 'ma-blink 1s ease-in-out infinite',
-                  }} />
-                  <span className="text-[9px] uppercase tracking-widest" style={{ color: '#818cf8' }}>
-                    {liveToken ? 'Analysing' : 'Scanning errors…'}
-                  </span>
-                </div>
-                <div className={`line-clamp-4 whitespace-pre-wrap leading-relaxed ${liveToken ? 'ma-cursor' : ''}`} style={{ color: '#94a3b8' }}>
-                  {liveToken
-                    ? liveToken.replace(/```html[\s\S]*/g, '[writing fix…]').slice(0, 400)
-                    : '…'}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Error list */}
-          {iframeErrors.length > 0 && (
-            <div
-              className="rounded-lg p-2 text-[9px] font-mono space-y-0.5"
-              style={{
-                background: 'rgba(239,68,68,0.05)',
-                border: '1px solid',
-                animation: fixing ? 'ma-err-pulse 1.8s ease-in-out infinite' : undefined,
-                borderColor: 'rgba(239,68,68,0.25)',
-                color: '#f87171',
-              }}
-            >
-              <div className="flex items-center gap-1.5 mb-1" style={{ color: 'rgba(239,68,68,0.6)' }}>
-                <div style={{
-                  width: 4, height: 4, borderRadius: '50%',
-                  background: '#ef4444',
-                  boxShadow: fixing ? '0 0 6px rgba(239,68,68,0.8)' : undefined,
-                  animation: fixing ? 'ma-blink 1s step-end infinite' : undefined,
-                }} />
-                <span className="uppercase tracking-widest">Live JS Errors</span>
-                <span className="ml-auto px-1 rounded-full" style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171' }}>
-                  {iframeErrors.length}
-                </span>
-              </div>
-              {iframeErrors.slice(0, 5).map((e, i) => (
-                <div key={i} className="truncate opacity-80">{e}</div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
       {/* iframe — desktop / phone / tablet */}
       {previewMode === 'desktop' ? (
