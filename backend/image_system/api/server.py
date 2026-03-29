@@ -1884,11 +1884,16 @@ async def chat(req: ChatRequest, request: Request):
         logger.info("[MODEL ROUTER] image_generation → DALL-E 3")
         try:
             from ..services.dalle_client import DalleClient
-            # GPT-5.4 enriches the raw user prompt with art style, lighting,
+            # GPT-5.4 enriches short/vague prompts with art style, lighting,
             # composition, and quality modifiers before hitting DALL-E 3.
+            # Skip enhancement for detailed prompts (>150 chars) — rewriting
+            # a detailed prompt risks adding words that trip the safety filter.
             try:
-                from mini_assistant.phase2.prompt_enhancer import enhance_image_prompt
-                _gen_prompt = await enhance_image_prompt(effective_msg)
+                if len(effective_msg) > 150:
+                    _gen_prompt = effective_msg
+                else:
+                    from mini_assistant.phase2.prompt_enhancer import enhance_image_prompt
+                    _gen_prompt = await enhance_image_prompt(effective_msg)
             except Exception:
                 _gen_prompt = effective_msg
             _dalle = DalleClient()
