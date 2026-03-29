@@ -818,24 +818,45 @@ async def _fetch_weather(location: str) -> Optional[str]:
         import httpx
         from datetime import datetime, timezone, timedelta
 
-        # Step 1: Geocode the location
-        geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={location.replace(' ', '+')}&count=1&language=en&format=json"
+        # Step 1: Geocode via Nominatim (handles city+state, zip codes, full addresses)
+        import urllib.parse as _up
+        nom_url = (
+            f"https://nominatim.openstreetmap.org/search"
+            f"?q={_up.quote(location)}&format=json&limit=1&addressdetails=1"
+        )
+        lat = lon = name = admin = country = tz_name = None
         async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as _c:
-            geo_r = await _c.get(geo_url, headers={"User-Agent": "MiniAssistant/1.0"})
-        if geo_r.status_code != 200:
-            return None
-        geo_d = geo_r.json()
-        results = geo_d.get("results")
-        if not results:
-            return None
-        loc_info = results[0]
-        lat  = loc_info["latitude"]
-        lon  = loc_info["longitude"]
-        name = loc_info.get("name", location)
-        admin = loc_info.get("admin1", "")
-        country = loc_info.get("country", "")
+            nom_r = await _c.get(nom_url, headers={"User-Agent": "MiniAssistant/1.0 weather-fetch"})
+        if nom_r.status_code == 200:
+            nom_d = nom_r.json()
+            if nom_d:
+                hit = nom_d[0]
+                lat = float(hit["lat"])
+                lon = float(hit["lon"])
+                addr = hit.get("address", {})
+                name    = addr.get("city") or addr.get("town") or addr.get("village") or addr.get("county") or location
+                admin   = addr.get("state", "")
+                country = addr.get("country_code", "").upper()
+        # Fallback to Open-Meteo geocoder if Nominatim returned nothing
+        if lat is None:
+            geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={_up.quote(location)}&count=1&language=en&format=json"
+            async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as _c:
+                geo_r = await _c.get(geo_url, headers={"User-Agent": "MiniAssistant/1.0"})
+            if geo_r.status_code != 200:
+                return None
+            geo_d = geo_r.json()
+            results = geo_d.get("results")
+            if not results:
+                return None
+            loc_info = results[0]
+            lat     = loc_info["latitude"]
+            lon     = loc_info["longitude"]
+            name    = loc_info.get("name", location)
+            admin   = loc_info.get("admin1", "")
+            country = loc_info.get("country", "")
+            tz_name = loc_info.get("timezone") or "auto"
         loc_str = ", ".join(filter(None, [name, admin, country]))
-        tz_name = loc_info.get("timezone", "UTC")
+        _tz_param = tz_name if tz_name and tz_name != "auto" else "auto"
 
         # Step 2: Fetch weather — current + today's daily forecast
         wx_url = (
@@ -846,7 +867,7 @@ async def _fetch_weather(location: str) -> Optional[str]:
             f"&daily=temperature_2m_max,temperature_2m_min,weather_code,"
             f"precipitation_probability_max,wind_speed_10m_max"
             f"&forecast_days=2"
-            f"&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone={tz_name}"
+            f"&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone={_tz_param}"
         )
         async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as _c:
             wx_r = await _c.get(wx_url, headers={"User-Agent": "MiniAssistant/1.0"})
@@ -883,7 +904,8 @@ async def _fetch_weather(location: str) -> Optional[str]:
         local_dt = datetime.now(timezone.utc) + timedelta(seconds=utc_offset_s)
         local_time_str = local_dt.strftime("%I:%M %p, %A %B %-d %Y")
         tz_offset_h = utc_offset_s // 3600
-        tz_label = f"UTC{'+' if tz_offset_h >= 0 else ''}{tz_offset_h}"
+        _resolved_tz = wx_d.get("timezone", tz_name or "UTC")
+        tz_label = _resolved_tz if _resolved_tz and _resolved_tz != "auto" else f"UTC{'+' if tz_offset_h >= 0 else ''}{tz_offset_h}"
 
         # Daily forecast lines (today + tomorrow)
         daily_lines = ""
