@@ -112,13 +112,20 @@ async def get_current_user(authorization: str = Header(None)) -> dict:
 
 
 def _public_user(user: dict) -> dict:
+    # Use new-schema credits (subscription_credits + topup_credits) when present.
+    # Falls back to legacy single `credits` field for old accounts.
+    sub_c = user.get("subscription_credits")
+    if sub_c is not None:
+        effective_credits = max(0, sub_c) + max(0, user.get("topup_credits", 0))
+    else:
+        effective_credits = max(0, user.get("credits", 0))
     return {
         "id": user["id"],
         "name": user["name"],
         "email": user["email"],
         "role": user.get("role", "user"),
         "avatar": user.get("avatar"),
-        "credits": user.get("credits", 0),
+        "credits": effective_credits,
         "plan": user.get("plan", "free"),
         "has_ad_mode": user.get("has_ad_mode", False),
         "referral_code": user.get("referral_code"),
