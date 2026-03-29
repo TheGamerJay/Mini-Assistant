@@ -499,9 +499,7 @@ async def get_profile(authorization: str = Header(None)):
         {"user_id": user["id"]},
         {"_id": 0},
     )
-    if not profile:
-        raise HTTPException(404, "No brand profile found. Generate one first.")
-    return {"profile": profile}
+    return {"profile": profile}  # None if not created yet — frontend shows setup form
 
 
 @ad_mode_router.put("/api/ad-mode/profile")
