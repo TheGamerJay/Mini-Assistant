@@ -12,7 +12,7 @@ import {
   Activity, Server, AlertCircle, CheckCircle, Clock,
   UserPlus, BarChart2, List, ChevronLeft, Bot, Cpu,
   TrendingUp, DollarSign, PieChart, Percent, ArrowUpRight,
-  Code2, Rocket, GitBranch, Download,
+  Code2, Rocket, GitBranch, Download, Flame, UserCheck,
 } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { api, setToken, clearToken, IMAGE_API } from '../api/client';
@@ -214,6 +214,9 @@ function AdminDashboard({ adminUser, onLogout }) {
   const [byTrigger, setByTrigger]       = useState(null);
   const [recentEvents, setRecentEvents] = useState([]);
   const [loadingFunnel, setLoadingFunnel] = useState(false);
+  const [growth, setGrowth]             = useState(null);
+  const [loadingGrowth, setLoadingGrowth] = useState(false);
+  const [changingPlanId, setChangingPlanId] = useState(null);
 
   const loadStats = useCallback(async () => {
     setLoadingStats(true);
@@ -275,6 +278,18 @@ function AdminDashboard({ adminUser, onLogout }) {
     }
   }, []);
 
+  const loadGrowth = useCallback(async () => {
+    setLoadingGrowth(true);
+    try {
+      const data = await api.adminGetGrowthStats();
+      setGrowth(data);
+    } catch (err) {
+      toast.error('Failed to load growth stats: ' + (err.message || 'unknown'));
+    } finally {
+      setLoadingGrowth(false);
+    }
+  }, []);
+
   const loadFunnel = useCallback(async () => {
     setLoadingFunnel(true);
     try {
@@ -321,7 +336,8 @@ function AdminDashboard({ adminUser, onLogout }) {
     if ((activeTab === 'revenue' || activeTab === 'profit') && !analytics) loadAnalytics();
     if (activeTab === 'profit' && !optimizer) loadOptimizer();
     if (activeTab === 'analytics' && !funnel) loadFunnel();
-  }, [activeTab, activity.length, analytics, optimizer, funnel, loadActivity, loadAnalytics, loadOptimizer, loadFunnel]);
+    if (activeTab === 'growth' && !growth) loadGrowth();
+  }, [activeTab, activity.length, analytics, optimizer, funnel, growth, loadActivity, loadAnalytics, loadOptimizer, loadFunnel, loadGrowth]);
 
   async function handleDeleteUser(u) {
     if (!window.confirm(`Delete ${u.name} (${u.email})? This removes all their data and cannot be undone.`)) return;
@@ -392,6 +408,21 @@ function AdminDashboard({ adminUser, onLogout }) {
     }
   }
 
+  async function handleChangePlan(u, newPlan) {
+    if (newPlan === u.plan) return;
+    setChangingPlanId(u.id);
+    try {
+      await api.adminSetPlan(u.id, newPlan);
+      setUsers(prev => prev.map(x => x.id === u.id ? { ...x, plan: newPlan } : x));
+      toast.success(`${u.name}'s plan changed to ${newPlan}.`);
+      loadStats();
+    } catch (err) {
+      toast.error(err.message || 'Failed to change plan.');
+    } finally {
+      setChangingPlanId(null);
+    }
+  }
+
   const positiveRate = stats && (stats.thumbs_up + stats.thumbs_down) > 0
     ? Math.round(stats.thumbs_up / (stats.thumbs_up + stats.thumbs_down) * 100)
     : null;
@@ -421,6 +452,7 @@ function AdminDashboard({ adminUser, onLogout }) {
             if (activeTab === 'activity') loadActivity();
             if (activeTab === 'profit') loadOptimizer();
             if (activeTab === 'analytics') loadFunnel();
+            if (activeTab === 'growth') loadGrowth();
           }}
             className="p-2 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all"
             title="Refresh"
@@ -444,6 +476,7 @@ function AdminDashboard({ adminUser, onLogout }) {
           { id: 'activity',   label: 'Activity',              icon: List },
           { id: 'revenue',    label: 'Revenue',               icon: DollarSign },
           { id: 'profit',     label: 'Profit & Cost',         icon: TrendingUp },
+          { id: 'growth',     label: 'Growth',                icon: Flame },
           { id: 'analytics',  label: 'Funnel',                icon: Percent },
         ].map(({ id, label, icon: Icon }) => (
           <button
@@ -569,7 +602,7 @@ function AdminDashboard({ adminUser, onLogout }) {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-white/5">
-                      {['User', 'Email', 'Auth', 'Role', 'Plan', 'Credits', 'Grant Credits', 'Bonus Images', 'Grant Images', 'Joined', 'Actions'].map(h => (
+                      {['User', 'Email', 'Auth', 'Role', 'Plan ✎', 'Credits', 'Grant Credits', 'Bonus Images', 'Grant Images', 'Joined', 'Actions'].map(h => (
                         <th key={h} className="px-4 py-3 text-left text-[11px] font-mono uppercase tracking-widest text-slate-600 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -620,9 +653,24 @@ function AdminDashboard({ adminUser, onLogout }) {
                           </button>
                         </td>
 
-                        {/* Plan */}
+                        {/* Plan — editable dropdown */}
                         <td className="px-4 py-3">
-                          <PlanBadge plan={u.plan} />
+                          <select
+                            value={u.plan || 'free'}
+                            disabled={changingPlanId === u.id}
+                            onChange={e => handleChangePlan(u, e.target.value)}
+                            className="text-[10px] font-mono px-2 py-1 rounded-full border bg-transparent cursor-pointer outline-none transition-all
+                              text-slate-300 border-white/20 hover:border-white/40
+                              disabled:opacity-40 disabled:cursor-not-allowed"
+                            title="Change plan"
+                          >
+                            {['free', 'standard', 'pro', 'max', 'team'].map(p => (
+                              <option key={p} value={p} className="bg-[#1a1a2e] text-slate-200">{p}</option>
+                            ))}
+                          </select>
+                          {changingPlanId === u.id && (
+                            <RefreshCw size={10} className="inline ml-1 animate-spin text-amber-400" />
+                          )}
                         </td>
 
                         {/* Credits */}
@@ -1044,6 +1092,151 @@ function AdminDashboard({ adminUser, onLogout }) {
               </div>
             )}
           </div>
+        )}
+
+        {/* ── GROWTH TAB ── */}
+        {activeTab === 'growth' && (
+          <>
+            {loadingGrowth ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="rounded-2xl border border-white/5 bg-white/[0.02] p-5 h-20 animate-pulse" />
+                ))}
+              </div>
+            ) : growth && (
+              <>
+                {/* KPI row */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <StatCard icon={UserCheck}  label="Pro Active This Week"  value={growth.pro_users_this_week}  color="violet" />
+                  <StatCard icon={TrendingUp} label="Pro Active Last Week"  value={growth.pro_users_last_week}  color="cyan"
+                    sub={growth.pro_users_last_week > 0
+                      ? `${growth.pro_users_this_week > growth.pro_users_last_week ? '+' : ''}${Math.round((growth.pro_users_this_week - growth.pro_users_last_week) / growth.pro_users_last_week * 100)}% wow`
+                      : undefined}
+                  />
+                  <StatCard icon={UserPlus}   label="Signups Last 30 Days" value={growth.signups_per_day?.reduce((s, d) => s + d.signups, 0)} color="emerald" />
+                  <StatCard icon={AlertCircle} label="Churn Estimate"      value={growth.churn_estimate} sub="no activity in 30 days" color="amber" />
+                </div>
+
+                {/* Signups per day chart */}
+                {growth.signups_per_day?.length > 0 && (
+                  <div className="rounded-2xl border border-white/10 bg-[#13131f] p-6">
+                    <h2 className="text-sm font-semibold text-slate-200 mb-4 flex items-center gap-2">
+                      <UserPlus size={14} className="text-emerald-400" /> New Signups — Last 30 Days
+                    </h2>
+                    {(() => {
+                      const maxS = Math.max(...growth.signups_per_day.map(d => d.signups), 1);
+                      return (
+                        <div className="flex items-end gap-0.5 h-20 pb-2">
+                          {growth.signups_per_day.map((d, i) => {
+                            const pct = Math.max(4, (d.signups / maxS) * 100);
+                            return (
+                              <div key={i} className="flex-1 min-w-[6px] flex flex-col items-center group relative">
+                                <div className="w-full bg-gradient-to-t from-emerald-600 to-emerald-400 rounded-sm" style={{ height: `${pct}%` }} />
+                                <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block z-10 pointer-events-none">
+                                  <div className="bg-[#1a1a2e] border border-white/10 rounded-lg px-2 py-1 text-[9px] text-slate-300 whitespace-nowrap shadow-xl">
+                                    <p className="font-mono">{d.date}</p>
+                                    <p className="text-emerald-400">{d.signups} signups</p>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {/* Top 10 most active users */}
+                {growth.top_users?.length > 0 && (
+                  <div className="rounded-2xl border border-white/10 bg-[#13131f] overflow-hidden">
+                    <div className="px-6 py-4 border-b border-white/5">
+                      <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                        <Flame size={14} className="text-amber-400" /> Top 10 Most Active Users (All Time)
+                      </h2>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-white/5">
+                            {['#', 'User', 'Email', 'Plan', 'Requests', 'Credits Used'].map(h => (
+                              <th key={h} className="px-4 py-3 text-left text-[10px] font-mono uppercase tracking-widest text-slate-600 whitespace-nowrap">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {growth.top_users.map((u, i) => (
+                            <tr key={i} className="border-b border-white/[0.04] hover:bg-white/[0.02]">
+                              <td className="px-4 py-3 text-slate-600 font-mono text-xs">#{i + 1}</td>
+                              <td className="px-4 py-3 text-slate-200 font-medium text-sm whitespace-nowrap">{u.name}</td>
+                              <td className="px-4 py-3 text-slate-500 font-mono text-xs whitespace-nowrap">{u.email}</td>
+                              <td className="px-4 py-3"><PlanBadge plan={u.plan} /></td>
+                              <td className="px-4 py-3 text-cyan-400 font-mono text-xs font-semibold">{fmt(u.requests)}</td>
+                              <td className="px-4 py-3 text-amber-400 font-mono text-xs">{fmt(u.credits)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Credit burn rate per plan */}
+                {growth.burn_rate_by_plan?.length > 0 && (
+                  <div className="rounded-2xl border border-white/10 bg-[#13131f] p-6">
+                    <h2 className="text-sm font-semibold text-slate-200 mb-4 flex items-center gap-2">
+                      <Zap size={14} className="text-amber-400" /> Credit Burn Rate by Plan (This Month)
+                    </h2>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      {growth.burn_rate_by_plan.map(row => (
+                        <div key={row.plan} className="rounded-xl border border-white/8 bg-white/[0.02] p-4">
+                          <PlanBadge plan={row.plan} />
+                          <p className="text-xl font-bold text-white mt-2">{fmt(row.total_credits)}</p>
+                          <p className="text-[10px] text-slate-500 mt-0.5">total credits used</p>
+                          <p className="text-[11px] text-amber-400 font-mono mt-1">{row.credits_per_user} per user</p>
+                          <p className="text-[10px] text-slate-600">{row.active_users} active users</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Top features per plan */}
+                {growth.features_by_plan && Object.keys(growth.features_by_plan).length > 0 && (
+                  <div className="rounded-2xl border border-white/10 bg-[#13131f] p-6">
+                    <h2 className="text-sm font-semibold text-slate-200 mb-4 flex items-center gap-2">
+                      <BarChart2 size={14} className="text-violet-400" /> Top Features by Plan (This Month)
+                    </h2>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {['free', 'standard', 'pro', 'max'].map(plan => {
+                        const features = growth.features_by_plan[plan] || [];
+                        if (!features.length) return null;
+                        const max = features[0]?.requests || 1;
+                        return (
+                          <div key={plan}>
+                            <PlanBadge plan={plan} />
+                            <div className="mt-3 space-y-2">
+                              {features.map((f, i) => (
+                                <div key={i}>
+                                  <div className="flex justify-between text-[10px] mb-0.5">
+                                    <span className="text-slate-400 font-mono truncate">{f.action}</span>
+                                    <span className="text-slate-500 ml-1 flex-shrink-0">{f.requests}</span>
+                                  </div>
+                                  <div className="h-1 bg-white/5 rounded-full overflow-hidden">
+                                    <div className="h-full rounded-full bg-violet-500/60" style={{ width: `${(f.requests / max) * 100}%` }} />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </>
         )}
 
         {/* ── ANALYTICS / FUNNEL TAB ── */}

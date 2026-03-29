@@ -433,6 +433,7 @@ export const api = {
 
   /** Credit pricing optimizer analysis — admin only */
   adminGetPricingOptimizer() { return get(`${MAIN_API}/admin/pricing-optimizer`, 15000); },
+  adminGetGrowthStats()      { return get(`${MAIN_API}/admin/growth-stats`, 15000); },
 
   /** Set a user's plan — admin only */
   adminSetPlan(userId, plan) {

@@ -1527,6 +1527,149 @@ async def admin_pricing_optimizer(admin: dict = Depends(_require_admin)):
 
 
 # ---------------------------------------------------------------------------
+# Admin Growth Stats
+# GET /admin/growth-stats — signups, top users, feature usage, churn, burn rate
+# ---------------------------------------------------------------------------
+
+@admin_router.get("/growth-stats")
+async def admin_growth_stats(admin: dict = Depends(_require_admin)):
+    """
+    Growth & engagement stats for the admin dashboard.
+    Returns:
+      - signups_per_day        : new user registrations per day (last 30 days)
+      - pro_users_this_week    : paid users active this week
+      - pro_users_last_week    : paid users active last week
+      - top_users              : top 10 most active users (all time)
+      - features_by_plan       : top 5 actions per plan (this month)
+      - churn_estimate         : users with zero activity in past 30 days
+      - burn_rate_by_plan      : credits used per plan this month
+    """
+    from datetime import datetime, timezone as _tz
+
+    db   = _get_db()
+    now  = datetime.now(_tz.utc)
+    ts   = now.timestamp()
+    month_key = f"{now.year:04d}-{now.month:02d}"
+
+    # ── New signups per day — last 30 days ───────────────────────────────────
+    thirty_ago = ts - 30 * 86400
+    seven_ago  = ts - 7 * 86400
+    fourteen_ago = ts - 14 * 86400
+
+    signup_agg = await db["users"].aggregate([
+        {"$match": {"created_at": {"$gte": thirty_ago}}},
+        {"$group": {
+            "_id": {"$dateToString": {
+                "format": "%Y-%m-%d",
+                "date": {"$toDate": {"$multiply": ["$created_at", 1000]}},
+            }},
+            "count": {"$sum": 1},
+        }},
+        {"$sort": {"_id": 1}},
+    ]).to_list(30)
+    signups_per_day = [{"date": d["_id"], "signups": d["count"]} for d in signup_agg]
+
+    # ── Pro users active this week vs last week ──────────────────────────────
+    pro_plans = ["standard", "pro", "max", "team"]
+
+    async def _count_active_paid(since_ts: float, until_ts: float) -> int:
+        agg = await db["activity_logs"].aggregate([
+            {"$match": {
+                "timestamp": {"$gte": since_ts, "$lt": until_ts},
+                "plan": {"$in": pro_plans},
+            }},
+            {"$group": {"_id": "$user_id"}},
+            {"$count": "count"},
+        ]).to_list(1)
+        return agg[0]["count"] if agg else 0
+
+    pro_this_week = await _count_active_paid(seven_ago, ts)
+    pro_last_week = await _count_active_paid(fourteen_ago, seven_ago)
+
+    # ── Top 10 most active users (all time) ──────────────────────────────────
+    top_users_agg = await db["activity_logs"].aggregate([
+        {"$group": {
+            "_id":      "$user_id",
+            "requests": {"$sum": 1},
+            "credits":  {"$sum": "$credits_used"},
+            "user_name":  {"$last": "$user_name"},
+            "user_email": {"$last": "$user_email"},
+            "plan":       {"$last": "$plan"},
+        }},
+        {"$sort": {"requests": -1}},
+        {"$limit": 10},
+    ]).to_list(10)
+    top_users = [
+        {
+            "name":     r.get("user_name") or r.get("_id", "—"),
+            "email":    r.get("user_email") or "—",
+            "plan":     r.get("plan") or "free",
+            "requests": r.get("requests", 0),
+            "credits":  r.get("credits", 0),
+        }
+        for r in top_users_agg
+    ]
+
+    # ── Top 5 features per plan (this month) ─────────────────────────────────
+    features_agg = await db["activity_logs"].aggregate([
+        {"$match": {"month_key": month_key}},
+        {"$group": {
+            "_id": {"plan": "$plan", "action": "$action_type"},
+            "requests": {"$sum": 1},
+        }},
+        {"$sort": {"requests": -1}},
+    ]).to_list(100)
+
+    features_by_plan: dict = {}
+    for r in features_agg:
+        plan   = r["_id"].get("plan") or "free"
+        action = r["_id"].get("action") or "unknown"
+        if plan not in features_by_plan:
+            features_by_plan[plan] = []
+        if len(features_by_plan[plan]) < 5:
+            features_by_plan[plan].append({"action": action, "requests": r["requests"]})
+
+    # ── Churn estimate: registered users with no activity in last 30 days ────
+    active_ids_agg = await db["activity_logs"].aggregate([
+        {"$match": {"timestamp": {"$gte": thirty_ago}}},
+        {"$group": {"_id": "$user_id"}},
+    ]).to_list(10000)
+    active_ids = {str(r["_id"]) for r in active_ids_agg}
+
+    total_users = await db["users"].count_documents({})
+    churn_estimate = max(0, total_users - len(active_ids))
+
+    # ── Credit burn rate per plan (this month) ───────────────────────────────
+    burn_agg = await db["activity_logs"].aggregate([
+        {"$match": {"month_key": month_key}},
+        {"$group": {
+            "_id":     "$plan",
+            "credits": {"$sum": "$credits_used"},
+            "users":   {"$addToSet": "$user_id"},
+        }},
+    ]).to_list(10)
+    burn_rate_by_plan = [
+        {
+            "plan":           r.get("_id") or "free",
+            "total_credits":  r.get("credits", 0),
+            "active_users":   len(r.get("users", [])),
+            "credits_per_user": round(r.get("credits", 0) / max(1, len(r.get("users", []))), 1),
+        }
+        for r in sorted(burn_agg, key=lambda x: x.get("credits", 0), reverse=True)
+    ]
+
+    return {
+        "signups_per_day":    signups_per_day,
+        "pro_users_this_week": pro_this_week,
+        "pro_users_last_week": pro_last_week,
+        "top_users":           top_users,
+        "features_by_plan":    features_by_plan,
+        "churn_estimate":      churn_estimate,
+        "burn_rate_by_plan":   burn_rate_by_plan,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Admin Override System
 # POST /api/admin/users/{user_id}/unflag          — clear abuse flags
 # POST /api/admin/users/{user_id}/reset-enforcement — reset enforcement stage to 0
