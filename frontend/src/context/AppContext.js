@@ -517,7 +517,24 @@ export function AppProvider({ children }) {
     if (_backendLoadedRef.current) return;
     _backendLoadedRef.current = true;
     api.dbGetChats()
-      .then((data) => { if (data?.chats?.length) setChats(data.chats); })
+      .then((data) => {
+        if (!data?.chats?.length) return;
+        // Merge: for each chat, keep whichever version (local vs backend) has the newer updatedAt.
+        // This prevents a stale backend snapshot from wiping messages that were saved to
+        // localStorage but hadn't yet synced to the backend when the user refreshed.
+        setChats((local) => {
+          const localMap = Object.fromEntries(local.map(c => [c.id, c]));
+          const merged = data.chats.map(remote => {
+            const loc = localMap[remote.id];
+            if (!loc) return remote;
+            return (loc.updatedAt || 0) >= (remote.updatedAt || 0) ? loc : remote;
+          });
+          // Keep any local-only chats the backend doesn't know about yet
+          const remoteIds = new Set(data.chats.map(c => c.id));
+          const localOnly = local.filter(c => !remoteIds.has(c.id));
+          return [...merged, ...localOnly];
+        });
+      })
       .catch(() => {});
     api.dbGetProjects()
       .then((data) => { if (data?.projects?.length) setProjects(data.projects); })
@@ -562,7 +579,7 @@ export function AppProvider({ children }) {
     clearTimeout(_chatSyncTimer.current);
     _chatSyncTimer.current = setTimeout(() => {
       api.dbSaveChats(chats).catch(() => {});
-    }, 3000);
+    }, 1000);
     return () => clearTimeout(_chatSyncTimer.current);
   }, [chats, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
