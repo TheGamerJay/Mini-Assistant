@@ -1770,14 +1770,13 @@ async def admin_set_user_plan(
         raise HTTPException(status_code=400, detail=f"Invalid plan '{body.plan}'. Valid: {sorted(valid_plans)}")
 
     new_credits = PLAN_CREDIT_LIMITS.get(body.plan, 50)
-    update_fields: dict = {
-        "plan":                 body.plan,
-        "subscription_credits": new_credits,
-    }
-    # Max plan automatically includes Ad Mode access
-    if body.plan == "max":
-        update_fields["has_ad_mode"] = True
-    result = await db["users"].update_one({"id": user_id}, {"$set": update_fields})
+    result = await db["users"].update_one(
+        {"id": user_id},
+        {"$set": {
+            "plan":                 body.plan,
+            "subscription_credits": new_credits,
+        }},
+    )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
 

@@ -412,9 +412,7 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
     setChangingPlanId(u.id);
     try {
       await api.adminSetPlan(u.id, newPlan);
-      // Max plan auto-grants ad mode
-      const adMode = newPlan === 'max' ? true : u.has_ad_mode;
-      setUsers(prev => prev.map(x => x.id === u.id ? { ...x, plan: newPlan, has_ad_mode: adMode } : x));
+      setUsers(prev => prev.map(x => x.id === u.id ? { ...x, plan: newPlan } : x));
       toast.success(`${u.name}'s plan changed to ${newPlan}.`);
       loadStats();
       if (u.id === currentUserId && onRefreshSelf) onRefreshSelf();
