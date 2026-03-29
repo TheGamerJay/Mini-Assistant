@@ -446,6 +446,11 @@ export const api = {
     return request(`${MAIN_API}/admin/users/${userId}/plan`, { method: 'PATCH', body: JSON.stringify({ plan }) }, 10000);
   },
 
+  /** Grant or revoke Ad Mode access — admin only */
+  adminToggleAdMode(userId, enabled) {
+    return request(`${MAIN_API}/admin/users/${userId}/ad-mode`, { method: 'PATCH', body: JSON.stringify({ enabled }) }, 10000);
+  },
+
   /** Get users flagged for potential abuse — admin only */
   adminGetAbuseFlags(actioned = false) {
     return get(`${MAIN_API}/admin/abuse-flags?actioned=${actioned}`, 10000);

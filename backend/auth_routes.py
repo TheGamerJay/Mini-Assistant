@@ -659,6 +659,7 @@ async def get_credits(authorization: str = Header(None)):
     return {
         "credits":          effective_credits,
         "plan":             user.get("plan", "free"),
+        "has_ad_mode":      bool(user.get("has_ad_mode", False)),
         "images_used":      _img_used,
         "images_limit":     _img_limit_val,
         "images_resets_on": _img_resets_on,
@@ -988,6 +989,7 @@ async def admin_list_users(admin: dict = Depends(_require_admin)):
                 "credits": u.get("credits", 0),
                 "plan": u.get("plan", "free"),
                 "bonus_images": u.get("bonus_images", 0),
+                "has_ad_mode": bool(u.get("has_ad_mode", False)),
                 "created_at": u.get("created_at"),
                 "google_linked": bool(u.get("google_sub")),
             }
@@ -1768,18 +1770,41 @@ async def admin_set_user_plan(
         raise HTTPException(status_code=400, detail=f"Invalid plan '{body.plan}'. Valid: {sorted(valid_plans)}")
 
     new_credits = PLAN_CREDIT_LIMITS.get(body.plan, 50)
-    result = await db["users"].update_one(
-        {"id": user_id},
-        {"$set": {
-            "plan":                 body.plan,
-            "subscription_credits": new_credits,
-        }},
-    )
+    update_fields: dict = {
+        "plan":                 body.plan,
+        "subscription_credits": new_credits,
+    }
+    # Max plan automatically includes Ad Mode access
+    if body.plan == "max":
+        update_fields["has_ad_mode"] = True
+    result = await db["users"].update_one({"id": user_id}, {"$set": update_fields})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
 
     log.info("Admin %s changed user %s plan → %s (credits=%d)", caller_uid, user_id, body.plan, new_credits)
     return {"ok": True, "user_id": user_id, "plan": body.plan, "subscription_credits": new_credits}
+
+
+class AdModeToggleBody(BaseModel):
+    enabled: bool
+
+
+@admin_router.patch("/users/{user_id}/ad-mode")
+async def admin_toggle_ad_mode(
+    user_id: str,
+    body: AdModeToggleBody,
+    admin: dict = Depends(_require_admin),
+):
+    """Grant or revoke Ad Mode access for a user — admin only."""
+    db = _get_db()
+    result = await db["users"].update_one(
+        {"id": user_id},
+        {"$set": {"has_ad_mode": body.enabled}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    log.info("Admin %s set has_ad_mode=%s for user %s", admin.get("sub"), body.enabled, user_id)
+    return {"ok": True, "user_id": user_id, "has_ad_mode": body.enabled}
 
 
 @auth_router.post("/admin/users/{user_id}/reset-enforcement")

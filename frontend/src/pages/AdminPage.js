@@ -412,15 +412,28 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
     setChangingPlanId(u.id);
     try {
       await api.adminSetPlan(u.id, newPlan);
-      setUsers(prev => prev.map(x => x.id === u.id ? { ...x, plan: newPlan } : x));
+      // Max plan auto-grants ad mode
+      const adMode = newPlan === 'max' ? true : u.has_ad_mode;
+      setUsers(prev => prev.map(x => x.id === u.id ? { ...x, plan: newPlan, has_ad_mode: adMode } : x));
       toast.success(`${u.name}'s plan changed to ${newPlan}.`);
       loadStats();
-      // If the changed user is the currently logged-in user, refresh their React state
       if (u.id === currentUserId && onRefreshSelf) onRefreshSelf();
     } catch (err) {
       toast.error(err.message || 'Failed to change plan.');
     } finally {
       setChangingPlanId(null);
+    }
+  }
+
+  async function handleToggleAdMode(u) {
+    const newVal = !u.has_ad_mode;
+    try {
+      await api.adminToggleAdMode(u.id, newVal);
+      setUsers(prev => prev.map(x => x.id === u.id ? { ...x, has_ad_mode: newVal } : x));
+      toast.success(`${u.name} Ad Mode ${newVal ? 'enabled' : 'disabled'}.`);
+      if (u.id === currentUserId && onRefreshSelf) onRefreshSelf();
+    } catch (err) {
+      toast.error(err.message || 'Failed to toggle Ad Mode.');
     }
   }
 
@@ -603,7 +616,7 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-white/5">
-                      {['User', 'Email', 'Auth', 'Role', 'Plan ✎', 'Credits', 'Grant Credits', 'Bonus Images', 'Grant Images', 'Joined', 'Actions'].map(h => (
+                      {['User', 'Email', 'Auth', 'Role', 'Plan ✎', 'Credits', 'Grant Credits', 'Bonus Images', 'Grant Images', 'Ad Mode', 'Joined', 'Actions'].map(h => (
                         <th key={h} className="px-4 py-3 text-left text-[11px] font-mono uppercase tracking-widest text-slate-600 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -732,6 +745,17 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
                               {grantingImageId === u.id ? '…' : 'Set'}
                             </button>
                           </div>
+                        </td>
+
+                        {/* Ad Mode toggle */}
+                        <td className="px-4 py-3">
+                          <button
+                            onClick={() => handleToggleAdMode(u)}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-mono border transition-all ${u.has_ad_mode ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25' : 'bg-white/5 border-white/10 text-slate-500 hover:bg-white/10 hover:text-slate-300'}`}
+                            title={u.has_ad_mode ? 'Revoke Ad Mode access' : 'Grant Ad Mode access'}
+                          >
+                            {u.has_ad_mode ? 'ON' : 'OFF'}
+                          </button>
                         </td>
 
                         {/* Joined */}

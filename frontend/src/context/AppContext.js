@@ -451,9 +451,10 @@ export function AppProvider({ children }) {
   }, []);
 
   const refreshCredits = useCallback(() => {
-    api.authCredits().then(({ credits: c, plan: p, images_used, images_limit, images_resets_on }) => {
+    api.authCredits().then(({ credits: c, plan: p, has_ad_mode, images_used, images_limit, images_resets_on }) => {
       setCredits(c);
       setPlan(p);
+      if (has_ad_mode !== undefined) setHasAdMode(Boolean(has_ad_mode));
       if (images_used !== undefined) {
         setImageUsage({ used: images_used, limit: images_limit ?? 2, resetsOn: images_resets_on ?? null });
       }
