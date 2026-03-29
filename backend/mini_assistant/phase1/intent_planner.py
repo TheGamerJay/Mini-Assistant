@@ -174,10 +174,10 @@ _DEBUGGING = re.compile(
 
 # Image generation — action verb + subject
 _IMG_GEN = re.compile(
-    r"\b(generate|create|draw|make|paint|render|produce|design|sketch|illustrate)\b"
-    r".{0,50}"
+    r"\b(generate|create|draw|make|paint|render|produce|design|sketch|illustrate|want|show|give me|get me)\b"
+    r".{0,60}"
     r"\b(image|picture|photo|artwork|art|illustration|logo|icon|wallpaper|poster|"
-    r"banner|thumbnail|hero image|splash|background|portrait|landscape|concept art)\b",
+    r"banner|thumbnail|hero image|splash|background|portrait|landscape|concept art|anime|drawing|painting)\b",
     re.IGNORECASE,
 )
 

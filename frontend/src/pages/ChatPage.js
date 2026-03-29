@@ -708,7 +708,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
 
       try {
         const history = nextMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
-        const data = await send(text, sessionIdRef.current, history, imgs.length ? imgs : null, preferredModel, requestId);
+        const data = await send(text, sessionIdRef.current, history, imgs.length ? imgs : null, preferredModel, requestId, chatMode);
         setStreamResponse(data);
 
         const isImg = !!data.image_base64;
@@ -800,7 +800,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
             content: 'Rendering your image...', timestamp: Date.now(), _placeholder: true,
           }]);
           try {
-            const data = await send(text, sessionIdRef.current, history, imgs.length ? imgs : null, preferredModel, requestId);
+            const data = await send(text, sessionIdRef.current, history, imgs.length ? imgs : null, preferredModel, requestId, chatMode);
             setStreamResponse(data);
             const isImg = !!data.image_base64;
             if (isImg) {
