@@ -440,6 +440,15 @@ The user has shared code or asked a coding question. Respond like a senior engin
 """
 
 # ---------------------------------------------------------------------------
+# Portrait/full-body keyword detector — used to auto-select 1024x1792 for tall shots
+_PORTRAIT_KW = re.compile(
+    r"\b(full.?body|head.?to.?toe|full.?length|standing|full.?character|"
+    r"wide.?shot|full.?figure|whole.?body|entire.?body|feet.?visible|"
+    r"no.?crop|not.?cropped|character.?in.?frame)\b",
+    re.IGNORECASE,
+)
+
+# ---------------------------------------------------------------------------
 # Mini Assistant identity system prompt
 # ---------------------------------------------------------------------------
 
@@ -1897,7 +1906,9 @@ async def chat(req: ChatRequest, request: Request):
             except Exception:
                 _gen_prompt = effective_msg
             _dalle = DalleClient()
-            _b64 = await _dalle.generate(_gen_prompt)
+            # Auto-select portrait size for full-body / character prompts
+            _gen_size = "1024x1792" if _PORTRAIT_KW.search(_gen_prompt) else "1024x1024"
+            _b64 = await _dalle.generate(_gen_prompt, size=_gen_size)
             try:
                 from mini_credits import log_image_generated as _log_img
                 await _log_img(request.headers.get("authorization"), request_id=getattr(req, "request_id", None))
@@ -1953,7 +1964,8 @@ async def chat(req: ChatRequest, request: Request):
         try:
             from ..services.dalle_client import DalleClient
             _dalle = DalleClient()
-            _b64 = await _dalle.generate(dalle_prompt)
+            _ref_size = "1024x1792" if _PORTRAIT_KW.search(dalle_prompt + " " + effective_msg) else "1024x1024"
+            _b64 = await _dalle.generate(dalle_prompt, size=_ref_size)
             try:
                 from mini_credits import log_image_generated as _log_img
                 await _log_img(request.headers.get("authorization"), request_id=getattr(req, "request_id", None))
