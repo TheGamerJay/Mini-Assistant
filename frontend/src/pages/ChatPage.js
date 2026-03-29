@@ -532,8 +532,17 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
       } else {
         setPreviewImage(null);
       }
+    } else if (activeChatId && !loading && !streamActive) {
+      // activeChatId unchanged but chats updated (e.g. backend merge on refresh).
+      // If messages are empty but the store now has them, resync — this fixes the
+      // race where chats loaded as [] on init, effect ran with empty results, then
+      // chats populated later but the condition above was already false.
+      const chat = chats.find((c) => c.id === activeChatId);
+      if (chat?.messages?.length && messages.length === 0) {
+        setMessages(chat.messages);
+      }
     }
-  }, [activeChatId, chats]);
+  }, [activeChatId, chats]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // On mount: restore the chat that belongs to the persisted chatMode
   const _modeRestored = useRef(false);
