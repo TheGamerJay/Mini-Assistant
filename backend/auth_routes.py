@@ -641,8 +641,16 @@ async def get_credits(authorization: str = Header(None)):
     from mini_credits import check_image_limit as _img_limit  # noqa: PLC0415
     _img_ok, _img_used, _img_limit_val, _img_resets_on = await _img_limit(authorization, db)
 
+    # Use subscription_credits + topup_credits if present (new schema),
+    # otherwise fall back to legacy credits field.
+    sub_c = user.get("subscription_credits")
+    if sub_c is not None:
+        effective_credits = max(0, sub_c) + max(0, user.get("topup_credits", 0))
+    else:
+        effective_credits = max(0, user.get("credits", 0))
+
     return {
-        "credits":          user.get("credits", 0),
+        "credits":          effective_credits,
         "plan":             user.get("plan", "free"),
         "images_used":      _img_used,
         "images_limit":     _img_limit_val,

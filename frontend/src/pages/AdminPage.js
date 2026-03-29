@@ -190,7 +190,7 @@ function AdminLoginForm({ onLogin }) {
 // ---------------------------------------------------------------------------
 // Admin Dashboard
 // ---------------------------------------------------------------------------
-function AdminDashboard({ adminUser, onLogout }) {
+function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
   const [stats, setStats]               = useState(null);
   const [users, setUsers]               = useState([]);
   const [activity, setActivity]         = useState([]);
@@ -415,6 +415,8 @@ function AdminDashboard({ adminUser, onLogout }) {
       setUsers(prev => prev.map(x => x.id === u.id ? { ...x, plan: newPlan } : x));
       toast.success(`${u.name}'s plan changed to ${newPlan}.`);
       loadStats();
+      // If the changed user is the currently logged-in user, refresh their React state
+      if (u.id === currentUserId && onRefreshSelf) onRefreshSelf();
     } catch (err) {
       toast.error(err.message || 'Failed to change plan.');
     } finally {
@@ -1355,7 +1357,7 @@ function AdminDashboard({ adminUser, onLogout }) {
 // AdminPage — root export, handles auth state independently
 // ---------------------------------------------------------------------------
 export default function AdminPage() {
-  const { user, logout, setPage } = useApp();
+  const { user, logout, setPage, refreshCredits } = useApp();
   const [localAdmin, setLocalAdmin] = useState(null);
 
   // The effective admin is either the AppContext user (if already logged in as admin) or localAdmin
@@ -1394,7 +1396,7 @@ export default function AdminPage() {
   return (
     <>
       <Toaster richColors position="bottom-right" />
-      <AdminDashboard adminUser={effectiveUser} onLogout={handleLogout} />
+      <AdminDashboard adminUser={effectiveUser} onLogout={handleLogout} currentUserId={user?.id} onRefreshSelf={refreshCredits} />
       <button
         onClick={() => { setPage('chat'); try { window.history.pushState({}, '', '/'); } catch {} }}
         className="fixed bottom-4 left-4 flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-400 transition-colors"
