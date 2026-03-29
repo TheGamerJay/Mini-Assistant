@@ -149,12 +149,16 @@ class CreateCampaignRequest(BaseModel):
 
 
 class GenerateAdsRequest(BaseModel):
-    campaign_id:         str
-    business_profile_id: str
-    goal:                Optional[str] = None
-    audience:            Optional[str] = None
-    tone:                Optional[str] = None
-    num_concepts:        int = 3   # 1–5
+    campaign_id:          str
+    business_profile_id:  str
+    goal:                 Optional[str] = None
+    audience:             Optional[str] = None
+    tone:                 Optional[str] = None
+    num_concepts:         int = 3           # 1–5
+    image_style:          Optional[str] = None   # e.g. "Dark Tech"
+    image_format:         Optional[str] = None   # e.g. "photorealistic"
+    visual_consistency:   bool = True
+    people_in_image:      Optional[str] = None   # "yes" | "no" | "optional"
 
 
 class RegenerateCopyRequest(BaseModel):
@@ -286,8 +290,96 @@ async def _generate_business_profile(info: BusinessProfileInput) -> Dict[str, An
 # Ad set generation
 # ---------------------------------------------------------------------------
 
-_AD_COPY_SYSTEM = """You are an expert direct-response copywriter.
-Generate compelling ad copy for social media and digital advertising.
+# Image style → DALL-E style prefix lookup
+_IMAGE_STYLE_PREFIXES: dict[str, str] = {
+    "Product UI / SaaS Dashboard":
+        "Professional SaaS product UI screenshot mockup on a dark background, glowing interface panels, "
+        "clean dashboard with charts and metrics, premium dark theme, subtle blue/cyan accent glow",
+    "Solo Founder Workspace":
+        "Moody solo founder workspace, laptop open with code or dashboard, late-night productivity aesthetic, "
+        "soft desk lamp lighting, dark background, focus and hustle vibe",
+    "Futuristic AI Interface":
+        "Futuristic AI holographic interface, glowing data streams, neural network visualization, "
+        "deep navy/black background, blue and purple light trails, ultra-modern tech aesthetic",
+    "Dark Tech":
+        "Dark tech product photography, deep black background, blue/cyan neon accent lighting, "
+        "dramatic shadows, premium hardware or software visualization, sleek and minimal",
+    "Clean Corporate":
+        "Clean modern corporate aesthetic, white and light grey tones, minimal layout, "
+        "professional business setting, soft shadows, polished and trustworthy",
+    "Startup Team":
+        "Dynamic startup team environment, collaborative workspace, diverse young professionals, "
+        "bright modern office, energy and momentum, natural lighting",
+    "Minimal Modern":
+        "Ultra-minimal modern composition, generous white space, single hero element, "
+        "clean geometry, muted accent color, sophisticated and editorial",
+    "Cinematic":
+        "Cinematic wide-angle shot, dramatic lighting, rich color grading, "
+        "film-quality composition, deep shadows and bright highlights, storytelling mood",
+    "Illustration":
+        "Clean vector illustration style, flat design with subtle depth, "
+        "limited modern color palette, bold shapes, professional and friendly",
+    "3D Render":
+        "High-quality 3D render, photorealistic materials, studio lighting, "
+        "floating UI elements or product, dark background, glossy surfaces, premium feel",
+    "No Image": "",
+}
+
+_IMAGE_FORMAT_SUFFIXES: dict[str, str] = {
+    "photorealistic": "photorealistic, DSLR quality, sharp focus, professional photography",
+    "illustration":   "digital illustration, clean vector art, bold flat design",
+    "3D":             "3D render, CGI quality, ray-traced lighting, octane render",
+    "UI mockup":      "UI/UX product mockup, device frame, app interface preview, clean layout",
+}
+
+_PEOPLE_RULES: dict[str, str] = {
+    "yes":      "Include one or two professional people naturally interacting with the product.",
+    "no":       "No people in the image — focus entirely on the product, interface, or abstract concept.",
+    "optional": "Only include people if it naturally improves the composition.",
+}
+
+
+def _build_image_prompt(
+    concept_prompt: str,
+    image_style: str | None,
+    image_format: str | None,
+    people_in_image: str | None,
+    consistency_anchor: str | None,
+) -> str:
+    """Combine concept-specific prompt with style controls into a final DALL-E prompt."""
+    style   = image_style   or "Dark Tech"
+    fmt     = image_format  or "photorealistic"
+    people  = people_in_image or "no"
+
+    if style == "No Image":
+        return ""
+
+    style_prefix  = _IMAGE_STYLE_PREFIXES.get(style, _IMAGE_STYLE_PREFIXES["Dark Tech"])
+    format_suffix = _IMAGE_FORMAT_SUFFIXES.get(fmt, _IMAGE_FORMAT_SUFFIXES["photorealistic"])
+    people_rule   = _PEOPLE_RULES.get(people, _PEOPLE_RULES["no"])
+    anchor        = f"Maintain consistent visual style: {consistency_anchor}. " if consistency_anchor else ""
+
+    parts = [
+        style_prefix,
+        concept_prompt,
+        people_rule,
+        format_suffix,
+        anchor,
+        "No text, logos, or watermarks in the image. No stock photo clichés. High quality, ad-ready.",
+    ]
+    return " ".join(p for p in parts if p).strip()
+
+
+_AD_COPY_SYSTEM = """You are an expert direct-response copywriter specialising in high-converting digital ads.
+
+RULES — follow these strictly:
+- NEVER invent statistics, user counts, testimonials, revenue figures, or performance claims unless the brand profile explicitly provides them.
+- Write bold, confident copy that is believable — no hype, no "10x your revenue overnight" nonsense.
+- Focus on real, concrete benefits: speed, automation, replacing multiple tools, helping solo founders scale.
+- Keep hooks punchy and curiosity-driven. Keep headlines clear and specific.
+- Write captions that educate and persuade in under 80 words — no fluff.
+- CTAs must be action-oriented and specific (e.g. "Start free today", "See it in action", "Build your first app").
+
 Return valid JSON only — no markdown, no explanation."""
 
 _AD_COPY_PROMPT = """
@@ -300,19 +392,20 @@ CAMPAIGN:
 - Goal: {goal}
 - Audience: {audience}
 - Tone: {tone}
+- Image Style: {image_style}
 
-Generate {num_concepts} ad concepts. Each concept must use a different ad angle.
-Available angles: benefit-driven, emotional, problem-solution, curiosity, direct-cta, social-proof, urgency
+Each concept MUST use a different angle.
+Available angles: benefit-driven, emotional, problem-solution, curiosity, direct-cta, urgency, value-stack
 
-Return a JSON array of ad concepts. Each item must have:
+Return a JSON array. Each object must have exactly these keys:
 {{
   "concept_number": 1,
   "angle": "benefit-driven",
-  "hook": "Attention-grabbing opening line (max 15 words)",
-  "headline": "Ad headline (max 10 words)",
-  "caption": "Full ad body copy (50-100 words). Persuasive, on-brand.",
-  "cta": "Call to action text (max 6 words)",
-  "image_prompt": "Detailed DALL-E prompt for a clean, professional ad image that matches this concept. Commercial photography style, no text in image, high quality, appropriate for ads."
+  "hook": "Attention-grabbing opening line. Max 12 words. Bold but believable.",
+  "headline": "Main ad headline. Max 8 words. Clear and specific.",
+  "caption": "Ad body copy. 40-80 words. Persuasive, no invented claims, on-brand voice.",
+  "cta": "Call to action. Max 5 words. Action-oriented.",
+  "image_prompt": "Describe the core visual concept in 1-2 sentences: what is shown, the mood, key elements. Style and format will be applied separately — just describe what the image should depict."
 }}
 """
 
@@ -323,6 +416,7 @@ async def _generate_ad_concepts(
     audience: str,
     tone: str,
     num_concepts: int,
+    image_style: str | None = None,
 ) -> List[Dict[str, Any]]:
     prompt = _AD_COPY_PROMPT.format(
         profile_json=json.dumps(profile, indent=2),
@@ -330,6 +424,7 @@ async def _generate_ad_concepts(
         audience=audience,
         tone=tone,
         num_concepts=num_concepts,
+        image_style=image_style or "Dark Tech",
     )
     raw = await _claude_complete(prompt, system=_AD_COPY_SYSTEM)
     raw = raw.strip()
@@ -649,53 +744,74 @@ async def generate_ads(
         raise HTTPException(404, "Brand profile not found")
 
     profile_data = profile_doc.get("generated_profile") or {}
-    goal     = body.goal     or campaign.get("goal", "awareness")
-    audience = body.audience or campaign.get("audience", profile_doc.get("audience", "general"))
-    tone     = body.tone     or campaign.get("tone",     profile_doc.get("tone", "professional"))
-    num      = max(1, min(5, body.num_concepts))
+    goal            = body.goal     or campaign.get("goal", "awareness")
+    audience        = body.audience or campaign.get("audience", profile_doc.get("audience", "general"))
+    tone            = body.tone     or campaign.get("tone",     profile_doc.get("tone", "professional"))
+    num             = max(1, min(5, body.num_concepts))
+    image_style     = body.image_style    or "Dark Tech"
+    image_format    = body.image_format   or "photorealistic"
+    people          = body.people_in_image or "no"
+    consistency     = body.visual_consistency
 
-    log.info("Generating %d ad concepts for user=%s campaign=%s", num, user_id, body.campaign_id)
+    log.info("Generating %d ad concepts for user=%s campaign=%s style=%s", num, user_id, body.campaign_id, image_style)
 
-    # Step 1: Generate copy with Claude
-    concepts = await _generate_ad_concepts(profile_data, goal, audience, tone, num)
+    # Step 1: Generate copy with Claude (includes raw concept image_prompt)
+    concepts = await _generate_ad_concepts(profile_data, goal, audience, tone, num, image_style)
 
     now = datetime.now(timezone.utc).isoformat()
     saved_sets: List[Dict[str, Any]] = []
 
-    # Step 2: For each concept, generate image + save
+    # Build a consistency anchor from the first concept so all images share the same vibe
+    consistency_anchor: Optional[str] = None
+    if consistency and concepts:
+        first_prompt = concepts[0].get("image_prompt", "")
+        consistency_anchor = (
+            f"{image_style} aesthetic, {image_format} style, "
+            f"{_IMAGE_STYLE_PREFIXES.get(image_style, '')[:80]}"
+        ) if first_prompt else None
+
+    # Step 2: For each concept, build full DALL-E prompt + generate image
     import asyncio as _asyncio  # noqa: PLC0415
 
     async def _gen_one(concept: Dict[str, Any]) -> Dict[str, Any]:
-        image_prompt = concept.get("image_prompt", "")
+        raw_concept_prompt = concept.get("image_prompt", "")
+        final_image_prompt = _build_image_prompt(
+            raw_concept_prompt, image_style, image_format, people,
+            consistency_anchor if consistency else None,
+        )
         image_b64: Optional[str] = None
-        if image_prompt:
+        if final_image_prompt:
             try:
-                image_b64 = await _dalle_generate(image_prompt)
+                image_b64 = await _dalle_generate(final_image_prompt)
             except Exception as exc:
                 log.warning("DALL-E failed for concept %s: %s", concept.get("concept_number"), exc)
 
         ad_set_id = str(uuid.uuid4())
         doc = {
-            "id":                ad_set_id,
-            "campaign_id":       body.campaign_id,
+            "id":                  ad_set_id,
+            "campaign_id":         body.campaign_id,
             "business_profile_id": body.business_profile_id,
-            "user_id":           user_id,
-            "angle":             concept.get("angle", ""),
-            "hook":              concept.get("hook", ""),
-            "headline":          concept.get("headline", ""),
-            "caption":           concept.get("caption", ""),
-            "cta":               concept.get("cta", ""),
-            "image_prompt":      image_prompt,
-            "image_base64":      image_b64,
-            "metadata":          {
-                "model_copy":   CLAUDE_MODEL,
-                "model_image":  DALLE_IMAGE_MODEL if image_b64 else None,
-                "goal":         goal,
-                "audience":     audience,
-                "tone":         tone,
+            "user_id":             user_id,
+            "angle":               concept.get("angle", ""),
+            "hook":                concept.get("hook", ""),
+            "headline":            concept.get("headline", ""),
+            "caption":             concept.get("caption", ""),
+            "cta":                 concept.get("cta", ""),
+            "image_prompt":        final_image_prompt,
+            "image_base64":        image_b64,
+            "metadata":            {
+                "model_copy":         CLAUDE_MODEL,
+                "model_image":        DALLE_IMAGE_MODEL if image_b64 else None,
+                "goal":               goal,
+                "audience":           audience,
+                "tone":               tone,
+                "image_style":        image_style,
+                "image_format":       image_format,
+                "people_in_image":    people,
+                "visual_consistency": consistency,
             },
-            "created_at":        now,
-            "updated_at":        now,
+            "created_at":          now,
+            "updated_at":          now,
         }
         await db["ad_mode_ad_sets"].insert_one({**doc, "_id": ad_set_id})
         doc.pop("_id", None)

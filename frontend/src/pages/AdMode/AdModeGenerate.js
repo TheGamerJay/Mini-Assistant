@@ -10,9 +10,28 @@ import {
 import { api } from '../../api/client';
 import { toast } from 'sonner';
 
-const GOALS   = ['sales', 'traffic', 'leads', 'awareness'];
-const TONES   = ['professional', 'casual', 'bold', 'playful', 'urgent'];
-const NUMS    = [1, 2, 3, 4, 5];
+const GOALS        = ['sales', 'traffic', 'leads', 'awareness'];
+const TONES        = ['professional', 'casual', 'bold', 'playful', 'urgent'];
+const NUMS         = [1, 2, 3, 4, 5];
+const IMAGE_STYLES = [
+  'Dark Tech',
+  'Product UI / SaaS Dashboard',
+  'Solo Founder Workspace',
+  'Futuristic AI Interface',
+  'Clean Corporate',
+  'Startup Team',
+  'Minimal Modern',
+  'Cinematic',
+  'Illustration',
+  '3D Render',
+  'No Image',
+];
+const IMAGE_FORMATS  = ['photorealistic', 'illustration', '3D', 'UI mockup'];
+const PEOPLE_OPTIONS = [
+  { value: 'no',       label: 'No people' },
+  { value: 'yes',      label: 'Include people' },
+  { value: 'optional', label: 'Optional' },
+];
 
 function inputCls() {
   return 'w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/40 transition-colors';
@@ -210,10 +229,14 @@ export default function AdModeGenerate({ campaigns }) {
   const [campaignList, setCampaignList]         = useState(campaigns || []);
 
   const [form, setForm] = useState({
-    goal:         'sales',
-    audience:     '',
-    tone:         'professional',
-    num_concepts: 3,
+    goal:               'sales',
+    audience:           '',
+    tone:               'bold',
+    num_concepts:       3,
+    image_style:        'Dark Tech',
+    image_format:       'photorealistic',
+    visual_consistency: true,
+    people_in_image:    'no',
   });
 
   useEffect(() => {
@@ -283,6 +306,10 @@ export default function AdModeGenerate({ campaigns }) {
           audience:            form.audience || undefined,
           tone:                form.tone || undefined,
           num_concepts:        Number(form.num_concepts),
+          image_style:         form.image_style,
+          image_format:        form.image_format,
+          visual_consistency:  form.visual_consistency,
+          people_in_image:     form.people_in_image,
         });
         setAdSets(ad_sets);
         toast.success(`Generated ${ad_sets.length} ad concepts`);
@@ -304,6 +331,10 @@ export default function AdModeGenerate({ campaigns }) {
         audience:            form.audience || undefined,
         tone:                form.tone || undefined,
         num_concepts:        Number(form.num_concepts),
+        image_style:         form.image_style,
+        image_format:        form.image_format,
+        visual_consistency:  form.visual_consistency,
+        people_in_image:     form.people_in_image,
       });
       setAdSets(ad_sets);
       toast.success(`Generated ${ad_sets.length} ad concepts`);
@@ -373,7 +404,7 @@ export default function AdModeGenerate({ campaigns }) {
         </div>
 
         {/* Goal / Tone / Audience / Count */}
-        <div className="grid grid-cols-2 gap-3 mb-4">
+        <div className="grid grid-cols-2 gap-3 mb-3">
           <div>
             <label className="block text-xs text-slate-400 mb-1.5 font-medium">Goal</label>
             <select value={form.goal} onChange={f('goal')} className={inputCls()}>
@@ -387,13 +418,13 @@ export default function AdModeGenerate({ campaigns }) {
             </select>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-3 mb-3">
           <div>
-            <label className="block text-xs text-slate-400 mb-1.5 font-medium">Target Audience (optional override)</label>
+            <label className="block text-xs text-slate-400 mb-1.5 font-medium">Target Audience <span className="text-slate-600">(optional)</span></label>
             <input
               value={form.audience}
               onChange={f('audience')}
-              placeholder={profile?.audience || 'e.g. busy parents 25–40'}
+              placeholder={profile?.audience || 'e.g. solo founders 25–40'}
               className={inputCls()}
             />
           </div>
@@ -402,6 +433,48 @@ export default function AdModeGenerate({ campaigns }) {
             <select value={form.num_concepts} onChange={f('num_concepts')} className={inputCls()}>
               {NUMS.map((n) => <option key={n} value={n} className="bg-[#111118]">{n} concept{n > 1 ? 's' : ''}</option>)}
             </select>
+          </div>
+        </div>
+
+        {/* Image controls */}
+        <div className="border-t border-white/5 pt-4 mt-1">
+          <p className="text-[10px] font-mono uppercase tracking-widest text-slate-600 mb-3">Image Settings</p>
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1.5 font-medium">Image Style</label>
+              <select value={form.image_style} onChange={f('image_style')} className={inputCls()}>
+                {IMAGE_STYLES.map((s) => <option key={s} value={s} className="bg-[#111118]">{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1.5 font-medium">Image Format</label>
+              <select value={form.image_format} onChange={f('image_format')} className={inputCls()}>
+                {IMAGE_FORMATS.map((s) => <option key={s} value={s} className="bg-[#111118]">{s}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1.5 font-medium">People in Image</label>
+              <select value={form.people_in_image} onChange={f('people_in_image')} className={inputCls()}>
+                {PEOPLE_OPTIONS.map((o) => <option key={o.value} value={o.value} className="bg-[#111118]">{o.label}</option>)}
+              </select>
+            </div>
+            <div className="flex flex-col justify-end pb-0.5">
+              <label className="block text-xs text-slate-400 mb-1.5 font-medium">Visual Consistency</label>
+              <button
+                type="button"
+                onClick={() => setForm(prev => ({ ...prev, visual_consistency: !prev.visual_consistency }))}
+                className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border text-sm font-medium transition-all ${
+                  form.visual_consistency
+                    ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400'
+                    : 'bg-white/5 border-white/10 text-slate-500'
+                }`}
+              >
+                <span className={`w-3 h-3 rounded-full flex-shrink-0 ${form.visual_consistency ? 'bg-cyan-400' : 'bg-slate-600'}`} />
+                {form.visual_consistency ? 'Same style across all' : 'Independent styles'}
+              </button>
+            </div>
           </div>
         </div>
 
