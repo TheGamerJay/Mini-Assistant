@@ -1330,11 +1330,14 @@ async def generate_image(req: GenerateRequest, request: Request):
     dalle = DalleClient()
     try:
         image_b64 = await dalle.generate(clean_prompt, quality=quality, size=size)
-    except RuntimeError as exc:
+    except (RuntimeError, Exception) as exc:
+        _exc_str = str(exc)
         logger.error("DALL-E 3 generation failed: %s", exc)
-        raise HTTPException(status_code=502, detail=str(exc))
-    except Exception as exc:
-        logger.error("DALL-E 3 unexpected error: %s", exc, exc_info=True)
+        if "content_policy_violation" in _exc_str or "safety system" in _exc_str:
+            raise HTTPException(
+                status_code=400,
+                detail="OpenAI's safety filter blocked that prompt. Try rephrasing it slightly.",
+            )
         raise HTTPException(status_code=502, detail=f"Image generation error: {exc}")
 
     # ── Log image generation (no credit deduction) ──────────────────────────
@@ -1904,7 +1907,15 @@ async def chat(req: ChatRequest, request: Request):
             }
         except Exception as exc:
             logger.error("DALL-E generation failed: %s", exc)
-            reply = f"Image generation failed: {exc}"
+            _exc_str = str(exc)
+            if "content_policy_violation" in _exc_str or "safety system" in _exc_str:
+                reply = (
+                    "OpenAI's safety filter flagged that prompt and blocked it. "
+                    "Try rephrasing — sometimes small wording tweaks get it through. "
+                    "What do you want to adjust?"
+                )
+            else:
+                reply = f"Image generation failed: {exc}"
 
     elif execution_intent == "image_reference_generate":
         # Analyze reference image with GPT-4o → build prompt → generate via DALL-E 3
@@ -1952,7 +1963,15 @@ async def chat(req: ChatRequest, request: Request):
             }
         except Exception as exc:
             logger.error("DALL-E reference generation failed: %s", exc)
-            reply = f"Image generation failed: {exc}"
+            _exc_str = str(exc)
+            if "content_policy_violation" in _exc_str or "safety system" in _exc_str:
+                reply = (
+                    "OpenAI's safety filter flagged that prompt and blocked it. "
+                    "Try rephrasing — sometimes small wording tweaks get it through. "
+                    "What do you want to adjust?"
+                )
+            else:
+                reply = f"Image generation failed: {exc}"
 
     elif execution_intent == "image_analysis" or (execution_intent == "chat" and attached_image_bytes):
         # Pure image analysis — describe/answer questions about the attached image
