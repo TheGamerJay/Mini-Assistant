@@ -18,6 +18,7 @@ import RightPanel from '../components/RightPanel';
 import ComparisonBubble from '../components/ComparisonBubble';
 import ThinkingSequence from '../components/orchestration/ThinkingSequence';
 import TaskSummaryCard from '../components/orchestration/TaskSummaryCard';
+import { savePreviewImage, loadPreviewImage, deletePreviewImage } from '../utils/previewImageStore';
 import { useOrchestration, ORCH_STATUS } from '../hooks/useOrchestration';
 import ExportRecordModal from '../components/creation/ExportRecordModal';
 import api from '../api/client';
@@ -507,11 +508,17 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
       responseCountRef.current = 0;
       setCompareData(null);
       setCompareLoading(false);
-      // Restore this chat's preview image — dedicated key survives localStorage bloat
+      // Restore this chat's preview image from IndexedDB (survives size limits)
       const chat = chats.find((c) => c.id === activeChatId);
-      const restored = (activeChatId && localStorage.getItem('ma_preview_img_' + activeChatId)) || chat?.previewImage || null;
-      setPreviewImage(restored);
-      if (restored) setRightPanelOpen(true);
+      if (activeChatId) {
+        loadPreviewImage(activeChatId).then(img => {
+          const restored = img || chat?.previewImage || null;
+          setPreviewImage(restored);
+          if (restored) setRightPanelOpen(true);
+        });
+      } else {
+        setPreviewImage(null);
+      }
     }
   }, [activeChatId, chats]);
 
@@ -714,7 +721,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
           // Show image in Preview panel, not in chat — persist per-chat
           setPreviewImage(data.image_base64);
           setRightPanelOpen(true);
-          try { localStorage.setItem('ma_preview_img_' + chatId, data.image_base64); } catch {}
+          savePreviewImage(chatId, data.image_base64);
           updateChatPreviewImage(chatId, data.image_base64);
           const thumb = await makeThumbnail(data.image_base64);
           await addImage(thumb, text, data.image_base64);
@@ -805,7 +812,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
             if (isImg) {
               setPreviewImage(data.image_base64);
               setRightPanelOpen(true);
-              try { localStorage.setItem('ma_preview_img_' + chatIdRef_local, data.image_base64); } catch {}
+              savePreviewImage(chatIdRef_local, data.image_base64);
               updateChatPreviewImage(chatIdRef_local, data.image_base64);
               const thumb = await makeThumbnail(data.image_base64);
               await addImage(thumb, text, data.image_base64);
@@ -1377,7 +1384,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         open={rightPanelOpen}
         onClose={() => setRightPanelOpen(false)}
         previewImage={previewImage}
-        onClearImage={() => { setPreviewImage(null); updateChatPreviewImage(activeChatId, null); try { localStorage.removeItem('ma_preview_img_' + activeChatId); } catch {} }}
+        onClearImage={() => { setPreviewImage(null); updateChatPreviewImage(activeChatId, null); deletePreviewImage(activeChatId); }}
         sessionId={sessionIdRef.current}
         onFixedHtml={(fixedHtml) => {
           // Add the auto-fixed code to chat history so it becomes the new "latest version"
