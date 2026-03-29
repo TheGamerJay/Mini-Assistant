@@ -1906,8 +1906,22 @@ async def chat(req: ChatRequest, request: Request):
             except Exception:
                 _gen_prompt = effective_msg
             _dalle = DalleClient()
-            # Auto-select portrait size for full-body / character prompts
-            _gen_size = "1024x1792" if _PORTRAIT_KW.search(_gen_prompt) else "1024x1024"
+            # Auto-select portrait size + inject anti-diagonal framing for full-body prompts.
+            # DALL-E defaults to "splash art" diagonal composition for anime/cinematic prompts
+            # unless explicitly overridden with reference-sheet framing keywords.
+            if _PORTRAIT_KW.search(_gen_prompt):
+                _gen_size = "1024x1792"
+                # Strip terms that push DALL-E toward diagonal splash art
+                _gen_prompt = re.sub(r'\b(cinematic|splash art|dynamic pose|battle stance|action pose)\b', '', _gen_prompt, flags=re.IGNORECASE)
+                _gen_prompt = _gen_prompt.strip().rstrip(',').strip()
+                # Append framing overrides that force straight-on full-body composition
+                _gen_prompt += (
+                    ", character design sheet, front view, neutral standing pose, "
+                    "character facing directly toward viewer, full body visible head to toe, "
+                    "feet fully visible, no cropping, camera straight ahead"
+                )
+            else:
+                _gen_size = "1024x1024"
             _b64 = await _dalle.generate(_gen_prompt, size=_gen_size)
             try:
                 from mini_credits import log_image_generated as _log_img
@@ -1964,7 +1978,17 @@ async def chat(req: ChatRequest, request: Request):
         try:
             from ..services.dalle_client import DalleClient
             _dalle = DalleClient()
-            _ref_size = "1024x1792" if _PORTRAIT_KW.search(dalle_prompt + " " + effective_msg) else "1024x1024"
+            if _PORTRAIT_KW.search(dalle_prompt + " " + effective_msg):
+                _ref_size = "1024x1792"
+                dalle_prompt = re.sub(r'\b(cinematic|splash art|dynamic pose|battle stance|action pose)\b', '', dalle_prompt, flags=re.IGNORECASE)
+                dalle_prompt = dalle_prompt.strip().rstrip(',').strip()
+                dalle_prompt += (
+                    ", character design sheet, front view, neutral standing pose, "
+                    "character facing directly toward viewer, full body visible head to toe, "
+                    "feet fully visible, no cropping, camera straight ahead"
+                )
+            else:
+                _ref_size = "1024x1024"
             _b64 = await _dalle.generate(dalle_prompt, size=_ref_size)
             try:
                 from mini_credits import log_image_generated as _log_img
