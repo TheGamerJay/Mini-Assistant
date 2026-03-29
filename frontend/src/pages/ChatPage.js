@@ -606,12 +606,8 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
       return;
     }
 
-    // Generate Mode: auto-attach last generated image when the request looks like
-    // a follow-up edit (not an explicit new-generation command).
-    const _NEW_GEN_RE = /\b(generate\s+a|create\s+a|draw\s+a|make\s+a\s+new|make\s+me\s+a|new\s+image\s+of|imagine\s+a)\b/i;
-    if (chatMode === 'image' && !imgs.length && previewImage && !_NEW_GEN_RE.test(text)) {
-      imgs = [previewImage];
-    }
+    // image mode = always fresh generation — never auto-attach a previous image.
+    // If the user wants to edit a previous image, they use image_edit mode.
 
     // Image generation limit gate — uses server-authoritative imageUsage (not localStorage)
     // Only block if this is a pure generation request (no reference image attached).
