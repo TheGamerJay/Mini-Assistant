@@ -509,7 +509,10 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
       setCompareLoading(false);
       // Restore this chat's preview image (null if none was generated yet)
       const chat = chats.find((c) => c.id === activeChatId);
-      setPreviewImage(chat?.previewImage || null);
+      const restored = chat?.previewImage || null;
+      setPreviewImage(restored);
+      // Re-open the preview panel if this chat has a generated image
+      if (restored) setRightPanelOpen(true);
     }
   }, [activeChatId, chats]);
 
