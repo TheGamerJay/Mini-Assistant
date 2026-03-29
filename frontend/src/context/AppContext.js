@@ -70,8 +70,8 @@ function loadLS(key, fallback) {
 function saveLS(key, value) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // quota exceeded or private browsing
+  } catch (e) {
+    console.warn('[AppContext] localStorage save failed (quota?):', key, e?.name);
   }
 }
 
@@ -621,7 +621,10 @@ export function AppProvider({ children }) {
     _initialProjectsRef.current = true;
     _initialSettingsRef.current = true;
     _initialTemplatesRef.current = true;
-  }, []);
+    // Reset modal state so it doesn't leak to next account
+    setUpgradeModalOpen(false);
+    setPurchaseModalOpen(false);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loginWithGoogle = useCallback(async (credential) => {
     const res = await api.authGoogle(credential);

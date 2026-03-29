@@ -769,6 +769,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         const withAssistant = [...nextMessages, assistantMsg];
         setMessages(withAssistant);
         updateChatMessages(chatId, withAssistant);
+        setStreamActive(false);
       } catch (err) {
         setStreamActive(false);
         const _isRL = err.status === 429 || err.message?.includes('rate limit');
@@ -853,6 +854,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
             const withA = [...nextMessages, assistantMsg];
             setMessages(withA);
             updateChatMessages(chatIdRef_local, withA);
+            setStreamActive(false);
           } catch (err) {
             const withErr = [...nextMessages, {
               role: 'assistant', type: 'error',
@@ -860,6 +862,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
             }];
             setMessages(withErr);
             updateChatMessages(chatIdRef_local, withErr);
+            setStreamActive(false);
           }
           setStreamingText(null);
           submittingRef.current = false;

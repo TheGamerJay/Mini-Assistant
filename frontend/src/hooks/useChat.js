@@ -62,14 +62,7 @@ export function useChat() {
       let buffer = '';
       let receivedDone = false;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop(); // keep incomplete trailing line
-
+      const processLines = (lines) => {
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
           const raw = line.slice(6).trim();
@@ -84,10 +77,28 @@ export function useChat() {
             }
           } catch { /* malformed SSE line — ignore */ }
         }
+      };
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            // Flush any remaining bytes in the decoder and buffer
+            const tail = decoder.decode(undefined, { stream: false });
+            if (tail) buffer += tail;
+            if (buffer.trim()) processLines(buffer.split('\n'));
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop(); // keep incomplete trailing line
+          processLines(lines);
+        }
+      } finally {
+        reader.cancel().catch(() => {});
       }
 
       // Stream closed without a done event (e.g. backend crashed mid-response).
-      // Finalize with whatever was accumulated so the UI doesn't stay stuck.
       if (!receivedDone) {
         onDone && onDone({});
       }

@@ -97,7 +97,7 @@ function del(url, timeoutMs) {
 export const api = {
   /** Send a chat message with optional conversation history, attached images, and model override */
   chat(message, sessionId, history = [], imagesBase64 = null, preferredModel = null, requestId = null, chatMode = null) {
-    const trimmedHistory = history.slice(-10).map(m => ({ role: m.role, content: m.content }));
+    const trimmedHistory = history.slice(-20).map(m => ({ role: m.role, content: m.content }));
     const body = { message, session_id: sessionId, history: trimmedHistory };
     const imgs = Array.isArray(imagesBase64) ? imagesBase64.filter(Boolean) : (imagesBase64 ? [imagesBase64] : []);
     if (imgs.length === 1) body.image_base64 = imgs[0];
@@ -111,7 +111,7 @@ export const api = {
 
   /** Open a streaming chat connection. Returns a raw fetch Response (SSE). */
   chatStream(message, sessionId, history = [], imagesBase64 = null, signal = null, vibeMode = false, chatMode = null) {
-    const trimmedHistory = history.slice(-10).map(m => ({ role: m.role, content: m.content }));
+    const trimmedHistory = history.slice(-20).map(m => ({ role: m.role, content: m.content }));
     const body = { message, session_id: sessionId, history: trimmedHistory };
     const imgs = Array.isArray(imagesBase64) ? imagesBase64.filter(Boolean) : (imagesBase64 ? [imagesBase64] : []);
     if (imgs.length === 1) body.image_base64 = imgs[0];
@@ -157,7 +157,7 @@ export const api = {
 
   /** Run the same message through two models in parallel; returns {reply_a, model_a, reply_b, model_b} */
   chatCompare(message, sessionId, history = []) {
-    const trimmedHistory = history.slice(-10).map(m => ({ role: m.role, content: m.content }));
+    const trimmedHistory = history.slice(-20).map(m => ({ role: m.role, content: m.content }));
     return post(`${IMAGE_API}/chat/compare`, { message, session_id: sessionId, history: trimmedHistory }, 180000);
   },
 
