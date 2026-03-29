@@ -51,10 +51,8 @@ PLAN_META: dict[str, dict] = {
         "color":    "#f59e0b",
         "features": [
             "10,000 Mini Credits per month",
-            "Up to 10 team seats",
-            "Shared credit pool",
-            "Admin dashboard & usage analytics",
-            "Dedicated support channel",
+            "Highest AI model access",
+            "Priority support (same-day response)",
         ],
     },
 }

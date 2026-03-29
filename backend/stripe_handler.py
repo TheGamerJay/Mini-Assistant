@@ -51,7 +51,6 @@ def _price_env(key: str, fallback: str) -> str:
     val = os.environ.get(key, fallback)
     return val if (val and not val.startswith("price_standard") and
                    not val.startswith("price_pro") and
-                   not val.startswith("price_team") and
                    not val.startswith("price_topup")) else val
 
 def _pid(*env_keys: str) -> str:
@@ -78,9 +77,6 @@ for _pid_val, _plan in [
     # "max" plan — highest tier (env var: PRICE_MAX_*)
     (_pid("PRICE_MAX_MONTHLY",      "STRIPE_PRICE_MAX_MONTHLY"),       "max"),
     (_pid("PRICE_MAX_YEARLY",       "STRIPE_PRICE_MAX_YEARLY"),        "max"),
-    # Legacy "team" fallback
-    (_pid("PRICE_TEAM_MONTHLY",     "STRIPE_PRICE_TEAM_MONTHLY"),      "team"),
-    (_pid("PRICE_TEAM_YEARLY",      "STRIPE_PRICE_TEAM_YEARLY"),       "team"),
 ]:
     if _pid_val:
         SUBSCRIPTION_PRICES[_pid_val] = _plan
@@ -117,7 +113,6 @@ PLAN_CREDITS: dict[str, int] = {
     "standard": 1000,
     "pro":      4000,
     "max":      10000,
-    "team":     10000,   # legacy alias for max
 }
 
 # Maximum top-up credits a user can accumulate (anti-abuse cap)
@@ -535,7 +530,6 @@ REFERRAL_MAX_REWARDS_BY_PLAN: dict[str, int] = {
     "standard": 3,
     "pro":      6,
     "max":      10,
-    "team":     10,
 }
 
 def _referral_max_for_plan(plan: str) -> int:

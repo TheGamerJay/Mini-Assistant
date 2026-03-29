@@ -13,7 +13,7 @@ import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { useApp } from '../context/AppContext';
 
-const PLAN_LIMITS = { free: 50, standard: 500, pro: 2000, team: 10000, max: 10000 };
+const PLAN_LIMITS = { free: 50, standard: 500, pro: 2000, max: 10000 };
 const STORAGE_KEY = 'ma_usage_banner';
 
 function getStore() {

@@ -139,7 +139,6 @@ REFERRAL_MAX_REWARDS_BY_PLAN: dict[str, int] = {
     "standard": 3,
     "pro":      6,
     "max":      10,
-    "team":     10,
 }
 
 # ---------------------------------------------------------------------------
@@ -716,7 +715,7 @@ async def get_referral_info(authorization: str = Header(None)):
         "signup_bonus": REFERRAL_SIGNUP_BONUS,
         "sub_bonus": REFERRAL_SUB_BONUS,
         "plan": user_plan,
-        "can_unlock_more": user_plan not in ("max", "team") and completed >= max_rewards,
+        "can_unlock_more": user_plan not in ("max",) and completed >= max_rewards,
     }
 
 
@@ -1010,7 +1009,7 @@ async def admin_stats(admin: dict = Depends(_require_admin)):
 
     # Credits stats — sum credits for all free-plan users (paid plans have unlimited)
     credits_pipeline = [
-        {"$match": {"plan": {"$nin": ["standard", "pro", "max", "team"]}}},
+        {"$match": {"plan": {"$nin": ["standard", "pro", "max"]}}},
         {"$group": {"_id": None, "total": {"$sum": "$credits"}}},
     ]
     credits_result = await db["users"].aggregate(credits_pipeline).to_list(1)
@@ -1203,7 +1202,7 @@ async def user_dashboard(authorization: str = Header(None)):
         "topup_credits":        topup_credits,
         "billing_cycle_start":  user.get("billing_cycle_start"),
         "stripe_customer_id":   user.get("stripe_customer_id"),
-        "is_subscribed": plan in ("standard", "pro", "team"),
+        "is_subscribed": plan in ("standard", "pro", "max"),
         "member_since": user.get("created_at"),
         # All-time
         "total_chats_sent":     total_chats_sent,
@@ -1570,7 +1569,7 @@ async def admin_growth_stats(admin: dict = Depends(_require_admin)):
     signups_per_day = [{"date": d["_id"], "signups": d["count"]} for d in signup_agg]
 
     # ── Pro users active this week vs last week ──────────────────────────────
-    pro_plans = ["standard", "pro", "max", "team"]
+    pro_plans = ["standard", "pro", "max"]
 
     async def _count_active_paid(since_ts: float, until_ts: float) -> int:
         agg = await db["activity_logs"].aggregate([

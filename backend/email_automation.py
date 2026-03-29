@@ -74,7 +74,6 @@ _PLAN_LIMITS: dict = {
     "standard": 500,
     "pro":      2000,
     "max":      10000,
-    "team":     10000,
 }
 LOW_CREDIT_THRESHOLD = 0.20     # 20 %
 

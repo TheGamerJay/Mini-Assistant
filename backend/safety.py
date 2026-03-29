@@ -48,13 +48,13 @@ MAX_RPM: Dict[str, int] = {          # requests per minute
     "free":     _int("RATE_FREE_RPM",     60),
     "standard": _int("RATE_STD_RPM",      60),
     "pro":      _int("RATE_PRO_RPM",      120),
-    "team":     _int("RATE_TEAM_RPM",     240),
+    "max":      _int("RATE_MAX_RPM",      240),
 }
 MAX_RPH: Dict[str, int] = {          # requests per hour
     "free":     _int("RATE_FREE_RPH",     200),
     "standard": _int("RATE_STD_RPH",      600),
     "pro":      _int("RATE_PRO_RPH",      1500),
-    "team":     _int("RATE_TEAM_RPH",     4000),
+    "max":      _int("RATE_MAX_RPH",      4000),
 }
 
 # Cost caps
@@ -63,7 +63,7 @@ MAX_DAILY_COST_USD: Dict[str, float] = {
     "free":     _float("MAX_DAILY_COST_FREE",     0.10),
     "standard": _float("MAX_DAILY_COST_STD",      2.00),
     "pro":      _float("MAX_DAILY_COST_PRO",      5.00),
-    "team":     _float("MAX_DAILY_COST_TEAM",     20.00),
+    "max":      _float("MAX_DAILY_COST_MAX",      20.00),
 }
 
 # Token caps (input + output tokens per single request)
@@ -1057,7 +1057,7 @@ async def validate_token_cost_consistency(
 # ---------------------------------------------------------------------------
 
 # Features locked to paid plans
-_PLAN_RANK: dict[str, int] = {"free": 0, "standard": 1, "pro": 2, "max": 3, "team": 3}
+_PLAN_RANK: dict[str, int] = {"free": 0, "standard": 1, "pro": 2, "max": 3}
 
 # action_type → minimum plan rank required
 FEATURE_PLAN_REQUIREMENTS: dict[str, int] = {

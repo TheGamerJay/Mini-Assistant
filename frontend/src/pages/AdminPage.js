@@ -80,7 +80,6 @@ function PlanBadge({ plan }) {
     free:     'text-slate-500 bg-white/5 border-white/10',
     standard: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20',
     pro:      'text-violet-400 bg-violet-500/10 border-violet-500/20',
-    team:     'text-amber-400 bg-amber-500/10 border-amber-500/20',
   };
   return (
     <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${cfg[plan] || cfg.free}`}>
@@ -664,7 +663,7 @@ function AdminDashboard({ adminUser, onLogout }) {
                               disabled:opacity-40 disabled:cursor-not-allowed"
                             title="Change plan"
                           >
-                            {['free', 'standard', 'pro', 'max', 'team'].map(p => (
+                            {['free', 'standard', 'pro', 'max'].map(p => (
                               <option key={p} value={p} className="bg-[#1a1a2e] text-slate-200">{p}</option>
                             ))}
                           </select>
@@ -787,11 +786,10 @@ function AdminDashboard({ adminUser, onLogout }) {
                       { plan: 'free',     color: 'border-slate-500/30 bg-white/[0.03]',            text: 'text-slate-400'  },
                       { plan: 'standard', color: 'border-cyan-500/30 bg-cyan-500/5',              text: 'text-cyan-400'   },
                       { plan: 'pro',      color: 'border-violet-500/30 bg-violet-500/5',          text: 'text-violet-400' },
-                      { plan: 'team',     color: 'border-amber-500/30 bg-amber-500/5',            text: 'text-amber-400'  },
                     ].map(({ plan, color, text }) => {
                       const count = analytics.users_by_plan?.[plan] || 0;
                       const pct = analytics.total_users > 0 ? Math.round(count / analytics.total_users * 100) : 0;
-                      const price = { free: 0, standard: 9, pro: 19, team: 49 }[plan];
+                      const price = { free: 0, standard: 9, pro: 19, max: 49 }[plan];
                       return (
                         <div key={plan} className={`rounded-xl border p-4 ${color}`}>
                           <p className={`text-2xl font-bold text-white`}>{fmt(count)}</p>

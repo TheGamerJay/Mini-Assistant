@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(m[''name'']\\) for m in data.get\\(''models'',[]\\)]\")",
+      "Bash(sed -i 's/model=\"\"llama3.2\"\"/model=\"\"qwen2.5:3b\"\"/g' \"c:\\\\Users\\\\jaaye\\\\OneDrive\\\\Desktop\\\\Mini Assistant\\\\backend\\\\server.py\")",
+      "Bash(sed -i 's/model: str = \"\"llama3.2\"\"/model: str = \"\"qwen2.5:3b\"\"/g' \"c:\\\\Users\\\\jaaye\\\\OneDrive\\\\Desktop\\\\Mini Assistant\\\\backend\\\\server.py\")",
+      "Bash(grep -n '\"\"qwen2.5:3b\"\"' backend/server.py)",
+      "Bash(grep -n \"from ''lucide-react''\" \"c:\\\\Users\\\\jaaye\\\\OneDrive\\\\Desktop\\\\Mini Assistant\\\\frontend\\\\src\\\\components\\\\AppBuilder\\\\AppBuilder.js\")",
+      "Bash(node -c \"c:\\\\Users\\\\jaaye\\\\OneDrive\\\\Desktop\\\\Mini Assistant\\\\frontend\\\\src\\\\components\\\\AppBuilder\\\\AppBuilder.js\")",
+      "Bash(python -m pytest tests/test_tool_security.py -v)",
+      "Bash(pip install pytest -q)",
+      "Bash(pip install filelock -q)",
+      "Bash(python3 -c \":*)",
+      "Bash(grep -n \"BUILD\\\\|activeTab.*build\\\\|build.*tab\\\\|=== ''build''\" frontend/src/components/AppBuilder/AppBuilder.js)",
+      "Bash(py -3 -c \":*)",
+      "Bash(python -c \":*)",
+      "Bash(grep -v \"^ui$\")",
+      "Bash(npx --no -- react-scripts build --stats)",
+      "Bash(npx craco build)",
+      "Bash(grep \"\\\\.js$\")",
+      "Bash(npx react-scripts build)",
+      "Bash(npm run build)",
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\(''eslintConfig'',{}\\), indent=2\\)\\)\")",
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\(''dependencies'',{}\\), indent=2\\)\\)\")",
+      "Bash(cloudflared --version)",
+      "Bash(railway variables set COMFYUI_URL=https://cord-union-marking-welfare.trycloudflare.com)",
+      "Bash(railway --help)",
+      "Bash(railway variables --help)",
+      "Bash(railway variables --set \"COMFYUI_URL=https://cord-union-marking-welfare.trycloudflare.com\")",
+      "Bash(railway link)",
+      "Bash(railway login)",
+      "Bash(Start-Process -NoNewWindow -FilePath \"cloudflared\" -ArgumentList \"tunnel --url http://localhost:8188\")",
+      "Bash(railway logs)",
+      "Bash(railway variables --set \"COMFYUI_URL=https://short-housewares-pipeline-thumbzilla.trycloudflare.com\" --set \"OLLAMA_HOST=https://rhythm-settings-gray-marie.trycloudflare.com\")",
+      "Bash(railway variables --set \"OLLAMA_HOST=https://ollama.miniassistantai.com\" --set \"COMFYUI_URL=https://images.miniassistantai.com\")",
+      "Bash(railway variables --set \"LOCAL_AI=https://ai.miniassistantai.com\" --set \"IMAGE_API=https://images.miniassistantai.com\")",
+      "Bash(python -m mini_assistant.scanner)",
+      "Bash(node -e \"const { Image } = require\\(''''./node_modules/lucide-react''''\\); console.log\\(typeof Image\\);\")",
+      "Bash(npx react-scripts:*)",
+      "Bash(DISABLE_ESLINT_PLUGIN=true npx react-scripts build)"
+    ]
+  }
+}

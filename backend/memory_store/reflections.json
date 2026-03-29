@@ -1,0 +1,20 @@
+[
+  {
+    "id": "45897a61-1bdc-4ca8-9db1-bd3835c7e99b",
+    "task": "test message",
+    "result": "success",
+    "brain": "slash_command",
+    "attempts": 1,
+    "errors_seen": [],
+    "fixes_applied": [],
+    "lesson": "Intent 'debugging' resolved successfully via 'slash_command'. Skill 'fix_import_error' (conf=0.90) was effective.",
+    "timestamp": "2026-03-14T00:38:49.497030+00:00",
+    "intent": "debugging",
+    "confidence": 1.0,
+    "response_mode": "debug",
+    "slash_command": "fix",
+    "skill_used": "fix_import_error",
+    "skill_confidence": 0.9,
+    "critic_passed": true
+  }
+]

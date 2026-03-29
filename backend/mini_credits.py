@@ -77,7 +77,6 @@ PLAN_CREDIT_LIMITS: dict[str, int] = {
     "free":     50,
     "standard": 500,
     "pro":      2000,
-    "team":     10000,
 }
 
 PLAN_MONTHLY_PRICE_USD: dict[str, float] = {
@@ -85,7 +84,6 @@ PLAN_MONTHLY_PRICE_USD: dict[str, float] = {
     "standard": 9.0,
     "pro":      19.0,
     "max":      49.0,
-    "team":     49.0,   # legacy alias for max
 }
 
 
@@ -409,7 +407,7 @@ async def check_and_deduct(
         total = legacy
 
     # ── Paid plan: deduct if credits available, log always ─────────────────
-    if plan in ("standard", "pro", "team"):
+    if plan in ("standard", "pro", "max"):
         if cost > 0 and total < cost:
             return False, total
 
@@ -534,7 +532,7 @@ async def rollback_credits(
                     }
                 }}],
             )
-        elif plan not in ("standard", "pro", "team"):
+        elif plan not in ("standard", "pro", "max"):
             # Legacy free user — refund single `credits`, capped
             await db["users"].update_one(
                 {"id": uid},
