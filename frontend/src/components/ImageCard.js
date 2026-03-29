@@ -5,7 +5,7 @@
  */
 
 import React, { useState } from 'react';
-import { Download, ChevronDown, ChevronUp, Copy, RefreshCw } from 'lucide-react';
+import { Download, ChevronDown, ChevronUp, Copy, RefreshCw, RotateCw } from 'lucide-react';
 import { toast } from 'sonner';
 
 function copyToClipboard(text, label) {
@@ -19,6 +19,7 @@ function ImageCard({ image_base64, prompt, route_result, generation_time_ms, ret
   const [showFullPositive, setShowFullPositive] = useState(false);
   const [showFullNegative, setShowFullNegative] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
+  const [rotation, setRotation] = useState(0);
 
   const handleDownload = () => {
     if (!image_base64) return;
@@ -177,11 +178,14 @@ function ImageCard({ image_base64, prompt, route_result, generation_time_ms, ret
   return (
     <div className="rounded-xl overflow-hidden border border-violet-500/20 bg-black/40 max-w-md">
       {image_base64 && (
-        <img
-          src={`data:image/png;base64,${image_base64}`}
-          alt={prompt || 'Generated image'}
-          className="w-full object-contain"
-        />
+        <div className="flex items-center justify-center overflow-hidden" style={{ minHeight: 80 }}>
+          <img
+            src={`data:image/png;base64,${image_base64}`}
+            alt={prompt || 'Generated image'}
+            className="w-full object-contain transition-transform duration-300"
+            style={{ transform: `rotate(${rotation}deg)` }}
+          />
+        </div>
       )}
       {/* Compact metadata footer */}
       <div className="flex items-center gap-2 px-3 py-2 border-t border-white/5 flex-wrap">
@@ -208,6 +212,17 @@ function ImageCard({ image_base64, prompt, route_result, generation_time_ms, ret
         >
           {showDetails ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>
+
+        {/* Rotate button */}
+        {image_base64 && (
+          <button
+            onClick={() => setRotation(r => (r + 90) % 360)}
+            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/10 transition-colors"
+            title="Rotate 90°"
+          >
+            <RotateCw size={14} />
+          </button>
+        )}
 
         {/* Re-run button */}
         {onRerun && (

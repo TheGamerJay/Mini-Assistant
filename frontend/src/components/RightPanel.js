@@ -14,7 +14,7 @@ import {
   Monitor, Code2, FolderOpen, X, RefreshCw,
   ChevronRight, File, Download, ListTodo, Diff, Plus, Trash2, CheckSquare, Square,
   Bug, Zap, CheckCircle, AlertTriangle, StopCircle, Share2, Copy, ExternalLink, Users,
-  Smartphone, Tablet,
+  Smartphone, Tablet, RotateCw,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/client';
@@ -817,6 +817,7 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
   }, [html, currentFixHtml]);
 
   // ── Image mode ─────────────────────────────────────────────────────────
+  const [imgRotation, setImgRotation] = React.useState(0);
   if (previewImage) {
     return (
       <div className="flex flex-col h-full">
@@ -825,6 +826,13 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
             <Monitor size={9} />
             generated image
           </div>
+          <button
+            onClick={() => setImgRotation(r => (r + 90) % 360)}
+            className="p-1 rounded hover:bg-white/5 text-slate-600 hover:text-slate-400 transition-colors"
+            title="Rotate 90°"
+          >
+            <RotateCw size={12} />
+          </button>
           <a href={`data:image/png;base64,${previewImage}`} download="generated.png"
             className="p-1 rounded hover:bg-white/5 text-slate-600 hover:text-slate-400 transition-colors" title="Download image">
             <Download size={12} />
@@ -836,8 +844,12 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
           )}
         </div>
         <div className="flex-1 flex flex-col items-center justify-center p-4 overflow-auto gap-3">
-          <img src={`data:image/png;base64,${previewImage}`} alt="Generated"
-            className="max-w-full max-h-[85%] object-contain rounded-lg shadow-xl" />
+          <img
+            src={`data:image/png;base64,${previewImage}`}
+            alt="Generated"
+            className="max-w-full max-h-[85%] object-contain rounded-lg shadow-xl transition-transform duration-300"
+            style={{ transform: `rotate(${imgRotation}deg)` }}
+          />
           {showSaved && (
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
               <CheckSquare size={11} className="text-emerald-400 flex-shrink-0" />
