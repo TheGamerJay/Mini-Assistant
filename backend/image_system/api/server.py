@@ -527,6 +527,34 @@ NEVER offer image generation as an option in chat mode.
 """
 
 # ---------------------------------------------------------------------------
+# Image mode addendum — injected when chat_mode == "image" or "image_edit"
+# Suppresses build-mode chatty behaviors that bleed in from the main prompt
+# ---------------------------------------------------------------------------
+_IMAGE_MODE_ADDENDUM = """
+
+## IMAGE MODE — YOU ARE AN ARTIST
+
+You are a creative AI artist, not a web developer or assistant. You generate images AND have your own artistic personality.
+
+### Core rule: ALWAYS generate first
+- If the user gives you a prompt (detailed or vague) → generate the image, THEN optionally ask one artistic follow-up.
+- If the user says "surprise me", "put whatever you recommend", "your choice" → go full creative, make artistic decisions yourself, then briefly explain the vibe you went with.
+- NEVER refuse to generate. NEVER ask questions INSTEAD of generating. Generate first, talk after.
+
+### How to respond (like a real artist):
+- **Vague prompt** (e.g. "make something cool", "draw a warrior"): Generate it with your own creative interpretation. After: ask 1–2 short questions like "want me to push the lighting darker?" or "should I add anything to the background?"
+- **Detailed prompt**: Generate it. After: brief reaction like "I leaned into the contrast on this one — let me know if you want it warmer" or just "here you go, tell me what to tweak."
+- **Iterative request** ("make her hair red", "add fog", "more dramatic"): Apply it. After: "done — does that feel right?" Keep it short.
+- **"Surprise me" / open-ended**: Full creative freedom. After: explain the artistic choice in 1 sentence. e.g. "went with a golden-hour cinematic feel — let me know if you want a different mood."
+
+### Personality
+- Warm, confident, direct. Like texting your personal artist.
+- Short responses — the image is the star, not your words.
+- Never write code. Never offer to build apps or galleries. Never give numbered "next step" options for development.
+- Keep your after-text to 1–3 sentences max.
+"""
+
+# ---------------------------------------------------------------------------
 # Lyrics specialist system prompt — injected when lyrics intent is detected
 # ---------------------------------------------------------------------------
 _LYRICS_SYSTEM_PROMPT = """\
@@ -1694,6 +1722,16 @@ async def chat(req: ChatRequest, request: Request):
     )
     route_result: dict = {}
 
+    # ── Honour explicit chat_mode from frontend (overrides planner) ────────────
+    _req_chat_mode = getattr(req, "chat_mode", None)
+    if _req_chat_mode == "image":
+        if attached_image_bytes:
+            execution_intent = "image_edit"
+        else:
+            execution_intent = "image_generation"
+    elif _req_chat_mode == "image_edit":
+        execution_intent = "image_edit"
+
     # For image generation, still run the RouterBrain to get checkpoint/workflow detail
     if execution_intent == "image_generation" or execution_intent is None:
         try:
@@ -2019,6 +2057,8 @@ async def chat(req: ChatRequest, request: Request):
                 _sys_prompt = _MINI_SYSTEM_PROMPT + "\n\n" + _LYRICS_SYSTEM_PROMPT
             if req.chat_mode == "chat":
                 _sys_prompt = _sys_prompt + _CHAT_MODE_IMAGE_RULE
+            if req.chat_mode in ("image", "image_edit"):
+                _sys_prompt = _sys_prompt + _IMAGE_MODE_ADDENDUM
             if _gpt_code_ctx:
                 _sys_prompt = _sys_prompt + "\n\n[TASK CONTEXT — GPT-5.4 ANALYSIS]\n" + _gpt_code_ctx
 
@@ -2601,6 +2641,9 @@ async def chat_stream(req: ChatRequest, request: Request):
         # In chat mode: append image redirect rule so Claude never offers to generate images
         if req.chat_mode == "chat" and not _is_build_intent:
             _sys_prompt_stream = _sys_prompt_stream + _CHAT_MODE_IMAGE_RULE
+        # In image mode: suppress build-mode chatty behaviors
+        if req.chat_mode in ("image", "image_edit"):
+            _sys_prompt_stream = _sys_prompt_stream + _IMAGE_MODE_ADDENDUM
         history_msgs: list[dict] = [{"role": "system", "content": _sys_prompt_stream}]
         # Use stored conversation as source of truth; fall back to req.history when empty.
         _history_to_build = (
