@@ -2206,15 +2206,32 @@ async def chat(req: ChatRequest, request: Request):
 
             # Real-time weather injection
             rt_context = ""
+            _live_weather_injected_ns = False
             weather_loc = _detect_weather_location(effective_msg)
+            # Follow-up detection: previous assistant asked for city, user replied with location
+            if not weather_loc and req.history:
+                _last_asst_ns = next(
+                    (h.content or "" for h in reversed(req.history) if h.role == "assistant"), ""
+                )
+                _asked_loc_ns = bool(_re.search(
+                    r"what city|your city|your location|which city|what('s| is) your|where are you",
+                    _last_asst_ns, _re.I
+                ))
+                _is_loc_ns = bool(_re.match(
+                    r"^[A-Za-z][A-Za-z\s,\.]{1,60}(\d{5}(-\d{4})?)?$", effective_msg.strip()
+                ))
+                if _asked_loc_ns and _is_loc_ns:
+                    weather_loc = effective_msg.strip()
             if weather_loc:
                 weather_data = await _fetch_weather(weather_loc)
                 if weather_data:
                     rt_context = (
                         f"{weather_data}\n"
                         "Use ONLY the live data above to answer the weather question accurately. "
+                        "Do NOT search the web for weather — the live data above is already fresh. "
                         "Do not say you lack internet access.\n\n"
                     )
+                    _live_weather_injected_ns = True
                 else:
                     rt_context = (
                         f"[NO REAL-TIME DATA] Weather fetch failed for '{weather_loc}'. "
@@ -2260,26 +2277,35 @@ async def chat(req: ChatRequest, request: Request):
 
             import anthropic as _am
             _ac = _am.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
-            logger.info("[MODEL ROUTER] chat → Claude claude-sonnet-4-6 (web_search enabled)")
-            _ws_tool = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]
-            try:
-                _resp = await _ac.messages.create(
-                    model         = "claude-sonnet-4-6",
-                    max_tokens    = 4096,
-                    system        = _sys_prompt,
-                    messages      = claude_msgs,
-                    tools         = _ws_tool,
-                    extra_headers = {"anthropic-beta": "web-search-2025-03-05"},
-                )
-            except Exception as _ws_exc:
-                # Beta not available on this key/tier — fall back to plain call
-                logger.warning("web_search beta unavailable (%s), falling back", _ws_exc)
+            # Skip web_search when live weather/data already injected to avoid stale override
+            if _live_weather_injected_ns:
+                logger.info("[MODEL ROUTER] chat → Claude claude-sonnet-4-6 (live data, no web_search)")
                 _resp = await _ac.messages.create(
                     model      = "claude-sonnet-4-6",
                     max_tokens = 4096,
                     system     = _sys_prompt,
                     messages   = claude_msgs,
                 )
+            else:
+                logger.info("[MODEL ROUTER] chat → Claude claude-sonnet-4-6 (web_search enabled)")
+                _ws_tool = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]
+                try:
+                    _resp = await _ac.messages.create(
+                        model         = "claude-sonnet-4-6",
+                        max_tokens    = 4096,
+                        system        = _sys_prompt,
+                        messages      = claude_msgs,
+                        tools         = _ws_tool,
+                        extra_headers = {"anthropic-beta": "web-search-2025-03-05"},
+                    )
+                except Exception as _ws_exc:
+                    logger.warning("web_search beta unavailable (%s), falling back", _ws_exc)
+                    _resp = await _ac.messages.create(
+                        model      = "claude-sonnet-4-6",
+                        max_tokens = 4096,
+                        system     = _sys_prompt,
+                        messages   = claude_msgs,
+                    )
             # Extract text from response (may contain tool_use/tool_result blocks)
             reply = next(
                 (b.text for b in _resp.content if hasattr(b, "text") and b.text),
@@ -2672,15 +2698,34 @@ async def chat_stream(req: ChatRequest, request: Request):
 
         # ── Real-time weather injection ───────────────────────────────────────
         rt_context = ""
+        _live_weather_injected = False
         weather_loc = _detect_weather_location(effective_msg)
+        # Follow-up detection: if the previous assistant turn asked for a city/location
+        # and the user's reply looks like a place name (no weather keyword in message),
+        # treat the user's reply as the location answer.
+        if not weather_loc and _effective_history:
+            _last_asst = next(
+                (h.content or "" for h in reversed(_effective_history) if h.role == "assistant"), ""
+            )
+            _asked_for_location = bool(_re.search(
+                r"what city|your city|your location|which city|what('s| is) your|where are you",
+                _last_asst, _re.I
+            ))
+            _looks_like_location = bool(_re.match(
+                r"^[A-Za-z][A-Za-z\s,\.]{1,60}(\d{5}(-\d{4})?)?$", effective_msg.strip()
+            ))
+            if _asked_for_location and _looks_like_location:
+                weather_loc = effective_msg.strip()
         if weather_loc:
             weather_data = await _fetch_weather(weather_loc)
             if weather_data:
                 rt_context = (
                     f"{weather_data}\n"
                     "Use ONLY the live data above to answer the weather question accurately. "
+                    "Do NOT search the web for weather — the live data above is already fresh. "
                     "Do not say you lack internet access.\n\n"
                 )
+                _live_weather_injected = True
             else:
                 rt_context = (
                     f"[NO REAL-TIME DATA] Weather fetch failed for '{weather_loc}'. "
@@ -3234,15 +3279,14 @@ If all pass: PASS.
             try:
                 import anthropic as _am_plain
                 _ac_plain = _am_plain.AsyncAnthropic(api_key=_api_key_claude)
-                _ws_tool_s = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]
-                async with _ac_plain.messages.stream(
-                    model="claude-sonnet-4-6",
-                    max_tokens=8192,
-                    system=_sys_prompt_stream,
-                    messages=_c_msgs_plain,
-                    tools=_ws_tool_s,
-                    extra_headers={"anthropic-beta": "web-search-2025-03-05"},
-                ) as _cs_plain:
+                # Skip web_search when live weather/data was already injected — prevents
+                # the AI from overriding accurate live data with stale search results.
+                _stream_kwargs: dict = {"model": "claude-sonnet-4-6", "max_tokens": 8192,
+                                        "system": _sys_prompt_stream, "messages": _c_msgs_plain}
+                if not _live_weather_injected:
+                    _stream_kwargs["tools"] = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]
+                    _stream_kwargs["extra_headers"] = {"anthropic-beta": "web-search-2025-03-05"}
+                async with _ac_plain.messages.stream(**_stream_kwargs) as _cs_plain:
                     _plain_last_ping = asyncio.get_event_loop().time()
                     async for _ct in _cs_plain.text_stream:
                         _plain_now = asyncio.get_event_loop().time()
