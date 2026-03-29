@@ -77,6 +77,7 @@ PLAN_CREDIT_LIMITS: dict[str, int] = {
     "free":     50,
     "standard": 500,
     "pro":      2000,
+    "max":      10000,
 }
 
 PLAN_MONTHLY_PRICE_USD: dict[str, float] = {
