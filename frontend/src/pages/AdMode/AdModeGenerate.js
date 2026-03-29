@@ -32,6 +32,14 @@ const PEOPLE_OPTIONS = [
   { value: 'yes',      label: 'Include people' },
   { value: 'optional', label: 'Optional' },
 ];
+const COPY_ANGLES = [
+  { value: '',                  label: 'Auto (best for goal)' },
+  { value: 'Direct Response',   label: 'Direct Response' },
+  { value: 'Curiosity',         label: 'Curiosity' },
+  { value: 'Problem-Solution',  label: 'Problem-Solution' },
+  { value: 'Founder Story',     label: 'Founder Story' },
+  { value: 'Feature-Driven',    label: 'Feature-Driven' },
+];
 
 function inputCls() {
   return 'w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/40 transition-colors';
@@ -237,6 +245,7 @@ export default function AdModeGenerate({ campaigns }) {
     image_format:       'photorealistic',
     visual_consistency: true,
     people_in_image:    'no',
+    copy_angle:         '',
   });
 
   useEffect(() => {
@@ -252,6 +261,24 @@ export default function AdModeGenerate({ campaigns }) {
 
   const f = (field) => (e) => setForm((prev) => ({ ...prev, [field]: e.target.value }));
 
+  // When selecting an existing campaign, restore its saved visual + copy settings
+  const handleCampaignSelect = (e) => {
+    const id = e.target.value;
+    setActiveCampaignId(id);
+    const cam = campaignList.find(c => c.id === id);
+    if (!cam) return;
+    setForm(prev => ({
+      ...prev,
+      goal:               cam.goal               || prev.goal,
+      tone:               cam.tone               || prev.tone,
+      image_style:        cam.image_style        || prev.image_style,
+      image_format:       cam.image_format       || prev.image_format,
+      visual_consistency: cam.visual_consistency !== undefined ? cam.visual_consistency : prev.visual_consistency,
+      people_in_image:    cam.people_in_image    || prev.people_in_image,
+      copy_angle:         cam.copy_angle         || '',
+    }));
+  };
+
   const handleCreateCampaign = async () => {
     if (!newCampaignName.trim() || !profile) return;
     setCreatingCampaign(true);
@@ -261,6 +288,11 @@ export default function AdModeGenerate({ campaigns }) {
         business_profile_id: profile.id,
         goal:                form.goal,
         tone:                form.tone,
+        image_style:         form.image_style,
+        image_format:        form.image_format,
+        visual_consistency:  form.visual_consistency,
+        people_in_image:     form.people_in_image,
+        copy_angle:          form.copy_angle || undefined,
       });
       setCampaignList((prev) => [campaign, ...prev]);
       setActiveCampaignId(campaign.id);
@@ -292,6 +324,11 @@ export default function AdModeGenerate({ campaigns }) {
           business_profile_id: profile.id,
           goal:                form.goal,
           tone:                form.tone,
+          image_style:         form.image_style,
+          image_format:        form.image_format,
+          visual_consistency:  form.visual_consistency,
+          people_in_image:     form.people_in_image,
+          copy_angle:          form.copy_angle || undefined,
         });
         setCampaignList((prev) => [campaign, ...prev]);
         setActiveCampaignId(campaign.id);
@@ -310,6 +347,7 @@ export default function AdModeGenerate({ campaigns }) {
           image_format:        form.image_format,
           visual_consistency:  form.visual_consistency,
           people_in_image:     form.people_in_image,
+          copy_angle:          form.copy_angle || undefined,
         });
         setAdSets(ad_sets);
         toast.success(`Generated ${ad_sets.length} ad concepts`);
@@ -335,6 +373,7 @@ export default function AdModeGenerate({ campaigns }) {
         image_format:        form.image_format,
         visual_consistency:  form.visual_consistency,
         people_in_image:     form.people_in_image,
+        copy_angle:          form.copy_angle || undefined,
       });
       setAdSets(ad_sets);
       toast.success(`Generated ${ad_sets.length} ad concepts`);
@@ -377,7 +416,7 @@ export default function AdModeGenerate({ campaigns }) {
           {campaignList.length > 0 && (
             <select
               value={activeCampaignId}
-              onChange={(e) => setActiveCampaignId(e.target.value)}
+              onChange={handleCampaignSelect}
               className={inputCls()}
             >
               <option value="" className="bg-[#111118]">— Select a campaign —</option>
@@ -434,6 +473,14 @@ export default function AdModeGenerate({ campaigns }) {
               {NUMS.map((n) => <option key={n} value={n} className="bg-[#111118]">{n} concept{n > 1 ? 's' : ''}</option>)}
             </select>
           </div>
+        </div>
+
+        {/* Copy Angle */}
+        <div className="mb-3">
+          <label className="block text-xs text-slate-400 mb-1.5 font-medium">Copy Angle</label>
+          <select value={form.copy_angle} onChange={f('copy_angle')} className={inputCls()}>
+            {COPY_ANGLES.map((a) => <option key={a.value} value={a.value} className="bg-[#111118]">{a.label}</option>)}
+          </select>
         </div>
 
         {/* Image controls */}

@@ -141,11 +141,16 @@ class UpdateProfileRequest(BaseModel):
 
 
 class CreateCampaignRequest(BaseModel):
-    name:               str
+    name:                str
     business_profile_id: str
-    goal:               str
-    audience:           Optional[str] = None
-    tone:               Optional[str] = None
+    goal:                str
+    audience:            Optional[str] = None
+    tone:                Optional[str] = None
+    image_style:         Optional[str] = None
+    image_format:        Optional[str] = None
+    visual_consistency:  bool = True
+    people_in_image:     Optional[str] = None
+    copy_angle:          Optional[str] = None
 
 
 class GenerateAdsRequest(BaseModel):
@@ -154,11 +159,12 @@ class GenerateAdsRequest(BaseModel):
     goal:                 Optional[str] = None
     audience:             Optional[str] = None
     tone:                 Optional[str] = None
-    num_concepts:         int = 3           # 1–5
-    image_style:          Optional[str] = None   # e.g. "Dark Tech"
-    image_format:         Optional[str] = None   # e.g. "photorealistic"
+    num_concepts:         int = 3
+    image_style:          Optional[str] = None
+    image_format:         Optional[str] = None
     visual_consistency:   bool = True
-    people_in_image:      Optional[str] = None   # "yes" | "no" | "optional"
+    people_in_image:      Optional[str] = None
+    copy_angle:           Optional[str] = None
 
 
 class RegenerateCopyRequest(BaseModel):
@@ -332,11 +338,64 @@ _IMAGE_FORMAT_SUFFIXES: dict[str, str] = {
     "UI mockup":      "UI/UX product mockup, device frame, app interface preview, clean layout",
 }
 
+# Styles to prefer for SaaS/AI/automation/developer products
+_SAAS_KEYWORDS = {
+    "saas", "ai", "artificial intelligence", "automation", "workflow",
+    "developer tool", "developer", "app builder", "assistant", "software",
+    "platform", "dashboard", "api", "code", "coding", "startup", "tool",
+    "productivity", "no-code", "low-code", "integration", "bot", "agent",
+}
+_SAAS_DEFAULT_STYLE = "Dark Tech"
+
+_STYLE_AVOIDS: dict[str, str] = {
+    "Dark Tech":
+        "Avoid: warm lifestyle office scenes, smiling corporate groups, bright airy stock photography, "
+        "generic business handshakes, sunny outdoor settings.",
+    "Product UI / SaaS Dashboard":
+        "Avoid: abstract art, portrait photography, cinematic lifestyle shots, nature scenes, "
+        "hand-drawn sketches, people without context.",
+    "Solo Founder Workspace":
+        "Avoid: multiple people, conference rooms, group collaboration, open-plan office crowds, "
+        "formal business attire, staged corporate poses.",
+    "Futuristic AI Interface":
+        "Avoid: real-world photography, natural lighting, vintage aesthetics, warm colour palettes, "
+        "traditional office environments.",
+    "Clean Corporate":
+        "Avoid: neon cyberpunk lighting, sci-fi UI overload, dark moody aesthetics, heavy grain, "
+        "cluttered compositions, aggressive colour contrasts.",
+    "Startup Team":
+        "Avoid: formal corporate settings, grey cubicle offices, solitary scenes with no energy, "
+        "dark moody cyberpunk lighting.",
+    "Minimal Modern":
+        "Avoid: busy compositions, multiple focal points, heavy textures, dark backgrounds, "
+        "neon lighting, photorealistic people.",
+    "Cinematic":
+        "Avoid: flat lighting, bland stock photography, white backgrounds, generic corporate imagery, "
+        "cartoon or illustration styles.",
+    "Illustration":
+        "Avoid: photorealistic rendering, dark moody photography, complex 3D scenes, "
+        "heavy texture overlays, cinematic film grain.",
+    "3D Render":
+        "Avoid: flat 2D illustration, photographic backgrounds, hand-drawn elements, "
+        "amateur renders with visible aliasing.",
+}
+
 _PEOPLE_RULES: dict[str, str] = {
     "yes":      "Include one or two professional people naturally interacting with the product.",
     "no":       "No people in the image — focus entirely on the product, interface, or abstract concept.",
     "optional": "Only include people if it naturally improves the composition.",
 }
+
+
+def _detect_saas_product(profile: dict) -> bool:
+    """Return True if the brand profile looks like a SaaS/AI/developer product."""
+    text = " ".join([
+        str(profile.get("core_identity", "")),
+        str(profile.get("positioning", "")),
+        str(profile.get("brand_voice_guidelines", "")),
+        str(profile.get("competitive_angle", "")),
+    ]).lower()
+    return any(kw in text for kw in _SAAS_KEYWORDS)
 
 
 def _build_image_prompt(
@@ -357,6 +416,7 @@ def _build_image_prompt(
     style_prefix  = _IMAGE_STYLE_PREFIXES.get(style, _IMAGE_STYLE_PREFIXES["Dark Tech"])
     format_suffix = _IMAGE_FORMAT_SUFFIXES.get(fmt, _IMAGE_FORMAT_SUFFIXES["photorealistic"])
     people_rule   = _PEOPLE_RULES.get(people, _PEOPLE_RULES["no"])
+    avoid_rule    = _STYLE_AVOIDS.get(style, "")
     anchor        = f"Maintain consistent visual style: {consistency_anchor}. " if consistency_anchor else ""
 
     parts = [
@@ -366,18 +426,37 @@ def _build_image_prompt(
         format_suffix,
         anchor,
         "No text, logos, or watermarks in the image. No stock photo clichés. High quality, ad-ready.",
+        avoid_rule,
     ]
     return " ".join(p for p in parts if p).strip()
 
 
+_COPY_ANGLE_INSTRUCTIONS: dict[str, str] = {
+    "Direct Response":
+        "Write hard-hitting, conversion-focused copy. Lead with the strongest benefit. "
+        "Use imperative CTAs. Every sentence must earn its place. Cut all fluff.",
+    "Curiosity":
+        "Open with an intriguing question or surprising insight. Build tension and withhold "
+        "the full answer until the CTA. Make the reader feel they must click to understand.",
+    "Problem-Solution":
+        "Start by naming a specific pain the audience feels daily. Amplify it briefly, "
+        "then position the product as the clear, obvious solution. Close with relief.",
+    "Founder Story":
+        "Write in first-person founder voice. Share a brief authentic moment of struggle "
+        "or insight that led to building this. Make it personal, vulnerable, and relatable.",
+    "Feature-Driven":
+        "Lead with the most impressive, concrete feature or capability. Describe what it "
+        "does in plain language. Stack 2-3 supporting features. End with a capability-focused CTA.",
+}
+
 _AD_COPY_SYSTEM = """You are an expert direct-response copywriter specialising in high-converting digital ads.
 
 RULES — follow these strictly:
-- NEVER invent statistics, user counts, testimonials, revenue figures, or performance claims unless the brand profile explicitly provides them.
+- NEVER invent statistics, user counts, testimonials, revenue figures, percentages, rankings (#1), guarantees, or performance claims unless the brand profile explicitly provides them.
 - Write bold, confident copy that is believable — no hype, no "10x your revenue overnight" nonsense.
 - Focus on real, concrete benefits: speed, automation, replacing multiple tools, helping solo founders scale.
 - Keep hooks punchy and curiosity-driven. Keep headlines clear and specific.
-- Write captions that educate and persuade in under 80 words — no fluff.
+- Write captions that educate and persuade in 40-80 words — no fluff.
 - CTAs must be action-oriented and specific (e.g. "Start free today", "See it in action", "Build your first app").
 
 Return valid JSON only — no markdown, no explanation."""
@@ -393,9 +472,9 @@ CAMPAIGN:
 - Audience: {audience}
 - Tone: {tone}
 - Image Style: {image_style}
+- Copy Angle Direction: {copy_angle_instruction}
 
-Each concept MUST use a different angle.
-Available angles: benefit-driven, emotional, problem-solution, curiosity, direct-cta, urgency, value-stack
+{angle_constraint}
 
 Return a JSON array. Each object must have exactly these keys:
 {{
@@ -409,6 +488,82 @@ Return a JSON array. Each object must have exactly these keys:
 }}
 """
 
+# Claim patterns that indicate invented data — used in safety validation
+_CLAIM_PATTERNS = [
+    r"\b\d+[,.]?\d*\s*%",                          # percentages
+    r"\b(#\s*1|number\s*one)\b",                   # #1 ranking
+    r"\b\d+[kKmMbB]\+?\s*(users?|customers?|clients?|businesses?|companies?)\b",
+    r"\b(guaranteed?|guarantee)\b",
+    r"\b\d+x\s*(faster|better|more|growth|revenue|roi)\b",
+    r"\bjoin\s+\d+",                               # "join 50,000 users"
+    r"\b\d{4,}[\s,]?\d*\s*(users?|people|businesses?|customers?)\b",
+    r"\brated\s+\d+(\.\d+)?\s*/\s*5\b",           # "rated 4.9/5"
+    r"\b(as\s+seen\s+in|featured\s+in)\b",
+]
+
+
+_SAFE_CLAIM_REWRITES = """
+The following concepts contain invented claims (statistics, user counts, percentages, guarantees, or rankings not provided in the brand profile).
+Rewrite ONLY the flagged concepts to remove all invented claims while keeping the same angle and energy.
+Return a JSON array with the same structure — only the rewritten concepts, in the same order.
+Flagged concepts:
+{flagged_json}
+"""
+
+import re as _re  # noqa: PLC0415 (module level is fine here, but keeping lazy import pattern)
+
+
+def _has_invented_claims(text: str) -> bool:
+    """Return True if text contains patterns that look like invented claims."""
+    for pattern in _CLAIM_PATTERNS:
+        if _re.search(pattern, text, _re.IGNORECASE):
+            return True
+    return False
+
+
+async def _validate_and_clean_concepts(concepts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Check each concept for invented claims; rewrite flagged ones via Claude."""
+    flagged = []
+    clean   = []
+    for c in concepts:
+        combined = " ".join([
+            c.get("hook", ""), c.get("headline", ""),
+            c.get("caption", ""), c.get("cta", ""),
+        ])
+        if _has_invented_claims(combined):
+            flagged.append(c)
+            log.warning("Concept %s flagged for invented claims: %s", c.get("concept_number"), combined[:120])
+        else:
+            clean.append(c)
+
+    if not flagged:
+        return concepts
+
+    # Rewrite flagged concepts
+    try:
+        rewrite_prompt = _SAFE_CLAIM_REWRITES.format(flagged_json=json.dumps(flagged, indent=2))
+        raw = await _claude_complete(rewrite_prompt, system=_AD_COPY_SYSTEM)
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.rsplit("```", 1)[0]
+        rewritten = json.loads(raw.strip())
+        if not isinstance(rewritten, list):
+            rewritten = [rewritten]
+        # Merge: replace flagged with rewritten in original order
+        rewritten_by_num = {r.get("concept_number"): r for r in rewritten}
+        result = []
+        for c in concepts:
+            num = c.get("concept_number")
+            result.append(rewritten_by_num.get(num, c))
+        log.info("Rewrote %d concepts to remove invented claims", len(flagged))
+        return result
+    except Exception as exc:
+        log.warning("Claim rewrite failed (%s) — returning originals", exc)
+        return concepts
+
 
 async def _generate_ad_concepts(
     profile: Dict[str, Any],
@@ -417,7 +572,15 @@ async def _generate_ad_concepts(
     tone: str,
     num_concepts: int,
     image_style: str | None = None,
+    copy_angle: str | None = None,
 ) -> List[Dict[str, Any]]:
+    angle_instruction = _COPY_ANGLE_INSTRUCTIONS.get(copy_angle or "", "")
+    angle_constraint  = (
+        f"All {num_concepts} concepts MUST follow the '{copy_angle}' angle direction above."
+        if copy_angle else
+        f"Each concept MUST use a different angle from: benefit-driven, emotional, "
+        f"problem-solution, curiosity, direct-cta, urgency, value-stack"
+    )
     prompt = _AD_COPY_PROMPT.format(
         profile_json=json.dumps(profile, indent=2),
         goal=goal,
@@ -425,6 +588,8 @@ async def _generate_ad_concepts(
         tone=tone,
         num_concepts=num_concepts,
         image_style=image_style or "Dark Tech",
+        copy_angle_instruction=angle_instruction or "Use the best angle for the campaign goal.",
+        angle_constraint=angle_constraint,
     )
     raw = await _claude_complete(prompt, system=_AD_COPY_SYSTEM)
     raw = raw.strip()
@@ -437,6 +602,8 @@ async def _generate_ad_concepts(
         concepts = json.loads(raw.strip())
         if not isinstance(concepts, list):
             concepts = [concepts]
+        # Safety: validate and clean invented claims
+        concepts = await _validate_and_clean_concepts(concepts)
         return concepts
     except json.JSONDecodeError:
         log.warning("Ad copy JSON parse failed, returning raw text")
@@ -653,6 +820,11 @@ async def create_campaign(
         "goal":                body.goal,
         "audience":            body.audience or profile.get("audience", ""),
         "tone":                body.tone or profile.get("tone", ""),
+        "image_style":         body.image_style or "Dark Tech",
+        "image_format":        body.image_format or "photorealistic",
+        "visual_consistency":  body.visual_consistency,
+        "people_in_image":     body.people_in_image or "no",
+        "copy_angle":          body.copy_angle,
         "status":              "active",
         "ad_set_count":        0,
         "created_at":          now,
@@ -748,15 +920,33 @@ async def generate_ads(
     audience        = body.audience or campaign.get("audience", profile_doc.get("audience", "general"))
     tone            = body.tone     or campaign.get("tone",     profile_doc.get("tone", "professional"))
     num             = max(1, min(5, body.num_concepts))
-    image_style     = body.image_style    or "Dark Tech"
-    image_format    = body.image_format   or "photorealistic"
-    people          = body.people_in_image or "no"
-    consistency     = body.visual_consistency
+    copy_angle      = body.copy_angle or campaign.get("copy_angle")
 
-    log.info("Generating %d ad concepts for user=%s campaign=%s style=%s", num, user_id, body.campaign_id, image_style)
+    # Smart image style default: SaaS/AI products get Dark Tech, others get what campaign stored
+    _saas = _detect_saas_product(profile_data)
+    _style_fallback = _SAAS_DEFAULT_STYLE if _saas else "Dark Tech"
+    image_style  = body.image_style    or campaign.get("image_style",    _style_fallback)
+    image_format = body.image_format   or campaign.get("image_format",   "photorealistic")
+    people       = body.people_in_image or campaign.get("people_in_image", "no")
+    consistency  = body.visual_consistency if body.visual_consistency is not None else campaign.get("visual_consistency", True)
+
+    log.info("Generating %d ad concepts for user=%s campaign=%s style=%s angle=%s",
+             num, user_id, body.campaign_id, image_style, copy_angle or "auto")
+
+    # Persist visual settings back to campaign so they survive page reloads
+    await db["ad_mode_campaigns"].update_one(
+        {"id": body.campaign_id},
+        {"$set": {
+            "image_style":        image_style,
+            "image_format":       image_format,
+            "people_in_image":    people,
+            "visual_consistency": consistency,
+            "copy_angle":         copy_angle,
+        }},
+    )
 
     # Step 1: Generate copy with Claude (includes raw concept image_prompt)
-    concepts = await _generate_ad_concepts(profile_data, goal, audience, tone, num, image_style)
+    concepts = await _generate_ad_concepts(profile_data, goal, audience, tone, num, image_style, copy_angle)
 
     now = datetime.now(timezone.utc).isoformat()
     saved_sets: List[Dict[str, Any]] = []
