@@ -544,6 +544,8 @@ function Sidebar() {
     renameProject,
     images,
     deleteImage,
+    getFullImage,
+    setLibraryPreview,
     serverStatus,
     promptTemplates,
     addPromptTemplate,
@@ -734,7 +736,15 @@ function Sidebar() {
               {images.map((img) => (
                 <button
                   key={img.id}
-                  onClick={() => setLightboxImg(img)}
+                  onClick={() => {
+                    const full = getFullImage(img.id);
+                    const base64 = full
+                      ? (full.startsWith('data:') ? full.split(',')[1] : full)
+                      : (img.thumb?.startsWith('data:') ? img.thumb.split(',')[1] : img.thumb);
+                    setLibraryPreview({ id: img.id, base64, prompt: img.prompt });
+                    setPage('chat');
+                    setMobileSidebarOpen(false);
+                  }}
                   title={img.prompt}
                   className="rounded-md overflow-hidden border border-white/10 hover:border-cyan-500/30 transition-colors aspect-square bg-black/40"
                   style={sidebarCollapsed ? { width: 36, height: 36 } : {}}

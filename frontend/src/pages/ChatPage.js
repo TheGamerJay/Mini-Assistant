@@ -351,6 +351,9 @@ function ChatPage() {
     incrementImageUsage,
     modeChatIds,
     saveModeChatId,
+    libraryPreview,
+    setLibraryPreview,
+    deleteImage,
   } = useApp();
 
   const handleExport = useCallback((format = 'md') => {
@@ -432,6 +435,16 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     }
   }, [chatMode, activeChatId, modeChatIds, chats, saveModeChatId, selectChat, newChat, setChatMode, setRightPanelOpen]);
   const [previewImage, setPreviewImage]       = useState(null); // latest generated image → shown in RightPanel
+  const [libraryPreviewId, setLibraryPreviewId] = useState(null); // id of the library image currently in preview panel
+
+  // When user clicks a sidebar image, open it in the right panel preview
+  useEffect(() => {
+    if (!libraryPreview) return;
+    setPreviewImage(libraryPreview.base64);
+    setLibraryPreviewId(libraryPreview.id);
+    setRightPanelOpen(true);
+    setLibraryPreview(null); // consume
+  }, [libraryPreview, setLibraryPreview, setRightPanelOpen]);
 
   // Streaming text state (non-image responses)
   const [streamingText, setStreamingText] = useState(null); // null = not streaming
@@ -1384,7 +1397,20 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         open={rightPanelOpen}
         onClose={() => setRightPanelOpen(false)}
         previewImage={previewImage}
-        onClearImage={() => { setPreviewImage(null); updateChatPreviewImage(activeChatId, null); deletePreviewImage(activeChatId); }}
+        onClearImage={() => {
+          setPreviewImage(null);
+          setLibraryPreviewId(null);
+          updateChatPreviewImage(activeChatId, null);
+          deletePreviewImage(activeChatId);
+        }}
+        libraryPreviewId={libraryPreviewId}
+        onSaveToLibrary={async (rotatedBase64) => {
+          // Replace the old library entry with the rotated image
+          if (libraryPreviewId) deleteImage(libraryPreviewId);
+          const thumb = await makeThumbnail(`data:image/png;base64,${rotatedBase64}`);
+          await addImage(thumb, null, rotatedBase64);
+          setLibraryPreviewId(null);
+        }}
         sessionId={sessionIdRef.current}
         onFixedHtml={(fixedHtml) => {
           // Add the auto-fixed code to chat history so it becomes the new "latest version"

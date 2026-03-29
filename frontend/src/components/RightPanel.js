@@ -14,7 +14,7 @@ import {
   Monitor, Code2, FolderOpen, X, RefreshCw,
   ChevronRight, File, Download, ListTodo, Diff, Plus, Trash2, CheckSquare, Square,
   Bug, Zap, CheckCircle, AlertTriangle, StopCircle, Share2, Copy, ExternalLink, Users,
-  Smartphone, Tablet, RotateCw,
+  Smartphone, Tablet, RotateCw, Save,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/client';
@@ -439,7 +439,7 @@ function extractAppTitle(messages) {
   return 'Community App';
 }
 
-function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage, isStreaming = false, sessionId = null, onFixedHtml = null, onDebugSummary = null, onBuildScreenshot = null }) {
+function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage, isStreaming = false, sessionId = null, onFixedHtml = null, onDebugSummary = null, onBuildScreenshot = null, libraryPreviewId = null, onSaveToLibrary = null }) {
   const { user } = useApp();
   const [key, setKey] = useState(0);
   const iframeRef = useRef(null);
@@ -818,13 +818,42 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
 
   // ── Image mode ─────────────────────────────────────────────────────────
   const [imgRotation, setImgRotation] = React.useState(0);
+  const [savingBack, setSavingBack] = React.useState(false);
+  const prevPreviewRef = React.useRef(null);
+  if (previewImage !== prevPreviewRef.current) {
+    prevPreviewRef.current = previewImage;
+    // Reset rotation when a different image is loaded
+    if (imgRotation !== 0) setImgRotation(0);
+  }
+
+  // Bake CSS rotation into actual pixel data via canvas, return new base64
+  const bakeRotation = React.useCallback(async (base64, degrees) => {
+    if (degrees === 0) return base64;
+    return new Promise((resolve) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const swap = degrees === 90 || degrees === 270;
+        const w = swap ? img.height : img.width;
+        const h = swap ? img.width : img.height;
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.translate(w / 2, h / 2);
+        ctx.rotate((degrees * Math.PI) / 180);
+        ctx.drawImage(img, -img.width / 2, -img.height / 2);
+        resolve(canvas.toDataURL('image/png').split(',')[1]);
+      };
+      img.src = `data:image/png;base64,${base64}`;
+    });
+  }, []);
+
   if (previewImage) {
     return (
       <div className="flex flex-col h-full">
         <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-[#0f111a]">
           <div className="flex items-center gap-1.5 flex-1 px-2 py-1 rounded bg-white/5 text-[10px] text-slate-600 font-mono">
             <Monitor size={9} />
-            generated image
+            {libraryPreviewId ? 'library image' : 'generated image'}
           </div>
           <button
             onClick={() => setImgRotation(r => (r + 90) % 360)}
@@ -833,6 +862,26 @@ function PreviewPane({ blocks, messages = [], previewImage = null, onClearImage,
           >
             <RotateCw size={12} />
           </button>
+          {libraryPreviewId && onSaveToLibrary && (
+            <button
+              onClick={async () => {
+                setSavingBack(true);
+                try {
+                  const rotated = await bakeRotation(previewImage, imgRotation);
+                  await onSaveToLibrary(rotated);
+                  setImgRotation(0);
+                } finally {
+                  setSavingBack(false);
+                }
+              }}
+              disabled={savingBack}
+              className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 transition-all disabled:opacity-40"
+              title="Save rotated image back to library"
+            >
+              {savingBack ? <RefreshCw size={9} className="animate-spin" /> : <Save size={9} />}
+              Save back
+            </button>
+          )}
           <a href={`data:image/png;base64,${previewImage}`} download="generated.png"
             className="p-1 rounded hover:bg-white/5 text-slate-600 hover:text-slate-400 transition-colors" title="Download image">
             <Download size={12} />
@@ -1674,7 +1723,7 @@ const TABS = [
   { id: 'tasks',   label: 'Tasks',   icon: ListTodo },
 ];
 
-function RightPanel({ messages = [], streamingText = null, open, onClose, previewImage = null, onClearImage, activeTab = null, sessionId = null, onFixedHtml = null, onRestoreCode = null, onDebugSummary = null, onBuildScreenshot = null }) {
+function RightPanel({ messages = [], streamingText = null, open, onClose, previewImage = null, onClearImage, activeTab = null, sessionId = null, onFixedHtml = null, onRestoreCode = null, onDebugSummary = null, onBuildScreenshot = null, libraryPreviewId = null, onSaveToLibrary = null }) {
   const [tab, setTab] = useState('preview');
   const { isSubscribed } = useApp();
   const codeBlocks = useMemo(() => getLatestCode(messages, streamingText), [messages, streamingText]);
@@ -1726,7 +1775,7 @@ function RightPanel({ messages = [], streamingText = null, open, onClose, previe
 
       {/* Body */}
       <div className="flex-1 overflow-hidden">
-        {tab === 'preview' && <PreviewPane blocks={codeBlocks} messages={messages} previewImage={previewImage} onClearImage={onClearImage} isStreaming={!!streamingText} sessionId={sessionId} onFixedHtml={onFixedHtml} onDebugSummary={onDebugSummary} onBuildScreenshot={onBuildScreenshot} />}
+        {tab === 'preview' && <PreviewPane blocks={codeBlocks} messages={messages} previewImage={previewImage} onClearImage={onClearImage} isStreaming={!!streamingText} sessionId={sessionId} onFixedHtml={onFixedHtml} onDebugSummary={onDebugSummary} onBuildScreenshot={onBuildScreenshot} libraryPreviewId={libraryPreviewId} onSaveToLibrary={onSaveToLibrary} />}
         {tab === 'code'    && isSubscribed && <CodeViewer  blocks={codeBlocks} />}
         {tab === 'files'   && isSubscribed && <FilesPane   blocks={codeBlocks} />}
         {tab === 'diff'    && isSubscribed && <DiffPane    messages={messages} onRestoreCode={onRestoreCode} />}

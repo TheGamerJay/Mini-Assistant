@@ -284,6 +284,9 @@ export function AppProvider({ children }) {
 
   const getFullImage = useCallback((id) => fullImageMap.get(id) || null, []);
 
+  // Library preview — set by Sidebar when user clicks an image; consumed by ChatPage
+  const [libraryPreview, setLibraryPreview] = useState(null); // { id, base64, prompt } | null
+
   const deleteImage = useCallback((id) => {
     fullImageMap.delete(id);
     setImages((prev) => prev.filter((img) => img.id !== id));
@@ -938,6 +941,8 @@ export function AppProvider({ children }) {
     addImage,
     deleteImage,
     getFullImage,
+    libraryPreview,
+    setLibraryPreview,
     // settings
     settings,
     updateSettings,
