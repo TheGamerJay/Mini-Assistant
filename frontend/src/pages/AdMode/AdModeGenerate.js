@@ -251,8 +251,47 @@ export default function AdModeGenerate({ campaigns }) {
   };
 
   const handleGenerate = async () => {
-    if (!profile || !activeCampaignId) {
-      toast.error(!profile ? 'Set up a brand profile first.' : 'Select or create a campaign first.');
+    if (!profile) {
+      toast.error('Set up a brand profile first in the Brand Profile tab.');
+      return;
+    }
+    // Auto-create campaign from the name field if none selected yet
+    if (!activeCampaignId) {
+      if (!newCampaignName.trim()) {
+        toast.error('Enter a campaign name and click + Create first.');
+        return;
+      }
+      // Auto-create then generate
+      setCreatingCampaign(true);
+      try {
+        const { campaign } = await api.adModeCreateCampaign({
+          name:                newCampaignName.trim(),
+          business_profile_id: profile.id,
+          goal:                form.goal,
+          tone:                form.tone,
+        });
+        setCampaignList((prev) => [campaign, ...prev]);
+        setActiveCampaignId(campaign.id);
+        setNewCampaignName('');
+        // Continue with generation using the new campaign id
+        setGenerating(true);
+        setAdSets([]);
+        const { ad_sets } = await api.adModeGenerate({
+          campaign_id:         campaign.id,
+          business_profile_id: profile.id,
+          goal:                form.goal || undefined,
+          audience:            form.audience || undefined,
+          tone:                form.tone || undefined,
+          num_concepts:        Number(form.num_concepts),
+        });
+        setAdSets(ad_sets);
+        toast.success(`Generated ${ad_sets.length} ad concepts`);
+      } catch (err) {
+        toast.error(err?.message || 'Failed');
+      } finally {
+        setCreatingCampaign(false);
+        setGenerating(false);
+      }
       return;
     }
     setGenerating(true);
@@ -370,7 +409,7 @@ export default function AdModeGenerate({ campaigns }) {
         <div className="mt-5">
           <button
             onClick={handleGenerate}
-            disabled={generating || !activeCampaignId}
+            disabled={generating || creatingCampaign}
             className="w-full flex items-center justify-center gap-2 bg-violet-500 hover:bg-violet-400 text-white px-5 py-3 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
           >
             {generating
