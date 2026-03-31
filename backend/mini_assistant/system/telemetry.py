@@ -6,7 +6,22 @@ Lightweight JSON logger. No external dependencies.
 import json
 import logging
 import os
+import uuid
+from contextvars import ContextVar
 from datetime import datetime, timezone
+
+_request_id: ContextVar[str] = ContextVar("request_id", default="")
+
+
+def new_request_id() -> str:
+    """Generate a fresh request ID and bind it to the current context."""
+    rid = uuid.uuid4().hex[:12]
+    _request_id.set(rid)
+    return rid
+
+
+def get_request_id() -> str:
+    return _request_id.get()
 
 _logger = logging.getLogger("mini_assistant.system")
 
@@ -25,8 +40,9 @@ def is_debug() -> bool:
 
 def log_event(event: str, data: dict) -> None:
     payload = {
-        "ts":    datetime.now(timezone.utc).isoformat(),
-        "event": event,
+        "ts":         datetime.now(timezone.utc).isoformat(),
+        "request_id": get_request_id() or "unset",
+        "event":      event,
         **data,
     }
     _logger.info(json.dumps(payload))

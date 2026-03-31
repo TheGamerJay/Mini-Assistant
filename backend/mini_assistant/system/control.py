@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .telemetry import log_request, log_tool, debug_view, log_event
+from .telemetry import log_request, log_tool, debug_view, log_event, new_request_id
 
 MODES = ["chat", "build", "image", "edit"]
 ACTIVE_MODE = None
@@ -300,6 +300,7 @@ ASK_PROMPTS = {
 
 
 def handle_request(user_message: str, user: dict, token_estimate: int = 0) -> dict:
+    rid = new_request_id()
     intent_result = detect_intent(user_message)
     context = extract_context(user_message)
 
@@ -338,6 +339,7 @@ def handle_request(user_message: str, user: dict, token_estimate: int = 0) -> di
 
     response = {
         "action":        "execute",
+        "request_id":    rid,
         "mode":          mode,
         "intent":        intent_result.intent,
         "confidence":    intent_result.confidence,
