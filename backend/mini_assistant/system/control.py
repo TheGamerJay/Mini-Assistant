@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .telemetry import log_request, log_tool, debug_view, log_event
+
 MODES = ["chat", "build", "image", "edit"]
 ACTIVE_MODE = None
 
@@ -249,13 +251,17 @@ def execute_tool(tool: str, params: dict, mode: str) -> dict:
     try:
         result = call_tool_with_timeout(tool, params, timeout_ms=timeout)
     except TimeoutError:
+        log_tool(tool=tool, success=False, reason=f"timed out after {timeout}ms", timed_out=True)
         return handle_failure(tool, {"error": f"timed out after {timeout}ms"})
     except Exception as e:
+        log_tool(tool=tool, success=False, reason=str(e))
         return handle_failure(tool, {"error": str(e)})
 
     if not result or result.get("error"):
+        log_tool(tool=tool, success=False, reason=result.get("error", "empty result") if result else "empty result")
         return handle_failure(tool, result or {})
 
+    log_tool(tool=tool, success=True)
     return {"ok": True, "result": result}
 
 
@@ -298,17 +304,30 @@ def handle_request(user_message: str, user: dict, token_estimate: int = 0) -> di
     context = extract_context(user_message)
 
     if intent_result.multiple:
+        log_event("request", {"detected_intent": "multi", "multiple": intent_result.multiple,
+                               "act": False, "act_reason": "multi_intent"})
         return handle_multi_intent(intent_result)
 
     if intent_result.ambiguous:
+        log_request(detected_intent="ambiguous", confidence=intent_result.confidence,
+                    mode_selected=None, multi_intent=False, context_summary=context,
+                    act_decision=False, act_reason="ambiguous_intent")
         return {"action": "ask", "reason": "ambiguous_intent",
                 "question": ASK_PROMPTS["ambiguous_intent"]}
 
     mode = route_to_mode(intent_result.intent)
     if not mode:
+        log_request(detected_intent=intent_result.intent, confidence=intent_result.confidence,
+                    mode_selected=None, multi_intent=False, context_summary=context,
+                    act_decision=False, act_reason="no_route")
         return {"action": "ask", "question": "Can you clarify what you'd like me to do?"}
 
     act, reason = should_act(intent_result, context, token_estimate)
+
+    log_request(detected_intent=intent_result.intent, confidence=intent_result.confidence,
+                mode_selected=mode, multi_intent=bool(intent_result.multiple),
+                context_summary=context, act_decision=act, act_reason=reason)
+
     if not act:
         question = ASK_PROMPTS.get(reason, f"I need more info before proceeding ({reason}).")
         if "low_confidence" in reason:
@@ -316,7 +335,8 @@ def handle_request(user_message: str, user: dict, token_estimate: int = 0) -> di
         return {"action": "ask", "reason": reason, "question": question}
 
     session = set_mode(mode)
-    return {
+
+    response = {
         "action":        "execute",
         "mode":          mode,
         "intent":        intent_result.intent,
@@ -326,3 +346,10 @@ def handle_request(user_message: str, user: dict, token_estimate: int = 0) -> di
         "context":       context,
         "watermark":     (user.get("plan", "free") == "free") if mode == "image" else False,
     }
+
+    dbg = debug_view(intent_result=intent_result, context=context,
+                     act_decision=act, act_reason=reason)
+    if dbg:
+        response["_debug"] = dbg["debug"]
+
+    return response

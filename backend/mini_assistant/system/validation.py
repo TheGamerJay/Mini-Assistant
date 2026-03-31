@@ -6,6 +6,8 @@ Ensures model outputs are valid, safe, and mode-consistent before returning.
 import re
 from dataclasses import dataclass
 
+from .telemetry import log_validation
+
 
 @dataclass
 class ValidationResult:
@@ -182,5 +184,8 @@ def validate_response(response: dict, mode: str) -> ValidationResult:
 def safe_return(response: dict, mode: str) -> dict:
     result = validate_response(response, mode)
     if not result.valid:
+        snapshot = response.get("text") or response.get("image_prompt") or str(response)
+        log_validation(valid=False, reason=result.reason, response_snapshot=snapshot)
         return {"ok": False, "reason": result.reason, "message": result.safe_fallback}
+    log_validation(valid=True, reason="ok")
     return {"ok": True, "response": response}
