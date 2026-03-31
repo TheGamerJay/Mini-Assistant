@@ -828,6 +828,9 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
       },
 
       async onDone(meta) {
+        // Backend is source of truth — update confirmed mode from backend response
+        if (meta.mode_used && meta.mode_used !== chatMode) handleModeChange(meta.mode_used);
+
         // Backend signalled image redirect — fall back to non-streaming
         if (meta.type === 'image_redirect') {
           setStreamingText(null);
@@ -957,6 +960,11 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
           } catch (_) { /* non-fatal */ }
         }
         if (isBuildIntent(text, meta.route_result)) setRightPanelOpen(true);
+
+        // Backend is source of truth — update confirmed mode from backend response
+        if (meta.mode_used && meta.mode_used !== chatMode) {
+          handleModeChange(meta.mode_used);
+        }
       },
 
       onError(err) {

@@ -147,15 +147,14 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
     : 'Message Mini Assistant…';
   const resolvedPlaceholder = placeholder || defaultPlaceholder;
 
-  // Auto-detect mode from typed text — debounced 300ms
+  // Local predicted mode — visual preview only, never sent upstream as authority
+  const [predictedMode, setPredictedMode] = useState(null);
   useEffect(() => {
-    if (!onChatModeChange) return;
     const timer = setTimeout(() => {
-      const detected = detectMode(value, attachedImages.length > 0);
-      if (detected !== chatMode) onChatModeChange(detected);
+      setPredictedMode(detectMode(value, attachedImages.length > 0));
     }, 300);
     return () => clearTimeout(timer);
-  }, [value, attachedImages.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [value, attachedImages.length]);
 
   // Consume pending template — fills input, or auto-submits for onboarding
   useEffect(() => {
@@ -579,54 +578,49 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
           </button>
 
           {/* Mode buttons: Generate | Edit | Build | Chat */}
-          {onChatModeChange && (
-            <>
-              {/* Chat — auto indicator */}
-              <span
-                title={chatMode === 'chat' ? 'Chat Mode — active' : 'Chat Mode'}
-                className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 cursor-default select-none ${
-                  chatMode === 'chat'
-                    ? 'bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-500/40'
-                    : 'text-slate-600'
-                }`}
-              >
-                <MessageSquare size={16} />
-              </span>
-              {/* Image Generate — auto indicator */}
-              <span
-                title={chatMode === 'image' ? 'Image Mode — active' : 'Image Mode'}
-                className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 cursor-default select-none ${
-                  chatMode === 'image'
-                    ? 'bg-gradient-to-br from-pink-500 to-rose-600 text-white shadow-lg shadow-pink-500/40'
-                    : 'text-slate-600'
-                }`}
-              >
-                <Image size={16} />
-              </span>
-              {/* Image Edit — auto indicator */}
-              <span
-                title={chatMode === 'image_edit' ? 'Image Edit Mode — active' : 'Image Edit Mode'}
-                className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 cursor-default select-none ${
-                  chatMode === 'image_edit'
-                    ? 'bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-lg shadow-amber-500/40'
-                    : 'text-slate-600'
-                }`}
-              >
-                <Pencil size={16} />
-              </span>
-              {/* Build — auto indicator */}
-              <span
-                title={chatMode === 'build' ? 'Build Mode — active' : 'Build Mode'}
-                className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 cursor-default select-none ${
-                  chatMode === 'build'
-                    ? 'bg-gradient-to-br from-cyan-400 to-violet-600 text-white shadow-lg shadow-cyan-500/40'
-                    : 'text-slate-600'
-                }`}
-              >
-                <Hammer size={16} />
-              </span>
-            </>
-          )}
+          {onChatModeChange && (() => {
+            const modeStyle = (mode, confirmed, predicted, colors) => {
+              if (confirmed === mode) return `${colors.confirmed} text-white shadow-lg ${colors.shadow}`;
+              if (predicted === mode) return `${colors.predicted} text-white/70`;
+              return 'text-slate-600';
+            };
+            return (
+              <>
+                {/* Chat */}
+                <span
+                  title={chatMode === 'chat' ? 'Chat — confirmed' : predictedMode === 'chat' ? 'Chat — predicted' : 'Chat'}
+                  className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 cursor-default select-none
+                    ${modeStyle('chat', chatMode, predictedMode, { confirmed: 'bg-gradient-to-br from-blue-500 to-indigo-600', predicted: 'bg-blue-500/30', shadow: 'shadow-blue-500/40' })}`}
+                >
+                  <MessageSquare size={16} />
+                </span>
+                {/* Image Generate */}
+                <span
+                  title={chatMode === 'image' ? 'Image — confirmed' : predictedMode === 'image' ? 'Image — predicted' : 'Image'}
+                  className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 cursor-default select-none
+                    ${modeStyle('image', chatMode, predictedMode, { confirmed: 'bg-gradient-to-br from-pink-500 to-rose-600', predicted: 'bg-pink-500/30', shadow: 'shadow-pink-500/40' })}`}
+                >
+                  <Image size={16} />
+                </span>
+                {/* Image Edit */}
+                <span
+                  title={chatMode === 'image_edit' ? 'Image Edit — confirmed' : predictedMode === 'image_edit' ? 'Image Edit — predicted' : 'Image Edit'}
+                  className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 cursor-default select-none
+                    ${modeStyle('image_edit', chatMode, predictedMode, { confirmed: 'bg-gradient-to-br from-amber-500 to-orange-600', predicted: 'bg-amber-500/30', shadow: 'shadow-amber-500/40' })}`}
+                >
+                  <Pencil size={16} />
+                </span>
+                {/* Build */}
+                <span
+                  title={chatMode === 'build' ? 'Build — confirmed' : predictedMode === 'build' ? 'Build — predicted' : 'Build'}
+                  className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 cursor-default select-none
+                    ${modeStyle('build', chatMode, predictedMode, { confirmed: 'bg-gradient-to-br from-cyan-400 to-violet-600', predicted: 'bg-cyan-500/30', shadow: 'shadow-cyan-500/40' })}`}
+                >
+                  <Hammer size={16} />
+                </span>
+              </>
+            );
+          })()}
 
           {/* Send */}
           <button

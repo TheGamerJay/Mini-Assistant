@@ -2532,7 +2532,7 @@ async def chat_stream(req: ChatRequest, request: Request):
         # 'build' → force app_builder (skip Q&A, build immediately)
         # 'chat'  → force plain chat/search, never image-gen or build
         if req.chat_mode == "image":
-            yield f"data: {_json.dumps({'done': True, 'meta': {'type': 'image_redirect'}})}\n\n"
+            yield f"data: {_json.dumps({'done': True, 'meta': {'type': 'image_redirect', 'mode_used': 'image'}})}\n\n"
             return
         if req.chat_mode == "build":
             execution_intent = "app_builder"
@@ -2645,7 +2645,8 @@ async def chat_stream(req: ChatRequest, request: Request):
         if _in_build_conversation:
             execution_intent = "app_builder"
         elif execution_intent in ("image_generation", "image_edit", "image_reference_generate") and req.chat_mode != "chat":
-            yield f"data: {_json.dumps({'done': True, 'meta': {'type': 'image_redirect'}})}\n\n"
+            _img_mode = "image_edit" if execution_intent == "image_edit" else "image"
+            yield f"data: {_json.dumps({'done': True, 'meta': {'type': 'image_redirect', 'mode_used': _img_mode}})}\n\n"
             return
         # In chat mode, fall back to plain chat if image/build intent was detected
         if req.chat_mode == "chat" and execution_intent in ("image_generation", "image_edit", "image_reference_generate", "app_builder"):
@@ -3371,10 +3372,17 @@ If all pass: PASS.
             reply_text = reply_text.replace('</body>', _BRAND_TAG + '\n</body>', 1)
 
         # ── Final done event with metadata ────────────────────────────────────
+        _intent_to_mode = {
+            "app_builder": "build",
+            "image_generation": "image",
+            "image_edit": "image_edit",
+            "image_reference_generate": "image",
+        }
         meta = {
             "reply": reply_text,
             "session_id": session_id,
             "model_used": _active_model,
+            "mode_used": _intent_to_mode.get(execution_intent, "chat"),
             "route_result": {"intent": execution_intent},
             "memory_stored": [
                 {"key": f.key, "value": f.value, "confidence": f.confidence}
