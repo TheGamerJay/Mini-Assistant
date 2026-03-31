@@ -15,6 +15,23 @@ import { toast } from 'sonner';
 import { api } from '../api/client';
 import { useApp } from '../context/AppContext';
 
+// ── Auto mode detection ───────────────────────────────────────
+function detectMode(text, hasImage) {
+  if (!text && !hasImage) return null;
+  const t = text.toLowerCase();
+
+  // Image edit: user has an attached image + edit-style language
+  if (hasImage && /\b(edit|change|remove|replace|add|fix|modify|adjust|extend|uncrop|inpaint|mask|recolor|make it|turn it)\b/.test(t)) return 'image_edit';
+
+  // Image generate
+  if (/\b(draw|paint|generate|create|make|render|design|illustrate|sketch|produce)\b.{0,50}\b(image|photo|picture|illustration|artwork|portrait|landscape|anime|wallpaper|avatar|banner|logo|thumbnail)\b|\b(image|picture|photo)\s+of\b|\banime\b|\bdigital art\b|\bphotorealistic\b/i.test(text)) return 'image';
+
+  // Build
+  if (/\/build|build me|build it|create (a|an|the) (app|website|page|ui|component|form|dashboard)|make (a|an) (web|react|html)|generate (a|an) (app|website|page)|add (a|an|the) (button|section|feature|page|component|form)/i.test(text)) return 'build';
+
+  return null; // default — chat (auto)
+}
+
 // Known slash commands — mirrors backend command_parser.py
 const SLASH_COMMANDS = [
   { cmd: '/chat',    desc: 'Normal conversation' },
@@ -129,6 +146,16 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
     : variant === 'home'   ? 'Ask anything, generate an image, or write code…'
     : 'Message Mini Assistant…';
   const resolvedPlaceholder = placeholder || defaultPlaceholder;
+
+  // Auto-detect mode from typed text — debounced 300ms
+  useEffect(() => {
+    if (!onChatModeChange) return;
+    const timer = setTimeout(() => {
+      const detected = detectMode(value, attachedImages.length > 0);
+      if (detected !== chatMode) onChatModeChange(detected);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [value, attachedImages.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Consume pending template — fills input, or auto-submits for onboarding
   useEffect(() => {
@@ -554,58 +581,50 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
           {/* Mode buttons: Generate | Edit | Build | Chat */}
           {onChatModeChange && (
             <>
-              {/* Chat Mode */}
-              <button
-                type="button"
-                onClick={() => onChatModeChange(chatMode === 'chat' ? null : 'chat')}
-                title={chatMode === 'chat' ? 'Chat Mode ON — click to exit' : 'Chat Mode — conversation & research, no building or image gen'}
-                className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 ${
+              {/* Chat — auto indicator */}
+              <span
+                title={chatMode === 'chat' ? 'Chat Mode — active' : 'Chat Mode'}
+                className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 cursor-default select-none ${
                   chatMode === 'chat'
                     ? 'bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-500/40'
-                    : 'text-slate-500 hover:text-blue-400 hover:bg-white/5'
+                    : 'text-slate-600'
                 }`}
               >
                 <MessageSquare size={16} />
-              </button>
-              {/* Create New Image */}
-              <button
-                type="button"
-                onClick={() => onChatModeChange(chatMode === 'image' ? null : 'image')}
-                title={chatMode === 'image' ? 'Create Mode ON — click to exit' : 'Create New Image — generate a brand new image from text'}
-                className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 ${
+              </span>
+              {/* Image Generate — auto indicator */}
+              <span
+                title={chatMode === 'image' ? 'Image Mode — active' : 'Image Mode'}
+                className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 cursor-default select-none ${
                   chatMode === 'image'
                     ? 'bg-gradient-to-br from-pink-500 to-rose-600 text-white shadow-lg shadow-pink-500/40'
-                    : 'text-slate-500 hover:text-pink-400 hover:bg-white/5'
+                    : 'text-slate-600'
                 }`}
               >
                 <Image size={16} />
-              </button>
-              {/* Edit Existing Image */}
-              <button
-                type="button"
-                onClick={() => onChatModeChange(chatMode === 'image_edit' ? null : 'image_edit')}
-                title={chatMode === 'image_edit' ? 'Edit Mode ON — click to exit' : 'Edit Existing Image — attach your image and describe the change'}
-                className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 ${
+              </span>
+              {/* Image Edit — auto indicator */}
+              <span
+                title={chatMode === 'image_edit' ? 'Image Edit Mode — active' : 'Image Edit Mode'}
+                className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 cursor-default select-none ${
                   chatMode === 'image_edit'
                     ? 'bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-lg shadow-amber-500/40'
-                    : 'text-slate-500 hover:text-amber-400 hover:bg-white/5'
+                    : 'text-slate-600'
                 }`}
               >
                 <Pencil size={16} />
-              </button>
-              {/* Build Mode */}
-              <button
-                type="button"
-                onClick={() => onChatModeChange(chatMode === 'build' ? null : 'build')}
-                title={chatMode === 'build' ? 'Build Mode ON — click to exit' : 'Build Mode — every message builds an app'}
-                className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 ${
+              </span>
+              {/* Build — auto indicator */}
+              <span
+                title={chatMode === 'build' ? 'Build Mode — active' : 'Build Mode'}
+                className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 cursor-default select-none ${
                   chatMode === 'build'
                     ? 'bg-gradient-to-br from-cyan-400 to-violet-600 text-white shadow-lg shadow-cyan-500/40'
-                    : 'text-slate-500 hover:text-cyan-400 hover:bg-white/5'
+                    : 'text-slate-600'
                 }`}
               >
                 <Hammer size={16} />
-              </button>
+              </span>
             </>
           )}
 
