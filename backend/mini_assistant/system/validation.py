@@ -4,6 +4,7 @@ Ensures model outputs are valid, safe, and mode-consistent before returning.
 """
 
 import re
+import time
 from dataclasses import dataclass
 
 from .telemetry import log_validation
@@ -182,10 +183,11 @@ def validate_response(response: dict, mode: str) -> ValidationResult:
 # ─── SAFE RETURN WRAPPER ─────────────────────────────────────
 
 def safe_return(response: dict, mode: str) -> dict:
+    t_start = time.perf_counter()
     result = validate_response(response, mode)
     if not result.valid:
         snapshot = response.get("text") or response.get("image_prompt") or str(response)
-        log_validation(valid=False, reason=result.reason, response_snapshot=snapshot)
+        log_validation(valid=False, reason=result.reason, response_snapshot=snapshot, start=t_start)
         return {"ok": False, "reason": result.reason, "message": result.safe_fallback}
-    log_validation(valid=True, reason="ok")
+    log_validation(valid=True, reason="ok", start=t_start)
     return {"ok": True, "response": response}

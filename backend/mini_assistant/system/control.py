@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import time
+
 from .telemetry import log_request, log_tool, debug_view, log_event, new_request_id
 
 MODES = ["chat", "build", "image", "edit"]
@@ -247,21 +249,22 @@ def execute_tool(tool: str, params: dict, mode: str) -> dict:
         return {"ok": False, "error": reason, "action": "abort"}
 
     timeout = TOOL_TIMEOUTS_MS.get(tool, 10_000)
+    t_tool = time.perf_counter()
 
     try:
         result = call_tool_with_timeout(tool, params, timeout_ms=timeout)
     except TimeoutError:
-        log_tool(tool=tool, success=False, reason=f"timed out after {timeout}ms", timed_out=True)
+        log_tool(tool=tool, success=False, reason=f"timed out after {timeout}ms", timed_out=True, start=t_tool)
         return handle_failure(tool, {"error": f"timed out after {timeout}ms"})
     except Exception as e:
-        log_tool(tool=tool, success=False, reason=str(e))
+        log_tool(tool=tool, success=False, reason=str(e), start=t_tool)
         return handle_failure(tool, {"error": str(e)})
 
     if not result or result.get("error"):
-        log_tool(tool=tool, success=False, reason=result.get("error", "empty result") if result else "empty result")
+        log_tool(tool=tool, success=False, reason=result.get("error", "empty result") if result else "empty result", start=t_tool)
         return handle_failure(tool, result or {})
 
-    log_tool(tool=tool, success=True)
+    log_tool(tool=tool, success=True, start=t_tool)
     return {"ok": True, "result": result}
 
 
@@ -300,19 +303,21 @@ ASK_PROMPTS = {
 
 
 def handle_request(user_message: str, user: dict, token_estimate: int = 0) -> dict:
+    t_start = time.perf_counter()
     rid = new_request_id()
     intent_result = detect_intent(user_message)
     context = extract_context(user_message)
 
     if intent_result.multiple:
         log_event("request", {"detected_intent": "multi", "multiple": intent_result.multiple,
-                               "act": False, "act_reason": "multi_intent"})
+                               "act": False, "act_reason": "multi_intent",
+                               "duration_ms": round((time.perf_counter() - t_start) * 1000)})
         return handle_multi_intent(intent_result)
 
     if intent_result.ambiguous:
         log_request(detected_intent="ambiguous", confidence=intent_result.confidence,
                     mode_selected=None, multi_intent=False, context_summary=context,
-                    act_decision=False, act_reason="ambiguous_intent")
+                    act_decision=False, act_reason="ambiguous_intent", start=t_start)
         return {"action": "ask", "reason": "ambiguous_intent",
                 "question": ASK_PROMPTS["ambiguous_intent"]}
 
@@ -320,14 +325,14 @@ def handle_request(user_message: str, user: dict, token_estimate: int = 0) -> di
     if not mode:
         log_request(detected_intent=intent_result.intent, confidence=intent_result.confidence,
                     mode_selected=None, multi_intent=False, context_summary=context,
-                    act_decision=False, act_reason="no_route")
+                    act_decision=False, act_reason="no_route", start=t_start)
         return {"action": "ask", "question": "Can you clarify what you'd like me to do?"}
 
     act, reason = should_act(intent_result, context, token_estimate)
 
     log_request(detected_intent=intent_result.intent, confidence=intent_result.confidence,
                 mode_selected=mode, multi_intent=bool(intent_result.multiple),
-                context_summary=context, act_decision=act, act_reason=reason)
+                context_summary=context, act_decision=act, act_reason=reason, start=t_start)
 
     if not act:
         question = ASK_PROMPTS.get(reason, f"I need more info before proceeding ({reason}).")

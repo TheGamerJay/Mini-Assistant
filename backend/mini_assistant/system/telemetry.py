@@ -6,9 +6,15 @@ Lightweight JSON logger. No external dependencies.
 import json
 import logging
 import os
+import time
 import uuid
 from contextvars import ContextVar
 from datetime import datetime, timezone
+
+
+def _elapsed_ms(start: float) -> int:
+    """Return whole milliseconds elapsed since a perf_counter() start."""
+    return round((time.perf_counter() - start) * 1000)
 
 _request_id: ContextVar[str] = ContextVar("request_id", default="")
 
@@ -57,8 +63,8 @@ def log_request(
     context_summary: dict,
     act_decision: bool,
     act_reason: str,
+    start: float,
 ) -> None:
-    # strip any sensitive fields before logging context
     safe_ctx = {k: v for k, v in context_summary.items()
                 if k not in {"user_confirmed", "missing_field"}}
     log_event("request", {
@@ -69,22 +75,24 @@ def log_request(
         "context":          safe_ctx,
         "act":              act_decision,
         "act_reason":       act_reason,
+        "duration_ms":      _elapsed_ms(start),
     })
 
 
-def log_tool(*, tool: str, success: bool, reason: str = "ok", timed_out: bool = False) -> None:
+def log_tool(*, tool: str, success: bool, reason: str = "ok", timed_out: bool = False, start: float) -> None:
     log_event("tool", {
-        "tool":      tool,
-        "success":   success,
-        "timed_out": timed_out,
-        "reason":    reason,
+        "tool":        tool,
+        "success":     success,
+        "timed_out":   timed_out,
+        "reason":      reason,
+        "duration_ms": _elapsed_ms(start),
     })
 
 
-def log_validation(*, valid: bool, reason: str, response_snapshot: str | None = None) -> None:
-    data: dict = {"valid": valid, "reason": reason}
+def log_validation(*, valid: bool, reason: str, response_snapshot: str | None = None, start: float) -> None:
+    data: dict = {"valid": valid, "reason": reason, "duration_ms": _elapsed_ms(start)}
     if not valid and response_snapshot:
-        data["snapshot"] = response_snapshot[:300]   # truncate — no bloat
+        data["snapshot"] = response_snapshot[:300]
     log_event("validation", data)
 
 
