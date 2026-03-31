@@ -554,6 +554,19 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
           {/* Mode buttons: Generate | Edit | Build | Chat */}
           {onChatModeChange && (
             <>
+              {/* Chat Mode */}
+              <button
+                type="button"
+                onClick={() => onChatModeChange(chatMode === 'chat' ? null : 'chat')}
+                title={chatMode === 'chat' ? 'Chat Mode ON — click to exit' : 'Chat Mode — conversation & research, no building or image gen'}
+                className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 ${
+                  chatMode === 'chat'
+                    ? 'bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-500/40'
+                    : 'text-slate-500 hover:text-blue-400 hover:bg-white/5'
+                }`}
+              >
+                <MessageSquare size={16} />
+              </button>
               {/* Create New Image */}
               <button
                 type="button"
@@ -580,6 +593,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
               >
                 <Pencil size={16} />
               </button>
+              {/* Build Mode */}
               <button
                 type="button"
                 onClick={() => onChatModeChange(chatMode === 'build' ? null : 'build')}
@@ -591,18 +605,6 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
                 }`}
               >
                 <Hammer size={16} />
-              </button>
-              <button
-                type="button"
-                onClick={() => onChatModeChange(chatMode === 'chat' ? null : 'chat')}
-                title={chatMode === 'chat' ? 'Chat Mode ON — click to exit' : 'Chat Mode — conversation & research, no building or image gen'}
-                className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 ${
-                  chatMode === 'chat'
-                    ? 'bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-500/40'
-                    : 'text-slate-500 hover:text-blue-400 hover:bg-white/5'
-                }`}
-              >
-                <MessageSquare size={16} />
               </button>
             </>
           )}
