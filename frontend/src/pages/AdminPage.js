@@ -428,10 +428,10 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
     try {
       await api.adminToggleAdMode(u.id, newVal);
       setUsers(prev => prev.map(x => x.id === u.id ? { ...x, has_ad_mode: newVal } : x));
-      toast.success(`${u.name} Ad Mode ${newVal ? 'enabled' : 'disabled'}.`);
+      toast.success(`${u.name} Campaign Lab ${newVal ? 'enabled' : 'disabled'}.`);
       if (u.id === currentUserId && onRefreshSelf) onRefreshSelf();
     } catch (err) {
-      toast.error(err.message || 'Failed to toggle Ad Mode.');
+      toast.error(err.message || 'Failed to toggle Campaign Lab.');
     }
   }
 
@@ -614,7 +614,7 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-white/5">
-                      {['User', 'Email', 'Auth', 'Role', 'Plan ✎', 'Credits', 'Grant Credits', 'Bonus Images', 'Grant Images', 'Ad Mode', 'Joined', 'Actions'].map(h => (
+                      {['User', 'Email', 'Auth', 'Role', 'Plan ✎', 'Credits', 'Grant Credits', 'Bonus Images', 'Grant Images', 'Campaign Lab', 'Joined', 'Actions'].map(h => (
                         <th key={h} className="px-4 py-3 text-left text-[11px] font-mono uppercase tracking-widest text-slate-600 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -745,12 +745,12 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
                           </div>
                         </td>
 
-                        {/* Ad Mode toggle */}
+                        {/* Campaign Lab toggle */}
                         <td className="px-4 py-3">
                           <button
                             onClick={() => handleToggleAdMode(u)}
                             className={`px-2 py-1 rounded-lg text-[10px] font-mono border transition-all ${u.has_ad_mode ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25' : 'bg-white/5 border-white/10 text-slate-500 hover:bg-white/10 hover:text-slate-300'}`}
-                            title={u.has_ad_mode ? 'Revoke Ad Mode access' : 'Grant Ad Mode access'}
+                            title={u.has_ad_mode ? 'Revoke Campaign Lab access' : 'Grant Campaign Lab access'}
                           >
                             {u.has_ad_mode ? 'ON' : 'OFF'}
                           </button>

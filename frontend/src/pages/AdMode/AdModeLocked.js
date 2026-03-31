@@ -72,7 +72,7 @@ export default function AdModeLocked() {
             <Lock size={11} /> Add-On Required
           </div>
           <h1 className="text-3xl font-bold text-slate-100 mb-3 leading-tight">
-            AI Ad Generator
+            Campaign Lab
           </h1>
           <p className="text-slate-400 text-base leading-relaxed max-w-lg mx-auto">
             Create high-converting ads in seconds — powered by AI
@@ -133,7 +133,7 @@ export default function AdModeLocked() {
                     : 'bg-white/8 hover:bg-white/12 text-slate-200 border border-white/10'}
                   disabled:opacity-50 disabled:cursor-not-allowed`}
               >
-                {loading === plan.id ? 'Opening checkout…' : 'Unlock AI Ad Generator'}
+                {loading === plan.id ? 'Opening checkout…' : 'Unlock Campaign Lab'}
               </button>
             </div>
           ))}

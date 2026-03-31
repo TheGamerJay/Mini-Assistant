@@ -4353,13 +4353,15 @@ try:
 except Exception as _share_err:
     logging.warning("Share routes unavailable: %s", _share_err)
 
-# ── Ad Mode routes ─────────────────────────────────────────────────────────────
+# ── Ad Mode / Campaign Lab routes ──────────────────────────────────────────────
 try:
-    from ad_mode_router import ad_mode_router
+    from ad_mode_router import ad_mode_router, campaign_lab_router
     app.include_router(ad_mode_router)
+    app.include_router(campaign_lab_router)
     logging.info("✓ Ad Mode routes registered (/api/ad-mode/*, /api/checkout/ad-mode)")
+    logging.info("✓ Campaign Lab routes registered (/api/campaign-lab/*, /api/checkout/campaign-lab)")
 except Exception as _ad_err:
-    logging.warning("Ad Mode routes unavailable: %s", _ad_err)
+    logging.warning("Ad Mode / Campaign Lab routes unavailable: %s", _ad_err)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

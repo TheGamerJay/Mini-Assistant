@@ -1806,6 +1806,16 @@ async def admin_toggle_ad_mode(
     return {"ok": True, "user_id": user_id, "has_ad_mode": body.enabled}
 
 
+@admin_router.patch("/users/{user_id}/campaign-lab")
+async def admin_toggle_campaign_lab(
+    user_id: str,
+    body: AdModeToggleBody,
+    admin: dict = Depends(_require_admin),
+):
+    """Campaign Lab alias — grant or revoke Campaign Lab access for a user."""
+    return await admin_toggle_ad_mode(user_id, body, admin)
+
+
 @auth_router.post("/admin/users/{user_id}/reset-enforcement")
 async def admin_reset_enforcement(
     user_id: str,

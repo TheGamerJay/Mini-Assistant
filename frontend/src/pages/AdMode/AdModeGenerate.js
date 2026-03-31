@@ -533,8 +533,8 @@ export default function AdModeGenerate({ campaigns }) {
             className="w-full flex items-center justify-center gap-2 bg-violet-500 hover:bg-violet-400 text-white px-5 py-3 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
           >
             {generating
-              ? <><Loader2 size={15} className="animate-spin" /> Generating ads…</>
-              : <><Sparkles size={15} /> Generate Ads</>
+              ? <><Loader2 size={15} className="animate-spin" /> Generating campaign concepts…</>
+              : <><Sparkles size={15} /> Generate Campaign Concepts</>
             }
           </button>
           {generating && (

@@ -1145,3 +1145,70 @@ async def download_asset(
         "headline":     ad_set.get("headline", "ad"),
         "angle":        ad_set.get("angle", ""),
     }
+
+
+# ---------------------------------------------------------------------------
+# Campaign Lab aliases — /api/campaign-lab/* routes map to same handlers
+# ---------------------------------------------------------------------------
+
+campaign_lab_router = APIRouter(tags=["campaign-lab"])
+
+
+@campaign_lab_router.get("/api/campaign-lab/status")
+async def campaign_lab_status(authorization: str = Header(None)):
+    return await ad_mode_status(authorization)
+
+
+@campaign_lab_router.post("/api/checkout/campaign-lab")
+async def checkout_campaign_lab(body: AdModeCheckoutRequest, authorization: str = Header(None)):
+    return await checkout_ad_mode(body, authorization)
+
+
+@campaign_lab_router.post("/api/campaign-lab/profile/generate")
+async def campaign_lab_profile_generate(body: BusinessProfileInput, authorization: str = Header(None)):
+    return await generate_profile(body, authorization)
+
+
+@campaign_lab_router.get("/api/campaign-lab/profile")
+async def campaign_lab_get_profile(authorization: str = Header(None)):
+    return await get_profile(authorization)
+
+
+@campaign_lab_router.put("/api/campaign-lab/profile")
+async def campaign_lab_update_profile(body: UpdateProfileRequest, authorization: str = Header(None)):
+    return await update_profile(body, authorization)
+
+
+@campaign_lab_router.post("/api/campaign-lab/campaigns")
+async def campaign_lab_create_campaign(body: CreateCampaignRequest, authorization: str = Header(None)):
+    return await create_campaign(body, authorization)
+
+
+@campaign_lab_router.get("/api/campaign-lab/campaigns")
+async def campaign_lab_list_campaigns(authorization: str = Header(None)):
+    return await list_campaigns(authorization)
+
+
+@campaign_lab_router.get("/api/campaign-lab/campaigns/{campaign_id}")
+async def campaign_lab_get_campaign(campaign_id: str, authorization: str = Header(None)):
+    return await get_campaign(campaign_id, authorization)
+
+
+@campaign_lab_router.post("/api/campaign-lab/generate")
+async def campaign_lab_generate(body: GenerateAdsRequest, authorization: str = Header(None)):
+    return await generate_ads(body, authorization)
+
+
+@campaign_lab_router.post("/api/campaign-lab/regenerate-copy")
+async def campaign_lab_regenerate_copy(body: RegenerateCopyRequest, authorization: str = Header(None)):
+    return await regenerate_copy(body, authorization)
+
+
+@campaign_lab_router.post("/api/campaign-lab/regenerate-image")
+async def campaign_lab_regenerate_image(body: RegenerateImageRequest, authorization: str = Header(None)):
+    return await regenerate_image(body, authorization)
+
+
+@campaign_lab_router.get("/api/campaign-lab/assets/{ad_set_id}/download")
+async def campaign_lab_download_asset(ad_set_id: str, authorization: str = Header(None)):
+    return await download_asset(ad_set_id, authorization)

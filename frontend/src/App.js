@@ -161,7 +161,7 @@ function pageTitle(page) {
   if (page === 'lessons') return 'What I\'ve Learned';
   if (page === 'settings') return 'Settings';
   if (page === 'checkout-success') return 'Payment Confirmed';
-  if (page === 'ad-mode') return 'AI Ad Generator';
+  if (page === 'ad-mode') return 'Campaign Lab';
   if (LEGAL_PAGES[page]) return LEGAL_PAGES[page].title;
   return TOOL_PAGES[page]?.title || 'Mini Assistant';
 }

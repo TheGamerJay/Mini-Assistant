@@ -113,13 +113,33 @@ def _validate_image_response(response: dict) -> tuple[bool, str]:
     return True, "ok"
 
 
+def _validate_image_edit_response(response: dict) -> tuple[bool, str]:
+    source_image = response.get("source_image", "").strip() if isinstance(response.get("source_image"), str) else ""
+    instruction = response.get("instruction", "").strip() if isinstance(response.get("instruction"), str) else ""
+
+    if not source_image:
+        return False, "missing source_image"
+    if not instruction or len(instruction) <= 5:
+        return False, "instruction missing or too short"
+
+    edit_type = response.get("edit_type")
+    VALID_EDIT_TYPES = {"mask", "inpaint", "replace", "remove", "extend", "uncrop", "recolor", "style"}
+    if edit_type is not None and edit_type not in VALID_EDIT_TYPES:
+        return False, f"invalid edit_type: '{edit_type}'"
+
+    if response.get("text") and not source_image:
+        return False, "text-only response in image_edit mode"
+
+    return True, "ok"
+
+
 # ─── MODE FAILURE HINTS ───────────────────────────────────────
 
 MODE_FAILURE_HINTS = {
-    "build": "Response must contain code (fenced block or recognizable code structure).",
-    "edit":  "Response must contain edited content, diff output, or a clear before/after.",
-    "image": "Response must include image_prompt and canvas. Text-only is invalid.",
-    "chat":  "Response must contain non-empty text.",
+    "build":      "Response must contain code (fenced block or recognizable code structure).",
+    "image":      "Response must include image_prompt and canvas. Text-only is invalid.",
+    "image_edit": "Response must include source_image and a clear instruction. Text-only is invalid.",
+    "chat":       "Response must contain non-empty text.",
 }
 
 
@@ -154,12 +174,14 @@ def validate_response(response: dict, mode: str) -> ValidationResult:
             safe_fallback=f"Something went wrong. {MODE_FAILURE_HINTS['build']}",
         )
 
-    if mode == "edit" and not _has_edit_content(text):
-        return ValidationResult(
-            valid=False,
-            reason="mode_mismatch:edit",
-            safe_fallback=f"Something went wrong. {MODE_FAILURE_HINTS['edit']}",
-        )
+    if mode == "image_edit":
+        ok, reason = _validate_image_edit_response(response)
+        if not ok:
+            return ValidationResult(
+                valid=False,
+                reason=f"mode_mismatch:image_edit:{reason}",
+                safe_fallback=f"Image edit response invalid ({reason}). {MODE_FAILURE_HINTS['image_edit']}",
+            )
 
     if mode == "image":
         ok, reason = _validate_image_response(response)

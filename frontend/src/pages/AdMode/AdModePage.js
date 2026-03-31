@@ -18,7 +18,7 @@ import { api } from '../../api/client';
 const TABS = [
   { id: 'overview',   label: 'Overview',      icon: BarChart2 },
   { id: 'brand',      label: 'Brand Profile', icon: User },
-  { id: 'generate',   label: 'Generate Ads',  icon: Image },
+  { id: 'generate',   label: 'Generate Campaign Concepts',  icon: Image },
   { id: 'campaigns',  label: 'Saved Campaigns', icon: BookOpen },
 ];
 
@@ -49,7 +49,7 @@ export default function AdModePage() {
       <div className="flex-shrink-0 flex items-center gap-3 px-6 py-3 border-b border-white/8 bg-[#0d0d12]">
         <div className="flex items-center gap-2">
           <Zap size={15} className="text-violet-400" />
-          <span className="text-sm font-semibold text-slate-100">AI Ad Generator</span>
+          <span className="text-sm font-semibold text-slate-100">Campaign Lab</span>
         </div>
         <div className="h-3 w-px bg-white/10 mx-1" />
         <p className="text-xs text-slate-500">Create high-converting ads in seconds</p>

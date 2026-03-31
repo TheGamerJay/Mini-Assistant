@@ -711,7 +711,7 @@ function Sidebar() {
         {/* Ad Generator */}
         <button
           onClick={() => navTo('ad-mode')}
-          title={hasAdMode ? 'AI Ad Generator — Create high-converting ads' : 'AI Ad Generator — Upgrade to unlock'}
+          title={hasAdMode ? 'Campaign Lab — Create high-converting campaigns' : 'Campaign Lab — Upgrade to unlock'}
           className={`w-full flex items-center gap-2 rounded-lg px-2 py-2 mb-1 text-xs transition-colors
             ${page === 'ad-mode'
               ? 'bg-violet-500/10 border border-violet-500/20 text-violet-300'

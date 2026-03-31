@@ -11,7 +11,7 @@ import time
 
 from .telemetry import log_request, log_tool, debug_view, log_event, new_request_id
 
-MODES = ["chat", "build", "image", "edit"]
+MODES = ["chat", "build", "image", "image_edit"]
 ACTIVE_MODE = None
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
@@ -43,8 +43,7 @@ INTENT_SIGNALS = {
                 "generate code", "set up", "implement", "add feature", "new"],
     "image":   ["generate image", "create image", "draw", "visualize",
                 "show me", "make an image", "image of", "picture of"],
-    "edit":    ["edit", "fix", "modify", "update", "change", "refactor",
-                "improve", "adjust", "rename", "replace", "rewrite"],
+    "image_edit": ["edit image", "modify image", "change image", "remove from image", "replace in image", "extend image", "uncrop", "inpaint", "mask", "add to image", "recolor image"],
     "search":  ["search", "find", "look up", "latest", "current", "check"],
     "analyze": ["analyze", "review", "compare", "evaluate", "audit", "assess"],
     "execute": ["run", "execute", "deploy", "start", "launch", "trigger"],
@@ -175,7 +174,7 @@ def route_to_mode(intent: str) -> str | None:
         "chat":    "chat",
         "build":   "build",
         "image":   "image",
-        "edit":    "edit",
+        "image_edit": "image_edit",
         "search":  "chat",
         "analyze": "chat",
     }
@@ -190,6 +189,7 @@ TOOL_SCHEMAS = {
     "file_write":     {"required": ["path", "content"], "types": {"path": str, "content": str}},
     "file_read":      {"required": ["path"],            "types": {"path": str}},
     "image_generate": {"required": ["prompt", "canvas"], "types": {"prompt": str, "canvas": str}},
+    "image_edit":     {"required": ["source_image", "instruction"], "types": {"source_image": str, "instruction": str}},
 }
 
 TOOL_TIMEOUTS_MS = {
@@ -198,6 +198,7 @@ TOOL_TIMEOUTS_MS = {
     "file_write":     3_000,
     "file_read":      3_000,
     "image_generate": 30_000,
+    "image_edit":    45_000,
 }
 
 
@@ -206,7 +207,7 @@ def get_tools_for_mode(mode: str) -> list[str]:
         "chat":  ["web_search"],
         "build": ["code_runner", "file_write", "web_search"],
         "image": ["image_generate"],
-        "edit":  ["file_read", "file_write", "code_runner"],
+        "image_edit": ["image_edit"],
     }
     return tool_map.get(mode, [])
 
