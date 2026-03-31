@@ -156,6 +156,19 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
     return () => clearTimeout(timer);
   }, [value, attachedImages.length]);
 
+  // Animate confirmed indicator when backend mode differs from predicted
+  const [animatingMode, setAnimatingMode] = useState(null);
+  const prevChatModeRef = useRef(chatMode);
+  useEffect(() => {
+    const prev = prevChatModeRef.current;
+    prevChatModeRef.current = chatMode;
+    if (chatMode && chatMode !== prev) {
+      setAnimatingMode(chatMode);
+      const t = setTimeout(() => setAnimatingMode(null), 600);
+      return () => clearTimeout(t);
+    }
+  }, [chatMode]);
+
   // Consume pending template — fills input, or auto-submits for onboarding
   useEffect(() => {
     if (!pendingTemplate) return;
@@ -580,7 +593,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
           {/* Mode buttons: Generate | Edit | Build | Chat */}
           {onChatModeChange && (() => {
             const modeStyle = (mode, confirmed, predicted, colors) => {
-              if (confirmed === mode) return `${colors.confirmed} text-white shadow-lg ${colors.shadow}`;
+              if (confirmed === mode) return `${colors.confirmed} text-white shadow-lg ${colors.shadow}${animatingMode === mode ? ` ring-2 ${colors.ring} ring-offset-1 ring-offset-black/80` : ''}`;
               if (predicted === mode) return `${colors.predicted} text-white/70`;
               return 'text-slate-600';
             };
@@ -589,32 +602,32 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
                 {/* Chat */}
                 <span
                   title={chatMode === 'chat' ? 'Chat — confirmed' : predictedMode === 'chat' ? 'Chat — predicted' : 'Chat'}
-                  className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 cursor-default select-none
-                    ${modeStyle('chat', chatMode, predictedMode, { confirmed: 'bg-gradient-to-br from-blue-500 to-indigo-600', predicted: 'bg-blue-500/30', shadow: 'shadow-blue-500/40' })}`}
+                  className={`flex-shrink-0 p-2.5 rounded-xl transition-all duration-300 mb-0.5 cursor-default select-none
+                    ${modeStyle('chat', chatMode, predictedMode, { confirmed: 'bg-gradient-to-br from-blue-500 to-indigo-600', predicted: 'bg-blue-500/30', shadow: 'shadow-blue-500/40', ring: 'ring-blue-400' })}`}
                 >
                   <MessageSquare size={16} />
                 </span>
                 {/* Image Generate */}
                 <span
                   title={chatMode === 'image' ? 'Image — confirmed' : predictedMode === 'image' ? 'Image — predicted' : 'Image'}
-                  className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 cursor-default select-none
-                    ${modeStyle('image', chatMode, predictedMode, { confirmed: 'bg-gradient-to-br from-pink-500 to-rose-600', predicted: 'bg-pink-500/30', shadow: 'shadow-pink-500/40' })}`}
+                  className={`flex-shrink-0 p-2.5 rounded-xl transition-all duration-300 mb-0.5 cursor-default select-none
+                    ${modeStyle('image', chatMode, predictedMode, { confirmed: 'bg-gradient-to-br from-pink-500 to-rose-600', predicted: 'bg-pink-500/30', shadow: 'shadow-pink-500/40', ring: 'ring-pink-400' })}`}
                 >
                   <Image size={16} />
                 </span>
                 {/* Image Edit */}
                 <span
                   title={chatMode === 'image_edit' ? 'Image Edit — confirmed' : predictedMode === 'image_edit' ? 'Image Edit — predicted' : 'Image Edit'}
-                  className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 cursor-default select-none
-                    ${modeStyle('image_edit', chatMode, predictedMode, { confirmed: 'bg-gradient-to-br from-amber-500 to-orange-600', predicted: 'bg-amber-500/30', shadow: 'shadow-amber-500/40' })}`}
+                  className={`flex-shrink-0 p-2.5 rounded-xl transition-all duration-300 mb-0.5 cursor-default select-none
+                    ${modeStyle('image_edit', chatMode, predictedMode, { confirmed: 'bg-gradient-to-br from-amber-500 to-orange-600', predicted: 'bg-amber-500/30', shadow: 'shadow-amber-500/40', ring: 'ring-amber-400' })}`}
                 >
                   <Pencil size={16} />
                 </span>
                 {/* Build */}
                 <span
                   title={chatMode === 'build' ? 'Build — confirmed' : predictedMode === 'build' ? 'Build — predicted' : 'Build'}
-                  className={`flex-shrink-0 p-2.5 rounded-xl transition-all mb-0.5 cursor-default select-none
-                    ${modeStyle('build', chatMode, predictedMode, { confirmed: 'bg-gradient-to-br from-cyan-400 to-violet-600', predicted: 'bg-cyan-500/30', shadow: 'shadow-cyan-500/40' })}`}
+                  className={`flex-shrink-0 p-2.5 rounded-xl transition-all duration-300 mb-0.5 cursor-default select-none
+                    ${modeStyle('build', chatMode, predictedMode, { confirmed: 'bg-gradient-to-br from-cyan-400 to-violet-600', predicted: 'bg-cyan-500/30', shadow: 'shadow-cyan-500/40', ring: 'ring-cyan-400' })}`}
                 >
                   <Hammer size={16} />
                 </span>

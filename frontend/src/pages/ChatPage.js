@@ -409,6 +409,15 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     return ['image', 'image_edit', 'build', 'chat'].includes(saved) ? saved : null;
   }); // null | 'image' | 'image_edit' | 'build' | 'chat' — persisted across refreshes
   const vibeMode = chatMode === 'build'; // legacy compat — still used in sendStream body
+  const _modeConfirmTimer = useRef(null);
+  const VALID_MODES = new Set(['chat', 'image', 'image_edit', 'build']);
+  const confirmBackendMode = useCallback((modeUsed) => {
+    if (!modeUsed || !VALID_MODES.has(modeUsed)) return;   // guard: ignore invalid/missing
+    if (_modeConfirmTimer.current) clearTimeout(_modeConfirmTimer.current);
+    _modeConfirmTimer.current = setTimeout(() => {
+      setChatMode(prev => prev === modeUsed ? prev : modeUsed);
+    }, 120); // short debounce — collapses rapid duplicate events, not noticeable to user
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Per-mode chat isolation: save current chat for old mode, restore saved chat for new mode
   const handleModeChange = useCallback((newMode) => {
@@ -828,8 +837,8 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
       },
 
       async onDone(meta) {
-        // Backend is source of truth — update confirmed mode from backend response
-        if (meta.mode_used && meta.mode_used !== chatMode) handleModeChange(meta.mode_used);
+        // Backend is source of truth — confirmed mode, debounced + guarded
+        confirmBackendMode(meta.mode_used);
 
         // Backend signalled image redirect — fall back to non-streaming
         if (meta.type === 'image_redirect') {
@@ -961,10 +970,8 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         }
         if (isBuildIntent(text, meta.route_result)) setRightPanelOpen(true);
 
-        // Backend is source of truth — update confirmed mode from backend response
-        if (meta.mode_used && meta.mode_used !== chatMode) {
-          handleModeChange(meta.mode_used);
-        }
+        // Backend is source of truth — confirmed mode, debounced + guarded
+        confirmBackendMode(meta.mode_used);
       },
 
       onError(err) {
