@@ -68,6 +68,7 @@ def log_request(
     safe_ctx = {k: v for k, v in context_summary.items()
                 if k not in {"user_confirmed", "missing_field"}}
     log_event("request", {
+        "status":           "ok",
         "detected_intent":  detected_intent,
         "confidence":       round(confidence, 3),
         "mode_selected":    mode_selected,
@@ -80,9 +81,15 @@ def log_request(
 
 
 def log_tool(*, tool: str, success: bool, reason: str = "ok", timed_out: bool = False, start: float) -> None:
+    if timed_out:
+        status = "timeout"
+    elif success:
+        status = "ok"
+    else:
+        status = "fail"
     log_event("tool", {
+        "status":      status,
         "tool":        tool,
-        "success":     success,
         "timed_out":   timed_out,
         "reason":      reason,
         "duration_ms": _elapsed_ms(start),
@@ -90,7 +97,7 @@ def log_tool(*, tool: str, success: bool, reason: str = "ok", timed_out: bool = 
 
 
 def log_validation(*, valid: bool, reason: str, response_snapshot: str | None = None, start: float) -> None:
-    data: dict = {"valid": valid, "reason": reason, "duration_ms": _elapsed_ms(start)}
+    data: dict = {"status": "ok" if valid else "fail", "valid": valid, "reason": reason, "duration_ms": _elapsed_ms(start)}
     if not valid and response_snapshot:
         data["snapshot"] = response_snapshot[:300]
     log_event("validation", data)
