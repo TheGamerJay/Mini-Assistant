@@ -42,7 +42,11 @@ _LIVE_CURRENT_PATTERNS = re.compile(
     r"stock price|exchange rate|currency rate|"
     r"is .{0,30} (up|down|live|online|working|available)\?|"
     r"current (status|price|rate|score|standing)|"
-    r"right now|at this moment|as of (today|now)"
+    r"right now|at this moment|as of (today|now)|"
+    # Asset/crypto price queries with temporal anchors (VULN-04 fix)
+    r"(bitcoin|btc|ethereum|eth|crypto|cryptocurrency|stock|share|coin|token|gold|oil) .{0,25} (price|value|worth|rate|doing)|"
+    r"(price|value|worth|rate) of .{0,25} (bitcoin|btc|ethereum|eth|crypto|cryptocurrency|coin|token|gold|oil)|"
+    r"(price|value|cost|rate|market).{0,20}\btoday\b"
     r")\b",
     re.IGNORECASE,
 )

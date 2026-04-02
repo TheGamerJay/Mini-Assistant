@@ -128,6 +128,18 @@ _FULL_SYSTEM_KW = re.compile(
     re.IGNORECASE,
 )
 
+# Verbs that can substitute for explicit "build/make/create" when paired with
+# a full-system object — catches "write me a login system", "give me the code
+# for a REST API", "I need a full authentication backend", etc.
+_BUILD_ALIAS_VERBS = re.compile(
+    r"\b(write (me |us )?|give (me |us )?(the |a |full |complete )?|"
+    r"(i |we )need (the |a |an |full |complete )?|"
+    r"provide (me |us )?(the |a |full |complete )?|"
+    r"show me (the |a |full )?)(code|files?|implementation|system|app|"
+    r"application|backend|service|module|solution)\b",
+    re.IGNORECASE,
+)
+
 
 # ---------------------------------------------------------------------------
 # Classifier
@@ -180,6 +192,12 @@ def detect_intent(
 
     if _EXECUTE.search(msg):
         scores["execute"] = _score(_EXECUTE, msg, base=0.83)
+
+    # Fallback: "write/give/need + full-system object" → builder (VULN-01 fix)
+    # Catches requests phrased without explicit build verbs but targeting a full
+    # backend/system — e.g. "write me a login system with database and auth".
+    if "builder" not in scores and _BUILD_ALIAS_VERBS.search(msg) and _FULL_SYSTEM_KW.search(msg):
+        scores["builder"] = 0.78
 
     if not scores:
         return "general_chat", None, 0.60

@@ -57,7 +57,7 @@ _PROBES: list[tuple[str, re.Pattern]] = [
         r"your internal (logic|architecture|design|code|structure)|"
         r"how (are you|is this) (built|implemented|structured|coded)|"
         r"what modules|what brains|brain (pipeline|system)|"
-        r"show (your|the) (architecture|code|source|internals)|"
+        r"(show|print|dump|output|display) (your|the) (architecture|code|source|internals|routing|structure)|"
         r"internal (components|pipeline|flow|system design)|"
         r"how (does|do) (orchestration|routing|the CEO) work"
         r")\b",
@@ -97,7 +97,7 @@ _PROBES: list[tuple[str, re.Pattern]] = [
         r"\b("
         # Must reference "your system" / "this system" explicitly — not generic how-to
         r"how (do you|does (the|your) system) (internally|secretly|actually) (know|detect|decide|route)|"
-        r"what (internal )(thresholds?|limits?|retries?|rules?) (do you use|are (used|set))|"
+        r"what (internal|hidden|secret|actual|real) (thresholds?|limits?|retries?|rules?) (do you use|are (used|set)|you have)|"
         r"how many (retries|attempts) (do you|does (the|your) system) (make|use)|"
         r"what (triggers?|causes?) (your system|the (ceo|router)) to|"
         r"internal (validation|scoring|ranking|thresholds?) (logic|rules|system)|"
@@ -125,6 +125,7 @@ _PROBES: list[tuple[str, re.Pattern]] = [
 _SAFE_PHRASES: list[re.Pattern] = [
     re.compile(r"\b(how do credits work|why was i charged|why did (chat|the assistant) (stop|pause)|"
                r"how do i (add|buy|top.?up) credits|what (is|are) credits for|"
+               r"how (are|do) credits (calculated|work|deducted|charged|figured out)|"
                r"credits.*plan|plan.*credits)\b", re.IGNORECASE),
     # Developer API questions about Claude
     re.compile(r"\b(using (claude|gpt|anthropic) (api|sdk|client|model|in (my|our|the) (app|code|project|system)))\b",
