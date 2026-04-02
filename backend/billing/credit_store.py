@@ -97,20 +97,33 @@ async def get_grace_used(user_id: str) -> int:
 
 async def increment_grace(user_id: str) -> int:
     """
-    Increment grace_messages_used by 1.
-    Returns the NEW value after increment.
+    Atomically increment grace_messages_used by 1, ONLY if still below the limit.
+
+    Uses a conditional update ($lt filter) to prevent the TOCTOU race:
+    two concurrent requests at grace_used=2 can't both succeed — only one
+    will match the filter and increment; the other will get no match and
+    be treated as grace exhausted.
+
+    Returns the NEW value after increment, or MAX_GRACE_MESSAGES if limit reached.
     """
     try:
         db = await _get_db()
         if db is None:
             return MAX_GRACE_MESSAGES  # fail closed
         result = await db["users"].find_one_and_update(
-            {"id": user_id},
+            {
+                "id": user_id,
+                # Only increment if still below the limit (atomic guard)
+                "grace_messages_used": {"$lt": MAX_GRACE_MESSAGES},
+            },
             {"$inc": {"grace_messages_used": 1}},
             return_document=True,
             projection={"grace_messages_used": 1},
         )
-        return int(result.get("grace_messages_used", MAX_GRACE_MESSAGES)) if result else MAX_GRACE_MESSAGES
+        if result is None:
+            # No document matched — either user not found OR grace already exhausted
+            return MAX_GRACE_MESSAGES
+        return int(result.get("grace_messages_used", MAX_GRACE_MESSAGES))
     except Exception as exc:
         log.warning("credit_store.increment_grace(%s) failed — %s", user_id, exc)
         return MAX_GRACE_MESSAGES  # fail closed

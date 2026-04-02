@@ -95,7 +95,7 @@ def get_credit_warning(balance: int, plan_limit: int) -> dict[str, Any]:
         return {
             "show_warning": True,
             "level":        "exhausted",
-            "message":      "⚡ You've used all your credits. The assistant will pause after your grace messages.",
+            "message":      "⚡ No credits remaining. Chat is free but requires an active balance — using grace messages now.",
             "percentage":   0.0,
         }
 
@@ -151,14 +151,37 @@ def low_credit_warning_response(balance: int, plan_limit: int) -> dict[str, Any]
     }
 
 
+def assert_chat_allowed(balance: int, grace_used: int, plan: str) -> dict:
+    """
+    Hard check: is the user allowed to send ANY message right now?
+
+    Returns {allowed: bool, state: str, reason: str | None}.
+    This is the single source of truth for chat access — never bypass this.
+
+    Guarantees:
+      - credits > 0           → always allowed
+      - credits = 0, grace < MAX → grace (allowed, counter will increment)
+      - credits = 0, grace >= MAX → paused (not allowed)
+      - admin/max plan         → always allowed regardless of credits
+    """
+    result = can_user_chat(balance, grace_used, plan)
+    return {
+        "allowed": result["allowed"],
+        "state":   result["state"],
+        "reason":  result["block_message"] if not result["allowed"] else None,
+    }
+
+
 def _paused_message() -> str:
     return (
-        "You've used all your credits.\n\n"
-        "Chat does not spend credits directly — credits power building, "
-        "generation, and advanced actions. When credits run out, the assistant pauses "
-        "until credits are restored.\n\n"
+        "Your credit balance has run out.\n\n"
+        "Chat is free — it costs 0 credits per message. But the assistant needs an "
+        "active credit balance to keep running. Credits power building, generating, "
+        "image creation, web research, and advanced actions.\n\n"
+        "When your balance hits 0, you get 3 grace messages before the assistant pauses. "
+        "You've used them all.\n\n"
         "To continue:\n"
-        "• Upgrade your plan\n"
-        "• Or buy more credits\n\n"
-        "Your progress is saved and ready when you return."
+        "• Top up your credits\n"
+        "• Or upgrade your plan\n\n"
+        "Your work is saved and will be ready when you return."
     )

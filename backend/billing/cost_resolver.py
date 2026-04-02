@@ -74,6 +74,7 @@ MODULE_ACTION_MAP: dict[str, str] = {
     "web_search":    "web_search_basic",
     "task_assist":   "chat_basic",
     "campaign_lab":  "campaign_concept",
+    "image":         "image_generation",       # image generation module
     "image_edit":    "image_edit",
 }
 

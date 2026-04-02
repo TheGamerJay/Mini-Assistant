@@ -708,7 +708,7 @@ function Sidebar() {
           {!sidebarCollapsed && <span className="font-medium">What I Know</span>}
         </button>
 
-        {/* Ad Generator */}
+        {/* Campaign Lab */}
         <button
           onClick={() => navTo('ad-mode')}
           title={hasAdMode ? 'Campaign Lab — Create high-converting campaigns' : 'Campaign Lab — Upgrade to unlock'}
@@ -721,7 +721,7 @@ function Sidebar() {
           <Zap size={14} className="flex-shrink-0" />
           {!sidebarCollapsed && (
             <span className="font-medium flex items-center gap-1.5 flex-1">
-              Ad Generator
+              Campaign Lab
               {!hasAdMode && <span className="text-[9px] font-mono text-violet-500 bg-violet-500/10 border border-violet-500/20 rounded px-1 py-px ml-auto">PRO</span>}
             </span>
           )}

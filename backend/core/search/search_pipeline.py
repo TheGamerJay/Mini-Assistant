@@ -111,15 +111,19 @@ async def _retrieve(search_plan: dict, max_results: int) -> dict[str, Any]:
     Returns {fail, fail_reason, results}.
     """
     try:
-        from core.web.web_searcher import search as web_search
+        from core.web.web_search import run_search as web_search
         query = search_plan.get("rewritten_query", search_plan.get("original_query", ""))
-        results = await web_search(query, max_results=max_results)
+        if not query.strip():
+            return {"fail": True, "fail_reason": "Empty search query.", "results": []}
+        raw = await web_search(query)
+        results = raw.get("results", []) if isinstance(raw, dict) else []
 
         if not results:
             # Try first variant
             variants = search_plan.get("query_variants", [])
             if variants:
-                results = await web_search(variants[0], max_results=max_results)
+                raw2 = await web_search(variants[0])
+                results = raw2.get("results", []) if isinstance(raw2, dict) else []
 
         if not results:
             return {"fail": True, "fail_reason": "Web search returned no results.", "results": []}

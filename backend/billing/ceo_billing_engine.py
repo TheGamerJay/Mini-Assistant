@@ -123,8 +123,16 @@ async def process_request(
             grace_used = await get_grace_used(user_id)
             chat_access = can_user_chat(balance, grace_used, plan)
 
-            if chat_access["state"] == "grace":
+            if chat_access["state"] in ("grace", "active"):
+                # Atomic conditional increment — returns MAX_GRACE_MESSAGES if exhausted
                 new_grace = await increment_grace(user_id)
+
+                if new_grace >= MAX_GRACE_MESSAGES:
+                    # Race condition caught atomically — grace just exhausted
+                    await log_blocked(user_id, session_id, resolved_action, module, "grace_exhausted")
+                    pr = paused_response()
+                    return {**_blocked(pr["message"], "grace_exhausted", resolved_action, cost), **pr}
+
                 grace_left = MAX_GRACE_MESSAGES - new_grace
                 elapsed = round((time.perf_counter() - t0) * 1000, 1)
                 await log_grace(user_id, session_id, grace_left)
@@ -190,8 +198,9 @@ async def process_request(
                 cost,
             )
 
-        # If credits were restored after being 0, reset grace counter
-        if balance == 0 and cost == 0:
+        # If user has credits (restored or always had them), reset grace counter
+        # so they get the full 3 messages next time credits run out.
+        if balance > 0:
             await reset_grace(user_id)
 
         # ── Step 6: Log + return approval ─────────────────────────────────────

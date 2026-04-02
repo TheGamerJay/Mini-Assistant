@@ -54,7 +54,80 @@ try:
         attachments: list = []
         mode_hint:  Optional[str] = None
         user_tier:  str = "free"
+        authorization: Optional[str] = None   # Bearer token forwarded to billing engine
         context_available: dict = {}
+
+    # ── POST /api/ceo/cost — pre-execution cost check ─────────────────────────
+    @router.post("/cost")
+    async def ceo_cost_check(body: ChatRouteRequest):
+        """
+        Pre-flight cost check — returns the credit cost for an action BEFORE
+        executing it. Frontend uses this to show a confirmation dialog.
+
+        Response:
+          {
+            "action_type":       str,
+            "cost":              int,      # credits required
+            "user_balance":      int,      # current balance
+            "can_afford":        bool,
+            "shortfall":         int,      # 0 if can_afford
+            "message":           str,      # human-readable cost summary
+            "free_action":       bool,     # True if cost == 0
+          }
+
+        Backend enforces the same check at execution time — this is display only.
+        """
+        from billing.cost_resolver import resolve_action_type, get_action_cost
+        from billing.credit_store  import get_balance
+
+        meta = {
+            "complexity":     "simple",
+            "has_attachment": bool(body.attachments),
+        }
+
+        # Run a lightweight route to detect the module
+        try:
+            req, decision = await _route(body)
+            module = decision.selected_module
+        except Exception:
+            module = "core_chat"
+
+        action_type = resolve_action_type(module, meta)
+        cost        = get_action_cost(action_type, meta)
+
+        balance = 0
+        if body.user_id:
+            try:
+                balance = await get_balance(body.user_id)
+            except Exception:
+                pass
+
+        can_afford = balance >= cost
+        shortfall  = max(0, cost - balance)
+
+        if cost == 0:
+            message = "This action is free."
+        elif can_afford:
+            message = (
+                f"This action costs {cost} credit{'s' if cost != 1 else ''}. "
+                f"You have {balance} remaining."
+            )
+        else:
+            message = (
+                f"This action costs {cost} credit{'s' if cost != 1 else ''} "
+                f"but you only have {balance}. "
+                f"You need {shortfall} more credit{'s' if shortfall != 1 else ''} to continue."
+            )
+
+        return {
+            "action_type": action_type,
+            "cost":        cost,
+            "user_balance": balance,
+            "can_afford":  can_afford,
+            "shortfall":   shortfall,
+            "message":     message,
+            "free_action": cost == 0,
+        }
 
     # ── POST /api/ceo/route — decision only ───────────────────────────────────
     @router.post("/route")
@@ -179,6 +252,7 @@ try:
             attachments       = body.attachments,
             mode_hint         = body.mode_hint,
             user_tier         = body.user_tier,
+            authorization     = body.authorization,
             context_available = body.context_available or {
                 "task_assist":      True,
                 "campaign_lab":     True,

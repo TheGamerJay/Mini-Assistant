@@ -77,7 +77,39 @@ async def route_request(request: RouterRequest) -> RouterDecision:
     t0 = time.perf_counter()
     events: list[dict] = []
 
-    # ── Step 0: probe detection (before any processing) ─────────────────────
+    # ── Step 0a: rate limiting (before anything else) ────────────────────────
+    if request.user_id:
+        try:
+            from billing.rate_limiter import check_rate_limit
+            rl = check_rate_limit(request.user_id, request.user_tier)
+            if not rl["allowed"]:
+                log.info(
+                    "CEO: rate limit user=%s retry_after=%ds",
+                    request.user_id, rl["retry_after_seconds"],
+                )
+                return RouterDecision(
+                    intent="rate_limited",
+                    complexity="simple",
+                    selected_module="core_chat",
+                    requires_memory=False, memory_scope=None,
+                    requires_web=False, web_mode=None,
+                    requires_backend=False,
+                    needs_user_input=True,
+                    clarification_question=(
+                        f"You're sending requests too quickly. "
+                        f"Please wait {rl['retry_after_seconds']} second(s) and try again."
+                    ),
+                    execution_plan=[],
+                    validation_required=False,
+                    tier_visibility="free",
+                    message=request.message,
+                    truth_type="stable_knowledge",
+                    truth_can_answer=True,
+                )
+        except Exception as _rle:
+            log.debug("CEO: rate limit check error (non-fatal) — %s", _rle)
+
+    # ── Step 0b: probe detection (before any processing) ─────────────────────
     if request.message:
         try:
             detect, build_probe_response = _probe_detector()
@@ -314,6 +346,7 @@ async def route_request(request: RouterRequest) -> RouterDecision:
         validation_required    = True,
         tier_visibility        = tier_vis,
         message                = request.message,
+        session_id             = request.session_id,
         attachments            = request.attachments,
         truth_type             = ctx.truth_type,
         truth_can_answer       = ctx.truth_can_answer,

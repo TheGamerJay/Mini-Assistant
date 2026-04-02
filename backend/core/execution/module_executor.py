@@ -156,7 +156,10 @@ async def execute_plan(
             ok_step = ok
             events.append(_ev.module_execution_complete(session_id, module, ok))
             if not ok:
-                events.append(_ev.error(session_id, module, result.get("error", "module failed")))
+                error_msg = result.get("error", "module failed")
+                events.append(_ev.error(session_id, module, error_msg))
+                # Soft failure recovery — surface partial result with guidance
+                result = _build_soft_failure(module, result, error_msg)
             log.debug("executor step %d: module_call %s — ok=%s", step.step, module, ok)
             # post_module checkpoint
             if session_id:
@@ -216,12 +219,14 @@ async def execute_plan(
 
     # Sanitize output before returning to user (removes paths, tracebacks, secrets)
     try:
-        from billing.output_sanitizer import sanitize
+        from billing.output_sanitizer import sanitize, _detect_output_type
         # Determine admin mode — admin users get less scrubbing
         tier_vis = getattr(decision, "tier_visibility", "free")
         san_mode = "admin" if tier_vis in ("admin",) else "user"
+        # Detect output type so code blocks are preserved intact
+        out_type = _detect_output_type(result)
         internal_keys = {k: result[k] for k in result if k.startswith("_")}
-        sanitized = sanitize(result, mode=san_mode, keep_files=True)
+        sanitized = sanitize(result, mode=san_mode, keep_files=True, output_type=out_type)
         sanitized.update(internal_keys)   # restore internal _ keys (events, checkpoints, elapsed)
         result = sanitized
     except Exception as _se:
@@ -398,3 +403,57 @@ def _extract_validation_type(reason: str) -> str:
     import re
     m = re.search(r"'([^']+)' rules", reason)
     return m.group(1) if m else "general_chat"
+
+
+def _build_soft_failure(module: str, result: dict, error_msg: str) -> dict:
+    """
+    Build a user-facing soft failure response.
+
+    Instead of returning a raw error dict, surface:
+    - whatever partial content the module produced (if any)
+    - a clear explanation that the task didn't fully complete
+    - a suggested next step
+
+    Never surfaces internal error strings. Never returns an empty response.
+    """
+    # Preserve any partial content the module managed to produce
+    partial_fields = {}
+    for key in ("files", "code", "summary", "answer", "message", "response",
+                "sources", "results", "output", "concepts"):
+        if result.get(key):
+            partial_fields[key] = result[key]
+
+    # Module-specific next-step suggestions
+    _NEXT_STEPS = {
+        "builder":      "Try narrowing the scope of the request, or break it into smaller pieces.",
+        "doctor":       "Share the specific error or file you'd like me to diagnose.",
+        "image":        "Try rephrasing the image prompt or reducing its complexity.",
+        "image_edit":   "Re-upload the image and try a simpler edit instruction.",
+        "campaign_lab": "Try starting with a single campaign concept instead of a full package.",
+        "web_search":   "Search may be temporarily unavailable. Try again in a moment.",
+        "core_chat":    "Please try rephrasing your message.",
+        "task_assist":  "Try breaking the task into a smaller first step.",
+        "vision":       "Re-upload the image and try a simpler analysis request.",
+    }
+
+    next_step = _NEXT_STEPS.get(module, "Try rephrasing or simplifying your request.")
+
+    response = {
+        "status":      "partial",
+        "module":      module,
+        "message":     (
+            "I wasn't able to complete this task fully. "
+            + (f"Here's what I was able to generate:\n\n" if partial_fields else "")
+        ),
+        "next_step":   next_step,
+        **partial_fields,
+    }
+
+    if not partial_fields:
+        response["message"] = (
+            "I ran into a problem completing this task. "
+            f"{next_step}"
+        )
+
+    log.info("executor: soft failure for module=%s partial_keys=%s", module, list(partial_fields.keys()))
+    return response

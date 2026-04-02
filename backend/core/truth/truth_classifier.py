@@ -117,7 +117,7 @@ def classify(message: str, tools_available: set[str] = None) -> dict[str, Any]:
         truth_type = "stable_knowledge"
 
     # Determine tool requirements
-    tool_required, tool_name = _resolve_tool(truth_type)
+    tool_required, tool_name = _resolve_tool(truth_type, msg)
 
     can_answer = True
     cannot_verify_reason = None
@@ -207,12 +207,28 @@ def get_current_time() -> dict[str, Any]:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _resolve_tool(truth_type: str) -> tuple[bool, str | None]:
-    """Return (tool_required, tool_name) for a truth type."""
+_TIME_PATTERNS = re.compile(
+    r"\b(what time|current time|time right now|time is it|"
+    r"today['']?s date|what day|what['']?s the date)\b",
+    re.IGNORECASE,
+)
+
+
+def _resolve_tool(truth_type: str, message: str = "") -> tuple[bool, str | None]:
+    """Return (tool_required, tool_name) for a truth type.
+
+    system_clock is ONLY injected when the query is specifically about time/date.
+    All other live_current queries (weather, stocks, uptime) require a tool that
+    isn't available, so they surface a cannot_verify response.
+    """
     if truth_type == "stable_knowledge":
         return False, None
     if truth_type == "live_current":
-        return True, "system_clock"   # default live tool; weather etc. would override
+        # Only inject clock for actual time/date queries
+        if message and _TIME_PATTERNS.search(message):
+            return True, "system_clock"
+        # All other live queries (weather, stocks, etc.) need unavailable tools
+        return True, "live_data_tool"
     if truth_type == "search_dependent":
         return True, "web_search"
     if truth_type == "mixed":

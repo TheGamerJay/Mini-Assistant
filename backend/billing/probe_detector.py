@@ -84,22 +84,24 @@ _PROBES: list[tuple[str, re.Pattern]] = [
     )),
     ("model_probe", re.compile(
         r"\b("
-        r"what (model|llm|ai|version) (are you|do you use|is this)|"
-        r"which (model|llm|version)|what version of (claude|gpt|openai)|"
-        r"are you (claude|gpt|chatgpt|gemini|llama)|"
-        r"(claude|gpt)[- ]?(sonnet|haiku|opus|turbo|4|3\.5)|"
-        r"model (name|id|version)|what (llm|AI) (powers|runs) (you|this)"
+        # Self-referential questions only — must include "you" / "this assistant"
+        r"what (model|llm|ai|version) (are you|do you use|is this assistant)|"
+        r"which (model|llm|version) (are you|do you run|powers you)|"
+        r"are you (claude|gpt|chatgpt|gemini|llama)\b|"
+        r"model (name|id|version) (of this|you use|you are)|"
+        r"what (llm|AI) (powers|runs) (you|this assistant)"
         r")\b",
         re.IGNORECASE,
     )),
     ("behavior_probe", re.compile(
         r"\b("
-        r"how (do you|does the system) (know|detect|decide|determine|validate|"
-        r"fix|repair|evaluate|check|verify|score|rank)|"
-        r"what (thresholds?|limits?|retries?|rules?) (do you use|are used)|"
-        r"how many (retries|attempts|tries)|what (triggers?|causes?) (you to|the system to)|"
-        r"internal (validation|scoring|ranking|thresholds?)|"
-        r"how (does|do) (validation|scoring|ranking|retry) work"
+        # Must reference "your system" / "this system" explicitly — not generic how-to
+        r"how (do you|does (the|your) system) (internally|secretly|actually) (know|detect|decide|route)|"
+        r"what (internal )(thresholds?|limits?|retries?|rules?) (do you use|are (used|set))|"
+        r"how many (retries|attempts) (do you|does (the|your) system) (make|use)|"
+        r"what (triggers?|causes?) (your system|the (ceo|router)) to|"
+        r"internal (validation|scoring|ranking|thresholds?) (logic|rules|system)|"
+        r"how (does|do) your (internal )?(validation|scoring|ranking|retry) work"
         r")\b",
         re.IGNORECASE,
     )),
@@ -114,6 +116,41 @@ _PROBES: list[tuple[str, re.Pattern]] = [
         re.IGNORECASE,
     )),
 ]
+
+# ---------------------------------------------------------------------------
+# Explicit allowlist — these phrases MUST NOT trigger probe detection
+# regardless of any pattern match (false-positive guard).
+# ---------------------------------------------------------------------------
+
+_SAFE_PHRASES: list[re.Pattern] = [
+    re.compile(r"\b(how do credits work|why was i charged|why did (chat|the assistant) (stop|pause)|"
+               r"how do i (add|buy|top.?up) credits|what (is|are) credits for|"
+               r"credits.*plan|plan.*credits)\b", re.IGNORECASE),
+    # Developer API questions about Claude
+    re.compile(r"\b(using (claude|gpt|anthropic) (api|sdk|client|model|in (my|our|the) (app|code|project|system)))\b",
+               re.IGNORECASE),
+    # "how do I" / "how does X" — plain how-to questions without self-referential target
+    re.compile(r"\bhow (do i|can i|should i)\b", re.IGNORECASE),
+]
+
+# Intent-level signals that indicate extraction intent regardless of phrasing
+_META_EXTRACTION_SIGNALS: re.Pattern = re.compile(
+    r"\b("
+    r"step.?by.?step (routing|routing logic|decision logic|how you decide)|"
+    r"walk (me through|through) (your|the) (routing|decision|execution|internal)|"
+    r"explain (your|the) internal (flow|logic|pipeline|architecture)|"
+    r"trace (your|the) (execution|decision|routing)|"
+    r"what happens (internally|inside) when (you|the system) (receives?|gets?|processes?)|"
+    r"show (me )?exactly how (you|the system|the router) (decides?|routes?|handles?)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _is_safe_phrase(message: str) -> bool:
+    """Return True if the message matches an explicitly safe allowlisted phrase."""
+    return any(p.search(message) for p in _SAFE_PHRASES)
+
 
 # ---------------------------------------------------------------------------
 # Safe responses per probe type
@@ -173,6 +210,12 @@ def detect(message: str) -> dict[str, Any]:
     """
     Scan a message for internal probe patterns.
 
+    Two-pass detection:
+      Pass 1: Allowlist check — if the message matches a known safe phrase,
+              skip all pattern matching entirely (false-positive prevention).
+      Pass 2: Regex patterns — check each probe type.
+      Pass 3: Intent-level semantic signals — catch phrasing-trick bypasses.
+
     Returns:
       {
         is_probe:    bool,
@@ -182,11 +225,23 @@ def detect(message: str) -> dict[str, Any]:
       }
     """
     message_stripped = message.strip()
+
+    # Pass 1: Allowlist — explicitly safe phrases always pass through
+    if _is_safe_phrase(message_stripped):
+        log.debug("probe_detector: allowlisted safe phrase — not a probe")
+        return {"is_probe": False, "probe_type": None, "all_types": [], "safe_response": None}
+
     matched: list[str] = []
 
+    # Pass 2: Regex pattern matching per probe type
     for probe_type, pattern in _PROBES:
         if pattern.search(message_stripped):
             matched.append(probe_type)
+
+    # Pass 3: Intent-level semantic signals (catches rephrasing bypasses)
+    if not matched and _META_EXTRACTION_SIGNALS.search(message_stripped):
+        matched.append("architecture_probe")
+        log.info("probe_detector: semantic extraction signal detected — architecture_probe")
 
     if not matched:
         return {"is_probe": False, "probe_type": None, "all_types": [], "safe_response": None}

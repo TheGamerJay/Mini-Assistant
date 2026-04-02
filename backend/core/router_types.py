@@ -120,6 +120,7 @@ class RouterDecision:
 
     # Session context (Phase 62)
     session_context:      Optional[dict] = None   # loaded from context_store
+    session_id:           Optional[str]  = None   # threaded through for search pipeline
 
     def to_dict(self) -> dict:
         return {
@@ -137,8 +138,10 @@ class RouterDecision:
             "validation_required":   self.validation_required,
             "tier_visibility":       self.tier_visibility,
             "message":               self.message,
+            "session_id":            self.session_id,
             "attachments":           self.attachments,
             "truth_type":            self.truth_type,
             "truth_can_answer":      self.truth_can_answer,
             "cannot_verify_reason":  self.cannot_verify_reason,
+            "billing_status":        self.billing_status,
         }

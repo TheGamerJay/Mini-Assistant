@@ -102,17 +102,22 @@ _SAFE_KEYS = frozenset({
 # ---------------------------------------------------------------------------
 
 def sanitize(
-    output:      dict[str, Any],
-    mode:        str = "user",
-    keep_files:  bool = True,
+    output:       dict[str, Any],
+    mode:         str = "user",
+    keep_files:   bool = True,
+    output_type:  str = "explanation_output",   # "code_output" | "explanation_output" | "data_output"
 ) -> dict[str, Any]:
     """
     Sanitize a module output dict before returning to the user.
 
     Args:
-        output:     raw module output dict
-        mode:       "user" (full sanitize) | "admin" (secrets only)
-        keep_files: if True, preserve files[] array (code output)
+        output:      raw module output dict
+        mode:        "user" (full sanitize) | "admin" (secrets only)
+        keep_files:  if True, preserve files[] array (code output)
+        output_type: controls sanitization depth:
+                       "code_output"        — preserve structure, strip secrets only
+                       "explanation_output" — full sanitization of internals
+                       "data_output"        — full sanitization, preserve numeric/list data
 
     Returns:
         Cleaned output dict safe for user consumption.
@@ -123,7 +128,57 @@ def sanitize(
     if mode == "admin":
         return _sanitize_secrets_only(output)
 
+    # Detect output_type from content if not specified
+    if output_type == "explanation_output":
+        output_type = _detect_output_type(output)
+
+    if output_type == "code_output":
+        # Code output: preserve all structure, strip secrets only
+        return _sanitize_code_output(output)
+
     return _sanitize_full(output, keep_files=keep_files)
+
+
+def _detect_output_type(output: dict[str, Any]) -> str:
+    """Infer output type from content to avoid over-sanitization."""
+    if output.get("files") or output.get("code"):
+        return "code_output"
+    if output.get("type") in ("search_output", "web_output"):
+        return "data_output"
+    if output.get("image_url") or output.get("image_base64") or output.get("base64"):
+        return "data_output"
+    return "explanation_output"
+
+
+def _sanitize_code_output(output: dict[str, Any]) -> dict[str, Any]:
+    """
+    Code output mode — preserve ALL code structure, strip secrets only.
+
+    Does NOT remove: variables, paths inside code blocks, import statements,
+    code markers, or any legitimate programming constructs.
+    Only removes: JWT tokens, API keys, env var values.
+    """
+    def _clean_code_value(v: Any) -> Any:
+        if isinstance(v, str):
+            # Only strip actual secret values, not code patterns
+            v = _JWT_PAT.sub("[token]", v)
+            v = _ENV_PAT.sub("[env_var]=[redacted]", v)
+            return v
+        if isinstance(v, dict):
+            return {k: _clean_code_value(val) for k, val in v.items()
+                    if k not in _INTERNAL_FIELDS}
+        if isinstance(v, list):
+            return [_clean_code_value(item) for item in v]
+        return v
+
+    cleaned: dict[str, Any] = {}
+    for k, v in output.items():
+        if k in _INTERNAL_FIELDS:
+            continue
+        if isinstance(k, str) and k.startswith("_"):
+            continue
+        cleaned[k] = _clean_code_value(v)
+    return cleaned
 
 
 def sanitize_text(text: str, mode: str = "user") -> str:
