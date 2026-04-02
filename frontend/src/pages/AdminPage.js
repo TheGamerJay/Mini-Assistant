@@ -359,7 +359,7 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
   const loadXraySessions = useCallback(async () => {
     setLoadingXray(true);
     try {
-      const data = await adminFetch('/api/admin/xray/sessions');
+      const data = await adminFetch('/admin/xray/sessions');
       setXraySessions(data.sessions || []);
     } catch (err) {
       toast.error('X-Ray: ' + (err.message || 'load failed'));
@@ -373,7 +373,7 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
     setLoadingXray(true);
     setXrayReport(null);
     try {
-      const data = await adminFetch(`/api/admin/xray/session/${encodeURIComponent(sid)}`);
+      const data = await adminFetch(`/admin/xray/session/${encodeURIComponent(sid)}`);
       setXrayReport(data);
     } catch (err) {
       toast.error('X-Ray report: ' + (err.message || 'load failed'));
@@ -385,7 +385,7 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
   const loadRepairList = useCallback(async () => {
     setLoadingRepair(true);
     try {
-      const data = await adminFetch(`/api/admin/repair${repairCategory ? `?category=${encodeURIComponent(repairCategory)}` : ''}`);
+      const data = await adminFetch(`/admin/repair${repairCategory ? `?category=${encodeURIComponent(repairCategory)}` : ''}`);
       setRepairList(data.records || []);
     } catch (err) {
       toast.error('Repair Memory: ' + (err.message || 'load failed'));
@@ -398,7 +398,7 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
     if (!repairSearch.trim()) return;
     setLoadingRepair(true);
     try {
-      const data = await adminFetch(`/api/admin/repair/search?query=${encodeURIComponent(repairSearch)}&category=${encodeURIComponent(repairCategory)}`);
+      const data = await adminFetch(`/admin/repair/search?query=${encodeURIComponent(repairSearch)}&category=${encodeURIComponent(repairCategory)}`);
       setRepairSearchResults(data.matches || []);
     } catch (err) {
       toast.error('Repair search: ' + (err.message || 'failed'));
@@ -410,7 +410,7 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
   const loadLogFeed = useCallback(async () => {
     setLoadingLogs(true);
     try {
-      const data = await adminFetch(`/api/admin/logs${logLevel ? `?level=${logLevel}` : ''}`);
+      const data = await adminFetch(`/admin/logs${logLevel ? `?level=${logLevel}` : ''}`);
       setLogFeed(data.events || []);
     } catch (err) {
       toast.error('Logs: ' + (err.message || 'load failed'));
@@ -422,7 +422,7 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
   const loadHealth = useCallback(async () => {
     setLoadingHealth(true);
     try {
-      const data = await adminFetch('/api/admin/health');
+      const data = await adminFetch('/admin/health');
       setHealthSnap(data);
     } catch (err) {
       toast.error('Health: ' + (err.message || 'load failed'));

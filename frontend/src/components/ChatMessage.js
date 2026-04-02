@@ -922,9 +922,22 @@ function ChatMessage({ message, onRetry, onRate, onFork, onPin, onSendToBuilder,
 
         {isImage ? (
           <>
-            <p className="text-slate-400 text-sm mb-3">Here's your image:</p>
             <ImageCard image_base64={image_base64} prompt={prompt || content} route_result={route_result}
               generation_time_ms={generation_time_ms} retry_used={retry_used} dry_run={false} />
+            {/* Phase 9: Quick-edit actions for in-chat image artifacts */}
+            {onSuggest && (
+              <div className="flex flex-wrap gap-1.5 mt-3">
+                {['Make it more vibrant', 'Add a dark background', 'Make it more detailed', 'Try a different style'].map(action => (
+                  <button
+                    key={action}
+                    onClick={() => onSuggest(action)}
+                    className="text-[10px] px-2.5 py-1 rounded-full border border-violet-500/25 bg-violet-500/8 text-violet-400/80 hover:bg-violet-500/20 hover:text-violet-300 hover:border-violet-500/50 transition-colors"
+                  >
+                    {action}
+                  </button>
+                ))}
+              </div>
+            )}
             {_fmtTs(timestamp) && (
               <div className="text-[10px] font-mono text-slate-600 mt-2">{_fmtTs(timestamp)}</div>
             )}

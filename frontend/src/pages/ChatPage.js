@@ -91,6 +91,12 @@ function isImageIntent(text) {
   return /\b(8k|4k|ultra[\s-]?detailed|masterpiece|cinematic lighting|volumetric light|photorealistic|hyper[\s-]?realistic|concept art|digital painting|unreal engine|octane render|artstation|highly detailed|studio lighting|depth of field|bokeh|ray tracing|smooth anatomy|realistic proportions|full.?body shot|head[\s-]to[\s-]toe)\b/i.test(text);
 }
 
+/** Detect follow-up modification intent for an existing image artifact */
+function isFollowUpIntent(text) {
+  if (!text) return false;
+  return /\b(edit|fix|change|update|modify|adjust|revise|redo|refine|improve|alter|transform|make it|try again|regenerate|different version|instead|darker|lighter|brighter|bigger|smaller|wider|taller|add|remove|replace|rotate|flip|blur|sharpen|crop|zoom|resize|recolor|relight|restyle|redraw)\b/i.test(text);
+}
+
 /** Detect if a message/prompt suggests app-building intent */
 function isBuildIntent(text, routeResult) {
   if (routeResult === 'app_builder') return true;
@@ -492,6 +498,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
   const pendingMsgRef     = useRef(null); // queued message while a response is in-flight
   const streamAccumRef    = useRef(''); // accumulates all streamed tokens — fallback if meta.reply is empty
   const lastHtmlRef       = useRef(null); // always holds the most recently built HTML app
+  const lastArtifactRef   = useRef(null); // { type:'image', base64:string, prompt:string } — last generated image for auto-bind
 
   // Context meter — estimate token usage from character counts (chars/4 ≈ tokens).
   // API sends only the last 20 messages, so meter only counts those.
@@ -646,15 +653,30 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     let imgs = Array.isArray(imagesBase64) ? imagesBase64.filter(Boolean) : (imagesBase64 ? [imagesBase64] : []);
     if (!text && !imgs.length) return;
 
+    // Phase 5: Auto-bind last image artifact for follow-up modification requests.
+    // If the user says "make it darker" / "fix this" without attaching an image,
+    // automatically use the last generated image and route as image_edit.
+    let _routeMode = chatMode; // may be overridden below
+    if (
+      !imgs.length &&
+      lastArtifactRef.current?.type === 'image' &&
+      isFollowUpIntent(text) &&
+      chatMode !== 'build'
+    ) {
+      imgs = [lastArtifactRef.current.base64];
+      _routeMode = 'image_edit';
+    }
+
     // Edit Mode guard: requires an attached image — never fall back to generation.
-    if (chatMode === 'image_edit' && !imgs.length) {
+    if (_routeMode === 'image_edit' && !imgs.length) {
       toast.error('Please attach the image you want to edit first.');
       submittingRef.current = false;
       return;
     }
 
     // image mode = always fresh generation — never auto-attach a previous image.
-    // If the user wants to edit a previous image, they use image_edit mode.
+    // If the user wants to edit a previous image, they use image_edit mode or
+    // type a follow-up command (auto-bound above).
 
     // Image generation limit gate — uses server-authoritative imageUsage (not localStorage)
     // Only block if this is a pure generation request (no reference image attached).
@@ -740,14 +762,15 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     // image_edit mode always routes through the image endpoint (edit pipeline).
     // image mode routes through image endpoint (generate pipeline).
     // Auto-detect for null mode.
-    const imageIntentDetected = chatMode === 'image' || chatMode === 'image_edit' || (chatMode === null && isImageIntent(text));
+    // Image routing: explicit mode, auto-detected intent, or follow-up on last artifact (_routeMode = image_edit)
+    const imageIntentDetected = _routeMode === 'image' || _routeMode === 'image_edit' || (chatMode === null && isImageIntent(text));
 
     // ── IMAGE path: non-streaming endpoint ────────────────────────────────────
     // 'image'      → Create New Image (text-to-image, DALL-E 3)
     // 'image_edit' → Edit Existing Image (source-preserving CEO pipeline, requires attachment)
     // null + auto  → auto-detected image intent → generation
     // Only skip this path in build mode.
-    if (imageIntentDetected && chatMode !== 'build') {
+    if (imageIntentDetected && _routeMode !== 'build') {
       if (imageIntentDetected) {
         setMessages([...nextMessages, {
           role: 'assistant', type: 'image_generating',
@@ -760,37 +783,44 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
 
       try {
         const history = nextMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
-        const data = await send(text, sessionIdRef.current, history, imgs.length ? imgs : null, preferredModel, requestId, chatMode);
+        const data = await send(text, sessionIdRef.current, history, imgs.length ? imgs : null, preferredModel, requestId, _routeMode);
         setStreamResponse(data);
 
         const isImg = !!data.image_base64;
+        let chatThumb = null;
         if (isImg) {
-          // Show image in Preview panel, not in chat — persist per-chat
+          // Always show full image in Preview panel (persisted)
           setPreviewImage(data.image_base64);
           setRightPanelOpen(true);
           savePreviewImage(chatId, data.image_base64);
           updateChatPreviewImage(chatId, data.image_base64);
-          const thumb = await makeThumbnail(data.image_base64);
-          await addImage(thumb, text, data.image_base64);
+          chatThumb = await makeThumbnail(data.image_base64);
+          await addImage(chatThumb, text, data.image_base64);
           incrementImageUsage();
+          // Track artifact for follow-up edit auto-binding (Phase 5)
+          lastArtifactRef.current = { type: 'image', base64: data.image_base64, prompt: text };
         }
 
-        const assistantMsg = {
-          role: 'assistant',
-          type: 'text',
-          content: isImg
-            ? (chatMode === 'image_edit'
-                ? (data.reconstruction_fallback_used
-                    ? '✏️ Edit applied (enhanced reconstruction). Check the **Preview** panel →'
-                    : '✏️ Edit applied! Check the **Preview** panel →')
-                : '🎨 Image generated! Check the **Preview** panel →')
-            : (data.reply || 'Done.'),
-          route_result: data.route_result || null,
-          generation_time_ms: data.generation_time_ms || null,
-          model_used: data.model_used || null,
-          memory_stored: data.memory_stored || [],
-          timestamp: Date.now(),
-        };
+        // Phase 7: Post image directly in chat as a visual artifact (thumbnail keeps storage small)
+        const assistantMsg = isImg
+          ? {
+              role: 'assistant', type: 'image',
+              image_base64: chatThumb, prompt: text, content: text,
+              route_result: data.route_result || null,
+              generation_time_ms: data.generation_time_ms || null,
+              model_used: data.model_used || null,
+              memory_stored: data.memory_stored || [],
+              timestamp: Date.now(),
+            }
+          : {
+              role: 'assistant', type: 'text',
+              content: data.reply || 'Done.',
+              route_result: data.route_result || null,
+              generation_time_ms: data.generation_time_ms || null,
+              model_used: data.model_used || null,
+              memory_stored: data.memory_stored || [],
+              timestamp: Date.now(),
+            };
         const withAssistant = [...nextMessages, assistantMsg];
         setMessages(withAssistant);
         updateChatMessages(chatId, withAssistant);
@@ -858,28 +888,38 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
             content: 'Rendering your image...', timestamp: Date.now(), _placeholder: true,
           }]);
           try {
-            const data = await send(text, sessionIdRef.current, history, imgs.length ? imgs : null, preferredModel, requestId, chatMode);
+            const data = await send(text, sessionIdRef.current, history, imgs.length ? imgs : null, preferredModel, requestId, _routeMode);
             setStreamResponse(data);
             const isImg = !!data.image_base64;
+            let chatThumb2 = null;
             if (isImg) {
               setPreviewImage(data.image_base64);
               setRightPanelOpen(true);
               savePreviewImage(chatIdRef_local, data.image_base64);
               updateChatPreviewImage(chatIdRef_local, data.image_base64);
-              const thumb = await makeThumbnail(data.image_base64);
-              await addImage(thumb, text, data.image_base64);
+              chatThumb2 = await makeThumbnail(data.image_base64);
+              await addImage(chatThumb2, text, data.image_base64);
               incrementImageUsage();
+              lastArtifactRef.current = { type: 'image', base64: data.image_base64, prompt: text };
             }
-            const assistantMsg = {
-              role: 'assistant', type: 'text',
-              content: isImg
-                ? '🎨 Image generated! Check the **Preview** panel →'
-                : (data.reply || ''),
-              route_result: data.route_result || null,
-              generation_time_ms: data.generation_time_ms || null,
-              model_used: data.model_used || null, memory_stored: data.memory_stored || [],
-              timestamp: Date.now(),
-            };
+            // Phase 7: Post image in chat as visual artifact
+            const assistantMsg = isImg
+              ? {
+                  role: 'assistant', type: 'image',
+                  image_base64: chatThumb2, prompt: text, content: text,
+                  route_result: data.route_result || null,
+                  generation_time_ms: data.generation_time_ms || null,
+                  model_used: data.model_used || null, memory_stored: data.memory_stored || [],
+                  timestamp: Date.now(),
+                }
+              : {
+                  role: 'assistant', type: 'text',
+                  content: data.reply || '',
+                  route_result: data.route_result || null,
+                  generation_time_ms: data.generation_time_ms || null,
+                  model_used: data.model_used || null, memory_stored: data.memory_stored || [],
+                  timestamp: Date.now(),
+                };
             const withA = [...nextMessages, assistantMsg];
             setMessages(withA);
             updateChatMessages(chatIdRef_local, withA);
