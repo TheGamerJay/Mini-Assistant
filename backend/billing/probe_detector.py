@@ -75,8 +75,11 @@ _PROBES: list[tuple[str, re.Pattern]] = [
     )),
     ("secrets_probe", re.compile(
         r"\b("
-        r"(print|show|reveal|what is) (your |the )?(api key|secret|token|"
-        r"password|credential|env|environment variable|jwt|database url)|"
+        r"(print|show|reveal|output|dump|what is|what are) (your |the )?(api key|secret|token|"
+        r"password|credential|env( vars?| values?)?|environment (variable|config|settings?)|"
+        r"jwt|database url|backend config|private config|hidden config|secret config|"
+        r"internal (config|configuration|settings?))|"
+        r"(your|the system.?s?) (hidden|private|secret|internal) (config|configuration|settings?)|"
         r"anthropic[_ ]?(api[_ ]?key|key)|openai[_ ]?key|"
         r"MONGO|STRIPE|RESEND|JWT_SECRET"
         r")\b",
@@ -98,6 +101,8 @@ _PROBES: list[tuple[str, re.Pattern]] = [
         # Must reference "your system" / "this system" explicitly — not generic how-to
         r"how (do you|does (the|your) system) (internally|secretly|actually) (know|detect|decide|route)|"
         r"what (internal|hidden|secret|actual|real) (thresholds?|limits?|retries?|rules?) (do you use|are (used|set)|you have)|"
+        r"what (thresholds?|limits?|rules?|scoring|ranking) (do you|you) use internally|"
+        r"(reveal|expose|show) .{0,20} (thresholds?|limits?|scoring|ranking|internal rules?)|"
         r"how many (retries|attempts) (do you|does (the|your) system) (make|use)|"
         r"what (triggers?|causes?) (your system|the (ceo|router)) to|"
         r"internal (validation|scoring|ranking|thresholds?) (logic|rules|system)|"
@@ -132,6 +137,11 @@ _SAFE_PHRASES: list[re.Pattern] = [
                re.IGNORECASE),
     # "how do I" / "how does X" — plain how-to questions without self-referential target
     re.compile(r"\bhow (do i|can i|should i)\b", re.IGNORECASE),
+    # Developer questions about their own app config/env — NOT about assistant internals
+    # "my env vars", "my environment variables", "my app's config", "my backend config"
+    re.compile(r"\b(my|our) (app.?s?|backend.?s?|project.?s?|server.?s?|service.?s?)?.{0,10}"
+               r"(env( vars?| values?)?|environment (variable|config|settings?)|config|configuration|settings?)\b",
+               re.IGNORECASE),
 ]
 
 # Intent-level signals that indicate extraction intent regardless of phrasing

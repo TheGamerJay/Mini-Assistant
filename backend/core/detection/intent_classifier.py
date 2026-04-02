@@ -62,10 +62,10 @@ _WEB_LOOKUP = re.compile(
 )
 
 _BUILDER = re.compile(
-    r"\b(build (me |an? |the )?(app|application|website|web app|dashboard|"
+    r"\b(build (me |us )?(an? |a |the )?(app|application|website|web app|dashboard|"
     r"calculator|todo|todo app|quiz|game|tool|widget|landing page|portfolio site)|"
-    r"make (me |an? |the )?(app|website|dashboard|tool|calculator)|"
-    r"create (an? )?(app|application|website|dashboard|tool)|"
+    r"make (me |us )?(an? |a |the )?(app|website|dashboard|tool|calculator)|"
+    r"create (an? |a )?(app|application|website|dashboard|tool)|"
     r"add (a |an )?(backend|leaderboard|login|auth|database|feature|api)|"
     r"set up (a )?(backend|database|api|server|auth)|"
     r"scaffold|boilerplate|starter template|full.?stack|fullstack)\b",
@@ -123,20 +123,33 @@ _FULL_SYSTEM_KW = re.compile(
     r"login|sign.?in|sign.?up|authentication|auth system|"
     r"database|db|sql|mongodb|postgres|mysql|firebase|supabase|"
     r"save (data|progress|scores|state)|persist|sync|realtime|real.?time|"
-    r"api|rest api|graphql|backend server|admin panel|"
-    r"user account|user profile|multi.?player|multiplayer)\b",
+    r"api|rest api|graphql|backend( server)?|admin panel|"
+    r"user account|user profile|multi.?player|multiplayer|"
+    r"production (code|app|system|build|ready))\b",
     re.IGNORECASE,
 )
 
-# Verbs that can substitute for explicit "build/make/create" when paired with
-# a full-system object — catches "write me a login system", "give me the code
-# for a REST API", "I need a full authentication backend", etc.
+# Verbs that substitute for explicit "build/make/create" when paired with a
+# full-system object — catches "write me a login system", "paste the code for
+# a backend", "output the full backend files", "give me the implementation", etc.
+#
+# Pattern: verb + up to 25 chars of filler (articles, modifiers) + system noun.
+# This lets "the full", "me the complete", "us the entire" etc. all pass through
+# without enumerating every combination.
 _BUILD_ALIAS_VERBS = re.compile(
-    r"\b(write (me |us )?|give (me |us )?(the |a |full |complete )?|"
-    r"(i |we )need (the |a |an |full |complete )?|"
-    r"provide (me |us )?(the |a |full |complete )?|"
-    r"show me (the |a |full )?)(code|files?|implementation|system|app|"
-    r"application|backend|service|module|solution)\b",
+    r"\b(write\b|paste\b|output\b|give\b|provide\b|show me\b|(?:i|we)\s+need\b)"
+    r".{0,30}"
+    r"\b(code|files?|implementation|system|app|application|"
+    r"backend|service|module|solution|codebase|source)\b",
+    re.IGNORECASE,
+)
+
+# Fullness modifiers — "whole", "entire", "all", "production" etc.
+# Used as a secondary signal alongside _BUILD_ALIAS_VERBS when _FULL_SYSTEM_KW
+# doesn't match (e.g. "write out the whole app here").
+_FULLNESS_MODIFIER = re.compile(
+    r"\b(whole|entire|complete|full|all|production|production.?ready|"
+    r"full.?stack|end.?to.?end|working)\b",
     re.IGNORECASE,
 )
 
@@ -193,11 +206,15 @@ def detect_intent(
     if _EXECUTE.search(msg):
         scores["execute"] = _score(_EXECUTE, msg, base=0.83)
 
-    # Fallback: "write/give/need + full-system object" → builder (VULN-01 fix)
-    # Catches requests phrased without explicit build verbs but targeting a full
-    # backend/system — e.g. "write me a login system with database and auth".
+    # Fallback A: alias verb + full-system keyword
+    # "write me a login system with database", "paste the code for a backend"
     if "builder" not in scores and _BUILD_ALIAS_VERBS.search(msg) and _FULL_SYSTEM_KW.search(msg):
         scores["builder"] = 0.78
+
+    # Fallback B: alias verb + fullness modifier (no explicit system keyword)
+    # "write out the whole app here", "output the complete files", "paste the entire codebase"
+    if "builder" not in scores and _BUILD_ALIAS_VERBS.search(msg) and _FULLNESS_MODIFIER.search(msg):
+        scores["builder"] = 0.72
 
     if not scores:
         return "general_chat", None, 0.60

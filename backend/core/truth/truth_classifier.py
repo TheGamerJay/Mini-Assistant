@@ -46,7 +46,12 @@ _LIVE_CURRENT_PATTERNS = re.compile(
     # Asset/crypto price queries with temporal anchors (VULN-04 fix)
     r"(bitcoin|btc|ethereum|eth|crypto|cryptocurrency|stock|share|coin|token|gold|oil) .{0,25} (price|value|worth|rate|doing)|"
     r"(price|value|worth|rate) of .{0,25} (bitcoin|btc|ethereum|eth|crypto|cryptocurrency|coin|token|gold|oil)|"
-    r"(price|value|cost|rate|market).{0,20}\btoday\b"
+    r"(price|value|cost|rate|market).{0,20}\btoday\b|"
+    # Temporal-activity patterns: "doing/moving/trading today", "happening with X today"
+    r"(doing|moving|trading|performing|trending|sitting).{0,20}(today|right now|currently|at the moment)|"
+    r"what.?s happening with .{0,40}(today|right now|this week)|"
+    r"(how is|what is|how.?s|what.?s) .{0,50} (doing|moving|trading|performing|priced) (today|right now|currently)|"
+    r"(stock|crypto|coin|token|ticker|market|share).{0,30}(today|right now|currently)"
     r")\b",
     re.IGNORECASE,
 )
