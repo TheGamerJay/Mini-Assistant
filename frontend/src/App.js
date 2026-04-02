@@ -35,7 +35,6 @@ import UserDashboard from './pages/UserDashboard';
 import PurchaseCreditsModal from './components/PurchaseCreditsModal';
 import UpgradeModal from './components/UpgradeModal';
 import MascotAssistant from './components/MascotAssistant';
-import OnboardingModal from './components/OnboardingModal';
 import PricingPage from './pages/PricingPage';
 import CheckoutSuccessPage from './pages/CheckoutSuccessPage';
 import SharedPage from './pages/SharedPage';
@@ -170,7 +169,7 @@ function pageTitle(page) {
 // AppShell — rendered inside AppProvider so it can use useApp()
 // ---------------------------------------------------------------------------
 function AppShell() {
-  const { page, setPage, getPrevPage, serverStatus, setServerStatus, purchaseModalOpen, setPurchaseModalOpen, upgradeModalOpen, setUpgradeModalOpen, refreshCredits, openUpgradeModal, user, logout } = useApp();
+  const { page, setPage, getPrevPage, serverStatus, setServerStatus, purchaseModalOpen, setPurchaseModalOpen, upgradeModalOpen, setUpgradeModalOpen, refreshCredits, openUpgradeModal, logout } = useApp();
 
   // Session sleep / resume — Page Visibility API
   const [sessionResumed, setSessionResumed] = React.useState(false);
@@ -195,17 +194,6 @@ function AppShell() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // First-login onboarding modal
-  const [showOnboarding, setShowOnboarding] = React.useState(false);
-  useEffect(() => {
-    if (!user?.id) return;
-    const key = `ma_onboarding_done_${user.id}`;
-    if (!localStorage.getItem(key)) setShowOnboarding(true);
-  }, [user?.id]);
-  const handleOnboardingDone = () => {
-    if (user?.id) localStorage.setItem(`ma_onboarding_done_${user.id}`, '1');
-    setShowOnboarding(false);
-  };
 
 
   // Open upgrade modal when any axiosInstance call returns 402
@@ -327,9 +315,6 @@ function AppShell() {
 
       {/* Floating mascot assistant — bottom-right, always visible */}
       <MascotAssistant />
-
-      {/* First-login onboarding modal */}
-      {showOnboarding && <OnboardingModal onDone={handleOnboardingDone} />}
 
       {/* Session resume notification — shown after 3+ min of inactivity */}
       {sessionResumed && (
