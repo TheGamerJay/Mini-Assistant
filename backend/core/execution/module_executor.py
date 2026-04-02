@@ -145,30 +145,90 @@ async def execute_plan(
 
         # ── module_call ────────────────────────────────────────────────────────
         elif stype == "module_call":
-            events.append(_ev.module_execution_started(session_id, module))
-            result = await _call_module(
-                module      = module,
-                decision    = decision.to_dict(),
-                memory      = memory,
-                web_results = web_results,
-            )
-            ok = result.get("status") != "error"
-            ok_step = ok
-            events.append(_ev.module_execution_complete(session_id, module, ok))
-            if not ok:
-                error_msg = result.get("error", "module failed")
-                events.append(_ev.error(session_id, module, error_msg))
-                # Soft failure recovery — surface partial result with guidance
-                result = _build_soft_failure(module, result, error_msg)
-            log.debug("executor step %d: module_call %s — ok=%s", step.step, module, ok)
-            # post_module checkpoint
-            if session_id:
-                cp = checkpoint_post_module(session_id, module, result)
-                checkpoints.append(cp)
-                events.append(_ev.checkpoint_reached(
-                    session_id, cp["checkpoint_id"], cp["step"],
-                    cp["requires_user_input"], cp["summary"],
-                ))
+            # ── Truth fail-safe gate (enforced before every module execution) ───
+            # check_all() validates: live fact without tool, fake search results,
+            # raw HTML in web context, context budget. Non-raising — a check
+            # exception logs and allows execution to continue (fail-open on errors
+            # in the checker itself, fail-closed on explicit violations).
+            _failsafe_ok = True
+            try:
+                from ..truth.truth_failsafe import (
+                    check_all as _tfs_check,
+                    build_violation_response as _tfs_vr,
+                )
+                _classification = {
+                    "truth_type":    decision.truth_type or "stable_knowledge",
+                    "can_answer":    decision.truth_can_answer,
+                    "tool_required": decision.truth_type in (
+                        "live_current", "search_dependent", "mixed"
+                    ),
+                }
+                # Build web context string from search snippets only —
+                # avoids false HTML positives from builder memory contexts.
+                _web_ctx: str | None = None
+                if web_results.get("results"):
+                    _web_ctx = " ".join(
+                        r.get("snippet", "") + r.get("content", "")
+                        for r in web_results.get("results", [])[:5]
+                    )
+                _fs = _tfs_check(
+                    truth_classification      = _classification,
+                    search_result             = web_results if web_results else None,
+                    retrieval_result          = None,
+                    context_passed            = _web_ctx,
+                    brain_requested_retrieval = False,
+                )
+                if not _fs["ok"]:
+                    _violations = _fs["violations"]
+                    log.warning(
+                        "executor: truth_failsafe BLOCKED module=%s violations=%s session=%s",
+                        module, _violations, session_id,
+                    )
+                    events.append(_ev.error(
+                        session_id, "truth_failsafe",
+                        "Truth fail-safe blocked execution: " + "; ".join(_violations),
+                    ))
+                    _vr = _tfs_vr(_fs)
+                    result = {
+                        "status":                     "blocked",
+                        "module":                     module,
+                        "message":                    _vr["message"],
+                        "_truth_failsafe_violations": _violations,
+                    }
+                    ok_step      = False
+                    _failsafe_ok = False
+            except Exception as _tfe:
+                log.debug("executor: truth_failsafe check skipped — %s", _tfe)
+
+            if _failsafe_ok:
+                events.append(_ev.module_execution_started(session_id, module))
+                result = await _call_module(
+                    module      = module,
+                    decision    = decision.to_dict(),
+                    memory      = memory,
+                    web_results = web_results,
+                )
+                ok = result.get("status") != "error"
+                ok_step = ok
+                events.append(_ev.module_execution_complete(session_id, module, ok))
+                if not ok:
+                    error_msg = result.get("error", "module failed")
+                    events.append(_ev.error(session_id, module, error_msg))
+                    # Soft failure recovery — surface partial result with guidance
+                    result = _build_soft_failure(module, result, error_msg)
+                log.debug("executor step %d: module_call %s — ok=%s", step.step, module, ok)
+                # post_module checkpoint
+                if session_id:
+                    cp = checkpoint_post_module(session_id, module, result)
+                    checkpoints.append(cp)
+                    events.append(_ev.checkpoint_reached(
+                        session_id, cp["checkpoint_id"], cp["step"],
+                        cp["requires_user_input"], cp["summary"],
+                    ))
+            else:
+                # Failsafe blocked — emit completion for full X-Ray trace
+                events.append(_ev.module_execution_complete(session_id, module, False))
+                log.debug("executor step %d: module_call BLOCKED by truth_failsafe", step.step)
 
         # ── validation ─────────────────────────────────────────────────────────
         elif stype == "validation":
