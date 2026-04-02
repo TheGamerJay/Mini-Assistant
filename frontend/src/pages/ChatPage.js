@@ -416,6 +416,11 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     if (_modeConfirmTimer.current) clearTimeout(_modeConfirmTimer.current);
     _modeConfirmTimer.current = setTimeout(() => {
       setChatMode(prev => prev === modeUsed ? prev : modeUsed);
+      // Phase 4: persist backend-confirmed mode so refresh restores the correct value.
+      // localStorage.setItem mirrors what handleModeChange does for explicit switches.
+      // We do NOT run the chat-isolation logic here — backend confirmation is not a
+      // deliberate mode switch and must not swap the active conversation.
+      localStorage.setItem('chatMode', modeUsed);
     }, 120); // short debounce — collapses rapid duplicate events, not noticeable to user
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -488,11 +493,13 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
   const streamAccumRef    = useRef(''); // accumulates all streamed tokens — fallback if meta.reply is empty
   const lastHtmlRef       = useRef(null); // always holds the most recently built HTML app
 
-  // Context meter — estimate token usage from character counts (chars/4 ≈ tokens)
-  const CONTEXT_MAX_TOKENS = 32000;
+  // Context meter — estimate token usage from character counts (chars/4 ≈ tokens).
+  // API sends only the last 20 messages, so meter only counts those.
+  // Max is 200K (Claude Sonnet 4.6 context window).
+  const CONTEXT_MAX_TOKENS = 200000;
   const contextPct = useMemo(() => {
     if (!messages.length) return 0;
-    const chars = messages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
+    const chars = messages.slice(-20).reduce((sum, m) => sum + (m.content?.length || 0), 0);
     const tokens = Math.round(chars / 4);
     return Math.min(100, Math.round((tokens / CONTEXT_MAX_TOKENS) * 100));
   }, [messages]);

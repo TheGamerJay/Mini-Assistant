@@ -13,6 +13,8 @@ import {
   UserPlus, BarChart2, List, ChevronLeft, Bot, Cpu,
   TrendingUp, DollarSign, PieChart, Percent, ArrowUpRight,
   Code2, Rocket, GitBranch, Download, Flame, UserCheck,
+  Eye, Wrench, FileText, Heart, Terminal, Database, Filter,
+  ChevronRight, XCircle, RotateCcw,
 } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { api, setToken, clearToken, IMAGE_API } from '../api/client';
@@ -208,7 +210,7 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
   const [grantInput, setGrantInput]     = useState({}); // { [userId]: string }
   const [grantingImageId, setGrantingImageId] = useState(null);
   const [grantImageInput, setGrantImageInput] = useState({}); // { [userId]: string }
-  const [activeTab, setActiveTab]       = useState('overview'); // 'overview' | 'users' | 'activity' | 'analytics'
+  const [activeTab, setActiveTab]       = useState('overview'); // 'overview' | 'users' | 'activity' | 'analytics' | 'xray' | 'repair' | 'logs' | 'health'
   const [funnel, setFunnel]             = useState(null);
   const [byTrigger, setByTrigger]       = useState(null);
   const [recentEvents, setRecentEvents] = useState([]);
@@ -216,6 +218,28 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
   const [growth, setGrowth]             = useState(null);
   const [loadingGrowth, setLoadingGrowth] = useState(false);
   const [changingPlanId, setChangingPlanId] = useState(null);
+
+  // --- X-Ray tab ---
+  const [xraySessions, setXraySessions] = useState([]);
+  const [xraySessionId, setXraySessionId] = useState('');
+  const [xrayReport, setXrayReport]     = useState(null);
+  const [loadingXray, setLoadingXray]   = useState(false);
+
+  // --- Repair Memory (Error Library) tab ---
+  const [repairList, setRepairList]         = useState([]);
+  const [repairCategory, setRepairCategory] = useState('');
+  const [repairSearch, setRepairSearch]     = useState('');
+  const [repairSearchResults, setRepairSearchResults] = useState(null);
+  const [loadingRepair, setLoadingRepair]   = useState(false);
+
+  // --- Log Viewer tab ---
+  const [logFeed, setLogFeed]       = useState([]);
+  const [logLevel, setLogLevel]     = useState('');
+  const [loadingLogs, setLoadingLogs] = useState(false);
+
+  // --- System Health tab ---
+  const [healthSnap, setHealthSnap] = useState(null);
+  const [loadingHealth, setLoadingHealth] = useState(false);
 
   const loadStats = useCallback(async () => {
     setLoadingStats(true);
@@ -322,6 +346,91 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
     }
   }, []);
 
+  const adminFetch = useCallback(async (path) => {
+    const tok = localStorage.getItem('ma_token') || '';
+    const adminKey = localStorage.getItem('ma_admin_xray_key') || '';
+    const res = await fetch(`${IMAGE_API}${path}`, {
+      headers: { Authorization: `Bearer ${tok}`, 'X-Admin-Key': adminKey },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }, []);
+
+  const loadXraySessions = useCallback(async () => {
+    setLoadingXray(true);
+    try {
+      const data = await adminFetch('/api/admin/xray/sessions');
+      setXraySessions(data.sessions || []);
+    } catch (err) {
+      toast.error('X-Ray: ' + (err.message || 'load failed'));
+    } finally {
+      setLoadingXray(false);
+    }
+  }, [adminFetch]);
+
+  const loadXrayReport = useCallback(async (sid) => {
+    if (!sid) return;
+    setLoadingXray(true);
+    setXrayReport(null);
+    try {
+      const data = await adminFetch(`/api/admin/xray/session/${encodeURIComponent(sid)}`);
+      setXrayReport(data);
+    } catch (err) {
+      toast.error('X-Ray report: ' + (err.message || 'load failed'));
+    } finally {
+      setLoadingXray(false);
+    }
+  }, [adminFetch]);
+
+  const loadRepairList = useCallback(async () => {
+    setLoadingRepair(true);
+    try {
+      const data = await adminFetch(`/api/admin/repair${repairCategory ? `?category=${encodeURIComponent(repairCategory)}` : ''}`);
+      setRepairList(data.records || []);
+    } catch (err) {
+      toast.error('Repair Memory: ' + (err.message || 'load failed'));
+    } finally {
+      setLoadingRepair(false);
+    }
+  }, [adminFetch, repairCategory]);
+
+  const searchRepair = useCallback(async () => {
+    if (!repairSearch.trim()) return;
+    setLoadingRepair(true);
+    try {
+      const data = await adminFetch(`/api/admin/repair/search?query=${encodeURIComponent(repairSearch)}&category=${encodeURIComponent(repairCategory)}`);
+      setRepairSearchResults(data.matches || []);
+    } catch (err) {
+      toast.error('Repair search: ' + (err.message || 'failed'));
+    } finally {
+      setLoadingRepair(false);
+    }
+  }, [adminFetch, repairSearch, repairCategory]);
+
+  const loadLogFeed = useCallback(async () => {
+    setLoadingLogs(true);
+    try {
+      const data = await adminFetch(`/api/admin/logs${logLevel ? `?level=${logLevel}` : ''}`);
+      setLogFeed(data.events || []);
+    } catch (err) {
+      toast.error('Logs: ' + (err.message || 'load failed'));
+    } finally {
+      setLoadingLogs(false);
+    }
+  }, [adminFetch, logLevel]);
+
+  const loadHealth = useCallback(async () => {
+    setLoadingHealth(true);
+    try {
+      const data = await adminFetch('/api/admin/health');
+      setHealthSnap(data);
+    } catch (err) {
+      toast.error('Health: ' + (err.message || 'load failed'));
+    } finally {
+      setLoadingHealth(false);
+    }
+  }, [adminFetch]);
+
   useEffect(() => {
     loadStats();
     loadUsers();
@@ -336,7 +445,12 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
     if (activeTab === 'profit' && !optimizer) loadOptimizer();
     if (activeTab === 'analytics' && !funnel) loadFunnel();
     if (activeTab === 'growth' && !growth) loadGrowth();
-  }, [activeTab, activity.length, analytics, optimizer, funnel, growth, loadActivity, loadAnalytics, loadOptimizer, loadFunnel, loadGrowth]);
+    if (activeTab === 'xray' && xraySessions.length === 0) loadXraySessions();
+    if (activeTab === 'repair' && repairList.length === 0) loadRepairList();
+    if (activeTab === 'logs' && logFeed.length === 0) loadLogFeed();
+    if (activeTab === 'health' && !healthSnap) loadHealth();
+  }, [activeTab, activity.length, analytics, optimizer, funnel, growth, xraySessions.length, repairList.length, logFeed.length, healthSnap,
+      loadActivity, loadAnalytics, loadOptimizer, loadFunnel, loadGrowth, loadXraySessions, loadRepairList, loadLogFeed, loadHealth]);
 
   async function handleDeleteUser(u) {
     if (!window.confirm(`Delete ${u.name} (${u.email})? This removes all their data and cannot be undone.`)) return;
@@ -490,6 +604,10 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
           { id: 'profit',     label: 'Profit & Cost',         icon: TrendingUp },
           { id: 'growth',     label: 'Growth',                icon: Flame },
           { id: 'analytics',  label: 'Funnel',                icon: Percent },
+          { id: 'xray',       label: 'X-Ray',                 icon: Eye },
+          { id: 'repair',     label: 'Error Library',         icon: Wrench },
+          { id: 'logs',       label: 'Logs',                  icon: Terminal },
+          { id: 'health',     label: 'Health',                icon: Heart },
         ].map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -1370,7 +1488,363 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
           </>
         )}
 
+        {/* ── X-RAY TAB ── */}
+        {activeTab === 'xray' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2"><Eye size={14} className="text-cyan-400" /> X-Ray Analysis</h2>
+              <button onClick={loadXraySessions} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5"><RefreshCw size={13} /></button>
+            </div>
+
+            {/* Admin key input */}
+            <div className="rounded-xl border border-white/8 bg-white/[0.02] p-3 flex items-center gap-3">
+              <Shield size={13} className="text-amber-400 flex-shrink-0" />
+              <input
+                type="password"
+                placeholder="X-Admin-Key (leave blank if not configured)"
+                className="flex-1 bg-transparent text-xs text-slate-300 placeholder-slate-600 outline-none"
+                onChange={e => localStorage.setItem('ma_admin_xray_key', e.target.value)}
+              />
+            </div>
+
+            {/* Session selector */}
+            <div className="rounded-xl border border-white/8 bg-white/[0.02] overflow-hidden">
+              <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-400">Sessions ({xraySessions.length})</span>
+                <div className="flex items-center gap-2">
+                  <input
+                    value={xraySessionId}
+                    onChange={e => setXraySessionId(e.target.value)}
+                    placeholder="session_id..."
+                    className="px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-xs text-slate-300 placeholder-slate-600 outline-none w-48"
+                  />
+                  <button
+                    onClick={() => loadXrayReport(xraySessionId)}
+                    disabled={!xraySessionId || loadingXray}
+                    className="px-3 py-1 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-xs hover:bg-cyan-500/20 disabled:opacity-40"
+                  >
+                    Load Report
+                  </button>
+                </div>
+              </div>
+              {loadingXray && !xrayReport && (
+                <div className="px-4 py-6 text-center text-xs text-slate-600">Loading…</div>
+              )}
+              {xraySessions.length > 0 && !loadingXray && (
+                <div className="divide-y divide-white/5">
+                  {xraySessions.map(s => (
+                    <button
+                      key={s.session_id}
+                      onClick={() => { setXraySessionId(s.session_id); loadXrayReport(s.session_id); }}
+                      className="w-full px-4 py-2.5 flex items-center justify-between hover:bg-white/[0.03] transition-colors text-left"
+                    >
+                      <span className="text-xs font-mono text-slate-400 truncate max-w-[240px]">{s.session_id}</span>
+                      <div className="flex items-center gap-3 flex-shrink-0">
+                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${s.final_status === 'complete' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-slate-500 bg-white/5 border-white/10'}`}>
+                          {s.final_status || 'in-memory'}
+                        </span>
+                        <span className="text-[10px] text-slate-600">{s.source}</span>
+                        <ChevronRight size={12} className="text-slate-700" />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Report display */}
+            {xrayReport && (
+              <div className="rounded-xl border border-white/8 bg-white/[0.02] overflow-hidden">
+                <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-300">Report: <span className="font-mono text-cyan-400">{xrayReport.report?.session_id || xraySessionId}</span></span>
+                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${xrayReport.report?.['1_executive_summary']?.success ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-amber-400 bg-amber-500/10 border-amber-500/20'}`}>
+                    {xrayReport.report?.['1_executive_summary']?.final_result || xrayReport.report?.report_type}
+                  </span>
+                </div>
+                <div className="p-4 space-y-3 max-h-[600px] overflow-y-auto">
+                  {/* Executive summary */}
+                  {xrayReport.report?.['1_executive_summary'] && (
+                    <XRaySection title="Executive Summary" color="cyan">
+                      <XRayGrid data={xrayReport.report['1_executive_summary']} />
+                    </XRaySection>
+                  )}
+                  {/* Chain timeline */}
+                  {xrayReport.report?.['2_chain_timeline']?.length > 0 && (
+                    <XRaySection title="Chain Timeline" color="violet">
+                      <div className="space-y-1.5">
+                        {xrayReport.report['2_chain_timeline'].map((step, i) => (
+                          <div key={i} className="flex items-start gap-3 text-xs">
+                            <span className="text-slate-600 font-mono w-4 flex-shrink-0">{step.step_number}</span>
+                            <span className={`font-mono px-1.5 py-0.5 rounded text-[10px] flex-shrink-0 ${step.status === 'success' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>{step.active_brain}</span>
+                            <span className="text-slate-400 flex-1 leading-relaxed">{step.action_taken}</span>
+                            <span className="text-slate-600 flex-shrink-0">{step.elapsed_ms ? `${step.elapsed_ms}ms` : ''}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </XRaySection>
+                  )}
+                  {/* Final diagnosis */}
+                  {xrayReport.report?.['8_final_diagnosis'] && (
+                    <XRaySection title="Final Diagnosis" color="amber">
+                      <XRayGrid data={xrayReport.report['8_final_diagnosis']} />
+                    </XRaySection>
+                  )}
+                  {/* Raw JSON fallback */}
+                  <details className="text-[10px]">
+                    <summary className="cursor-pointer text-slate-600 hover:text-slate-400">Raw JSON</summary>
+                    <pre className="mt-2 p-3 rounded-lg bg-black/30 text-slate-500 overflow-x-auto text-[10px] max-h-64">{JSON.stringify(xrayReport.report, null, 2)}</pre>
+                  </details>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── REPAIR MEMORY (ERROR LIBRARY) TAB ── */}
+        {activeTab === 'repair' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2"><Wrench size={14} className="text-violet-400" /> Error Library — Repair Memory</h2>
+              <button onClick={loadRepairList} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5"><RefreshCw size={13} /></button>
+            </div>
+
+            {/* Search + filter bar */}
+            <div className="flex items-center gap-3">
+              <select
+                value={repairCategory}
+                onChange={e => setRepairCategory(e.target.value)}
+                className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-slate-300 outline-none"
+              >
+                <option value="">All categories</option>
+                {['build_pipeline','backend_logic','frontend_ui','image_pipeline','database','auth','network','config','deployment','testing','memory','file_io'].map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+              <div className="flex-1 relative">
+                <input
+                  value={repairSearch}
+                  onChange={e => setRepairSearch(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && searchRepair()}
+                  placeholder="Search problems… (Enter)"
+                  className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-slate-300 placeholder-slate-600 outline-none"
+                />
+              </div>
+              <button
+                onClick={() => { setRepairSearchResults(null); loadRepairList(); }}
+                className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-slate-400 hover:text-slate-200"
+              >
+                <RotateCcw size={12} />
+              </button>
+            </div>
+
+            {loadingRepair && <div className="text-center py-8 text-xs text-slate-600">Loading…</div>}
+
+            {/* Search results */}
+            {repairSearchResults && (
+              <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-4 space-y-2">
+                <p className="text-xs text-violet-400 font-semibold">{repairSearchResults.length} match(es)</p>
+                {repairSearchResults.map((r, i) => (
+                  <div key={i} className="flex items-start gap-3 text-xs py-1.5 border-b border-white/5 last:border-0">
+                    <span className={`font-mono px-2 py-0.5 rounded-full text-[10px] border flex-shrink-0 ${r.confidence_level === 'HIGH' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : r.confidence_level === 'MEDIUM' ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' : 'text-slate-500 bg-white/5 border-white/10'}`}>
+                      {r.confidence_level}
+                    </span>
+                    <div className="flex-1">
+                      <p className="text-slate-300">{r.problem_name}</p>
+                      <p className="text-slate-600 mt-0.5">{r.solution_name}</p>
+                    </div>
+                    <span className="text-slate-600 flex-shrink-0">{r.similarity_score?.toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Record list */}
+            {!repairSearchResults && !loadingRepair && (
+              <div className="rounded-xl border border-white/8 bg-white/[0.02] overflow-hidden">
+                <div className="px-4 py-3 border-b border-white/5">
+                  <span className="text-xs text-slate-500">{repairList.length} record(s)</span>
+                </div>
+                {repairList.length === 0
+                  ? <div className="px-4 py-8 text-center text-xs text-slate-700">No repair records found.</div>
+                  : (
+                    <div className="divide-y divide-white/5">
+                      {repairList.map((r, i) => (
+                        <div key={i} className="px-4 py-3 flex items-start gap-3">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs text-slate-300 font-medium truncate">{r.problem_name}</p>
+                            <p className="text-[11px] text-slate-600 mt-0.5 truncate">{r.solution_name}</p>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0 text-[10px] font-mono">
+                            <span className="text-slate-600 bg-white/5 px-1.5 py-0.5 rounded border border-white/8">{r.category}</span>
+                            <span className="text-emerald-400">{r.success_count}✓</span>
+                            <span className="text-slate-700">{r.step_count} steps</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                }
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── LOG VIEWER TAB ── */}
+        {activeTab === 'logs' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2"><Terminal size={14} className="text-emerald-400" /> Log Viewer</h2>
+              <button onClick={loadLogFeed} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5"><RefreshCw size={13} /></button>
+            </div>
+
+            {/* Level filter */}
+            <div className="flex items-center gap-2">
+              {[['', 'All Events'], ['error', 'Errors'], ['validation', 'Validation']].map(([val, label]) => (
+                <button
+                  key={val}
+                  onClick={() => { setLogLevel(val); }}
+                  className={`px-3 py-1.5 rounded-lg text-xs border transition-all ${logLevel === val ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-slate-500 bg-white/5 border-white/8 hover:text-slate-300'}`}
+                >
+                  {label}
+                </button>
+              ))}
+              <button onClick={() => { loadLogFeed(); }} className="ml-2 px-3 py-1.5 rounded-lg text-xs bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20">Refresh</button>
+            </div>
+
+            {loadingLogs && <div className="text-center py-8 text-xs text-slate-600">Loading…</div>}
+
+            {!loadingLogs && (
+              <div className="rounded-xl border border-white/8 bg-white/[0.02] overflow-hidden">
+                <div className="px-4 py-2 border-b border-white/5 text-[11px] text-slate-600">{logFeed.length} event(s)</div>
+                <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-[#0d0d12]">
+                      <tr className="border-b border-white/5">
+                        {['Time', 'Type', 'Module', 'Status', 'Summary'].map(h => (
+                          <th key={h} className="px-3 py-2 text-left text-[10px] font-mono uppercase tracking-widest text-slate-700 whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {logFeed.map((ev, i) => (
+                        <tr key={i} className="border-b border-white/[0.03] hover:bg-white/[0.02]">
+                          <td className="px-3 py-2 text-slate-700 font-mono whitespace-nowrap text-[10px]">
+                            {ev.timestamp ? new Date(ev.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'}
+                          </td>
+                          <td className="px-3 py-2 font-mono whitespace-nowrap">
+                            <span className="text-[10px] text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-1.5 py-0.5 rounded-full">{ev.event_type}</span>
+                          </td>
+                          <td className="px-3 py-2 text-slate-500 font-mono text-[10px]">{ev.module}</td>
+                          <td className="px-3 py-2">
+                            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${ev.status === 'error' || ev.status === 'failed' ? 'text-red-400 bg-red-500/10' : ev.status === 'passed' || ev.status === 'complete' ? 'text-emerald-400 bg-emerald-500/10' : 'text-slate-500 bg-white/5'}`}>
+                              {ev.status}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-slate-400 max-w-sm truncate">{ev.summary}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {logFeed.length === 0 && <div className="px-4 py-8 text-center text-xs text-slate-700">No log entries. Events will appear here as the system runs.</div>}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── SYSTEM HEALTH TAB ── */}
+        {activeTab === 'health' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2"><Heart size={14} className="text-red-400" /> System Health</h2>
+              <button onClick={loadHealth} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5"><RefreshCw size={13} /></button>
+            </div>
+
+            {loadingHealth && <div className="text-center py-8 text-xs text-slate-600">Loading…</div>}
+
+            {healthSnap && !loadingHealth && (
+              <>
+                {/* Overall status */}
+                <div className={`rounded-xl border p-4 flex items-center gap-4 ${healthSnap.status === 'healthy' ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-amber-500/20 bg-amber-500/5'}`}>
+                  {healthSnap.status === 'healthy'
+                    ? <CheckCircle size={20} className="text-emerald-400 flex-shrink-0" />
+                    : <AlertCircle size={20} className="text-amber-400 flex-shrink-0" />
+                  }
+                  <div>
+                    <p className={`text-sm font-semibold ${healthSnap.status === 'healthy' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                      System {healthSnap.status === 'healthy' ? 'Healthy' : 'Degraded'}
+                    </p>
+                    <p className="text-xs text-slate-600 mt-0.5">All components checked at runtime.</p>
+                  </div>
+                </div>
+
+                {/* Component grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {Object.entries(healthSnap.components || {}).map(([name, comp]) => (
+                    <div key={name} className={`rounded-xl border p-4 ${comp.ok ? 'border-white/8 bg-white/[0.02]' : 'border-red-500/20 bg-red-500/5'}`}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <StatusDot ok={comp.ok} />
+                        <span className="text-xs font-semibold text-slate-300 capitalize">{name.replace(/_/g, ' ')}</span>
+                      </div>
+                      {comp.error
+                        ? <p className="text-[11px] text-red-400 font-mono">{comp.error}</p>
+                        : (
+                          <div className="space-y-0.5">
+                            {Object.entries(comp).filter(([k]) => k !== 'ok' && k !== 'error').map(([k, v]) => (
+                              <div key={k} className="flex justify-between text-[11px]">
+                                <span className="text-slate-600">{k.replace(/_/g, ' ')}</span>
+                                <span className="text-slate-400 font-mono">{String(v)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )
+                      }
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {!healthSnap && !loadingHealth && (
+              <div className="text-center py-12 text-xs text-slate-700">No health data. Click refresh to load.</div>
+            )}
+          </div>
+        )}
+
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// X-Ray sub-components
+// ---------------------------------------------------------------------------
+function XRaySection({ title, color = 'cyan', children }) {
+  const colors = {
+    cyan:   'border-cyan-500/20 bg-cyan-500/5',
+    violet: 'border-violet-500/20 bg-violet-500/5',
+    amber:  'border-amber-500/20 bg-amber-500/5',
+  };
+  return (
+    <div className={`rounded-lg border p-3 ${colors[color] || colors.cyan}`}>
+      <p className="text-[10px] font-mono uppercase tracking-widest text-slate-600 mb-2">{title}</p>
+      {children}
+    </div>
+  );
+}
+
+function XRayGrid({ data }) {
+  if (!data || typeof data !== 'object') return null;
+  return (
+    <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+      {Object.entries(data).map(([k, v]) => (
+        <div key={k} className="flex justify-between items-start text-[11px] border-b border-white/[0.03] py-0.5">
+          <span className="text-slate-600 flex-shrink-0 mr-2">{k.replace(/_/g, ' ')}</span>
+          <span className="text-slate-300 font-mono text-right break-all">
+            {Array.isArray(v) ? v.join(', ') || '—' : typeof v === 'boolean' ? (v ? 'yes' : 'no') : String(v ?? '—')}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }

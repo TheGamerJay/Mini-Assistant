@@ -933,6 +933,26 @@ async def generate_ads(
     log.info("Generating %d ad concepts for user=%s campaign=%s style=%s angle=%s",
              num, user_id, body.campaign_id, image_style, copy_angle or "auto")
 
+    # ── Credit gate (fail closed — Campaign Lab usage must not be silently free) ──
+    _credit_cost = 2 * num  # 2 credits per concept: Claude copy + DALL-E image
+    try:
+        from mini_credits import check_and_deduct as _deduct
+        _ok, _remaining = await _deduct(
+            authorization,
+            cost=_credit_cost,
+            action_type="campaign_lab_concept",
+        )
+        if not _ok:
+            raise HTTPException(status_code=402, detail="out_of_credits")
+    except HTTPException:
+        raise
+    except Exception as _credit_err:
+        log.error(
+            "[campaign-lab] Credit deduction failed — user=%s cost=%d error=%s",
+            user_id, _credit_cost, _credit_err, exc_info=True,
+        )
+        raise HTTPException(status_code=503, detail="Credit service temporarily unavailable")
+
     # Persist visual settings back to campaign so they survive page reloads
     await db["ad_mode_campaigns"].update_one(
         {"id": body.campaign_id},
@@ -1025,16 +1045,22 @@ async def generate_ads(
         },
     )
 
-    # Log generation
+    # Audit log — enriched with concept/image counts and cost fields
+    _num_images = sum(1 for s in saved_sets if s.get("image_base64"))
     await db["ad_mode_generation_logs"].insert_one({
-        "id":              str(uuid.uuid4()),
-        "user_id":         user_id,
-        "campaign_id":     body.campaign_id,
-        "generation_type": "full_ad_set",
-        "model_used":      f"{CLAUDE_MODEL} + {DALLE_IMAGE_MODEL}",
-        "request_json":    body.model_dump(),
-        "response_json":   {"count": len(saved_sets)},
-        "created_at":      now,
+        "id":                   str(uuid.uuid4()),
+        "user_id":              user_id,
+        "campaign_id":          body.campaign_id,
+        "generation_type":      "full_ad_set",
+        "model_used":           f"{CLAUDE_MODEL} + {DALLE_IMAGE_MODEL}",
+        "num_concepts_requested": num,
+        "num_concepts_generated": len(saved_sets),
+        "num_images_generated": _num_images,
+        "credits_deducted":     _credit_cost,
+        "estimated_cost_usd":   round(0.058 * num, 4),
+        "request_json":         body.model_dump(),
+        "response_json":        {"count": len(saved_sets)},
+        "created_at":           now,
     })
 
     return {"ad_sets": saved_sets, "count": len(saved_sets)}
@@ -1048,6 +1074,19 @@ async def regenerate_copy(
     """Regenerate only the copy (hook, headline, caption, cta) for an existing ad set."""
     user = await _require_ad_mode(authorization)
     db = await _get_db()
+
+    # Credit gate — 1 credit for Claude copy only
+    try:
+        from mini_credits import check_and_deduct as _deduct
+        _ok, _ = await _deduct(authorization, cost=1, action_type="campaign_lab_concept")
+        if not _ok:
+            raise HTTPException(status_code=402, detail="out_of_credits")
+    except HTTPException:
+        raise
+    except Exception as _credit_err:
+        log.error("[campaign-lab] regenerate_copy credit deduction failed — user=%s error=%s",
+                  user["id"], _credit_err, exc_info=True)
+        raise HTTPException(status_code=503, detail="Credit service temporarily unavailable")
 
     ad_set = await db["ad_mode_ad_sets"].find_one({
         "id":          body.ad_set_id,
@@ -1082,6 +1121,27 @@ async def regenerate_copy(
         "updated_at": now,
     }
     await db["ad_mode_ad_sets"].update_one({"id": body.ad_set_id}, {"$set": updates})
+
+    # Audit trail for regenerate-copy
+    try:
+        await db["ad_mode_generation_logs"].insert_one({
+            "id":                   str(uuid.uuid4()),
+            "user_id":              user["id"],
+            "campaign_id":          body.campaign_id,
+            "generation_type":      "regenerate_copy",
+            "model_used":           CLAUDE_MODEL,
+            "num_concepts_requested": 1,
+            "num_concepts_generated": 1,
+            "num_images_generated": 0,
+            "credits_deducted":     1,
+            "estimated_cost_usd":   0.018,
+            "request_json":         {"ad_set_id": body.ad_set_id, "campaign_id": body.campaign_id},
+            "response_json":        {"ad_set_id": body.ad_set_id},
+            "created_at":           now,
+        })
+    except Exception as _log_err:
+        log.warning("[campaign-lab] regenerate_copy audit log failed — %s", _log_err)
+
     return {"ad_set_id": body.ad_set_id, **updates}
 
 
@@ -1093,6 +1153,19 @@ async def regenerate_image(
     """Regenerate a single image for an existing ad set using DALL-E."""
     user = await _require_ad_mode(authorization)
     db = await _get_db()
+
+    # Credit gate — 2 credits for DALL-E image
+    try:
+        from mini_credits import check_and_deduct as _deduct
+        _ok, _ = await _deduct(authorization, cost=2, action_type="campaign_lab_concept")
+        if not _ok:
+            raise HTTPException(status_code=402, detail="out_of_credits")
+    except HTTPException:
+        raise
+    except Exception as _credit_err:
+        log.error("[campaign-lab] regenerate_image credit deduction failed — user=%s error=%s",
+                  user["id"], _credit_err, exc_info=True)
+        raise HTTPException(status_code=503, detail="Credit service temporarily unavailable")
 
     ad_set = await db["ad_mode_ad_sets"].find_one({
         "id":      body.ad_set_id,
@@ -1112,6 +1185,26 @@ async def regenerate_image(
             "updated_at":    now,
         }},
     )
+
+    # Audit trail for regenerate-image
+    try:
+        await db["ad_mode_generation_logs"].insert_one({
+            "id":                   str(uuid.uuid4()),
+            "user_id":              user["id"],
+            "campaign_id":          ad_set.get("campaign_id", ""),
+            "generation_type":      "regenerate_image",
+            "model_used":           DALLE_IMAGE_MODEL,
+            "num_concepts_requested": 1,
+            "num_concepts_generated": 1,
+            "num_images_generated": 1,
+            "credits_deducted":     2,
+            "estimated_cost_usd":   0.040,
+            "request_json":         {"ad_set_id": body.ad_set_id, "image_prompt": body.image_prompt[:200]},
+            "response_json":        {"ad_set_id": body.ad_set_id},
+            "created_at":           now,
+        })
+    except Exception as _log_err:
+        log.warning("[campaign-lab] regenerate_image audit log failed — %s", _log_err)
 
     return {"ad_set_id": body.ad_set_id, "image_base64": image_b64, "updated_at": now}
 

@@ -31,8 +31,8 @@ def run_tests() -> bool:
     r = detect_intent("create a new dashboard component")
     _check(results, "build intent → detected with confidence", r.intent == "build" and r.confidence >= 0.4)
 
-    r = detect_intent("edit the header to change the title color")
-    _check(results, "edit intent → detected", r.intent == "edit")
+    r = detect_intent("edit image to change the header title color")
+    _check(results, "image_edit intent → detected", r.intent == "image_edit")
 
     r = detect_intent("generate an image of a futuristic city")
     _check(results, "image intent → detected", r.intent == "image")
@@ -87,11 +87,15 @@ def run_tests() -> bool:
     r = validate_response({"text": "import React from 'react'\nconst App = () => <div/>"}, "build")
     _check(results, "build mode with code signals → valid", r.valid)
 
-    r = validate_response({"text": "I made some changes to your code."}, "edit")
-    _check(results, "edit mode without real edits → invalid", not r.valid)
+    r = validate_response({"text": "I made some changes to your code."}, "image_edit")
+    _check(results, "image_edit mode without real edits → invalid", not r.valid)
 
-    r = validate_response({"text": "What changed: renamed the function.\n```python\ndef new_name():\n    pass\n```"}, "edit")
-    _check(results, "edit mode with change summary + code → valid", r.valid)
+    r = validate_response({
+        "source_image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAE=",
+        "instruction": "Make the background darker and add a blue tint",
+        "edit_type": "recolor",
+    }, "image_edit")
+    _check(results, "image_edit mode with source image + instruction → valid", r.valid)
 
     r = validate_response({"text": "Here is a nice image for you."}, "image")
     _check(results, "image mode text-only → invalid", not r.valid)

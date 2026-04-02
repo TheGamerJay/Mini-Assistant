@@ -42,32 +42,53 @@ if JWT_SECRET == "mini_assistant_jwt_secret_2025":
 # ---------------------------------------------------------------------------
 # Authoritative cost config
 # ---------------------------------------------------------------------------
+#
+# IMAGE GENERATION CREDIT MODEL (read before changing):
+#
+#   Text→image generation costs 2 credits in total:
+#     - 1 credit deducted by /api/chat/stream  (generic cost=1, pre-redirect)
+#     - 1 credit deducted by /api/chat         (generic cost=1, non-streaming)
+#   This is enforced via cost=1 in both endpoints — NOT via action_type="image_generated".
+#   "image_generated" in this table is used for analytics logging only (log_image_generated).
+#
+#   Image edit / reference-generate (requests with image_base64 attached) cost 0 credits.
+#   Both endpoints skip deduction when image_base64 is present — this is intentional.
+# ---------------------------------------------------------------------------
 
 CREDIT_COSTS: dict[str, int] = {
-    "chat_message":    1,
-    "chat_stream":     1,
-    "image_generated": 3,
-    "image_analyze":   1,
-    "app_build":       5,
-    "code_review":     2,
-    "chat_compare":    2,
-    "fixloop_analyze": 1,
-    "tester_generate": 1,
-    "export_zip":      0,
-    "github_push":     0,
-    "deploy_vercel":   0,
+    "chat_message":         1,
+    "chat_stream":          1,
+    # image_generated is used for analytics logging only — not passed to check_and_deduct.
+    # Actual image generation costs 2 credits (1 per endpoint, via cost=1 generic deduction).
+    "image_generated":      2,
+    # image_edit = 0 by design: requests with image_base64 attached are exempt from deduction.
+    "image_edit":           0,
+    "image_analyze":        1,
+    "app_build":            5,
+    "code_review":          2,
+    "chat_compare":         2,
+    "fixloop_analyze":      1,
+    "tester_generate":      1,
+    "export_zip":           0,
+    "github_push":          0,
+    "deploy_vercel":        0,
+    # Campaign Lab — charged per concept (covers Claude copy + DALL-E image)
+    "campaign_lab_concept": 2,
 }
 
 # Estimated USD cost per action (Claude Sonnet 4.6: $3/M input, $15/M output)
 AI_COST_USD: dict[str, float] = {
-    "chat_message":    0.018,
-    "chat_stream":     0.018,
-    "image_generated": 0.040,
-    "app_build":       0.090,
-    "code_review":     0.012,
-    "export_zip":      0.001,
-    "github_push":     0.001,
-    "deploy_vercel":   0.002,
+    "chat_message":         0.018,
+    "chat_stream":          0.018,
+    "image_generated":      0.040,   # DALL-E 3 image cost
+    "image_edit":           0.000,   # intentionally free (attachment-gated)
+    "app_build":            0.090,
+    "code_review":          0.012,
+    "export_zip":           0.001,
+    "github_push":          0.001,
+    "deploy_vercel":        0.002,
+    # ~$0.018 Claude Sonnet copy + $0.040 DALL-E 3 image per concept
+    "campaign_lab_concept": 0.058,
 }
 
 TOKEN_COST_INPUT_PER_M  = 3.00

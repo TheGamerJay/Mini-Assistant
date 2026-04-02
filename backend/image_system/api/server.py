@@ -440,11 +440,69 @@ The user has shared code or asked a coding question. Respond like a senior engin
 """
 
 # ---------------------------------------------------------------------------
+# Image-edit vs reference-generate keyword detectors — used in the stream endpoint
+# to classify attached-image intent without recompiling on every request.
+_EDIT_KW = re.compile(
+    r"\b(change|edit|modify|fix|adjust|recolor|replace|remove|enhance|improve|"
+    r"turn\s+(?:him|her|it|them|this|that)\b|make\s+(?:him|her|it|them|this|that)\b|"
+    r"darker|brighter|lighter|sharper|blurrier|warmer|cooler|saturate|desaturate|"
+    r"add\s+(?!a\s+new|another)|give\s+(?:him|her|it|them)\b|"
+    r"angrier|fiercer|stronger|glowing|dramatic|intense|powerful)\b",
+    re.IGNORECASE,
+)
+_REF_GEN_KW = re.compile(
+    r"\b(draw|generate|create|recreate|render|design|reimagine|reinvent|"
+    r"in the style of|inspired by|wearing|holding|show|put|place)\b",
+    re.IGNORECASE,
+)
+
 # Portrait/full-body keyword detector — used to auto-select 1024x1792 for tall shots
 _PORTRAIT_KW = re.compile(
     r"\b(full.?body|head.?to.?toe|full.?length|standing|full.?character|"
     r"wide.?shot|full.?figure|whole.?body|entire.?body|feet.?visible|"
     r"no.?crop|not.?cropped|character.?in.?frame)\b",
+    re.IGNORECASE,
+)
+
+# Build intent history detector — used in streaming to detect a build conversation
+# from prior turns, avoiding re-classification of follow-up messages as chat.
+_BUILD_KW = re.compile(
+    r"/build|build me|build it|create (a|an|the) (app|website|page|ui|component|dashboard)|"
+    r"make (a|an) (web|html|react)|make it|do it|generate (a|an) (app|website|page)|"
+    r"update it|add (a|an|the) (button|section|feature|page|component|form)|"
+    r"can you (build|make|create|add|update)",
+    re.IGNORECASE,
+)
+
+# Error-type detector — used to recognise coding/debug intent from error names in messages.
+_CODE_ERRORS = re.compile(
+    r"\b(TypeError|SyntaxError|ImportError|NameError|AttributeError|KeyError|"
+    r"IndexError|ValueError|RuntimeError|ModuleNotFoundError|stacktrace|traceback)\b",
+    re.IGNORECASE,
+)
+
+# Image-to-code heuristic — images + style/build keywords trigger the builder pipeline
+# even when Phase 1 classified the message as image_analysis.
+_IMAGE_BUILD_KW = re.compile(
+    r"\b(build|create|recreate|replicate|clone|design)\b"
+    r"|same.{0,15}(style|theme|color|look|design)"
+    r"|(style|theme|color|look|design).{0,15}(for|my)\b"
+    r"|i.{0,10}want.{0,10}(this|same)",
+    re.IGNORECASE,
+)
+
+# Datetime-only query detector — these are skipped for web_search to avoid unnecessary tool calls.
+_DATETIME_ONLY = re.compile(
+    r"^(?:what(?:'?s| is)|tell me|whats)?\s*(?:the\s+)?(?:current\s+)?"
+    r"(?:time|date|day|today|datetime|clock)[\s?!.]*$",
+    re.IGNORECASE,
+)
+
+# Explicit rebuild keyword detector — signals user wants a full fresh build, not a patch.
+_REBUILD_KW = re.compile(
+    r"\b(rebuild|start (over|fresh|from scratch)|redo (it|everything|the (whole|entire))|"
+    r"rewrite (it|everything|the (whole|entire))|make a (brand )?new (version|one)|"
+    r"scrap (it|this)|throw (it|this) away|start (it )?again from)\b",
     re.IGNORECASE,
 )
 
@@ -1352,8 +1410,8 @@ async def generate_image(req: GenerateRequest, request: Request):
                 raise HTTPException(status_code=403, detail="email_not_verified")
     except HTTPException:
         raise
-    except Exception:
-        pass
+    except Exception as _ev_err:
+        logger.warning("generate: email verification check failed (non-fatal) — %s", _ev_err)
 
     # ── Image limit gate ────────────────────────────────────────────────────
     try:
@@ -1366,8 +1424,8 @@ async def generate_image(req: GenerateRequest, request: Request):
             )
     except HTTPException:
         raise
-    except Exception:
-        pass
+    except Exception as _il_err:
+        logger.warning("generate: image limit check failed (non-fatal) — %s", _il_err)
 
     from ..utils.prompt_safety import validate as ps_validate
     from ..services.dalle_client import DalleClient
@@ -1460,6 +1518,30 @@ async def analyze_image(req: AnalyzeRequest, request: Request):
     try:
         vision = _get_vision()
         answer = await vision.analyze(image_bytes, req.question or "Describe this image.")
+
+        # Phase 6 validation — vision answer is chat-mode text
+        try:
+            from mini_assistant.system.validation import safe_return as _sv_an
+            from mini_assistant.system.telemetry import log_event as _lev_an
+            _vr_an = _sv_an({"text": answer}, "chat")
+            if not _vr_an.get("ok"):
+                import logging as _anlog
+                _anlog.warning(
+                    "[mini-assistant/analyze] Validation failed — reason=%s",
+                    _vr_an.get("reason"),
+                )
+                if not answer.strip():
+                    answer = _vr_an.get("message", "I wasn't able to analyze this image. Please try again.")
+            _lev_an("validation", {
+                "status": "ok" if _vr_an.get("ok") else "fail",
+                "valid":  _vr_an.get("ok", False),
+                "reason": _vr_an.get("reason", "ok"),
+                "mode":   "chat",
+            })
+        except Exception as _ve_an:
+            import logging as _anlog2
+            _anlog2.error("[mini-assistant/analyze] Validation layer error — %s", _ve_an, exc_info=True)
+
         return {"answer": answer}
     except Exception as exc:
         logger.error("Vision analysis failed: %s", exc, exc_info=True)
@@ -1544,14 +1626,33 @@ async def chat(req: ChatRequest, request: Request):
                 raise HTTPException(status_code=402, detail="out_of_credits")
         except HTTPException:
             raise
-        except Exception:
-            pass  # credit module unavailable — allow through
+        except Exception as _credit_err:
+            import logging as _clog
+            _clog.error(
+                "[mini-assistant] Credit deduction failed — session=%s error=%s",
+                req.session_id, _credit_err, exc_info=True,
+            )
 
     session_id = req.session_id or str(uuid.uuid4())
 
     is_valid, clean_message, safety_error = ps_validate(req.message)
     if not is_valid:
         raise HTTPException(status_code=400, detail=f"Message rejected: {safety_error}")
+
+    # ── Persist user message — deduplicated to avoid double-save on image redirect ──
+    # The streaming endpoint pre-saves the user turn before signalling image_redirect.
+    # If this endpoint is called directly (not via redirect), the user turn is not yet
+    # in the store. We save only when the last stored user message differs from this one.
+    try:
+        _stored_pre = load_conversation(session_id)
+        _last_user_stored = next(
+            (m["content"] for m in reversed(_stored_pre) if m.get("role") == "user"),
+            None,
+        )
+        if _last_user_stored != clean_message:
+            save_message(session_id, "user", clean_message)
+    except Exception as _sm_pre_err:
+        logger.warning("conversation_store: non-streaming user pre-save failed — %s", _sm_pre_err)
 
     # Decode user-attached image (Phase 5)
     attached_image_bytes: Optional[bytes] = None
@@ -1596,23 +1697,8 @@ async def chat(req: ChatRequest, request: Request):
         effective_msg = parsed_cmd.args if parsed_cmd.is_slash else clean_message
 
         # ── Phase 1 Step 2: Planner (ALWAYS RUNS FIRST) ────────────────────────
-        # If an image is attached, route to edit / reference-generate / analysis
-        import re as _re_intent
-        # Edit keywords — modify the EXACT same image, preserve identity
-        _EDIT_KW = _re_intent.compile(
-            r"\b(change|edit|modify|fix|adjust|recolor|replace|remove|enhance|improve|"
-            r"turn\s+(him|her|it|them|this|that)\b|make\s+(him|her|it|them|this|that)\b|"
-            r"darker|brighter|lighter|redder|bluer|greener|purpler|"
-            r"angrier|fiercer|stronger|calmer|sadder|happier|older|younger|"
-            r"add\s+(?!a\s+new|another)|give\s+(?:him|her|it|them))\b",
-            _re_intent.I,
-        )
-        # Reference-generate keywords — use image as style reference, create NEW image
-        _REF_GEN_KW = _re_intent.compile(
-            r"\b(draw|generate|create|recreate|render|design|reimagine|reinvent|"
-            r"in the style of|inspired by|wearing|holding|show|put|place)\b",
-            _re_intent.I,
-        )
+        # If an image is attached, route to edit / reference-generate / analysis.
+        # Uses module-level _EDIT_KW / _REF_GEN_KW — same patterns as streaming path.
         from mini_assistant.phase1.command_parser import ParsedCommand as _PC, SLASH_COMMANDS as _SC
         if attached_image_bytes and not (parsed_cmd and parsed_cmd.is_slash):
             _wants_edit   = bool(_EDIT_KW.search(effective_msg))    if effective_msg else False
@@ -1871,8 +1957,8 @@ async def chat(req: ChatRequest, request: Request):
                     "reply": f"You've reached your image limit ({_img_used}/{_img_limit_v}). Upgrade to generate more.",
                     "error": "image_limit_reached",
                 }
-        except Exception:
-            pass
+        except Exception as _img_gate_err:
+            logger.warning("chat: image limit gate failed (non-fatal) — %s", _img_gate_err)
 
     # Model: always Claude claude-sonnet-4-6 (no local Ollama)
     _active_model = "claude-sonnet-4-6"
@@ -1924,6 +2010,13 @@ async def chat(req: ChatRequest, request: Request):
                     pass
                 _meta = _ceo_result.metadata
                 _steps_meta = _meta.get("steps", [])
+                # Record assistant turn so conversation_store stays coherent
+                # across the streaming→non-streaming redirect handoff.
+                try:
+                    _edit_summary = _ceo_result.reply or "[Image edit applied]"
+                    save_message(session_id, "assistant", _edit_summary)
+                except Exception as _sm_e:
+                    logger.warning("conversation_store: save_message(image_edit result) — %s", _sm_e)
                 return {
                     "image_base64":               _ceo_result.image_b64,
                     "reply":                      _ceo_result.reply,
@@ -1988,6 +2081,12 @@ async def chat(req: ChatRequest, request: Request):
                 await _log_img(request.headers.get("authorization"), request_id=getattr(req, "request_id", None))
             except Exception:
                 pass
+            # Record assistant turn so conversation_store stays coherent
+            # across the streaming→non-streaming redirect handoff.
+            try:
+                save_message(session_id, "assistant", f"[Image generated: {_gen_prompt[:300]}]")
+            except Exception as _sm_e:
+                logger.warning("conversation_store: save_message(image_generation result) — %s", _sm_e)
             return {
                 "image_base64": _b64,
                 "reply": "Image generated.",
@@ -2057,6 +2156,12 @@ async def chat(req: ChatRequest, request: Request):
                 await _log_img(request.headers.get("authorization"), request_id=getattr(req, "request_id", None))
             except Exception:
                 pass
+            # Record assistant turn so conversation_store stays coherent
+            # across the streaming→non-streaming redirect handoff.
+            try:
+                save_message(session_id, "assistant", f"[Image generated from reference: {dalle_prompt[:300]}]")
+            except Exception as _sm_e:
+                logger.warning("conversation_store: save_message(image_reference_generate result) — %s", _sm_e)
             return {
                 "image_base64": _b64,
                 "reply": "Image generated from reference.",
@@ -2278,11 +2383,6 @@ async def chat(req: ChatRequest, request: Request):
             import anthropic as _am
             _ac = _am.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
             # Also skip web_search for pure time/date queries — datetime is already in context
-            _DATETIME_ONLY = _re.compile(
-                r"^(?:what(?:'?s| is)|tell me|whats)?\s*(?:the\s+)?(?:current\s+)?"
-                r"(?:time|date|day|today|datetime|clock)[\s?!.]*$",
-                _re.I
-            )
             _skip_search_ns = _live_weather_injected_ns or bool(_DATETIME_ONLY.match(effective_msg.strip()))
             # Skip web_search when live weather/data already injected to avoid stale override
             if _skip_search_ns:
@@ -2418,6 +2518,34 @@ async def chat(req: ChatRequest, request: Request):
                 logger.warning("MissionManager failed (non-fatal): %s", _mis_err)
                 mission_result = None
 
+            # ── Phase 6 validation — applied before response assembly ────────
+            _val_mode = "build" if execution_intent == "app_builder" else "chat"
+            try:
+                import time as _vt
+                _vt_start = _vt.perf_counter()
+                from mini_assistant.system.validation import safe_return as _sv
+                _vr = _sv({"text": reply}, _val_mode)
+                if not _vr.get("ok"):
+                    import logging as _vlog_c
+                    _vlog_c.warning(
+                        "[mini-assistant/chat] Validation failed — mode=%s reason=%s session=%s",
+                        _val_mode, _vr.get("reason"), session_id,
+                    )
+                    if not reply.strip():
+                        reply = _vr.get("message", "I wasn't able to generate a response. Please try again.")
+                from mini_assistant.system.telemetry import log_event as _lev_c
+                _lev_c("validation", {
+                    "status":     "ok" if _vr.get("ok") else "fail",
+                    "valid":      _vr.get("ok", False),
+                    "reason":     _vr.get("reason", "ok"),
+                    "mode":       _val_mode,
+                    "session_id": session_id,
+                    "duration_ms": round((_vt.perf_counter() - _vt_start) * 1000),
+                })
+            except Exception as _ve_c:
+                import logging as _vlog_c2
+                _vlog_c2.error("[mini-assistant/chat] Validation layer error — %s", _ve_c, exc_info=True)
+
             response = phase1_compose(
                 reply        = reply,
                 plan         = phase1_plan,
@@ -2490,8 +2618,13 @@ async def chat_stream(req: ChatRequest, request: Request):
                 raise HTTPException(status_code=402, detail="out_of_credits")
         except HTTPException:
             raise
-        except Exception:
-            pass
+        except Exception as _credit_err:
+            import logging as _clog
+            _clog.error(
+                "[mini-assistant] Credit deduction failed — session=%s error=%s",
+                req.session_id, _credit_err, exc_info=True,
+            )
+            # Fail-safe: infrastructure failure ≠ user error — continue serving
 
     session_id = req.session_id or str(uuid.uuid4())
 
@@ -2501,6 +2634,9 @@ async def chat_stream(req: ChatRequest, request: Request):
         raise HTTPException(status_code=400, detail=f"Message rejected: {safety_error}")
 
     async def generate():
+        import time as _time_mod
+        _req_start = _time_mod.perf_counter()
+
         # Yield an SSE keepalive immediately so Cloudflare doesn't timeout
         # the frontend connection while we wait for routing + Ollama.
         yield ": keepalive\n\n"
@@ -2532,6 +2668,13 @@ async def chat_stream(req: ChatRequest, request: Request):
         # 'build' → force app_builder (skip Q&A, build immediately)
         # 'chat'  → force plain chat/search, never image-gen or build
         if req.chat_mode == "image":
+            # Persist user turn before handing off to non-streaming image endpoint.
+            # Without this, the conversation_store never sees the image request
+            # and history is broken on the next streaming turn.
+            try:
+                save_message(session_id, "user", effective_msg)
+            except Exception as _sm_pre:
+                logger.warning("conversation_store: pre-redirect save failed — %s", _sm_pre)
             yield f"data: {_json.dumps({'done': True, 'meta': {'type': 'image_redirect', 'mode_used': 'image'}})}\n\n"
             return
         if req.chat_mode == "build":
@@ -2606,25 +2749,15 @@ async def chat_stream(req: ChatRequest, request: Request):
                 logger.warning("Phase1 failed in stream endpoint: %s", _e)
 
         # Image intents can't stream meaningfully — signal redirect to non-streaming endpoint
-        import re as _re_stream
-        _EDIT_KW_STREAM = _re_stream.compile(
-            r"\b(change|edit|modify|fix|adjust|recolor|replace|remove|enhance|improve|"
-            r"turn\s+(?:him|her|it|them|this|that)\b|make\s+(?:him|her|it|them|this|that)\b|"
-            r"darker|brighter|lighter|sharper|blurrier|warmer|cooler|saturate|desaturate|"
-            r"add\s+(?!a\s+new|another)|give\s+(?:him|her|it|them)\b|"
-            r"angrier|fiercer|stronger|glowing|dramatic|intense|powerful)\b",
-            _re_stream.I,
-        )
-        _REF_GEN_KW_STREAM = _re_stream.compile(
-            r"\b(draw|generate|create|recreate|render|design|reimagine|reinvent|"
-            r"in the style of|inspired by|wearing|holding|show|put|place)\b",
-            _re_stream.I,
-        )
         _has_attached = bool(req.image_base64)
-        if _has_attached:
+        # Only apply image-keyword routing when no explicit chat_mode was set.
+        # Explicit mode (build/chat) takes precedence — never let keyword regex
+        # override a deliberate user choice. (chat_mode=="image" already returned
+        # early above, so the only values reaching here are "build", "chat", or None.)
+        if _has_attached and not req.chat_mode:
             _msg_str = effective_msg or ""
-            _edit_match    = bool(_EDIT_KW_STREAM.search(_msg_str))
-            _ref_gen_match = bool(_REF_GEN_KW_STREAM.search(_msg_str))
+            _edit_match    = bool(_EDIT_KW.search(_msg_str))
+            _ref_gen_match = bool(_REF_GEN_KW.search(_msg_str))
             _short_prompt  = len(_msg_str.strip()) < 80
             # Ref-gen keywords (draw/create/generate/wearing…) → image_reference_generate
             if _ref_gen_match:
@@ -2635,9 +2768,9 @@ async def chat_stream(req: ChatRequest, request: Request):
         # If we're in the middle of a build Q&A conversation, never image-redirect.
         # The user's answer to builder questions can look like an image prompt
         # ("modern style", "forest", "cartoon") — we must keep it in build flow.
-        _build_convo_markers = ("ready to build", "build once", "```html", "what visual style",
-                                "visual style", "app builder", "platform —", "obstacles —",
-                                "difficulty —", "plain html", "react?")
+        _build_convo_markers = ("ready to build", "build once", "```html", "<!doctype", "</html>",
+                                "what visual style", "visual style", "app builder",
+                                "plain html", "html vs react", "platform", "obstacles", "difficulty")
         _in_build_conversation = any(
             h.role == "assistant" and any(kw in (h.content or "").lower() for kw in _build_convo_markers)
             for h in _effective_history
@@ -2646,6 +2779,11 @@ async def chat_stream(req: ChatRequest, request: Request):
             execution_intent = "app_builder"
         elif execution_intent in ("image_generation", "image_edit", "image_reference_generate") and req.chat_mode != "chat":
             _img_mode = "image_edit" if execution_intent == "image_edit" else "image"
+            # Persist user turn before handing off — same reason as the early redirect above.
+            try:
+                save_message(session_id, "user", effective_msg)
+            except Exception as _sm_pre:
+                logger.warning("conversation_store: pre-redirect save failed — %s", _sm_pre)
             yield f"data: {_json.dumps({'done': True, 'meta': {'type': 'image_redirect', 'mode_used': _img_mode}})}\n\n"
             return
         # In chat mode, fall back to plain chat if image/build intent was detected
@@ -2677,27 +2815,16 @@ async def chat_stream(req: ChatRequest, request: Request):
                 for h in _effective_history
             )
             # Or if the first user message was a build request
-            _BUILD_KW = _re.compile(
-                r"/build|build me|build it|create (a|an|the) (app|website|page|ui|component|dashboard)|"
-                r"make (a|an) (web|html|react)|make it|do it|generate (a|an) (app|website|page)|"
-                r"update it|add (a|an|the) (button|section|feature|page|component|form)|"
-                r"can you (build|make|create|add|update)",
-                _re.I,
-            )
             _first_user = next((h for h in _effective_history if h.role == "user"), None)
             if _assistant_has_code or (_first_user and _BUILD_KW.search(_first_user.content or "")):
                 _is_build_intent = True
+                execution_intent = "app_builder"  # keep in sync — done event uses execution_intent
 
         # Detect if the user pasted code (``` in their message or coding intent from router)
         _has_code_in_msg = "```" in effective_msg or execution_intent == "coding"
         # Also check if their message looks like a code question even without fences
         # Only treat as code if there are very explicit code signals — NOT broad phrases
         # that would match normal conversation ("how does", "why does", etc.)
-        _CODE_ERRORS = _re.compile(
-            r"\b(TypeError|SyntaxError|ImportError|NameError|AttributeError|KeyError|"
-            r"IndexError|ValueError|RuntimeError|ModuleNotFoundError|stacktrace|traceback)\b",
-            _re.I,
-        )
         _is_code_intent = _has_code_in_msg or execution_intent == "coding" or bool(_CODE_ERRORS.search(effective_msg))
 
         # All tasks use Claude claude-sonnet-4-6 — no local models
@@ -2945,13 +3072,6 @@ async def chat_stream(req: ChatRequest, request: Request):
 
         # Extra heuristic: images + build/style keywords upgrade intent even if phase1
         # classified as image_analysis (e.g. user used /analyze but means "build like this").
-        _IMAGE_BUILD_KW = _re.compile(
-            r"\b(build|create|recreate|replicate|clone|design)\b"
-            r"|same.{0,15}(style|theme|color|look|design)"
-            r"|(style|theme|color|look|design).{0,15}(for|my)\b"
-            r"|i.{0,10}want.{0,10}(this|same)",
-            _re.I,
-        )
         if all_images and not _is_build_intent and not _has_prior_code and _IMAGE_BUILD_KW.search(effective_msg):
             _is_build_intent = True
             execution_intent = "app_builder"
@@ -3013,12 +3133,6 @@ async def chat_stream(req: ChatRequest, request: Request):
 
             # Pick system prompt based on what Claude is doing
             # ── Explicit rebuild requested (user said "rebuild", "start over", etc.) ──
-            _REBUILD_KW = _re.compile(
-                r"\b(rebuild|start (over|fresh|from scratch)|redo (it|everything|the (whole|entire))|"
-                r"rewrite (it|everything|the (whole|entire))|make a (brand )?new (version|one)|"
-                r"scrap (it|this)|throw (it|this) away|start (it )?again from)\b",
-                _re.I,
-            )
             _is_explicit_rebuild = bool(_REBUILD_KW.search(effective_msg))
 
             if _is_build_intent:
@@ -3288,12 +3402,7 @@ If all pass: PASS.
                 import anthropic as _am_plain
                 _ac_plain = _am_plain.AsyncAnthropic(api_key=_api_key_claude)
                 # Skip web_search when live weather/data was injected or query is time/date only
-                _DATETIME_ONLY_S = _re.compile(
-                    r"^(?:what(?:'?s| is)|tell me|whats)?\s*(?:the\s+)?(?:current\s+)?"
-                    r"(?:time|date|day|today|datetime|clock)[\s?!.]*$",
-                    _re.I
-                )
-                _skip_search_s = _live_weather_injected or bool(_DATETIME_ONLY_S.match(effective_msg.strip()))
+                _skip_search_s = _live_weather_injected or bool(_DATETIME_ONLY.match(effective_msg.strip()))
                 _stream_kwargs: dict = {"model": "claude-sonnet-4-6", "max_tokens": 8192,
                                         "system": _sys_prompt_stream, "messages": _c_msgs_plain}
                 if not _skip_search_s:
@@ -3378,11 +3487,45 @@ If all pass: PASS.
             "image_edit": "image_edit",
             "image_reference_generate": "image",
         }
+        _confirmed_mode = _intent_to_mode.get(execution_intent, "chat")
+
+        # ── Response validation (Phase 1 hardening) ───────────────────────────
+        try:
+            from mini_assistant.system.validation import safe_return as _safe_return
+            _response_payload = {"text": reply_text}
+            _val = _safe_return(_response_payload, _confirmed_mode)
+            if not _val.get("ok"):
+                import logging as _vlog
+                _vlog.warning(
+                    "[mini-assistant] Response validation failed — mode=%s reason=%s session=%s",
+                    _confirmed_mode, _val.get("reason"), session_id,
+                )
+        except Exception as _ve:
+            import logging as _vlog2
+            _vlog2.error("[mini-assistant] Validation layer error — %s", _ve, exc_info=True)
+
+        # ── Telemetry (Phase 1 hardening) ─────────────────────────────────────
+        try:
+            from mini_assistant.system.telemetry import log_event as _log_event, new_request_id as _new_rid
+            import time as _t
+            _new_rid()  # bind a request_id to this context
+            _log_event("request", {
+                "status":      "ok",
+                "session_id":  session_id,
+                "mode":        _confirmed_mode,
+                "intent":      execution_intent,
+                "model":       _active_model,
+                "duration_ms": round((_t.perf_counter() - _req_start) * 1000),
+            })
+        except Exception as _te:
+            import logging as _tlog
+            _tlog.error("[mini-assistant] Telemetry log_event error — %s", _te, exc_info=True)
+
         meta = {
             "reply": reply_text,
             "session_id": session_id,
             "model_used": _active_model,
-            "mode_used": _intent_to_mode.get(execution_intent, "chat"),
+            "mode_used": _confirmed_mode,
             "route_result": {"intent": execution_intent},
             "memory_stored": [
                 {"key": f.key, "value": f.value, "confidence": f.confidence}
@@ -3419,8 +3562,8 @@ async def chat_compare(req: ChatRequest, request: Request):
             raise HTTPException(status_code=402, detail="out_of_credits")
     except HTTPException:
         raise
-    except Exception:
-        pass
+    except Exception as _credit_err:
+        logger.error("chat_compare credit check failed: %s", _credit_err, exc_info=True)
 
     import json as _json
 
@@ -3469,6 +3612,30 @@ async def chat_compare(req: ChatRequest, request: Request):
         return reply
 
     reply_a, reply_b = await asyncio.gather(_collect(model_a), _collect(model_b))
+
+    # Phase 6 validation — advisory only; both replies shown regardless
+    try:
+        from mini_assistant.system.validation import safe_return as _sv_cmp
+        from mini_assistant.system.telemetry import log_event as _lev_cmp
+        for _cmp_label, _cmp_text in (("reply_a", reply_a), ("reply_b", reply_b)):
+            _vr = _sv_cmp({"text": _cmp_text}, "chat")
+            if not _vr.get("ok"):
+                import logging as _cmplog
+                _cmplog.warning(
+                    "[mini-assistant/compare] Validation failed — slot=%s reason=%s session=%s",
+                    _cmp_label, _vr.get("reason"), session_id,
+                )
+            _lev_cmp("validation", {
+                "status":  "ok" if _vr.get("ok") else "fail",
+                "valid":   _vr.get("ok", False),
+                "reason":  _vr.get("reason", "ok"),
+                "mode":    "chat",
+                "slot":    _cmp_label,
+                "session_id": session_id,
+            })
+    except Exception as _ve_cmp:
+        import logging as _cmplog2
+        _cmplog2.error("[mini-assistant/compare] Validation layer error — %s", _ve_cmp, exc_info=True)
 
     return {
         "reply_a": reply_a,
@@ -3731,7 +3898,31 @@ async def autofix_stream(req: AutoFixRequest, request: Request):
                 except Exception as _bp_err:
                     logger.debug("[BuildPatterns] non-fatal: %s", _bp_err)
 
-            yield f"data: {_json.dumps({'done': True, 'meta': {'all_clear': all_clear, 'reply': reply}})}\n\n"
+            # Phase 6 validation — autofix always outputs build content
+            _af_reply = reply
+            try:
+                from mini_assistant.system.validation import safe_return as _sv_af
+                from mini_assistant.system.telemetry import log_event as _lev_af
+                _vr_af = _sv_af({"text": reply}, "build")
+                if not _vr_af.get("ok"):
+                    import logging as _aflog
+                    _aflog.warning(
+                        "[mini-assistant/autofix] Validation failed — reason=%s",
+                        _vr_af.get("reason"),
+                    )
+                    if not reply.strip():
+                        _af_reply = _vr_af.get("message", "Fix pass produced no output. Please try again.")
+                _lev_af("validation", {
+                    "status": "ok" if _vr_af.get("ok") else "fail",
+                    "valid":  _vr_af.get("ok", False),
+                    "reason": _vr_af.get("reason", "ok"),
+                    "mode":   "build",
+                })
+            except Exception as _ve_af:
+                import logging as _aflog2
+                _aflog2.error("[mini-assistant/autofix] Validation layer error — %s", _ve_af, exc_info=True)
+
+            yield f"data: {_json.dumps({'done': True, 'meta': {'all_clear': all_clear, 'reply': _af_reply}})}\n\n"
 
         except Exception as exc:
             err = _friendly_error(exc)
@@ -4072,3 +4263,100 @@ async def chat_suggestions(req: SuggestionsRequest):
     except Exception as exc:
         logger.warning("Suggestions failed: %s", exc)
         return {"suggestions": []}
+
+
+# ============================================================================
+# Admin: X-Ray, Repair Memory, Log Viewer, System Health
+# (Phase 60 — Bracket 6 wiring)
+# ============================================================================
+
+def _xray_service():
+    """Lazy-import xray_service to avoid import-time side effects."""
+    import importlib, sys
+    # xray package lives at backend/xray/
+    backend_root = Path(__file__).resolve().parent.parent.parent.parent
+    xray_path = str(backend_root)
+    if xray_path not in sys.path:
+        sys.path.insert(0, xray_path)
+    return importlib.import_module("xray.xray_service")
+
+
+@app.get("/api/admin/xray/sessions", tags=["admin-xray"])
+async def admin_xray_sessions(limit: int = 20):
+    """List all sessions with orchestration state or log history."""
+    try:
+        svc = _xray_service()
+        sessions = svc.get_all_sessions(limit=limit)
+        return {"sessions": sessions}
+    except Exception as exc:
+        logger.error("admin_xray_sessions: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/admin/xray/session/{session_id}", tags=["admin-xray"])
+async def admin_xray_session(session_id: str):
+    """Full X-Ray analysis report for a session."""
+    try:
+        svc = _xray_service()
+        report = svc.get_session_summary(session_id)
+        if not report:
+            raise HTTPException(status_code=404, detail=f"No data for session '{session_id}'")
+        return report
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("admin_xray_session: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/admin/repair", tags=["admin-repair"])
+async def admin_repair_list(category: str = ""):
+    """List all repair memory records (Error Library)."""
+    try:
+        svc = _xray_service()
+        records = svc.get_repair_memory_list(category=category)
+        return {"records": records, "count": len(records)}
+    except Exception as exc:
+        logger.error("admin_repair_list: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/admin/repair/search", tags=["admin-repair"])
+async def admin_repair_search(query: str, category: str = "", top_n: int = 5):
+    """Search repair memory for similar problems."""
+    try:
+        svc = _xray_service()
+        matches = svc.search_repair_memory(category=category, query=query, top_n=top_n)
+        return {"matches": matches, "query": query, "category": category}
+    except Exception as exc:
+        logger.error("admin_repair_search: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/admin/logs", tags=["admin-logs"])
+async def admin_logs(level: str = "", limit: int = 100):
+    """
+    Return events from the NDJSON log pipeline.
+    level: '' = all events, 'error' = errors only, 'validation' = validation only
+    """
+    try:
+        svc = _xray_service()
+        events = svc.get_log_feed(limit=limit, level=level)
+        return {"events": events, "count": len(events), "level": level or "all"}
+    except Exception as exc:
+        logger.error("admin_logs: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/admin/health", tags=["admin-health"])
+async def admin_health():
+    """
+    System health snapshot — checks all internal subsystems.
+    Returns { status, components } where status is 'healthy' or 'degraded'.
+    """
+    try:
+        svc = _xray_service()
+        return svc.get_health_snapshot()
+    except Exception as exc:
+        logger.error("admin_health: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
