@@ -18,12 +18,12 @@ export function useChat() {
   const [loading, setLoading] = useState(false);
   const abortControllerRef = useRef(null);
 
-  const send = useCallback(async (text, sessionId, history = [], imagesBase64 = null, preferredModel = null, requestId = null, chatMode = null) => {
+  const send = useCallback(async (text, sessionId, history = [], imagesBase64 = null, preferredModel = null, requestId = null, chatMode = null, userTier = null) => {
     setLoading(true);
     abortControllerRef.current = new AbortController();
 
     try {
-      const data = await api.chat(text, sessionId, history, imagesBase64, preferredModel, requestId, chatMode);
+      const data = await api.chat(text, sessionId, history, imagesBase64, preferredModel, requestId, chatMode, userTier);
       return data;
     } finally {
       setLoading(false);
@@ -41,14 +41,14 @@ export function useChat() {
     sessionId,
     history = [],
     imagesBase64 = null,
-    { onToken, onDone, onError, vibeMode = false, chatMode = null } = {}
+    { onToken, onDone, onError, vibeMode = false, chatMode = null, userTier = null } = {}
   ) => {
     setLoading(true);
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
     try {
-      const res = await api.chatStream(text, sessionId, history, imagesBase64, controller.signal, vibeMode, chatMode);
+      const res = await api.chatStream(text, sessionId, history, imagesBase64, controller.signal, vibeMode, chatMode, userTier);
       if (res.status === 402) throw new Error('out_of_credits');
       if (res.status === 429) {
         let retryAfter = 30;

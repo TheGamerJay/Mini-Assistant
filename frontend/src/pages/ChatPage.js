@@ -550,10 +550,22 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         loadPreviewImage(activeChatId).then(img => {
           const restored = img || chat?.previewImage || null;
           setPreviewImage(restored);
-          if (restored) setRightPanelOpen(true);
+          if (restored) {
+            setRightPanelOpen(true);
+            // Restore last artifact so follow-up edit auto-bind survives page reload.
+            // Full-res image comes from IndexedDB (already loaded as `restored`).
+            // Prompt comes from localStorage metadata written when image was generated.
+            try {
+              const meta = JSON.parse(localStorage.getItem('lastArtifact') || '{}');
+              if (meta.chatId === activeChatId && restored) {
+                lastArtifactRef.current = { type: 'image', base64: restored, prompt: meta.prompt || '' };
+              }
+            } catch (_) {}
+          }
         });
       } else {
         setPreviewImage(null);
+        lastArtifactRef.current = null;
       }
     } else if (activeChatId && !loading && !streamActive) {
       // activeChatId unchanged but chats updated (e.g. backend merge on refresh).
@@ -652,6 +664,10 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     }
     let imgs = Array.isArray(imagesBase64) ? imagesBase64.filter(Boolean) : (imagesBase64 ? [imagesBase64] : []);
     if (!text && !imgs.length) return;
+
+    // Derive user_tier from subscription state — backend uses this for tier visibility + rate limits.
+    // "paid" = any active subscription. "free" = no subscription or free plan.
+    const _userTier = isSubscribed ? 'paid' : 'free';
 
     // Phase 5: Auto-bind last image artifact for follow-up modification requests.
     // If the user says "make it darker" / "fix this" without attaching an image,
@@ -783,7 +799,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
 
       try {
         const history = nextMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
-        const data = await send(text, sessionIdRef.current, history, imgs.length ? imgs : null, preferredModel, requestId, _routeMode);
+        const data = await send(text, sessionIdRef.current, history, imgs.length ? imgs : null, preferredModel, requestId, _routeMode, _userTier);
         setStreamResponse(data);
 
         const isImg = !!data.image_base64;
@@ -799,6 +815,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
           incrementImageUsage();
           // Track artifact for follow-up edit auto-binding (Phase 5)
           lastArtifactRef.current = { type: 'image', base64: data.image_base64, prompt: text };
+          try { localStorage.setItem('lastArtifact', JSON.stringify({ chatId, prompt: text })); } catch (_) {}
         }
 
         // Phase 7: Post image directly in chat as a visual artifact (thumbnail keeps storage small)
@@ -868,6 +885,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     await sendStream(text, sessionIdRef.current, history, imgs.length ? imgs : null, {
       vibeMode,
       chatMode,
+      userTier: _userTier,
       onToken(token) {
         streamAccumRef.current += token;
         setStreamingText(prev => (prev === null ? token : prev + token));
@@ -888,7 +906,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
             content: 'Rendering your image...', timestamp: Date.now(), _placeholder: true,
           }]);
           try {
-            const data = await send(text, sessionIdRef.current, history, imgs.length ? imgs : null, preferredModel, requestId, _routeMode);
+            const data = await send(text, sessionIdRef.current, history, imgs.length ? imgs : null, preferredModel, requestId, _routeMode, _userTier);
             setStreamResponse(data);
             const isImg = !!data.image_base64;
             let chatThumb2 = null;
@@ -901,6 +919,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
               await addImage(chatThumb2, text, data.image_base64);
               incrementImageUsage();
               lastArtifactRef.current = { type: 'image', base64: data.image_base64, prompt: text };
+              try { localStorage.setItem('lastArtifact', JSON.stringify({ chatId: chatIdRef_local, prompt: text })); } catch (_) {}
             }
             // Phase 7: Post image in chat as visual artifact
             const assistantMsg = isImg

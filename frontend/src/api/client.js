@@ -96,7 +96,7 @@ function del(url, timeoutMs) {
 
 export const api = {
   /** Send a chat message with optional conversation history, attached images, and model override */
-  chat(message, sessionId, history = [], imagesBase64 = null, preferredModel = null, requestId = null, chatMode = null) {
+  chat(message, sessionId, history = [], imagesBase64 = null, preferredModel = null, requestId = null, chatMode = null, userTier = null) {
     const trimmedHistory = history.slice(-20).map(m => ({ role: m.role, content: m.content }));
     const body = { message, session_id: sessionId, history: trimmedHistory };
     const _MAX_IMG_B64 = 15 * 1024 * 1024; // 15 MB base64 ~ 11 MB actual file
@@ -107,12 +107,13 @@ export const api = {
     if (preferredModel) body.preferred_model = preferredModel;
     if (requestId)      body.request_id      = requestId;
     if (chatMode)       body.chat_mode       = chatMode;
+    if (userTier)       body.user_tier       = userTier;
     try { body.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (_) {}
     return post(`${IMAGE_API}/chat`, body, 120000);
   },
 
   /** Open a streaming chat connection. Returns a raw fetch Response (SSE). */
-  chatStream(message, sessionId, history = [], imagesBase64 = null, signal = null, vibeMode = false, chatMode = null) {
+  chatStream(message, sessionId, history = [], imagesBase64 = null, signal = null, vibeMode = false, chatMode = null, userTier = null) {
     const trimmedHistory = history.slice(-20).map(m => ({ role: m.role, content: m.content }));
     const body = { message, session_id: sessionId, history: trimmedHistory };
     const _MAX_IMG_B64 = 15 * 1024 * 1024;
@@ -120,8 +121,9 @@ export const api = {
       .filter(b => { if (b.length > _MAX_IMG_B64) { console.warn('Image dropped: exceeds 15 MB limit'); return false; } return true; });
     if (imgs.length === 1) body.image_base64 = imgs[0];
     else if (imgs.length > 1) body.images_base64 = imgs;
-    if (vibeMode) body.vibe_mode = true;
-    if (chatMode) body.chat_mode = chatMode;
+    if (vibeMode)   body.vibe_mode  = true;
+    if (chatMode)   body.chat_mode  = chatMode;
+    if (userTier)   body.user_tier  = userTier;
     try { body.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (_) {}
     const _streamToken = getToken();
     const authHeaders = {
