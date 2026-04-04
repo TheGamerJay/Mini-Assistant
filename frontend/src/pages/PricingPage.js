@@ -3,7 +3,7 @@
  * Single-plan BYOK pricing page — monthly / yearly toggle.
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   Check, KeyRound, Zap, Code2, Download, Github,
   Sparkles, ArrowRight, Shield, RefreshCw,
@@ -22,8 +22,8 @@ const FEATURES = [
 ];
 
 const MONTHLY_PRICE  = 20;
-const YEARLY_MONTHLY = 17;
 const YEARLY_TOTAL   = 200;
+const YEARLY_MONTHLY = (YEARLY_TOTAL / 12).toFixed(2); // 16.67
 
 export default function PricingPage() {
   const { isSubscribed, setPage } = useApp();
@@ -31,6 +31,13 @@ export default function PricingPage() {
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState(null);
   const [portalLoading, setPortalLoading] = useState(false);
+
+  // Reset loading if user returns via browser back (bfcache restore)
+  useEffect(() => {
+    const handler = (e) => { if (e.persisted) setLoading(false); };
+    window.addEventListener('pageshow', handler);
+    return () => window.removeEventListener('pageshow', handler);
+  }, []);
 
   const handleSubscribe = useCallback(async () => {
     const priceId = await getPriceId(billing);
