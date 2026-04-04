@@ -247,6 +247,12 @@ def _gen_referral_code() -> str:
     return "".join(secrets.choice(alphabet) for _ in range(8))
 
 
+def _fallback_defaults() -> dict:
+    """Return fallback budget fields for a new user document."""
+    from billing.fallback_budget import default_fallback_fields  # noqa: PLC0415
+    return default_fallback_fields()
+
+
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
@@ -320,6 +326,10 @@ class SaveApiKeyBody(BaseModel):
     key: str
 
 
+class TestApiKeyBody(BaseModel):
+    provider: str  # 'anthropic' | 'openai'
+
+
 # ---------------------------------------------------------------------------
 # Auth router  (/api/auth/*)
 # ---------------------------------------------------------------------------
@@ -380,11 +390,17 @@ async def register(body: RegisterBody, request: Request):
         "is_subscribed":         False,
         "subscription_interval": None,
         "subscription_end":      None,
-        "api_key_enc":           None,
-        "api_key_hint":          None,
-        "api_key_provider":      None,
-        "api_key_verified":      False,
-        "api_key_added_at":      None,
+        # Per-provider key slots (new schema — replaces single api_key_enc)
+        "api_key_anthropic_enc":      None,
+        "api_key_anthropic_hint":     None,
+        "api_key_anthropic_verified": False,
+        "api_key_anthropic_added_at": None,
+        "api_key_openai_enc":         None,
+        "api_key_openai_hint":        None,
+        "api_key_openai_verified":    False,
+        "api_key_openai_added_at":    None,
+        # Fallback budget (Phase 2/3) — per-provider, rolling 30-day window
+        **_fallback_defaults(),
         # Referral tracking (time-based rewards applied in Phase 5)
         "referral_code":              _gen_referral_code(),
         "referred_by":                referred_by_code,
@@ -596,11 +612,17 @@ async def google_login(body: GoogleAuthBody):
             "is_subscribed":         False,
             "subscription_interval": None,
             "subscription_end":      None,
-            "api_key_enc":           None,
-            "api_key_hint":          None,
-            "api_key_provider":      None,
-            "api_key_verified":      False,
-            "api_key_added_at":      None,
+            # Per-provider key slots
+            "api_key_anthropic_enc":      None,
+            "api_key_anthropic_hint":     None,
+            "api_key_anthropic_verified": False,
+            "api_key_anthropic_added_at": None,
+            "api_key_openai_enc":         None,
+            "api_key_openai_hint":        None,
+            "api_key_openai_verified":    False,
+            "api_key_openai_added_at":    None,
+            # Fallback budget
+            **_fallback_defaults(),
             # Referral
             "referral_code":            _gen_referral_code(),
             "referred_by":              None,
@@ -650,27 +672,54 @@ async def me(authorization: str = Header(None)):
 @auth_router.get("/subscription-status")
 async def subscription_status(authorization: str = Header(None)):
     """Return subscription + API key status for the authenticated user."""
-    user = await get_current_user(authorization)
-    is_subscribed    = bool(user.get("is_subscribed", False))
-    api_key_verified = bool(user.get("api_key_verified", False))
+    from api_key_manager import get_providers_info  # noqa: PLC0415
+    from billing.key_router import get_user_providers  # noqa: PLC0415
+    from billing.access_gate import _has_any_verified_key  # noqa: PLC0415
+
+    user          = await get_current_user(authorization)
+    is_subscribed = bool(user.get("is_subscribed", False))
+    is_admin      = user.get("role") == "admin"
+
+    providers_info = get_providers_info(user)
+    user_providers = get_user_providers(user)
+    has_anthropic  = user_providers["anthropic"]
+    has_openai     = user_providers["openai"]
+    has_any_key    = _has_any_verified_key(user)
+
     return {
         "is_subscribed":         is_subscribed,
         "subscription_interval": user.get("subscription_interval"),
         "subscription_end":      user.get("subscription_end"),
-        "api_key_hint":          user.get("api_key_hint"),
-        "api_key_verified":      api_key_verified,
-        "api_key_provider":      user.get("api_key_provider"),
-        "can_execute":           (is_subscribed and api_key_verified)
-                                 or user.get("role") == "admin",
-        "plan": "paid" if is_subscribed else "free",
+        "can_execute":           (is_subscribed and has_any_key) or is_admin,
+        "plan":                  "paid" if is_subscribed else "free",
+        # Per-provider status
+        "has_anthropic_key":     has_anthropic,
+        "has_openai_key":        has_openai,
+        "providers":             providers_info,
+        # Backward-compat single-key fields (derived from whichever provider is active)
+        "api_key_verified":      has_any_key,
+        "api_key_hint":          (
+            providers_info["anthropic"]["hint"] if has_anthropic
+            else providers_info["openai"]["hint"] if has_openai
+            else None
+        ),
+        "api_key_provider":      (
+            "anthropic" if has_anthropic
+            else "openai" if has_openai
+            else None
+        ),
     }
 
 
 @auth_router.post("/api-key")
 async def save_api_key(body: SaveApiKeyBody, authorization: str = Header(None)):
-    """Encrypt and store the user's API key. Does NOT verify it — call /api-key/test for that."""
+    """
+    Encrypt and store the user's API key in the per-provider slot.
+    Provider is auto-detected from the key format (sk-ant- → anthropic, sk- → openai).
+    Does NOT verify it — call POST /api-key/test after saving.
+    """
     from api_key_manager import (  # noqa: PLC0415
-        encrypt_key, make_hint, detect_provider, validate_key_format,
+        validate_key_format, detect_provider, provider_fields,
     )
     user = await get_current_user(authorization)
     db   = _get_db()
@@ -680,45 +729,59 @@ async def save_api_key(body: SaveApiKeyBody, authorization: str = Header(None)):
     if not valid:
         raise HTTPException(status_code=400, detail=err)
 
-    enc      = encrypt_key(raw_key)
-    hint     = make_hint(raw_key)
-    provider = detect_provider(raw_key).value
+    provider = detect_provider(raw_key)
+    if provider == "unknown":
+        raise HTTPException(status_code=400, detail="Unrecognised key format.")
 
-    await db["users"].update_one(
-        {"id": user["id"]},
-        {"$set": {
-            "api_key_enc":      enc,
-            "api_key_hint":     hint,
-            "api_key_provider": provider,
-            "api_key_verified": False,          # must test to verify
-            "api_key_added_at": time.time(),
-        }},
-    )
-    return {"ok": True, "hint": hint, "provider": provider}
+    patch = provider_fields(provider, raw_key)
+    await db["users"].update_one({"id": user["id"]}, {"$set": patch})
+    return {"ok": True, "hint": patch[f"api_key_{provider}_hint"], "provider": provider}
 
 
 @auth_router.get("/api-key")
 async def get_api_key_status(authorization: str = Header(None)):
-    """Return the API key hint and verification status. Never returns the raw key."""
+    """
+    Return per-provider API key hints and verification status.
+    Never returns raw keys.
+
+    Returns:
+        {
+          "anthropic": {"verified": bool, "hint": str|None, "added_at": float|None},
+          "openai":    {"verified": bool, "hint": str|None, "added_at": float|None},
+        }
+    """
+    from api_key_manager import get_providers_info  # noqa: PLC0415
     user = await get_current_user(authorization)
-    return {
-        "api_key_hint":     user.get("api_key_hint"),
-        "api_key_verified": bool(user.get("api_key_verified", False)),
-        "api_key_provider": user.get("api_key_provider"),
-        "api_key_added_at": user.get("api_key_added_at"),
-    }
+    return get_providers_info(user)
 
 
 @auth_router.post("/api-key/test")
-async def test_api_key(authorization: str = Header(None)):
-    """Test the stored encrypted API key against the provider. Sets api_key_verified on success."""
-    from api_key_manager import decrypt_key, test_key  # noqa: PLC0415
+async def test_api_key(body: TestApiKeyBody, authorization: str = Header(None)):
+    """
+    Test the stored encrypted key for a specific provider.
+    Sets api_key_{provider}_verified = True on success.
+
+    Body: {"provider": "anthropic" | "openai"}
+    """
+    from api_key_manager import decrypt_key, test_key, provider_verified_patch  # noqa: PLC0415
     user = await get_current_user(authorization)
     db   = _get_db()
 
-    enc = user.get("api_key_enc")
+    provider = body.provider
+    if provider not in ("anthropic", "openai"):
+        raise HTTPException(status_code=400, detail="provider must be 'anthropic' or 'openai'")
+
+    # Check new per-provider field first, then backward-compat
+    enc = user.get(f"api_key_{provider}_enc") or (
+        user.get("api_key_enc")
+        if user.get("api_key_provider") == provider
+        else None
+    )
     if not enc:
-        raise HTTPException(status_code=400, detail="No API key saved. Add one first.")
+        raise HTTPException(
+            status_code=400,
+            detail=f"No {provider} key saved. Add one first.",
+        )
 
     try:
         raw_key = decrypt_key(enc)
@@ -729,26 +792,44 @@ async def test_api_key(authorization: str = Header(None)):
     if ok:
         await db["users"].update_one(
             {"id": user["id"]},
-            {"$set": {"api_key_verified": True}},
+            {"$set": provider_verified_patch(provider)},
         )
-    return {"ok": ok, "message": message}
+    return {"ok": ok, "message": message, "provider": provider}
 
 
 @auth_router.delete("/api-key")
-async def remove_api_key(authorization: str = Header(None)):
-    """Remove the stored API key and revoke verified status."""
+async def remove_api_key(
+    provider: Optional[str] = None,
+    authorization: str = Header(None),
+):
+    """
+    Remove a stored API key.
+
+    Query param: ?provider=anthropic  or  ?provider=openai
+    If omitted, clears both providers (full reset).
+    """
+    from api_key_manager import provider_clear_patch  # noqa: PLC0415
     user = await get_current_user(authorization)
     db   = _get_db()
-    await db["users"].update_one(
-        {"id": user["id"]},
-        {"$set": {
+
+    if provider:
+        if provider not in ("anthropic", "openai"):
+            raise HTTPException(status_code=400, detail="provider must be 'anthropic' or 'openai'")
+        patch = provider_clear_patch(provider)
+    else:
+        # Clear both
+        patch = {
+            **provider_clear_patch("anthropic"),
+            **provider_clear_patch("openai"),
+            # Also clear legacy single-key fields
             "api_key_enc":      None,
             "api_key_hint":     None,
             "api_key_provider": None,
             "api_key_verified": False,
             "api_key_added_at": None,
-        }},
-    )
+        }
+
+    await db["users"].update_one({"id": user["id"]}, {"$set": patch})
     return {"ok": True}
 
 

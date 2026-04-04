@@ -37,10 +37,17 @@ async def _async_ai_chat(
     prompt: str,
     system: Optional[str] = None,
     images: Optional[List[str]] = None,
+    ant_key: Optional[str] = None,
+    oai_key: Optional[str] = None,
 ) -> str:
-    """Async Claude (primary) / OpenAI (fallback) call."""
-    ant_key = os.getenv("ANTHROPIC_API_KEY")
-    oai_key = os.getenv("OPENAI_API_KEY")
+    """
+    Async Claude (primary) / OpenAI (fallback) call.
+
+    ant_key / oai_key: injected keys from the routing layer.
+    Falls back to env vars if not provided (platform fallback path).
+    """
+    ant_key = ant_key or os.getenv("ANTHROPIC_API_KEY")
+    oai_key = oai_key or os.getenv("OPENAI_API_KEY")
 
     if ant_key:
         import anthropic
@@ -102,10 +109,17 @@ async def _async_ai_embed(text: str) -> List[float]:
 async def _async_ai_stream(
     prompt: str,
     system: Optional[str] = None,
+    ant_key: Optional[str] = None,
+    oai_key: Optional[str] = None,
 ) -> AsyncIterator[str]:
-    """Async streaming Claude / OpenAI call."""
-    ant_key = os.getenv("ANTHROPIC_API_KEY")
-    oai_key = os.getenv("OPENAI_API_KEY")
+    """
+    Async streaming Claude / OpenAI call.
+
+    ant_key / oai_key: injected keys from the routing layer.
+    Falls back to env vars if not provided (platform fallback path).
+    """
+    ant_key = ant_key or os.getenv("ANTHROPIC_API_KEY")
+    oai_key = oai_key or os.getenv("OPENAI_API_KEY")
 
     if ant_key:
         import anthropic

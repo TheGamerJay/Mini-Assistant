@@ -343,12 +343,16 @@ export function AppProvider({ children }) {
   });
 
   // ---- Subscription + BYOK state ----
-  const [isSubscribed,    setIsSubscribed]    = useState(false);
-  const [apiKeyVerified,  setApiKeyVerified]  = useState(false);
-  const [apiKeyHint,      setApiKeyHint]      = useState(null);
-  const [apiKeyProvider,  setApiKeyProvider]  = useState(null);
-  const [canExecute,      setCanExecute]      = useState(false);
-  const [hasAdMode,       setHasAdMode]       = useState(false);
+  const [isSubscribed,     setIsSubscribed]     = useState(false);
+  const [apiKeyVerified,   setApiKeyVerified]   = useState(false);   // true if ANY provider key verified
+  const [apiKeyHint,       setApiKeyHint]       = useState(null);    // hint for primary provider
+  const [apiKeyProvider,   setApiKeyProvider]   = useState(null);    // primary provider name
+  const [hasAnthropicKey,  setHasAnthropicKey]  = useState(false);
+  const [hasOpenAIKey,     setHasOpenAIKey]     = useState(false);
+  // providers: {anthropic: {verified, hint, added_at}, openai: {verified, hint, added_at}}
+  const [providers,        setProviders]        = useState({ anthropic: {verified: false, hint: null}, openai: {verified: false, hint: null} });
+  const [canExecute,       setCanExecute]       = useState(false);
+  const [hasAdMode,        setHasAdMode]        = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   // ---- Image usage (server-authoritative) ----
@@ -362,10 +366,16 @@ export function AppProvider({ children }) {
     api.authSubscriptionStatus()
       .then((data) => {
         setIsSubscribed(Boolean(data.is_subscribed));
+        setCanExecute(Boolean(data.can_execute));
+        // Per-provider state
+        const p = data.providers || {};
+        setProviders(p);
+        setHasAnthropicKey(Boolean(data.has_anthropic_key));
+        setHasOpenAIKey(Boolean(data.has_openai_key));
+        // Backward-compat single fields (derived server-side)
         setApiKeyVerified(Boolean(data.api_key_verified));
         setApiKeyHint(data.api_key_hint || null);
         setApiKeyProvider(data.api_key_provider || null);
-        setCanExecute(Boolean(data.can_execute));
       })
       .catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -398,10 +408,13 @@ export function AppProvider({ children }) {
       .then((profile) => {
         _setUser((prev) => ({ ...prev, ...profile }));
         if (profile.is_subscribed !== undefined) setIsSubscribed(Boolean(profile.is_subscribed));
+        if (profile.can_execute !== undefined) setCanExecute(Boolean(profile.can_execute));
         if (profile.api_key_verified !== undefined) setApiKeyVerified(Boolean(profile.api_key_verified));
         if (profile.api_key_hint !== undefined) setApiKeyHint(profile.api_key_hint || null);
         if (profile.api_key_provider !== undefined) setApiKeyProvider(profile.api_key_provider || null);
-        if (profile.can_execute !== undefined) setCanExecute(Boolean(profile.can_execute));
+        if (profile.has_anthropic_key !== undefined) setHasAnthropicKey(Boolean(profile.has_anthropic_key));
+        if (profile.has_openai_key !== undefined) setHasOpenAIKey(Boolean(profile.has_openai_key));
+        if (profile.providers) setProviders(profile.providers);
         if (profile.has_ad_mode !== undefined) setHasAdMode(Boolean(profile.has_ad_mode));
         if (profile.avatar !== undefined) {
           _setAvatar(profile.avatar || null);
@@ -936,6 +949,9 @@ export function AppProvider({ children }) {
     apiKeyVerified,
     apiKeyHint,
     apiKeyProvider,
+    hasAnthropicKey,
+    hasOpenAIKey,
+    providers,
     canExecute,
     hasAdMode,
     setHasAdMode,

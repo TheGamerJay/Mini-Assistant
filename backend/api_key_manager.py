@@ -203,3 +203,81 @@ def _sanitise_error(err: str) -> str:
     """Remove anything that looks like a key fragment from error strings."""
     import re
     return re.sub(r"sk-[a-zA-Z0-9\-_]{6,}", "sk-[REDACTED]", err)
+
+
+# ---------------------------------------------------------------------------
+# Per-provider key storage helpers
+# ---------------------------------------------------------------------------
+
+def provider_fields(provider: str, raw_key: str) -> dict:
+    """
+    Return a MongoDB $set dict for storing a key against a specific provider slot.
+    Does NOT set verified=True — caller must call test_key() first.
+
+    Args:
+        provider: 'anthropic' or 'openai'
+        raw_key:  plaintext key (never stored — encrypted here)
+
+    Returns:
+        Dict suitable for use in {"$set": ...}
+    """
+    import time  # noqa: PLC0415
+    enc  = encrypt_key(raw_key)
+    hint = make_hint(raw_key)
+    return {
+        f"api_key_{provider}_enc":      enc,
+        f"api_key_{provider}_hint":     hint,
+        f"api_key_{provider}_verified": False,
+        f"api_key_{provider}_added_at": time.time(),
+    }
+
+
+def provider_verified_patch(provider: str) -> dict:
+    """Return a MongoDB $set dict that marks a provider key as verified."""
+    return {f"api_key_{provider}_verified": True}
+
+
+def provider_clear_patch(provider: str) -> dict:
+    """Return a MongoDB $set dict that removes a provider key slot."""
+    return {
+        f"api_key_{provider}_enc":      None,
+        f"api_key_{provider}_hint":     None,
+        f"api_key_{provider}_verified": False,
+        f"api_key_{provider}_added_at": None,
+    }
+
+
+def get_providers_info(user_doc: dict) -> dict:
+    """
+    Return display-safe provider info for both slots.
+    Checks new per-provider fields and backward-compat single-key field.
+    Never returns raw keys.
+
+    Returns:
+        {
+          "anthropic": {"verified": bool, "hint": str|None, "added_at": float|None},
+          "openai":    {"verified": bool, "hint": str|None, "added_at": float|None},
+        }
+    """
+    result = {}
+    for p in ("anthropic", "openai"):
+        # New per-provider field takes priority
+        if user_doc.get(f"api_key_{p}_enc") is not None:
+            result[p] = {
+                "verified":  bool(user_doc.get(f"api_key_{p}_verified", False)),
+                "hint":      user_doc.get(f"api_key_{p}_hint"),
+                "added_at":  user_doc.get(f"api_key_{p}_added_at"),
+            }
+        # Backward compat: old single-key field matches this provider
+        elif (
+            user_doc.get("api_key_enc") is not None
+            and user_doc.get("api_key_provider") == p
+        ):
+            result[p] = {
+                "verified":  bool(user_doc.get("api_key_verified", False)),
+                "hint":      user_doc.get("api_key_hint"),
+                "added_at":  user_doc.get("api_key_added_at"),
+            }
+        else:
+            result[p] = {"verified": False, "hint": None, "added_at": None}
+    return result

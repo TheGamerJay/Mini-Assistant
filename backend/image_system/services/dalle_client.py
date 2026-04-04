@@ -736,9 +736,15 @@ async def analyze_region_colors(
 # ─────────────────────────────────────────────────────────────────────────────
 
 class DalleClient:
-    """Async wrapper around the OpenAI images.generate endpoint."""
+    """
+    Async wrapper around the OpenAI images.generate endpoint.
 
-    def __init__(self) -> None:
+    Accepts an optional injected api_key (from the key routing layer).
+    Falls back to the OPENAI_API_KEY env var (platform fallback) if not supplied.
+    """
+
+    def __init__(self, api_key: str | None = None) -> None:
+        self._injected_key = api_key
         self._client = None
 
     def _get_client(self):
@@ -748,11 +754,11 @@ class DalleClient:
             except ImportError as exc:
                 raise RuntimeError("openai package not installed") from exc
 
-            api_key = os.getenv("OPENAI_API_KEY")
+            api_key = self._injected_key or os.getenv("OPENAI_API_KEY")
             if not api_key:
                 raise RuntimeError(
-                    "OPENAI_API_KEY environment variable is not set. "
-                    "Add it to your Railway / .env config."
+                    "No OpenAI API key available. Add your OpenAI key in Settings "
+                    "or contact support if you believe this is an error."
                 )
             self._client = AsyncOpenAI(api_key=api_key)
         return self._client

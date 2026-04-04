@@ -48,11 +48,17 @@ class VisionBrain:
         "\"technical_issues\": [\"...\"], \"severity\": \"none|minor|moderate|severe\"}"
     )
 
-    def __init__(self) -> None:
-        self._api_key = os.environ.get("OPENAI_API_KEY", "")
+    def __init__(self, api_key: str | None = None) -> None:
+        # Injected key (from key routing layer) takes priority over env
+        self._api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
 
     def _get_client(self):
         from openai import AsyncOpenAI
+        if not self._api_key:
+            raise RuntimeError(
+                "No OpenAI API key available for vision analysis. "
+                "Add your OpenAI key in Settings."
+            )
         return AsyncOpenAI(api_key=self._api_key)
 
     # ------------------------------------------------------------------

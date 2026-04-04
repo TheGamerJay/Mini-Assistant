@@ -1,11 +1,15 @@
 """
-billing/access_gate.py — Single execution gate for the BYOK + subscription model.
+billing/access_gate.py — Single execution gate for the hybrid BYOK + fallback model.
 
-Replaces ALL credit-based gating with two checks:
+Two required conditions:
   1. is_subscribed == True   (active Stripe subscription)
-  2. api_key_verified == True (user has added + tested a valid API key)
+  2. at least one verified provider key (Anthropic OR OpenAI — not both required)
 
 Admins bypass both checks.
+
+Key check handles both:
+  - New per-provider fields: api_key_anthropic_verified, api_key_openai_verified
+  - Backward-compat single-key field: api_key_verified
 
 Usage:
   from billing.access_gate import can_execute, ExecutionBlock
@@ -85,14 +89,14 @@ def can_execute(user: dict[str, Any]) -> tuple[bool, ExecutionBlock | None]:
             action="subscribe",
         )
 
-    # Check 2: verified API key
-    if not user.get("api_key_verified", False):
+    # Check 2: at least one verified provider key
+    if not _has_any_verified_key(user):
         log.info("access_gate: blocked — no verified API key user_id=%s", user.get("id"))
         return False, ExecutionBlock(
             reason="no_api_key",
             message=(
-                "Add and verify your API key to start executing tasks. "
-                "Your key is encrypted and never shared."
+                "Add and verify at least one API key (Anthropic or OpenAI) "
+                "to start executing tasks. Your key is encrypted and never shared."
             ),
             http_status=403,
             action="add_api_key",
@@ -118,7 +122,19 @@ def is_subscribed(user: dict[str, Any]) -> bool:
 
 
 def has_verified_key(user: dict[str, Any]) -> bool:
-    """Quick read-only check for API key status (no side effects)."""
+    """Quick read-only check — True if user has at least one verified provider key."""
     if user.get("role") == "admin" or user.get("plan") == "admin":
         return True
+    return _has_any_verified_key(user)
+
+
+def _has_any_verified_key(user: dict[str, Any]) -> bool:
+    """
+    Returns True if the user has at least one verified provider key.
+    Checks new per-provider fields first, then backward-compat single-key field.
+    """
+    # New per-provider fields
+    if user.get("api_key_anthropic_verified") or user.get("api_key_openai_verified"):
+        return True
+    # Backward compat: old single-key field
     return bool(user.get("api_key_verified", False))

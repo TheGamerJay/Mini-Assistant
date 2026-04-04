@@ -359,24 +359,35 @@ export const api = {
     return get(`${MAIN_API}/auth/subscription-status`, 10000);
   },
 
-  /** Save (encrypt) user's API key. Does NOT verify it. */
+  /** Save (encrypt) user's API key into the per-provider slot. Provider auto-detected. */
   authSaveApiKey(key) {
     return post(`${MAIN_API}/auth/api-key`, { key }, 10000);
   },
 
-  /** Get API key hint + verified status (never returns raw key). */
+  /**
+   * Get per-provider API key status. Never returns raw keys.
+   * Returns: { anthropic: {verified, hint, added_at}, openai: {verified, hint, added_at} }
+   */
   authGetApiKey() {
     return get(`${MAIN_API}/auth/api-key`, 10000);
   },
 
-  /** Test the stored API key against the provider. Sets api_key_verified on success. */
-  authTestApiKey() {
-    return post(`${MAIN_API}/auth/api-key/test`, {}, 20000);
+  /**
+   * Test the stored key for a specific provider.
+   * Sets api_key_{provider}_verified = true on success.
+   * @param {string} provider - 'anthropic' | 'openai'
+   */
+  authTestApiKey(provider) {
+    return post(`${MAIN_API}/auth/api-key/test`, { provider }, 20000);
   },
 
-  /** Remove the stored API key and revoke verified status. */
-  authRemoveApiKey() {
-    return request(`${MAIN_API}/auth/api-key`, { method: 'DELETE' }, 10000);
+  /**
+   * Remove a stored API key.
+   * @param {string} [provider] - 'anthropic' | 'openai'. Omit to clear both.
+   */
+  authRemoveApiKey(provider) {
+    const qs = provider ? `?provider=${provider}` : '';
+    return request(`${MAIN_API}/auth/api-key${qs}`, { method: 'DELETE' }, 10000);
   },
 
   /** Get personal usage dashboard stats + recent activity. */
