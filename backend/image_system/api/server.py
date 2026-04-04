@@ -2708,19 +2708,23 @@ async def chat_stream(req: ChatRequest, request: Request):
             logger.warning("Phase1 failed in stream endpoint: %s", _e)
             execution_intent = None
 
-        # ── CEO decision is final — chat_mode only fills when CEO returned nothing ──
+        # ── UI image mode is a hard override — user explicitly clicked the button ──
+        # chat_mode="image" or "image_edit" = user pressed the image mode button.
+        # This is explicit user intent, not a hint. Always route to image generation.
+        # For all other modes (chat, build) the CEO decides and cannot be overridden.
         _req_chat_mode = getattr(req, "chat_mode", None)
-        if execution_intent is None:
-            # CEO had no answer — use UI mode hint as fallback
-            if _req_chat_mode == "image":
-                execution_intent = "image_generation"
-            elif _req_chat_mode == "image_edit":
+        if _req_chat_mode in ("image", "image_edit"):
+            if _req_chat_mode == "image_edit" or (_req_chat_mode == "image" and bool(req.image_base64)):
                 execution_intent = "image_edit"
-            elif _req_chat_mode == "build":
+            else:
+                execution_intent = "image_generation"
+        elif execution_intent is None:
+            # CEO had no answer — use UI mode hint as fallback
+            if _req_chat_mode == "build":
                 execution_intent = "app_builder"
             else:
                 execution_intent = "chat"
-        # CEO decision stands — nothing below may overwrite execution_intent
+        # CEO decision stands for all non-image modes
 
         logger.info(
             "[CEO] stream: chat_mode=%s execution_intent=%s (FINAL — no overrides below)",
