@@ -1878,15 +1878,20 @@ async def chat(req: ChatRequest, request: Request):
     )
     route_result: dict = {}
 
-    # ── Honour explicit chat_mode from frontend (overrides planner) ────────────
+    # ── chat_mode from frontend: only used as a fallback when planner has no intent ──
+    # The CEO (planner) owns routing. chat_mode is honoured only when planner is silent.
+    # Exception: explicit image/image_edit modes from the UI always override (user clicked a mode).
     _req_chat_mode = getattr(req, "chat_mode", None)
-    if _req_chat_mode == "image":
-        if attached_image_bytes:
+    if _req_chat_mode in ("image", "image_edit"):
+        # User explicitly switched to image mode in the UI — always honour
+        if _req_chat_mode == "image_edit" or (_req_chat_mode == "image" and attached_image_bytes):
             execution_intent = "image_edit"
         else:
             execution_intent = "image_generation"
-    elif _req_chat_mode == "image_edit":
-        execution_intent = "image_edit"
+    elif execution_intent is None and _req_chat_mode == "chat":
+        # Planner found nothing — stay in chat
+        execution_intent = "chat"
+    # else: planner's intent stands (including image_generate detected in chat mode)
 
     # For image generation, still run the RouterBrain to get checkpoint/workflow detail
     if execution_intent == "image_generation" or execution_intent is None:
@@ -2295,8 +2300,7 @@ async def chat(req: ChatRequest, request: Request):
             _sys_prompt = _datetime_header + _MINI_SYSTEM_PROMPT
             if _LYRICS_INTENT.search(effective_msg):
                 _sys_prompt = _datetime_header + _MINI_SYSTEM_PROMPT + "\n\n" + _LYRICS_SYSTEM_PROMPT
-            if req.chat_mode == "chat":
-                _sys_prompt = _sys_prompt + _CHAT_MODE_IMAGE_RULE
+            # CEO owns routing — no prompt-level redirect rules needed
             if req.chat_mode in ("image", "image_edit"):
                 _sys_prompt = _sys_prompt + _IMAGE_MODE_ADDENDUM
             if _gpt_code_ctx:
