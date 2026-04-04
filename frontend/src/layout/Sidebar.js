@@ -719,7 +719,6 @@ function Sidebar() {
           {!sidebarCollapsed && (
             <span className="font-medium flex items-center gap-1.5 flex-1">
               Campaign Lab
-              {!hasAdMode && <span className="text-[9px] font-mono text-violet-500 bg-violet-500/10 border border-violet-500/20 rounded px-1 py-px ml-auto">PRO</span>}
             </span>
           )}
         </button>
@@ -882,7 +881,7 @@ function Sidebar() {
                 onClick={() => navTo('pricing')}
                 className="text-[11px] text-cyan-400 font-medium hover:text-cyan-300 transition-colors"
               >
-                Subscribe to unlock AI
+                Subscribe to unlock Mini Assistant
               </button>
             )}
           </div>

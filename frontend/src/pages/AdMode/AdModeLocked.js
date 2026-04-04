@@ -3,68 +3,24 @@
  * Clean premium locked screen with pricing and checkout CTAs.
  */
 
-import React, { useState, useEffect } from 'react';
-import { Zap, Image, Sparkles, Target, Download, TrendingUp, Lock, Check } from 'lucide-react';
-import { api } from '../../api/client';
-import { toast } from 'sonner';
+import React from 'react';
+import { Sparkles, Image, Target, TrendingUp, Download, Lock, ArrowRight } from 'lucide-react';
+import { useApp } from '../../context/AppContext';
 
 const FEATURES = [
   { icon: Sparkles, text: 'AI-generated ad copy — hooks, headlines, CTAs' },
-  { icon: Image, text: 'DALL·E 3 ad images matched to your brand' },
-  { icon: Target, text: 'Multiple ad angles: emotional, benefit, curiosity, urgency' },
+  { icon: Image,    text: 'DALL·E 3 ad images matched to your brand' },
+  { icon: Target,   text: 'Multiple ad angles: emotional, benefit, curiosity, urgency' },
   { icon: TrendingUp, text: 'Brand profile generation from your business info' },
   { icon: Download, text: 'Download creatives ready for ads manager' },
 ];
 
-const PLANS = [
-  {
-    id: 'monthly',
-    label: 'Monthly',
-    price: '$29',
-    period: '/month',
-    note: 'Cancel anytime',
-    highlight: false,
-  },
-  {
-    id: 'yearly',
-    label: 'Yearly',
-    price: '$24',
-    period: '/month',
-    note: 'Billed $290/year · Save 17%',
-    highlight: true,
-    badge: 'Best Value',
-  },
-];
-
 export default function AdModeLocked() {
-  const [loading, setLoading] = useState(null);
-
-  // Clear loading when user presses Back from Stripe (bfcache restore)
-  useEffect(() => {
-    const handler = (e) => { if (e.persisted) setLoading(null); };
-    window.addEventListener('pageshow', handler);
-    return () => window.removeEventListener('pageshow', handler);
-  }, []);
-
-  const handleCheckout = async (billingPeriod) => {
-    setLoading(billingPeriod);
-    try {
-      const { checkout_url } = await api.adModeCheckout(billingPeriod);
-      if (checkout_url) {
-        window.location.href = checkout_url;
-      } else {
-        setLoading(null);
-        toast.error('Could not start checkout. Try again.');
-      }
-    } catch (err) {
-      toast.error(err?.message || 'Could not start checkout. Try again.');
-      setLoading(null);
-    }
-  };
+  const { setPage } = useApp();
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-2xl mx-auto px-6 py-12">
+      <div className="max-w-lg mx-auto px-6 py-12">
 
         {/* Hero */}
         <div className="text-center mb-10">
@@ -74,14 +30,10 @@ export default function AdModeLocked() {
           <h1 className="text-3xl font-bold text-slate-100 mb-3 leading-tight">
             Campaign Lab
           </h1>
-          <p className="text-slate-400 text-base leading-relaxed max-w-lg mx-auto">
-            Create high-converting ads in seconds — powered by AI
+          <p className="text-slate-400 text-base leading-relaxed max-w-md mx-auto">
+            Create high-converting ads in seconds — powered by AI.
+            Included as an add-on with your Mini Assistant subscription.
           </p>
-          <div className="mt-4 flex flex-col gap-1.5 text-sm text-slate-500 max-w-sm mx-auto text-left">
-            <p>⚡ Generate scroll-stopping ad copy and visuals instantly</p>
-            <p>🎯 Test multiple ad angles with one click</p>
-            <p>🚀 Built for creators, brands, and businesses</p>
-          </div>
         </div>
 
         {/* Feature list */}
@@ -101,49 +53,16 @@ export default function AdModeLocked() {
           </div>
         </div>
 
-        {/* Pricing cards */}
-        <div className="grid grid-cols-2 gap-3 mb-6">
-          {PLANS.map((plan) => (
-            <div
-              key={plan.id}
-              className={`relative rounded-2xl border p-5 transition-all
-                ${plan.highlight
-                  ? 'border-violet-500/50 bg-violet-500/8'
-                  : 'border-white/8 bg-white/3'}`}
-            >
-              {plan.badge && (
-                <div className="absolute -top-2.5 left-1/2 -translate-x-1/2">
-                  <span className="bg-violet-500 text-white text-[10px] font-bold px-3 py-0.5 rounded-full">
-                    {plan.badge}
-                  </span>
-                </div>
-              )}
-              <p className="text-xs text-slate-500 mb-1">{plan.label}</p>
-              <div className="flex items-baseline gap-1 mb-0.5">
-                <span className="text-2xl font-bold text-slate-100">{plan.price}</span>
-                <span className="text-xs text-slate-500">{plan.period}</span>
-              </div>
-              <p className="text-[10px] text-slate-600 mb-4">{plan.note}</p>
-              <button
-                onClick={() => handleCheckout(plan.id)}
-                disabled={!!loading}
-                className={`w-full py-2.5 rounded-xl text-sm font-medium transition-all
-                  ${plan.highlight
-                    ? 'bg-violet-500 hover:bg-violet-400 text-white'
-                    : 'bg-white/8 hover:bg-white/12 text-slate-200 border border-white/10'}
-                  disabled:opacity-50 disabled:cursor-not-allowed`}
-              >
-                {loading === plan.id ? 'Opening checkout…' : 'Unlock Campaign Lab'}
-              </button>
-            </div>
-          ))}
-        </div>
-
-        {/* Trust line */}
-        <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-600">
-          <Check size={11} className="text-emerald-500" />
-          Cancel anytime from your billing portal · Powered by Stripe
-        </div>
+        {/* CTA */}
+        <button
+          onClick={() => setPage('pricing')}
+          className="w-full py-3 rounded-2xl bg-gradient-to-r from-violet-600 to-cyan-600 text-white text-sm font-bold hover:opacity-90 transition-all flex items-center justify-center gap-2 shadow-lg mb-3"
+        >
+          View Plans <ArrowRight size={14} />
+        </button>
+        <p className="text-center text-[11px] text-slate-600">
+          Cancel anytime · Powered by Stripe
+        </p>
 
       </div>
     </div>
