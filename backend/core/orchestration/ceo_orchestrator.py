@@ -346,12 +346,14 @@ async def resume_after_approval(
     state.final_status = "complete"
     state.end_time     = time.perf_counter()
 
-    # Save confirmed fix to repair memory library
+    # CEO reviews and saves confirmed fix to repair memory library
     if approved:
-        _auto_save_repair(
+        _api_key = decision.get("api_key", "") if isinstance(decision, dict) else ""
+        await _ceo_approve_and_save(
             problem  = approved.get("issue", state.goal)[:200],
             solution = approved.get("proposed_fix", "Doctor fix applied")[:200],
             steps    = approved.get("fix_steps", [])[:10],
+            api_key  = _api_key,
             category = "build_pipeline",
         )
 
@@ -371,47 +373,77 @@ async def resume_after_approval(
 # Repair memory: auto-save confirmed solutions
 # ---------------------------------------------------------------------------
 
-def _auto_save_repair(
+async def _ceo_approve_and_save(
     problem:   str,
     solution:  str,
     steps:     list[str],
+    api_key:   str,
     category:  str = "build_pipeline",
 ) -> None:
     """
-    CEO saves a confirmed fix to the repair memory library.
-    Called ONLY after a solution has been verified (Hands + Vision passed).
-    Never called on partial fixes or unverified outcomes.
+    CEO reviews the fix and decides whether it's worth saving to the repair library.
+    Only saves if CEO explicitly approves — never auto-saves.
+
+    Save conditions (all must be true before this is called):
+      - problem is confirmed
+      - solution was applied by Builder
+      - Hands and/or Vision verification PASSED
+      - CEO is now reviewing final save decision
     """
+    # CEO approval check via Claude Haiku
     try:
-        from core.repair_memory.repair_store import save_repair, slug_exists, increment_success
+        import anthropic as _sa_am
+        client = _sa_am.AsyncAnthropic(api_key=api_key)
+        _approve_prompt = (
+            f"Problem: {problem}\n"
+            f"Solution: {solution}\n"
+            f"Steps: {'; '.join(steps[:5])}\n\n"
+            "Should this fix be saved to the repair memory library for future reuse?\n"
+            "Save if: the fix addresses a real, repeatable problem that could occur again.\n"
+            "Don't save if: the fix was trivial, one-off, or too specific to be useful.\n"
+            "Answer with ONLY: yes or no"
+        )
+        resp = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=5,
+            system="You are the CEO. Approve or reject saving this fix to the repair library.",
+            messages=[{"role": "user", "content": _approve_prompt}],
+        )
+        decision = resp.content[0].text.strip().lower() if resp.content else "no"
+        if not decision.startswith("yes"):
+            log.info("repair_memory: CEO rejected save — problem not generalizable enough")
+            return
+        log.info("repair_memory: CEO approved save")
+    except Exception as exc:
+        log.warning("repair_memory: CEO approval check failed — not saving (%s)", exc)
+        return
+
+    # CEO approved — now save
+    try:
+        from core.repair_memory.repair_store import save_repair, increment_success
         from core.repair_memory.repair_search import search
 
-        # Check if a very similar problem already exists — if so, increment success count
         matches = search(category, problem, top_n=1)
         if matches and matches[0]["similarity_score"] >= 0.75:
             existing_slug = matches[0]["_slug"]
             if increment_success(category, existing_slug):
                 log.info(
-                    "repair_memory: incremented existing record slug=%s (similarity=%.2f)",
+                    "repair_memory: CEO-approved increment slug=%s (similarity=%.2f)",
                     existing_slug, matches[0]["similarity_score"],
                 )
                 return
 
-        # New problem — save fresh record
         slug = problem[:60].lower().replace(" ", "-")
-        record = save_repair(
+        save_repair(
             category       = category,
             problem_slug   = slug,
             problem_name   = problem[:200],
             solution_name  = solution[:200],
             solution_steps = steps[:10],
         )
-        log.info(
-            "repair_memory: saved new solution slug=%s category=%s",
-            slug, category,
-        )
+        log.info("repair_memory: CEO-approved save slug=%s category=%s", slug, category)
     except Exception as exc:
-        log.warning("repair_memory: auto-save failed (non-fatal) — %s", exc)
+        log.warning("repair_memory: save failed (non-fatal) — %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -546,14 +578,14 @@ async def stream_builder_task(
             yield _status("ceo", "Hands re-checking after fix…")
             _hands_ok2, _ = await _hands_qa(_built_html, message, api_key)
             if _hands_ok2:
-                # Solution confirmed — save to repair memory library
-                _auto_save_repair(
+                yield _status("ceo", "Fix verified. CEO reviewing for library save…")
+                await _ceo_approve_and_save(
                     problem  = f"Build failed QA: {'; '.join(hands_issues[:2])}",
                     solution = f"Builder fix resolved: {message[:80]}",
                     steps    = hands_issues[:5],
+                    api_key  = api_key,
                     category = "build_pipeline",
                 )
-                yield _status("ceo", "Fix verified and saved to repair library.")
         else:
             yield _status("ceo", "Hands: all checks passed.")
 
