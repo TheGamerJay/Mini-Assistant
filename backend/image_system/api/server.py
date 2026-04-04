@@ -2667,98 +2667,74 @@ async def chat_stream(req: ChatRequest, request: Request):
 
         _effective_history = _history_source()
 
-        # ── Explicit chat_mode override (bypasses all intent detection) ──────
-        # 'image' → force image generation (redirect to non-streaming endpoint)
-        # 'build' → force app_builder (skip Q&A, build immediately)
-        # 'chat'  → force plain chat/search, never image-gen or build
-        if req.chat_mode == "image":
-            # Persist user turn before handing off to non-streaming image endpoint.
-            # Without this, the conversation_store never sees the image request
-            # and history is broken on the next streaming turn.
-            try:
-                save_message(session_id, "user", effective_msg)
-            except Exception as _sm_pre:
-                logger.warning("conversation_store: pre-redirect save failed — %s", _sm_pre)
-            yield f"data: {_json.dumps({'done': True, 'meta': {'type': 'image_redirect', 'mode_used': 'image'}})}\n\n"
-            return
-        if req.chat_mode == "build":
+        # ── Phase 1: CEO intent routing — always runs, owns all routing decisions ──
+        # chat_mode from the frontend is a UI hint only:
+        #   "image"      → user clicked image button: use as fallback if CEO returns nothing
+        #   "image_edit" → user clicked edit button: same
+        #   "build"      → user clicked build button: same
+        #   "chat"       → default chat UI: CEO still routes (may detect image/build/search)
+        # CEO's decision always wins. chat_mode is only used when CEO returns None/chat.
+        try:
+            from mini_assistant.phase1.command_parser import parse as cmd_parse
+            from mini_assistant.phase1.intent_planner import (
+                plan as make_plan,
+                classify_intent_with_llm,
+                INTENT_TO_EXECUTION,
+            )
+            parsed_cmd = cmd_parse(clean_message)
+            effective_msg = parsed_cmd.args if parsed_cmd.is_slash else clean_message
+            phase1_plan = make_plan(
+                message=effective_msg,
+                parsed_command=parsed_cmd,
+                history=req.history or [],
+            )
+            execution_intent = phase1_plan.execution_intent or None
+
+            # LLM fallback: regex returned low-confidence normal_chat — ask model to classify
+            if (
+                phase1_plan.intent == "normal_chat"
+                and phase1_plan.confidence <= 0.72
+                and len(effective_msg.strip()) > 40
+                and not (parsed_cmd and parsed_cmd.is_slash)
+            ):
+                llm_intent = await classify_intent_with_llm(effective_msg)
+                if llm_intent != "normal_chat":
+                    execution_intent = INTENT_TO_EXECUTION.get(llm_intent, "chat")
+                    logger.info(
+                        "Phase1 LLM override: %s → %s (exec: %s)",
+                        phase1_plan.intent, llm_intent, execution_intent,
+                    )
+        except Exception as _e:
+            logger.warning("Phase1 failed in stream endpoint: %s", _e)
+            execution_intent = None
+
+        # ── chat_mode fallback: only used when CEO returned nothing ─────────
+        # If CEO detected an intent, it wins. UI mode only fills the gap.
+        _req_chat_mode = getattr(req, "chat_mode", None)
+        if execution_intent is None:
+            if _req_chat_mode == "image":
+                execution_intent = "image_generation"
+            elif _req_chat_mode == "image_edit":
+                execution_intent = "image_edit"
+            elif _req_chat_mode == "build":
+                execution_intent = "app_builder"
+            else:
+                execution_intent = "chat"
+        elif execution_intent == "chat" and _req_chat_mode == "build":
+            # CEO said chat but user is in build mode — build wins as context signal
             execution_intent = "app_builder"
-            phase1_plan = None  # skip routing entirely
-        if req.chat_mode == "chat":
-            execution_intent = "chat"
-            # Run the planner so web_search intent is detected — but don't let
-            # it override execution_intent (chat mode stays as chat).
-            # If regex returns normal_chat, also try the LLM classifier so
-            # naturally-phrased queries ("can u check if theres any X on amazon")
-            # are correctly identified regardless of wording.
-            try:
-                from mini_assistant.phase1.command_parser import parse as _cp_parse
-                from mini_assistant.phase1.intent_planner import (
-                    plan as _cp_plan,
-                    classify_intent_with_llm as _cp_llm,
-                )
-                _cp_parsed = _cp_parse(clean_message)
-                phase1_plan = _cp_plan(
-                    message=clean_message,
-                    parsed_command=_cp_parsed,
-                    history=req.history or [],
-                )
-                # LLM fallback: regex returned normal_chat — let Haiku decide.
-                # No length gate: short queries like "any rtx 5090 under 2k on amazon?"
-                # are valid searches even if they're only 40 chars.
-                if phase1_plan.intent == "normal_chat":
-                    _llm_intent = await _cp_llm(clean_message)
-                    if _llm_intent == "web_search":
-                        phase1_plan.intent = "web_search"
-                        logger.info("Chat-mode LLM intent override → web_search")
-            except Exception as _cp_err:
-                logger.debug("Chat-mode planner skipped: %s", _cp_err)
-                phase1_plan = None
 
-        # ── Phase 1 intent routing (fast regex, then LLM fallback) ──────────
-        # Skip entirely when chat_mode forces the intent already
-        if not req.chat_mode:
-            try:
-                from mini_assistant.phase1.command_parser import parse as cmd_parse
-                from mini_assistant.phase1.intent_planner import (
-                    plan as make_plan,
-                    classify_intent_with_llm,
-                    INTENT_TO_EXECUTION,
-                )
-                parsed_cmd = cmd_parse(clean_message)
-                effective_msg = parsed_cmd.args if parsed_cmd.is_slash else clean_message
-                phase1_plan = make_plan(
-                    message=effective_msg,
-                    parsed_command=parsed_cmd,
-                    history=req.history or [],
-                )
-                execution_intent = phase1_plan.execution_intent or "chat"
-
-                # LLM fallback: regex returned low-confidence normal_chat for a long
-                # message — ask the model to classify properly
-                if (
-                    phase1_plan.intent == "normal_chat"
-                    and phase1_plan.confidence <= 0.72
-                    and len(effective_msg.strip()) > 60
-                    and not (parsed_cmd and parsed_cmd.is_slash)
-                ):
-                    llm_intent = await classify_intent_with_llm(effective_msg)
-                    if llm_intent != "normal_chat":
-                        execution_intent = INTENT_TO_EXECUTION.get(llm_intent, "chat")
-                        logger.info(
-                            "Phase1 LLM override: %s → %s (exec: %s)",
-                            phase1_plan.intent, llm_intent, execution_intent,
-                        )
-            except Exception as _e:
-                logger.warning("Phase1 failed in stream endpoint: %s", _e)
+        logger.info(
+            "[CEO] stream routing: chat_mode=%s → execution_intent=%s",
+            _req_chat_mode, execution_intent,
+        )
 
         # Image intents can't stream meaningfully — signal redirect to non-streaming endpoint
         _has_attached = bool(req.image_base64)
-        # Only apply image-keyword routing when no explicit chat_mode was set.
-        # Explicit mode (build/chat) takes precedence — never let keyword regex
-        # override a deliberate user choice. (chat_mode=="image" already returned
-        # early above, so the only values reaching here are "build", "chat", or None.)
-        if _has_attached and not req.chat_mode:
+        # Image attachment routing: CEO already ran above.
+        # These keyword checks only apply when an image is attached and CEO returned
+        # a non-image intent — they refine the image handling mode, not override CEO.
+        if _has_attached and execution_intent not in ("image_generation", "image_edit", "image_reference_generate"):
             _msg_str = effective_msg or ""
             _edit_match    = bool(_EDIT_KW.search(_msg_str))
             _ref_gen_match = bool(_REF_GEN_KW.search(_msg_str))
@@ -2781,18 +2757,15 @@ async def chat_stream(req: ChatRequest, request: Request):
         )
         if _in_build_conversation:
             execution_intent = "app_builder"
-        elif execution_intent in ("image_generation", "image_edit", "image_reference_generate") and req.chat_mode != "chat":
+        elif execution_intent in ("image_generation", "image_edit", "image_reference_generate"):
             _img_mode = "image_edit" if execution_intent == "image_edit" else "image"
-            # Persist user turn before handing off — same reason as the early redirect above.
+            # Image intents can't stream — redirect to non-streaming endpoint.
             try:
                 save_message(session_id, "user", effective_msg)
             except Exception as _sm_pre:
                 logger.warning("conversation_store: pre-redirect save failed — %s", _sm_pre)
             yield f"data: {_json.dumps({'done': True, 'meta': {'type': 'image_redirect', 'mode_used': _img_mode}})}\n\n"
             return
-        # In chat mode, fall back to plain chat if image/build intent was detected
-        if req.chat_mode == "chat" and execution_intent in ("image_generation", "image_edit", "image_reference_generate", "app_builder"):
-            execution_intent = "chat"
 
         # ── Model selection — always Claude claude-sonnet-4-6 ─────────────────
         _is_build_intent = execution_intent == "app_builder"
