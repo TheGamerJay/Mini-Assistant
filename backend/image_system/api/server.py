@@ -2708,10 +2708,10 @@ async def chat_stream(req: ChatRequest, request: Request):
             logger.warning("Phase1 failed in stream endpoint: %s", _e)
             execution_intent = None
 
-        # ── chat_mode fallback: only used when CEO returned nothing ─────────
-        # If CEO detected an intent, it wins. UI mode only fills the gap.
+        # ── CEO decision is final — chat_mode only fills when CEO returned nothing ──
         _req_chat_mode = getattr(req, "chat_mode", None)
         if execution_intent is None:
+            # CEO had no answer — use UI mode hint as fallback
             if _req_chat_mode == "image":
                 execution_intent = "image_generation"
             elif _req_chat_mode == "image_edit":
@@ -2720,46 +2720,19 @@ async def chat_stream(req: ChatRequest, request: Request):
                 execution_intent = "app_builder"
             else:
                 execution_intent = "chat"
-        elif execution_intent == "chat" and _req_chat_mode == "build":
-            # CEO said chat but user is in build mode — build wins as context signal
-            execution_intent = "app_builder"
+        # CEO decision stands — nothing below may overwrite execution_intent
 
         logger.info(
-            "[CEO] stream routing: chat_mode=%s → execution_intent=%s",
+            "[CEO] stream: chat_mode=%s execution_intent=%s (FINAL — no overrides below)",
             _req_chat_mode, execution_intent,
         )
 
-        # Image intents can't stream meaningfully — signal redirect to non-streaming endpoint
-        _has_attached = bool(req.image_base64)
-        # Image attachment routing: CEO already ran above.
-        # These keyword checks only apply when an image is attached and CEO returned
-        # a non-image intent — they refine the image handling mode, not override CEO.
-        if _has_attached and execution_intent not in ("image_generation", "image_edit", "image_reference_generate"):
-            _msg_str = effective_msg or ""
-            _edit_match    = bool(_EDIT_KW.search(_msg_str))
-            _ref_gen_match = bool(_REF_GEN_KW.search(_msg_str))
-            _short_prompt  = len(_msg_str.strip()) < 80
-            # Ref-gen keywords (draw/create/generate/wearing…) → image_reference_generate
-            if _ref_gen_match:
+        # ── Image intents redirect to non-streaming endpoint (can't carry images) ──
+        if execution_intent in ("image_generation", "image_edit", "image_reference_generate"):
+            # If image attached and CEO said image_generation, treat as reference-generate
+            if bool(req.image_base64) and execution_intent == "image_generation":
                 execution_intent = "image_reference_generate"
-            # Edit keywords OR short prompt with image → preserve identity, apply edit
-            elif _edit_match or _short_prompt:
-                execution_intent = "image_edit"
-        # If we're in the middle of a build Q&A conversation, never image-redirect.
-        # The user's answer to builder questions can look like an image prompt
-        # ("modern style", "forest", "cartoon") — we must keep it in build flow.
-        _build_convo_markers = ("ready to build", "build once", "```html", "<!doctype", "</html>",
-                                "what visual style", "visual style", "app builder",
-                                "plain html", "html vs react", "platform", "obstacles", "difficulty")
-        _in_build_conversation = any(
-            h.role == "assistant" and any(kw in (h.content or "").lower() for kw in _build_convo_markers)
-            for h in _effective_history
-        )
-        if _in_build_conversation:
-            execution_intent = "app_builder"
-        elif execution_intent in ("image_generation", "image_edit", "image_reference_generate"):
             _img_mode = "image_edit" if execution_intent == "image_edit" else "image"
-            # Image intents can't stream — redirect to non-streaming endpoint.
             try:
                 save_message(session_id, "user", effective_msg)
             except Exception as _sm_pre:
@@ -2767,22 +2740,19 @@ async def chat_stream(req: ChatRequest, request: Request):
             yield f"data: {_json.dumps({'done': True, 'meta': {'type': 'image_redirect', 'mode_used': _img_mode}})}\n\n"
             return
 
-        # ── Model selection — always Claude claude-sonnet-4-6 ─────────────────
+        # ── Derived flags from CEO decision — read-only, never modify execution_intent ──
         _is_build_intent = execution_intent == "app_builder"
 
-        # Vibe Code mode OR explicit build mode — skip all Q&A, build immediately
-        # (never override chat mode with build intent)
-        if (req.vibe_mode or req.chat_mode == "build") and not _is_build_intent and req.chat_mode != "chat":
-            _is_build_intent = True
-            execution_intent = "app_builder"  # so done-event intent is correct → auto-opens preview
+        # vibe_mode: signals "skip Q&A, build immediately" — only active when CEO already
+        # chose app_builder. Does NOT change routing; only changes build prompt posture.
+        _vibe_build = bool(req.vibe_mode) and _is_build_intent
 
-        # Also detect build intent from history — follow-up messages in a build
-        # conversation are often classified as "chat" by the router (e.g. "make it
-        # a video uploader"), but they still need the coder model + build prompt.
-        # Do NOT override chat or image mode — those explicitly opt out of building.
-        if not _is_build_intent and _effective_history and req.chat_mode not in ("chat", "image"):
-            _hist_contents = " ".join(h.content or "" for h in _effective_history)
-            # If any previous assistant turn contains a code fence or raw HTML, we're in a build session
+        # Build conversation continuation: if CEO said chat but prior turns have assistant
+        # HTML/code output, treat as continuation of a build session (executor context only).
+        # This is NOT a routing override — execution_intent stays as CEO set it.
+        # Executor uses _is_build_intent to select coder prompt and build pipeline.
+        _has_attached = bool(req.image_base64)
+        if not _is_build_intent and _effective_history:
             _assistant_has_code = any(
                 h.role == "assistant" and (
                     "```" in (h.content or "") or
@@ -2791,11 +2761,8 @@ async def chat_stream(req: ChatRequest, request: Request):
                 )
                 for h in _effective_history
             )
-            # Or if the first user message was a build request
-            _first_user = next((h for h in _effective_history if h.role == "user"), None)
-            if _assistant_has_code or (_first_user and _BUILD_KW.search(_first_user.content or "")):
-                _is_build_intent = True
-                execution_intent = "app_builder"  # keep in sync — done event uses execution_intent
+            if _assistant_has_code:
+                _is_build_intent = True  # context flag only — does NOT change execution_intent
 
         # Detect if the user pasted code (``` in their message or coding intent from router)
         _has_code_in_msg = "```" in effective_msg or execution_intent == "coding"
