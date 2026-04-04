@@ -8,7 +8,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Settings, User, LogOut, Moon, Sun,
   HelpCircle, ChevronDown, RefreshCw, ShieldCheck, BarChart2, Menu,
-  Zap, Plus, TrendingUp, CreditCard,
+  KeyRound, CreditCard, CheckCircle2, AlertCircle,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/client';
@@ -16,88 +16,45 @@ import AvatarMedia from './AvatarMedia';
 
 
 // ---------------------------------------------------------------------------
-// CreditChip — shows remaining credits with color coding + upgrade nudge
+// StatusChip — shows subscription + API key state
 // ---------------------------------------------------------------------------
-const PLAN_LIMITS = { free: 50, standard: 500, pro: 2000, max: 10000 };
+function StatusChip() {
+  const { isSubscribed, apiKeyVerified, setPage } = useApp();
 
+  if (!isSubscribed) {
+    return (
+      <button
+        onClick={() => setPage('pricing')}
+        title="Subscribe to unlock AI execution"
+        className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-violet-500/40 transition-all group"
+      >
+        <AlertCircle className="w-3 h-3 text-amber-400 flex-shrink-0" />
+        <span className="text-[11px] text-slate-400 group-hover:text-violet-300 transition-colors">Subscribe</span>
+      </button>
+    );
+  }
 
-function CreditChip() {
-  const { credits, plan, isSubscribed, setPurchaseModalOpen, setPage, imageUsage } = useApp();
-
-  if (credits === null) return null; // loading
-
-  const limit     = PLAN_LIMITS[plan] || 50;
-  const imgCount  = imageUsage.used;
-  const imgLimit  = imageUsage.limit;
-  const resetsOn  = imageUsage.resetsOn; // e.g. "April 1" or null
-  const pct       = Math.max(0, Math.min(100, (credits / limit) * 100));
-  const low       = pct < 20;
-  const mid       = pct >= 20 && pct < 50;
-
-  const barColor  = low ? 'bg-red-500'   : mid ? 'bg-amber-400' : 'bg-emerald-400';
-  const textColor = low ? 'text-red-400' : mid ? 'text-amber-400' : 'text-emerald-400';
-
-  const imgAtLimit  = imgCount >= imgLimit;
-  const imgNearEnd  = !imgAtLimit && imgCount >= imgLimit - 1;
-
-  const handleClick = () => {
-    if (!isSubscribed) {
-      setPage('pricing');
-    } else {
-      setPurchaseModalOpen(true);
-    }
-  };
+  if (!apiKeyVerified) {
+    return (
+      <button
+        onClick={() => setPage('settings')}
+        title="Add your API key to start"
+        className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-amber-500/40 transition-all group"
+      >
+        <KeyRound className="w-3 h-3 text-amber-400 flex-shrink-0" />
+        <span className="text-[11px] text-slate-400 group-hover:text-amber-300 transition-colors">Add API Key</span>
+      </button>
+    );
+  }
 
   return (
-    <button
-      onClick={handleClick}
-      title={`${credits} credits remaining${!isSubscribed ? ' — click to upgrade' : ' — click to top up'}`}
-      className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] transition-all group"
+    <div
+      title="Subscribed & API key verified — ready to execute"
+      className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.04] border border-white/[0.06]"
     >
-      <Zap className={`w-3 h-3 flex-shrink-0 ${textColor}`} />
-      <div className="flex flex-col items-start">
-        <span className={`text-[11px] font-bold leading-none ${textColor}`}>
-          {credits.toLocaleString()}
-          <span className="text-slate-600 font-normal"> / {limit.toLocaleString()}</span>
-        </span>
-        {/* Mini bar */}
-        <div className="w-16 h-0.5 bg-white/10 rounded-full mt-1 overflow-hidden">
-          <div
-            className={`h-full rounded-full transition-all ${barColor}`}
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-        {/* Image usage */}
-        {imgAtLimit ? (
-          <span className="text-[9px] font-semibold text-red-400 leading-none mt-0.5">
-            {imgCount} / {imgLimit} images used — limit reached
-          </span>
-        ) : imgNearEnd ? (
-          <span className="text-[9px] font-semibold text-amber-400 leading-none mt-0.5">
-            {imgCount} / {imgLimit} images used — last one!
-          </span>
-        ) : (
-          <span className="text-[9px] text-slate-600 leading-none mt-0.5">
-            {imgCount} / {imgLimit} images used
-          </span>
-        )}
-        {/* Reset indicator */}
-        {isSubscribed && resetsOn ? (
-          <span className="text-[8px] text-slate-700 leading-none mt-0.5">
-            Resets on {resetsOn}
-          </span>
-        ) : !isSubscribed ? (
-          <span className="text-[8px] text-slate-700 leading-none mt-0.5 group-hover:text-violet-400/60 transition-colors">
-            {imgAtLimit ? 'Upgrade for more' : 'No reset — upgrade anytime'}
-          </span>
-        ) : null}
-      </div>
-      {!isSubscribed ? (
-        <TrendingUp className="w-3 h-3 text-slate-600 group-hover:text-violet-400 transition-colors" />
-      ) : (
-        <Plus className="w-3 h-3 text-slate-600 group-hover:text-cyan-400 transition-colors" />
-      )}
-    </button>
+      <CheckCircle2 className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+      <span className="text-[11px] text-emerald-400">Active</span>
+    </div>
   );
 }
 
@@ -309,9 +266,9 @@ function TopBar() {
 
       <div className="flex-1" />
 
-      {/* Credits chip */}
+      {/* Subscription status chip */}
       <div className="mr-3">
-        <CreditChip />
+        <StatusChip />
       </div>
 
       {/* Profile button */}

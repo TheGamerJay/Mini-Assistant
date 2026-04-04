@@ -117,49 +117,58 @@ async def get_current_user(authorization: str = Header(None)) -> dict:
 
 
 def _public_user(user: dict) -> dict:
-    # Use new-schema credits (subscription_credits + topup_credits) when present.
-    # Falls back to legacy single `credits` field for old accounts.
-    sub_c = user.get("subscription_credits")
-    if sub_c is not None:
-        effective_credits = max(0, sub_c) + max(0, user.get("topup_credits", 0))
-    else:
-        effective_credits = max(0, user.get("credits", 0))
+    """Safe public projection of a user document. No credits, no raw keys."""
     return {
-        "id": user["id"],
-        "name": user["name"],
-        "email": user["email"],
-        "role": user.get("role", "user"),
-        "avatar": user.get("avatar"),
-        "credits": effective_credits,
-        "plan": user.get("plan", "free"),
-        "has_ad_mode": user.get("has_ad_mode", False),
-        "referral_code": user.get("referral_code"),
+        "id":                    user["id"],
+        "name":                  user["name"],
+        "email":                 user["email"],
+        "role":                  user.get("role", "user"),
+        "avatar":                user.get("avatar"),
+        # BYOK + subscription model fields
+        "is_subscribed":         bool(user.get("is_subscribed", False)),
+        "subscription_interval": user.get("subscription_interval"),
+        "subscription_end":      user.get("subscription_end"),
+        "api_key_hint":          user.get("api_key_hint"),
+        "api_key_verified":      bool(user.get("api_key_verified", False)),
+        "api_key_provider":      user.get("api_key_provider"),
+        "can_execute":           bool(user.get("is_subscribed", False) and user.get("api_key_verified", False))
+                                 or user.get("role") == "admin",
+        # Referral (preserved — time-based rewards in Phase 5)
+        "referral_code":         user.get("referral_code"),
         "referrals_rewarded_count": user.get("referrals_rewarded_count", 0),
-        # True for existing users (backward compat) and Google OAuth users
-        "email_verified": user.get("email_verified", True),
+        "referrer_days_total":   user.get("referrer_days_total", 0),
+        "email_verified":        user.get("email_verified", True),
+        # Legacy plan field — kept for admin tooling; 'paid' for any active subscriber
+        "plan": "paid" if user.get("is_subscribed") else "free",
     }
 
 
-# Referral constants
-REFERRAL_SIGNUP_BONUS   = 5    # credits given to new user on signup with referral
-REFERRAL_SUB_BONUS      = 50   # credits given to both parties on subscription
-REFERRAL_MAX_REWARDS    = 3    # default max (free/standard plans)
+# Referral constants (time-based model — Phase 5 implements the reward logic)
+REFERRAL_DAYS_REFERRER  = 5    # days added to referrer's subscription on successful referral
+REFERRAL_DAYS_REFERRED  = 2    # days added to referred user's NEXT billing cycle
+REFERRAL_MAX_REWARD_DAYS = 15  # total cap: referrer earns max 15 days (3 referrals × 5 days)
+REFERRAL_MAX_REWARDS    = 3    # max rewarded referrals (15 days / 5 days each)
 
-# Plan-based referral caps — must match stripe_handler.py
+# Kept for legacy referral info endpoint — all plans now get same cap
 REFERRAL_MAX_REWARDS_BY_PLAN: dict[str, int] = {
-    "free":     3,
+    "free":  3,
+    "paid":  3,
+    # Legacy plan names — kept so old records still resolve correctly
     "standard": 3,
-    "pro":      6,
-    "max":      10,
+    "pro":      3,
+    "max":      3,
 }
+
+# Credit bonuses removed — no credit system
+REFERRAL_SIGNUP_BONUS = 0
+REFERRAL_SUB_BONUS    = 0
 
 # ---------------------------------------------------------------------------
 # Anti-abuse constants
 # ---------------------------------------------------------------------------
 
-SIGNUP_CREDITS      = 5     # credits granted AFTER email verification (down from 10)
-VERIFY_TOKEN_EXPIRY = 86400 # 24 hours in seconds
-FREE_CREDIT_TTL     = 7 * 86400  # free credits expire after 7 days
+VERIFY_TOKEN_EXPIRY = 86400      # 24 hours in seconds
+# Credit constants removed — no credit system
 
 # In-memory IP-based signup rate limiter  {ip: [timestamps]}
 _signup_attempts: dict = collections.defaultdict(list)
@@ -230,14 +239,6 @@ def _gen_verify_token() -> str:
     return secrets.token_hex(24)
 
 
-def _expire_free_credits_if_needed(user: dict) -> int:
-    """Return the effective credit balance, zeroing out expired free credits."""
-    if user.get("plan", "free") != "free":
-        return user.get("credits", 0)
-    expire_at = user.get("free_credits_expire_at")
-    if expire_at and expire_at < time.time() and user.get("credits", 0) > 0:
-        return -1  # signal: should zero out in DB
-    return user.get("credits", 0)
 
 
 def _gen_referral_code() -> str:
@@ -315,6 +316,10 @@ class ResendVerifyBody(BaseModel):
     pass  # auth header carries the identity
 
 
+class SaveApiKeyBody(BaseModel):
+    key: str
+
+
 # ---------------------------------------------------------------------------
 # Auth router  (/api/auth/*)
 # ---------------------------------------------------------------------------
@@ -346,7 +351,7 @@ async def register(body: RegisterBody, request: Request):
     if body.security_question and body.security_answer:
         sec_answer_hash = _hash_password(body.security_answer.strip().lower())
 
-    # ── Phase 5: Validate referral code + IP self-referral check ───────────
+    # Validate referral code + IP self-referral check
     referrer = None
     referred_by_code = (body.referral_code or "").strip().upper() or None
     if referred_by_code:
@@ -358,10 +363,6 @@ async def register(body: RegisterBody, request: Request):
             log.info("referral.blocked: same-IP self-referral from %s", client_ip)
             referred_by_code = None
             referrer = None
-
-    # ── Phase 1: Credits start at 0 — granted after email verification ─────
-    # ── Phase 2: Signup credits reduced to SIGNUP_CREDITS (5) ─────────────
-    pending_credits = SIGNUP_CREDITS + (REFERRAL_SIGNUP_BONUS if referred_by_code else 0)
 
     # Generate email verification token
     verify_token = _gen_verify_token()
@@ -375,21 +376,38 @@ async def register(body: RegisterBody, request: Request):
         "security_question": body.security_question or None,
         "security_answer_hash": sec_answer_hash,
         "avatar": None,
-        "credits": 0,                   # Phase 1: no credits until email verified
-        "pending_credits": pending_credits,  # granted on verification
-        "plan": "free",
-        "created_at": time.time(),
-        "signup_ip": client_ip,
-        "referral_code": _gen_referral_code(),
-        "referred_by": referred_by_code,
-        "referral_reward_given": False,
-        "referrals_rewarded_count": 0,
+        # BYOK + subscription fields (defaults — set after payment + key add)
+        "is_subscribed":         False,
+        "subscription_interval": None,
+        "subscription_end":      None,
+        "api_key_enc":           None,
+        "api_key_hint":          None,
+        "api_key_provider":      None,
+        "api_key_verified":      False,
+        "api_key_added_at":      None,
+        # Referral tracking (time-based rewards applied in Phase 5)
+        "referral_code":              _gen_referral_code(),
+        "referred_by":                referred_by_code,
+        "referral_reward_given":      False,
+        "referrals_rewarded_count":   0,
+        "referrer_days_total":        0,
+        "bonus_days_next_cycle":      0,
+        # Chargeback defense
+        "created_at":    time.time(),
+        "signup_ip":     client_ip,
+        "first_login_at":       None,
+        "first_execution_at":   None,
         # Email verification
-        "email_verified": False,
-        "email_verify_token": verify_token,
+        "email_verified":      False,
+        "email_verify_token":  verify_token,
         "email_verify_expires": time.time() + VERIFY_TOKEN_EXPIRY,
-        # Phase 4: credit expiry (set when verification completes)
-        "free_credits_expire_at": None,
+        # Stripe (populated by webhook)
+        "stripe_customer_id":    None,
+        "stripe_subscription_id": None,
+        "payment_failure_count": 0,
+        "last_payment_succeeded_at": None,
+        # Legacy credit fields — preserved as null for history queries
+        "plan": "free",
     }
     await db["users"].insert_one(user_doc)
 
@@ -439,7 +457,7 @@ async def login(body: LoginBody):
 
 @auth_router.post("/verify-email")
 async def verify_email(body: VerifyEmailBody):
-    """Verify email using the token from the verification link. Grants signup credits."""
+    """Verify email using the token from the verification link."""
     db = _get_db()
     user = await db["users"].find_one({"email_verify_token": body.token})
     if not user:
@@ -454,21 +472,15 @@ async def verify_email(body: VerifyEmailBody):
             detail="Verification link has expired. Please request a new one.",
         )
 
-    pending = user.get("pending_credits", SIGNUP_CREDITS)
-    now = time.time()
     await db["users"].update_one(
         {"id": user["id"]},
         {"$set": {
             "email_verified": True,
-            "credits": pending,
-            "pending_credits": 0,
             "email_verify_token": None,
             "email_verify_expires": None,
-            "free_credits_expire_at": now + FREE_CREDIT_TTL,  # Phase 4: 7-day expiry
         }},
     )
     user["email_verified"] = True
-    user["credits"] = pending
 
     # Send welcome email now that verification is confirmed
     try:
@@ -482,7 +494,7 @@ async def verify_email(body: VerifyEmailBody):
         log.warning("Welcome email failed (non-fatal): %s", _e)
 
     token = _make_token(user)
-    return {"token": token, "user": _public_user(user), "message": "Email verified! Credits granted."}
+    return {"token": token, "user": _public_user(user), "message": "Email verified!"}
 
 
 @auth_router.post("/resend-verification")
@@ -573,26 +585,44 @@ async def google_login(body: GoogleAuthBody):
         role = "admin" if count == 0 else "user"
         now = time.time()
         user = {
-            "id": str(uuid.uuid4()),
-            "email": google_email,
-            "name": google_name,
+            "id":           str(uuid.uuid4()),
+            "email":        google_email,
+            "name":         google_name,
             "password_hash": None,
-            "google_sub": google_sub,
-            "role": role,
-            "avatar": google_pic,
-            "credits": SIGNUP_CREDITS,   # Phase 2: reduced signup credits
-            "pending_credits": 0,
-            "plan": "free",
-            "created_at": now,
-            "signup_ip": None,
-            "referral_code": _gen_referral_code(),
-            "referred_by": None,
-            "referral_reward_given": False,
+            "google_sub":   google_sub,
+            "role":         role,
+            "avatar":       google_pic,
+            # BYOK + subscription fields
+            "is_subscribed":         False,
+            "subscription_interval": None,
+            "subscription_end":      None,
+            "api_key_enc":           None,
+            "api_key_hint":          None,
+            "api_key_provider":      None,
+            "api_key_verified":      False,
+            "api_key_added_at":      None,
+            # Referral
+            "referral_code":            _gen_referral_code(),
+            "referred_by":              None,
+            "referral_reward_given":    False,
             "referrals_rewarded_count": 0,
-            "email_verified": True,      # Google already verified the email
-            "email_verify_token": None,
+            "referrer_days_total":      0,
+            "bonus_days_next_cycle":    0,
+            # Chargeback defense
+            "created_at":         now,
+            "signup_ip":          None,
+            "first_login_at":     None,
+            "first_execution_at": None,
+            # Email (Google already verified)
+            "email_verified":      True,
+            "email_verify_token":  None,
             "email_verify_expires": None,
-            "free_credits_expire_at": now + FREE_CREDIT_TTL,  # Phase 4: 7-day expiry
+            # Stripe
+            "stripe_customer_id":        None,
+            "stripe_subscription_id":    None,
+            "payment_failure_count":     0,
+            "last_payment_succeeded_at": None,
+            "plan": "free",
         }
         await db["users"].insert_one(user)
 
@@ -614,61 +644,112 @@ async def google_login(body: GoogleAuthBody):
 @auth_router.get("/me")
 async def me(authorization: str = Header(None)):
     user = await get_current_user(authorization)
-    db = _get_db()
-    updates: dict = {}
-    # Backfill starter credits for pre-existing accounts
-    if "credits" not in user:
-        updates["credits"] = 10
-        updates["plan"] = "free"
-    # Phase 4: zero out expired free credits
-    effective = _expire_free_credits_if_needed(user)
-    if effective == -1:
-        updates["credits"] = 0
-        user["credits"] = 0
-    if updates:
-        await db["users"].update_one({"id": user["id"]}, {"$set": updates})
-        user.update(updates)
     return _public_user(user)
 
 
-@auth_router.get("/credits")
-async def get_credits(authorization: str = Header(None)):
-    """Return current credit balance and plan for the authenticated user."""
+@auth_router.get("/subscription-status")
+async def subscription_status(authorization: str = Header(None)):
+    """Return subscription + API key status for the authenticated user."""
     user = await get_current_user(authorization)
-    db = _get_db()
-    updates: dict = {}
-    # Backfill: existing users have no 'credits' field
-    if "credits" not in user:
-        updates["credits"] = 10
-        updates["plan"] = "free"
-    # Phase 4: zero out expired free credits
-    effective = _expire_free_credits_if_needed(user)
-    if effective == -1:
-        updates["credits"] = 0
-    if updates:
-        await db["users"].update_one({"id": user["id"]}, {"$set": updates})
-        user.update(updates)
-
-    # Include image usage so the frontend can enforce limits without a separate call
-    from mini_credits import check_image_limit as _img_limit  # noqa: PLC0415
-    _img_ok, _img_used, _img_limit_val, _img_resets_on = await _img_limit(authorization, db)
-
-    # Use subscription_credits + topup_credits if present (new schema),
-    # otherwise fall back to legacy credits field.
-    sub_c = user.get("subscription_credits")
-    if sub_c is not None:
-        effective_credits = max(0, sub_c) + max(0, user.get("topup_credits", 0))
-    else:
-        effective_credits = max(0, user.get("credits", 0))
-
+    is_subscribed    = bool(user.get("is_subscribed", False))
+    api_key_verified = bool(user.get("api_key_verified", False))
     return {
-        "credits":          effective_credits,
-        "plan":             user.get("plan", "free"),
-        "has_ad_mode":      bool(user.get("has_ad_mode", False)),
-        "images_used":      _img_used,
-        "images_limit":     _img_limit_val,
-        "images_resets_on": _img_resets_on,
+        "is_subscribed":         is_subscribed,
+        "subscription_interval": user.get("subscription_interval"),
+        "subscription_end":      user.get("subscription_end"),
+        "api_key_hint":          user.get("api_key_hint"),
+        "api_key_verified":      api_key_verified,
+        "api_key_provider":      user.get("api_key_provider"),
+        "can_execute":           (is_subscribed and api_key_verified)
+                                 or user.get("role") == "admin",
+        "plan": "paid" if is_subscribed else "free",
     }
+
+
+@auth_router.post("/api-key")
+async def save_api_key(body: SaveApiKeyBody, authorization: str = Header(None)):
+    """Encrypt and store the user's API key. Does NOT verify it — call /api-key/test for that."""
+    from api_key_manager import (  # noqa: PLC0415
+        encrypt_key, make_hint, detect_provider, validate_key_format,
+    )
+    user = await get_current_user(authorization)
+    db   = _get_db()
+
+    raw_key = body.key.strip()
+    valid, err = validate_key_format(raw_key)
+    if not valid:
+        raise HTTPException(status_code=400, detail=err)
+
+    enc      = encrypt_key(raw_key)
+    hint     = make_hint(raw_key)
+    provider = detect_provider(raw_key).value
+
+    await db["users"].update_one(
+        {"id": user["id"]},
+        {"$set": {
+            "api_key_enc":      enc,
+            "api_key_hint":     hint,
+            "api_key_provider": provider,
+            "api_key_verified": False,          # must test to verify
+            "api_key_added_at": time.time(),
+        }},
+    )
+    return {"ok": True, "hint": hint, "provider": provider}
+
+
+@auth_router.get("/api-key")
+async def get_api_key_status(authorization: str = Header(None)):
+    """Return the API key hint and verification status. Never returns the raw key."""
+    user = await get_current_user(authorization)
+    return {
+        "api_key_hint":     user.get("api_key_hint"),
+        "api_key_verified": bool(user.get("api_key_verified", False)),
+        "api_key_provider": user.get("api_key_provider"),
+        "api_key_added_at": user.get("api_key_added_at"),
+    }
+
+
+@auth_router.post("/api-key/test")
+async def test_api_key(authorization: str = Header(None)):
+    """Test the stored encrypted API key against the provider. Sets api_key_verified on success."""
+    from api_key_manager import decrypt_key, test_key  # noqa: PLC0415
+    user = await get_current_user(authorization)
+    db   = _get_db()
+
+    enc = user.get("api_key_enc")
+    if not enc:
+        raise HTTPException(status_code=400, detail="No API key saved. Add one first.")
+
+    try:
+        raw_key = decrypt_key(enc)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Key decryption failed — please re-add your key.")
+
+    ok, message = await test_key(raw_key)
+    if ok:
+        await db["users"].update_one(
+            {"id": user["id"]},
+            {"$set": {"api_key_verified": True}},
+        )
+    return {"ok": ok, "message": message}
+
+
+@auth_router.delete("/api-key")
+async def remove_api_key(authorization: str = Header(None)):
+    """Remove the stored API key and revoke verified status."""
+    user = await get_current_user(authorization)
+    db   = _get_db()
+    await db["users"].update_one(
+        {"id": user["id"]},
+        {"$set": {
+            "api_key_enc":      None,
+            "api_key_hint":     None,
+            "api_key_provider": None,
+            "api_key_verified": False,
+            "api_key_added_at": None,
+        }},
+    )
+    return {"ok": True}
 
 
 @auth_router.patch("/profile")
@@ -728,15 +809,16 @@ async def get_referral_info(authorization: str = Header(None)):
     })
 
     return {
-        "referral_code": code,
+        "referral_code":            code,
         "referrals_rewarded_count": completed,
-        "referrals_pending_count": pending,
-        "max_rewards": max_rewards,
-        "slots_remaining": max(0, max_rewards - completed),
-        "signup_bonus": REFERRAL_SIGNUP_BONUS,
-        "sub_bonus": REFERRAL_SUB_BONUS,
-        "plan": user_plan,
-        "can_unlock_more": user_plan not in ("max",) and completed >= max_rewards,
+        "referrals_pending_count":  pending,
+        "max_rewards":              max_rewards,
+        "slots_remaining":          max(0, max_rewards - completed),
+        # Time-based reward info (days added to subscription, not credits)
+        "days_per_referral":        REFERRAL_DAYS_REFERRER,
+        "days_total_earned":        user.get("referrer_days_total", 0),
+        "days_cap":                 REFERRAL_MAX_REWARD_DAYS,
+        "plan":                     user_plan,
     }
 
 

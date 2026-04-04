@@ -1,20 +1,18 @@
 """
 stripe_handler.py
-Complete Stripe subscription + top-up credit system for Mini Assistant AI.
+Stripe subscription management for Mini Assistant AI (BYOK model).
 
 Endpoints:
-  POST /api/stripe/create-checkout-session   — subscription or top-up
+  POST /api/stripe/create-checkout-session   — subscription only
   POST /api/stripe/billing-portal            — manage subscription
   POST /api/stripe/webhook                   — Stripe webhook handler
-  GET  /api/stripe/credits/{user_id}         — credit balance breakdown
+  GET  /api/stripe/prices                    — configured price IDs
 
 Security hardening:
-  - Webhook signature verification mandatory in production (no-secret = WARNING)
+  - Webhook signature verification mandatory (no-secret = RuntimeError at startup)
   - Full idempotency via stripe_events collection with compound upsert
-  - Plan state ONLY changes via webhook — no manual plan override via API
-  - Subscription cancellation immediately revokes paid-plan access
-  - Top-up grants are atomic ($inc with floor guarantee)
-  - Credit amounts are always validated against known values before grant
+  - Subscription state ONLY changes via webhook — no manual override via API
+  - Cancellation immediately revokes access (is_subscribed=False)
   - Stripe customer IDs are stored per-user and reused to prevent duplicates
 """
 
@@ -47,13 +45,6 @@ if not STRIPE_WEBHOOK_SECRET:
         "allowing forged Stripe events."
     )
 
-def _price_env(key: str, fallback: str) -> str:
-    """Read a price ID from env; return empty string if it's still the fallback placeholder."""
-    val = os.environ.get(key, fallback)
-    return val if (val and not val.startswith("price_standard") and
-                   not val.startswith("price_pro") and
-                   not val.startswith("price_topup")) else val
-
 def _pid(*env_keys: str) -> str:
     """
     Read a Stripe price ID from the first matching env var.
@@ -67,57 +58,31 @@ def _pid(*env_keys: str) -> str:
     return ""
 
 
-# Map Stripe Price IDs → plan name
-# Checks actual env var names the user set (PRICE_*) then legacy fallbacks
+# ---------------------------------------------------------------------------
+# Price ID registry — all map to is_subscribed=True (BYOK model, no tiers)
+# ---------------------------------------------------------------------------
+
+# Canonical price IDs — single plan, monthly/yearly only
+PRICE_MONTHLY = _pid("PRICE_MONTHLY")
+PRICE_YEARLY  = _pid("PRICE_YEARLY")
+
+# Subscription price → interval label ("month" | "year")
+# Only PRICE_MONTHLY and PRICE_YEARLY are active. Legacy price vars removed.
 SUBSCRIPTION_PRICES: dict[str, str] = {}
-for _pid_val, _plan in [
-    (_pid("PRICE_STANDARD_MONTHLY", "STRIPE_PRICE_STANDARD_MONTHLY"), "standard"),
-    (_pid("PRICE_STANDARD_YEARLY",  "STRIPE_PRICE_STANDARD_YEARLY"),  "standard"),
-    (_pid("PRICE_PRO_MONTHLY",      "STRIPE_PRICE_PRO_MONTHLY"),       "pro"),
-    (_pid("PRICE_PRO_YEARLY",       "STRIPE_PRICE_PRO_YEARLY"),        "pro"),
-    # "max" plan — highest tier (env var: PRICE_MAX_*)
-    (_pid("PRICE_MAX_MONTHLY",      "STRIPE_PRICE_MAX_MONTHLY"),       "max"),
-    (_pid("PRICE_MAX_YEARLY",       "STRIPE_PRICE_MAX_YEARLY"),        "max"),
+for _pid_val, _interval in [
+    (PRICE_MONTHLY, "month"),
+    (PRICE_YEARLY,  "year"),
 ]:
     if _pid_val:
-        SUBSCRIPTION_PRICES[_pid_val] = _plan
+        SUBSCRIPTION_PRICES[_pid_val] = _interval
 
-# Map Stripe Price IDs → top-up credit amounts
-# PRICE_TOPUP_10 = $10 purchase → 100 credits
-# PRICE_TOPUP_25 = $25 purchase → 300 credits
-# PRICE_TOPUP_50 = $50 purchase → 800 credits
-_SAFE_TOPUP_AMOUNTS: set[int] = {100, 300, 800}   # credit amounts (not dollar amounts)
-TOPUP_PRICES: dict[str, int] = {}
-for _pid_val, _credits in [
-    (_pid("PRICE_TOPUP_10",  "STRIPE_PRICE_TOPUP_10"),  100),
-    (_pid("PRICE_TOPUP_25",  "STRIPE_PRICE_TOPUP_25"),  300),
-    (_pid("PRICE_TOPUP_50",  "STRIPE_PRICE_TOPUP_50"),  800),
-    # Legacy higher amounts
-    (_pid("PRICE_TOPUP_100", "STRIPE_PRICE_TOPUP_100"), 100),
-    (_pid("PRICE_TOPUP_300", "STRIPE_PRICE_TOPUP_300"), 300),
-    (_pid("PRICE_TOPUP_800", "STRIPE_PRICE_TOPUP_800"), 800),
-]:
-    if _pid_val and _credits in _SAFE_TOPUP_AMOUNTS:
-        TOPUP_PRICES[_pid_val] = _credits
-
-# Ad Mode add-on price IDs (independent of plan)
+# Ad Mode add-on price IDs (independent of main subscription)
 _AD_MODE_MONTHLY_ID = _pid("STRIPE_AD_MODE_MONTHLY")
 _AD_MODE_YEARLY_ID  = _pid("STRIPE_AD_MODE_YEARLY")
 AD_MODE_PRICES: frozenset[str] = frozenset(
     p for p in [_AD_MODE_MONTHLY_ID, _AD_MODE_YEARLY_ID] if p
 )
 log.info("Ad Mode prices loaded: %d", len(AD_MODE_PRICES))
-
-# Subscription credits per plan (per billing cycle)
-PLAN_CREDITS: dict[str, int] = {
-    "free":     50,
-    "standard": 1000,
-    "pro":      4000,
-    "max":      10000,
-}
-
-# Maximum top-up credits a user can accumulate (anti-abuse cap)
-MAX_TOPUP_CREDITS: int = int(os.environ.get("MAX_TOPUP_CREDITS", 10000))
 
 # Strict whitelist of Stripe webhook event types we handle
 _HANDLED_EVENT_TYPES: frozenset[str] = frozenset({
@@ -130,11 +95,7 @@ _HANDLED_EVENT_TYPES: frozenset[str] = frozenset({
     "payment_intent.payment_failed",
 })
 
-# Log configured prices at startup
-log.info(
-    "Stripe prices loaded: subscriptions=%d top-ups=%d",
-    len(SUBSCRIPTION_PRICES), len(TOPUP_PRICES),
-)
+log.info("Stripe prices loaded: subscriptions=%d", len(SUBSCRIPTION_PRICES))
 
 # ---------------------------------------------------------------------------
 # Router
@@ -248,66 +209,22 @@ async def create_checkout_session(
 
     price_id = body.price_id
 
-    # Determine mode
-    is_subscription = price_id in SUBSCRIPTION_PRICES
-    is_topup        = price_id in TOPUP_PRICES
-
-    if not is_subscription and not is_topup:
+    if price_id not in SUBSCRIPTION_PRICES:
         raise HTTPException(400, "Unknown price_id")
-
-    # Top-ups are subscribers-only — block free-plan users at the API level
-    if is_topup and user.get("plan", "free") == "free":
-        log.warning("checkout.topup: blocked user=%s — free plan cannot purchase top-ups", uid)
-        raise HTTPException(403, "Credit top-ups are only available to subscribed users (Standard, Pro, or Max).")
-
-    # Block top-up if user still has credits remaining — must be fully depleted first
-    if is_topup:
-        sub_credits   = max(0, user.get("subscription_credits", 0))
-        topup_credits = max(0, user.get("topup_credits", 0))
-        total_credits = sub_credits + topup_credits
-        if total_credits > 0:
-            log.warning(
-                "checkout.topup: blocked user=%s plan=%s — %d credits still remaining",
-                uid, user.get("plan", "free"), total_credits,
-            )
-            raise HTTPException(
-                403,
-                f"You still have {total_credits} credits remaining. "
-                "Top-ups are only available once your credits are fully used.",
-            )
 
     try:
         customer_id = await _get_or_create_stripe_customer(db, user)
 
-        common_kwargs = {
-            "customer": customer_id,
-            "line_items": [{"price": price_id, "quantity": 1}],
-            "success_url": f"{FRONTEND_URL}?checkout=success&session_id={{CHECKOUT_SESSION_ID}}",
-            "cancel_url":  f"{FRONTEND_URL}?checkout=cancelled",
-            "metadata": {
-                "user_id":  uid,
-                "price_id": price_id,
-            },
-            "allow_promotion_codes": True,
-        }
-
-        if is_subscription:
-            session = stripe.checkout.Session.create(
-                mode="subscription",
-                subscription_data={
-                    "metadata": {"user_id": uid},
-                },
-                **common_kwargs,
-            )
-        else:
-            session = stripe.checkout.Session.create(
-                mode="payment",
-                payment_intent_data={
-                    "metadata": {"user_id": uid, "price_id": price_id},
-                },
-                **common_kwargs,
-            )
-
+        session = stripe.checkout.Session.create(
+            mode="subscription",
+            customer=customer_id,
+            line_items=[{"price": price_id, "quantity": 1}],
+            subscription_data={"metadata": {"user_id": uid}},
+            success_url=f"{FRONTEND_URL}/onboarding/api-key?checkout=success&session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{FRONTEND_URL}?checkout=cancelled",
+            metadata={"user_id": uid, "price_id": price_id},
+            allow_promotion_codes=True,
+        )
         return {"checkout_url": session.url, "session_id": session.id}
 
     except stripe.error.StripeError as exc:
@@ -354,66 +271,10 @@ async def billing_portal(
 
 @stripe_router.get("/prices")
 async def get_prices():
-    """Return all configured Stripe price IDs for the frontend."""
+    """Return configured Stripe price IDs for the frontend."""
     return {
-        "standard": {
-            "monthly": _pid("PRICE_STANDARD_MONTHLY", "STRIPE_PRICE_STANDARD_MONTHLY"),
-            "yearly":  _pid("PRICE_STANDARD_YEARLY",  "STRIPE_PRICE_STANDARD_YEARLY"),
-        },
-        "pro": {
-            "monthly": _pid("PRICE_PRO_MONTHLY", "STRIPE_PRICE_PRO_MONTHLY"),
-            "yearly":  _pid("PRICE_PRO_YEARLY",  "STRIPE_PRICE_PRO_YEARLY"),
-        },
-        "max": {
-            "monthly": _pid("PRICE_MAX_MONTHLY", "STRIPE_PRICE_MAX_MONTHLY"),
-            "yearly":  _pid("PRICE_MAX_YEARLY",  "STRIPE_PRICE_MAX_YEARLY"),
-        },
-        "topup": {
-            "t10": _pid("PRICE_TOPUP_10", "STRIPE_PRICE_TOPUP_10"),
-            "t25": _pid("PRICE_TOPUP_25", "STRIPE_PRICE_TOPUP_25"),
-            "t50": _pid("PRICE_TOPUP_50", "STRIPE_PRICE_TOPUP_50"),
-        },
-    }
-
-
-@stripe_router.get("/credits/{user_id}")
-async def get_credits(user_id: str, authorization: str = Header(None)):
-    """Return full credit breakdown for a user."""
-    payload = _decode_bearer(authorization)
-    if not payload:
-        raise HTTPException(401, "Authentication required")
-    # Users can only see their own; admins see any
-    requester_uid = payload["sub"]
-
-    db = await _get_db()
-    if db is None:
-        raise HTTPException(503, "Database unavailable")
-
-    requester = await _get_user_by_id(db, requester_uid)
-    if not requester:
-        raise HTTPException(404, "Requester not found")
-
-    is_admin = requester.get("role") == "admin"
-    if requester_uid != user_id and not is_admin:
-        raise HTTPException(403, "Forbidden")
-
-    user = await _get_user_by_id(db, user_id)
-    if not user:
-        raise HTTPException(404, "User not found")
-
-    plan = user.get("plan", "free")
-    sub_credits   = user.get("subscription_credits", PLAN_CREDITS.get(plan, 50))
-    topup_credits = user.get("topup_credits", 0)
-
-    return {
-        "user_id":              user_id,
-        "plan":                 plan,
-        "subscription_credits": sub_credits,
-        "topup_credits":        topup_credits,
-        "total_credits":        sub_credits + topup_credits,
-        "plan_limit":           PLAN_CREDITS.get(plan, 50),
-        "billing_cycle_start":  user.get("billing_cycle_start"),
-        "stripe_customer_id":   user.get("stripe_customer_id") if is_admin else None,
+        "monthly": PRICE_MONTHLY or None,
+        "yearly":  PRICE_YEARLY  or None,
     }
 
 
@@ -522,19 +383,10 @@ async def stripe_webhook(request: Request):
 
 # ---------------------------------------------------------------------------
 # Referral reward constants (must match auth_routes.py)
-REFERRAL_SUB_BONUS   = 50   # credits awarded to both parties on first subscription
-REFERRAL_MAX_REWARDS = 3    # default max (free/standard plans)
-
-# Plan-based referral caps — higher plans unlock more referral slots
-REFERRAL_MAX_REWARDS_BY_PLAN: dict[str, int] = {
-    "free":     3,
-    "standard": 3,
-    "pro":      6,
-    "max":      10,
-}
-
-def _referral_max_for_plan(plan: str) -> int:
-    return REFERRAL_MAX_REWARDS_BY_PLAN.get(plan, REFERRAL_MAX_REWARDS)
+REFERRAL_DAYS_REFERRER  = 5    # subscription days added to referrer per reward
+REFERRAL_DAYS_REFERRED  = 2    # days added to referred user's next billing cycle
+REFERRAL_MAX_REWARDS    = 3    # max rewarded referrals
+REFERRAL_MAX_REWARD_DAYS = 15  # referrer cap: 3 × 5 days
 
 
 async def _process_referral_reward(db, subscribed_user: dict) -> None:
@@ -543,106 +395,85 @@ async def _process_referral_reward(db, subscribed_user: dict) -> None:
     - Finds the referrer via referred_by code
     - Checks cap (referrals_rewarded_count < REFERRAL_MAX_REWARDS)
     - Ensures this referred user hasn't already triggered a reward
-    - Awards +50 credits to both parties atomically
+    - Awards days to referrer (subscription_end += days) and queues days for referred user
     """
     referred_by_code = subscribed_user.get("referred_by")
     if not referred_by_code:
-        return  # user wasn't referred
+        return
 
     if subscribed_user.get("referral_reward_given"):
-        return  # reward already given for this user
+        return
 
     referred_user_id = subscribed_user["id"]
 
-    # Find referrer
     referrer = await db["users"].find_one({"referral_code": referred_by_code})
     if not referrer:
         return
 
     referrer_id = referrer["id"]
 
-    # Anti-abuse: block self-referral (shouldn't happen but be safe)
     if referrer_id == referred_user_id:
         log.warning("referral.reward: self-referral blocked user=%s", referred_user_id)
         return
 
-    # Check plan-based cap
-    referrer_plan  = referrer.get("plan", "free")
-    max_rewards    = _referral_max_for_plan(referrer_plan)
     rewarded_count = referrer.get("referrals_rewarded_count", 0)
-    if rewarded_count >= max_rewards:
-        log.info("referral.reward: referrer=%s plan=%s hit cap (%d), no reward", referrer_id, referrer_plan, max_rewards)
+    if rewarded_count >= REFERRAL_MAX_REWARDS:
+        log.info("referral.reward: referrer=%s hit cap (%d), no reward", referrer_id, REFERRAL_MAX_REWARDS)
         return
 
-    # Mark referred user so they can't trigger another reward
+    # Atomic mark — prevent double reward
     res = await db["users"].update_one(
         {"id": referred_user_id, "referral_reward_given": {"$ne": True}},
         {"$set": {"referral_reward_given": True}},
     )
     if res.modified_count == 0:
-        return  # race condition — another webhook already processed this
+        return  # race — already processed
 
-    # Award referrer (capped increment)
+    # Extend referrer's subscription_end by REFERRAL_DAYS_REFERRER
+    referrer_end = referrer.get("subscription_end") or time.time()
+    new_end = referrer_end + REFERRAL_DAYS_REFERRER * 86400
     await db["users"].update_one(
         {"id": referrer_id},
         {
+            "$set": {"subscription_end": new_end},
             "$inc": {
-                "subscription_credits": REFERRAL_SUB_BONUS,
                 "referrals_rewarded_count": 1,
-            }
+                "referrer_days_total":      REFERRAL_DAYS_REFERRER,
+            },
         },
     )
 
-    # Award referred user
+    # Queue days for referred user — applied on their next invoice.paid
     await db["users"].update_one(
         {"id": referred_user_id},
-        {"$inc": {"subscription_credits": REFERRAL_SUB_BONUS}},
+        {"$inc": {"bonus_days_next_cycle": REFERRAL_DAYS_REFERRED}},
     )
 
     log.info(
-        "referral.reward: referrer=%s plan=%s referred=%s +%d credits each (referrer total=%d/%d)",
-        referrer_id, referrer_plan, referred_user_id, REFERRAL_SUB_BONUS, rewarded_count + 1, max_rewards,
+        "referral.reward: referrer=%s +%d days (total=%d/%d) referred=%s +%d days next cycle",
+        referrer_id, REFERRAL_DAYS_REFERRER, rewarded_count + 1, REFERRAL_MAX_REWARDS,
+        referred_user_id, REFERRAL_DAYS_REFERRED,
     )
 
-    # Log activity for both users
     now_ts = time.time()
     await db["activity_logs"].insert_many([
         {
-            "user_id": referrer_id,
-            "type": "referral_reward",
-            "action_type": "referral_reward",
-            "credits_used": -REFERRAL_SUB_BONUS,
+            "user_id":          referrer_id,
+            "type":             "referral_reward",
+            "action_type":      "referral_reward",
             "referred_user_id": referred_user_id,
-            "timestamp": now_ts,
+            "days_added":       REFERRAL_DAYS_REFERRER,
+            "timestamp":        now_ts,
         },
         {
-            "user_id": referred_user_id,
-            "type": "referral_reward",
-            "action_type": "referral_reward",
-            "credits_used": -REFERRAL_SUB_BONUS,
-            "referrer_id": referrer_id,
-            "timestamp": now_ts,
+            "user_id":      referred_user_id,
+            "type":         "referral_reward",
+            "action_type":  "referral_reward",
+            "referrer_id":  referrer_id,
+            "days_queued":  REFERRAL_DAYS_REFERRED,
+            "timestamp":    now_ts,
         },
     ])
-
-    # If referrer just hit their plan cap, send completion celebration email (once only)
-    if rewarded_count + 1 >= max_rewards:
-        try:
-            from email_sender import send_referral_complete_email  # noqa: PLC0415
-            referrer_doc = await db["users"].find_one(
-                {"id": referrer_id}, {"email": 1, "name": 1}
-            )
-            if referrer_doc and referrer_doc.get("email"):
-                await send_referral_complete_email(
-                    to_email=referrer_doc["email"],
-                    to_name=referrer_doc.get("name", "there"),
-                    total_bonus=REFERRAL_SUB_BONUS * REFERRAL_MAX_REWARDS,
-                    max_referrals=REFERRAL_MAX_REWARDS,
-                    user_id=referrer_id,
-                    db=db,
-                )
-        except Exception as _e:
-            log.warning("referral complete email failed (non-fatal): %s", _e)
 
 
 # Webhook event handlers
@@ -650,13 +481,12 @@ async def _process_referral_reward(db, subscribed_user: dict) -> None:
 
 
 async def _handle_checkout_completed(db, session: dict) -> None:
-    """Handle checkout.session.completed — subscription activation or top-up credit grant."""
+    """Handle checkout.session.completed — subscription activation."""
     user_id  = session.get("metadata", {}).get("user_id")
     price_id = session.get("metadata", {}).get("price_id")
-    mode     = session.get("mode")  # "subscription" or "payment"
+    mode     = session.get("mode")
 
     if not user_id:
-        # Try to find user by customer ID
         cid = session.get("customer")
         if cid:
             user = await db["users"].find_one({"stripe_customer_id": cid})
@@ -666,103 +496,16 @@ async def _handle_checkout_completed(db, session: dict) -> None:
         log.warning("checkout.session.completed: could not resolve user_id")
         return
 
-    if mode == "payment" and price_id in TOPUP_PRICES:
-        # One-time top-up — validate credit amount before grant
-        credits_to_add = TOPUP_PRICES[price_id]
-        if credits_to_add not in _SAFE_TOPUP_AMOUNTS:
-            log.error(
-                "Top-up REJECTED: unsafe credit amount %d for price_id=%s user=%s",
-                credits_to_add, price_id, user_id,
-            )
-            return
-
-        # Track revenue for attribution and high-value detection
-        topup_revenue = round((session.get("amount_total") or 0) / 100, 2)
-
-        # Atomic add with cap to prevent accumulating unlimited credits
-        result = await db["users"].update_one(
-            {
-                "id": user_id,
-                # Only grant if current topup_credits < max cap
-                "$expr": {"$lt": [{"$ifNull": ["$topup_credits", 0]}, MAX_TOPUP_CREDITS]},
-            },
-            [{"$set": {
-                "topup_credits": {
-                    "$min": [
-                        MAX_TOPUP_CREDITS,
-                        {"$add": [{"$ifNull": ["$topup_credits", 0]}, credits_to_add]},
-                    ]
-                }
-            }}],
-        )
-        if result.modified_count == 0:
-            log.warning(
-                "Top-up not applied: user %s already at topup cap (%d)",
-                user_id, MAX_TOPUP_CREDITS,
-            )
-        else:
-            log.info(
-                "checkout.topup: user=%s plan=%s +%d topup_credits revenue=%.2f",
-                user_id, user.get("plan", "free"), credits_to_add, topup_revenue,
-            )
-            # Record topup timestamp + accumulate total spend for high-value detection
-            _topup_inc: dict = {"total_spend": topup_revenue}
-            if os.environ.get("LTV_TRACKING_ENABLED", "true").lower() == "true" and topup_revenue > 0:
-                _topup_inc["lifetime_value"] = topup_revenue
-            await db["users"].update_one(
-                {"id": user_id},
-                {
-                    "$set": {"last_topup_at": time.time()},
-                    "$inc": _topup_inc,
-                },
-            )
-
-        await db["activity_logs"].insert_one({
-            "user_id":    user_id,
-            "type":       "topup_purchase",
-            "action_type": "topup_purchase",
-            "credits_used": -credits_to_add,   # negative = credit addition
-            "month_key":  _month_key(),
-            "timestamp":  time.time(),
-            "stripe_session_id": session.get("id"),
-        })
-
-        # Send top-up confirmation email + track conversion
-        try:
-            from email_sender import send_topup_email   # noqa: PLC0415
-            from email_logger import mark_conversion    # noqa: PLC0415
-            user_doc = await db["users"].find_one(
-                {"id": user_id},
-                {"email": 1, "name": 1, "topup_credits": 1, "subscription_credits": 1},
-            )
-            if user_doc and user_doc.get("email"):
-                new_balance = (
-                    max(0, user_doc.get("subscription_credits", 0)) +
-                    max(0, user_doc.get("topup_credits", 0))
-                )
-                await send_topup_email(
-                    to_email=user_doc["email"],
-                    to_name=user_doc.get("name", ""),
-                    credits_added=credits_to_add,
-                    new_balance=new_balance,
-                    user_id=user_id,
-                    db=db,
-                )
-                await mark_conversion(db, user_id, "topup", window_hours=24, revenue=topup_revenue)
-        except Exception as _email_exc:
-            log.warning("Top-up email failed (non-fatal): %s", _email_exc)
-
-    elif mode == "subscription":
+    if mode == "subscription":
         sub_id = session.get("subscription")
         if price_id and price_id in AD_MODE_PRICES:
-            # Ad Mode add-on — independent of main plan
             update: dict = {"has_ad_mode": True}
             if sub_id:
                 update["ad_mode_subscription_id"] = sub_id
             await db["users"].update_one({"id": user_id}, {"$set": update})
             log.info("Ad Mode activated: user=%s sub=%s", user_id, sub_id)
         else:
-            # Main plan subscription — upgrade handled fully by invoice.paid
+            # Main subscription — full state set on invoice.paid
             if sub_id:
                 await db["users"].update_one(
                     {"id": user_id},
@@ -774,7 +517,8 @@ async def _handle_checkout_completed(db, session: dict) -> None:
 async def _handle_invoice_paid(db, invoice: dict) -> None:
     """
     Handle invoice.paid — fires on new subscription and every renewal.
-    Resets subscription_credits to the plan's monthly allotment.
+    Sets is_subscribed=True, syncs subscription_end from Stripe period.
+    Applies any queued bonus_days_next_cycle then resets the field.
     """
     cid    = invoice.get("customer")
     sub_id = invoice.get("subscription")
@@ -788,63 +532,74 @@ async def _handle_invoice_paid(db, invoice: dict) -> None:
         return
 
     user_id = user["id"]
+    interval = "month"  # default; overridden below
 
-    # Determine plan from subscription price
-    plan = user.get("plan", "free")
     if sub_id:
         try:
             sub = stripe.Subscription.retrieve(sub_id)
-            # Check if this invoice is for Ad Mode add-on first
             _sub_items = sub.get("items", {}).get("data", [])
+
+            # Ad Mode renewal — don't touch main subscription
             _is_ad_mode = any(
                 item.get("price", {}).get("id", "") in AD_MODE_PRICES
                 for item in _sub_items
             )
             if _is_ad_mode:
                 await db["users"].update_one(
-                    {"id": user_id},
-                    {"$set": {"has_ad_mode": True}},
+                    {"id": user_id}, {"$set": {"has_ad_mode": True}}
                 )
                 log.info("invoice.paid: Ad Mode renewed for user=%s sub=%s", user_id, sub_id)
-                return   # Don't touch plan credits or billing cycle
+                return
+
+            # Determine interval from price
             for item in _sub_items:
                 pid = item.get("price", {}).get("id", "")
                 if pid in SUBSCRIPTION_PRICES:
-                    plan = SUBSCRIPTION_PRICES[pid]
+                    interval = SUBSCRIPTION_PRICES[pid]
                     break
+
+            # Get Stripe's authoritative period end
+            period_end = sub.get("current_period_end")
         except Exception as exc:
             log.warning("Could not retrieve subscription %s: %s", sub_id, exc)
+            period_end = None
+    else:
+        period_end = None
 
-    plan_credits    = PLAN_CREDITS.get(plan, 50)
-    now             = datetime.now(timezone.utc)
+    # Apply any queued referral bonus days on top of Stripe's period end
+    bonus_days  = user.get("bonus_days_next_cycle", 0)
+    base_end    = period_end or time.time()
+    new_sub_end = base_end + (bonus_days * 86400 if bonus_days > 0 else 0)
+
     invoice_revenue = round((invoice.get("amount_paid") or 0) / 100, 2)
+
+    update_set: dict = {
+        "is_subscribed":              True,
+        "subscription_interval":      interval,
+        "subscription_end":           new_sub_end,
+        "stripe_subscription_id":     sub_id,
+        "payment_failure_count":      0,
+        "last_payment_succeeded_at":  time.time(),
+        "plan":                       "paid",
+    }
+    if bonus_days > 0:
+        update_set["bonus_days_next_cycle"] = 0  # reset after applying
+
+    inc_fields: dict = {
+        "total_spend": invoice_revenue,
+        **({"lifetime_value": invoice_revenue}
+           if os.environ.get("LTV_TRACKING_ENABLED", "true").lower() == "true"
+              and invoice_revenue > 0
+           else {}),
+    }
 
     await db["users"].update_one(
         {"id": user_id},
-        {
-            "$set": {
-                "plan":                  plan,
-                "subscription_credits":  plan_credits,
-                "billing_cycle_start":   now.isoformat(),
-                "stripe_subscription_id": sub_id,
-                # Successful payment — reset failure counter
-                "payment_failure_count":  0,
-                "last_payment_succeeded_at": time.time(),
-            },
-            # Accumulate total spend + lifetime value
-            "$inc": {
-                "total_spend":    invoice_revenue,
-                **( {"lifetime_value": invoice_revenue}
-                    if os.environ.get("LTV_TRACKING_ENABLED", "true").lower() == "true"
-                       and invoice_revenue > 0
-                    else {}
-                ),
-            },
-        },
+        {"$set": update_set, "$inc": inc_fields},
     )
     log.info(
-        "invoice.paid: user=%s plan=%s subscription_credits=%d revenue=%.2f",
-        user_id, plan, plan_credits, invoice_revenue,
+        "invoice.paid: user=%s interval=%s sub_end=%s bonus_days=%d revenue=%.2f",
+        user_id, interval, new_sub_end, bonus_days, invoice_revenue,
     )
 
     # ── Referral rewards (non-fatal) ────────────────────────────────────────
@@ -853,17 +608,17 @@ async def _handle_invoice_paid(db, invoice: dict) -> None:
     except Exception as _ref_exc:
         log.warning("referral reward failed (non-fatal): %s", _ref_exc)
 
-    # Send welcome / renewal email + track conversion (non-fatal)
+    # Send welcome / renewal email (non-fatal)
     try:
         from email_sender import send_welcome_email   # noqa: PLC0415
         from email_logger import mark_conversion      # noqa: PLC0415
         user_doc = await db["users"].find_one({"id": user_id}, {"email": 1, "name": 1})
-        if user_doc and user_doc.get("email") and plan != "free":
+        if user_doc and user_doc.get("email"):
             await send_welcome_email(
                 to_email=user_doc["email"],
                 to_name=user_doc.get("name", ""),
-                plan=plan,
-                credits=plan_credits,
+                plan="paid",
+                credits=0,
                 user_id=user_id,
                 db=db,
             )
@@ -872,26 +627,22 @@ async def _handle_invoice_paid(db, invoice: dict) -> None:
         log.warning("Welcome email failed (non-fatal): %s", _email_exc)
 
     await db["activity_logs"].insert_one({
-        "user_id":    user_id,
-        "type":       "subscription_renewal",
-        "action_type": "subscription_renewal",
-        "credits_used": -plan_credits,   # negative = credit addition
-        "plan":       plan,
-        "month_key":  _month_key(),
-        "timestamp":  time.time(),
+        "user_id":           user_id,
+        "type":              "subscription_renewal",
+        "action_type":       "subscription_renewal",
+        "interval":          interval,
+        "month_key":         _month_key(),
+        "timestamp":         time.time(),
         "stripe_invoice_id": invoice.get("id"),
     })
 
 
 async def _handle_subscription_deleted(db, subscription: dict) -> None:
     """
-    Handle customer.subscription.deleted — immediately downgrade to free.
+    Handle customer.subscription.deleted — immediately revoke access.
 
-    Security: This is the critical access-revocation path. We explicitly:
-    - Set plan to "free"
-    - Reset subscription_credits to free tier limit (50)
-    - Do NOT touch topup_credits (legitimately purchased, non-refundable)
-    - Clear stripe_subscription_id to prevent any subscription-based grants
+    Security: This is the critical access-revocation path. We set
+    is_subscribed=False which blocks all execution via access_gate.can_execute().
     """
     cid = subscription.get("customer")
     if not cid:
@@ -902,9 +653,9 @@ async def _handle_subscription_deleted(db, subscription: dict) -> None:
         log.warning("subscription.deleted: no user found for customer %s", cid)
         return
 
-    user_id  = user["id"]
+    user_id = user["id"]
 
-    # Check if this is the Ad Mode add-on subscription being cancelled
+    # Ad Mode cancellation — don't touch main subscription
     _sub_items = subscription.get("items", {}).get("data", [])
     _is_ad_mode = any(
         item.get("price", {}).get("id", "") in AD_MODE_PRICES
@@ -915,46 +666,38 @@ async def _handle_subscription_deleted(db, subscription: dict) -> None:
             {"stripe_customer_id": cid},
             {"$set": {"has_ad_mode": False, "ad_mode_subscription_id": None}},
         )
-        log.info("Ad Mode cancelled: user=%s (access immediately revoked)", user_id)
+        log.info("Ad Mode cancelled: user=%s", user_id)
         await db["activity_logs"].insert_one({
             "user_id":    user_id,
             "type":       "ad_mode_cancelled",
             "action_type": "ad_mode_cancelled",
-            "credits_used": 0,
             "month_key":  _month_key(),
             "timestamp":  time.time(),
         })
-        return   # Don't touch main plan
-
-    old_plan = user.get("plan", "free")
+        return
 
     await db["users"].update_one(
         {"id": user_id},
         {"$set": {
-            "plan":                   "free",
-            "subscription_credits":   PLAN_CREDITS["free"],
-            "stripe_subscription_id": None,
+            "is_subscribed":            False,
+            "plan":                     "free",
+            "stripe_subscription_id":   None,
             "subscription_cancelled_at": time.time(),
         }},
     )
-    log.info(
-        "Subscription cancelled: user %s %s → free (access immediately revoked)",
-        user_id, old_plan,
-    )
+    log.info("Subscription cancelled: user=%s (access immediately revoked)", user_id)
 
     await db["activity_logs"].insert_one({
         "user_id":    user_id,
         "type":       "subscription_cancelled",
         "action_type": "subscription_cancelled",
-        "credits_used": 0,
-        "plan":       "free",
         "month_key":  _month_key(),
         "timestamp":  time.time(),
     })
 
 
 async def _handle_subscription_updated(db, subscription: dict) -> None:
-    """Handle customer.subscription.updated — plan change mid-cycle."""
+    """Handle customer.subscription.updated — sync interval and status."""
     cid = subscription.get("customer")
     if not cid:
         return
@@ -967,7 +710,7 @@ async def _handle_subscription_updated(db, subscription: dict) -> None:
     sub_items  = subscription.get("items", {}).get("data", [])
     sub_status = subscription.get("status", "")
 
-    # Check if this is an Ad Mode subscription update
+    # Ad Mode subscription update
     _is_ad_mode = any(
         item.get("price", {}).get("id", "") in AD_MODE_PRICES
         for item in sub_items
@@ -975,33 +718,30 @@ async def _handle_subscription_updated(db, subscription: dict) -> None:
     if _is_ad_mode:
         has_ad = sub_status in ("active", "trialing")
         await db["users"].update_one(
-            {"id": user_id},
-            {"$set": {"has_ad_mode": has_ad}},
+            {"id": user_id}, {"$set": {"has_ad_mode": has_ad}}
         )
-        log.info("Ad Mode subscription updated: user=%s status=%s has_ad_mode=%s", user_id, sub_status, has_ad)
-        return   # Don't touch main plan
+        log.info("Ad Mode updated: user=%s status=%s", user_id, sub_status)
+        return
 
-    # Find new plan from price
-    new_plan = user.get("plan", "free")
+    # Sync subscription active state + interval
+    is_active = sub_status in ("active", "trialing")
+    interval  = user.get("subscription_interval", "month")
     for item in sub_items:
         pid = item.get("price", {}).get("id", "")
         if pid in SUBSCRIPTION_PRICES:
-            new_plan = SUBSCRIPTION_PRICES[pid]
+            interval = SUBSCRIPTION_PRICES[pid]
             break
 
-    old_plan = user.get("plan", "free")
-    if new_plan == old_plan:
-        return  # no change
+    period_end = subscription.get("current_period_end")
+    updates: dict = {
+        "is_subscribed":         is_active,
+        "subscription_interval": interval,
+    }
+    if period_end:
+        updates["subscription_end"] = period_end
 
-    plan_credits = PLAN_CREDITS.get(new_plan, 50)
-    await db["users"].update_one(
-        {"id": user_id},
-        {"$set": {
-            "plan":                 new_plan,
-            "subscription_credits": plan_credits,
-        }},
-    )
-    log.info("Subscription updated: user %s %s → %s", user_id, old_plan, new_plan)
+    await db["users"].update_one({"id": user_id}, {"$set": updates})
+    log.info("Subscription updated: user=%s status=%s interval=%s", user_id, sub_status, interval)
 
 
 MAX_PAYMENT_FAILURES: int = int(os.environ.get("MAX_PAYMENT_FAILURES", "3"))
@@ -1070,34 +810,32 @@ async def _handle_invoice_payment_failed(db, invoice: dict) -> None:
         },
     })
 
-    # Auto-downgrade after MAX_PAYMENT_FAILURES consecutive failures
+    # Auto-revoke after MAX_PAYMENT_FAILURES consecutive failures
     if failure_count >= MAX_PAYMENT_FAILURES and current_plan != "free":
         log.error(
-            "AUTO-DOWNGRADE: user=%s reached %d payment failures — downgrading to free",
+            "AUTO-REVOKE: user=%s reached %d payment failures — revoking access",
             uid, failure_count,
         )
         await db["users"].update_one(
             {"id": uid},
             {"$set": {
-                "plan":                    "free",
-                "subscription_credits":    50,
+                "is_subscribed":                   False,
+                "plan":                            "free",
                 "subscription_auto_downgraded_at": time.time(),
                 "subscription_downgrade_reason":   f"payment_failed_{failure_count}x",
             }},
         )
-        # Log the downgrade event
         await db["activity_logs"].insert_one({
             "user_id":      uid,
             "type":         "auto_downgrade",
             "action_type":  "auto_downgrade",
-            "credits_used": 0,
             "month_key":    _month_key(),
             "timestamp":    time.time(),
             "details": {
-                "reason":            "payment_failed",
-                "failure_count":     failure_count,
-                "previous_plan":     current_plan,
-                "subscription_id":   sub_id,
+                "reason":          "payment_failed",
+                "failure_count":   failure_count,
+                "previous_plan":   current_plan,
+                "subscription_id": sub_id,
             },
         })
 

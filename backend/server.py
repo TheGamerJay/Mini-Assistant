@@ -369,11 +369,13 @@ async def _on_startup():
     # clearly rather than letting the app run in a degraded / insecure state.
     import os as _os
     _REQUIRED_ENV = {
-        "JWT_SECRET":             "JWT signing key — tokens would be forgeable without it",
-        "STRIPE_WEBHOOK_SECRET":  "Stripe webhook verification — forged events possible without it",
-        "STRIPE_SECRET_KEY":      "Stripe API key — billing endpoints will 503 without it",
-        "ANTHROPIC_API_KEY":      "Claude API key — chat will 503 without it",
-        "MONGO_URL":              "MongoDB connection — all persistence will fail without it",
+        "JWT_SECRET":                 "JWT signing key — tokens would be forgeable without it",
+        "STRIPE_WEBHOOK_SECRET":      "Stripe webhook verification — forged events possible without it",
+        "STRIPE_SECRET_KEY":          "Stripe API key — billing endpoints will 503 without it",
+        "MONGO_URL":                  "MongoDB connection — all persistence will fail without it",
+        "API_KEY_ENCRYPTION_SECRET":  "AES-256-GCM key — user API keys cannot be stored without it",
+        # ANTHROPIC_API_KEY intentionally omitted — BYOK model: users supply their own key.
+        # A platform-level key is optional (admin/testing) and must never be required for startup.
     }
     _missing = [k for k, _ in _REQUIRED_ENV.items() if not _os.environ.get(k)]
     if _missing:
@@ -842,15 +844,6 @@ async def generate_image(request: ImageGenRequest):
 @api_router.post("/fixloop/analyze")
 async def analyze_error(request: FixLoopRequest, authorization: str = Header(None)):
 
-    try:
-        from mini_credits import check_and_deduct as _deduct
-        _ok, _remaining = await _deduct(authorization, action_type="fixloop_analyze")
-        if not _ok:
-            raise HTTPException(status_code=402, detail="out_of_credits")
-    except HTTPException:
-        raise
-    except Exception:
-        pass
 
     try:
         prompt = f"""Analyze this command error and suggest a fix:
@@ -1066,16 +1059,6 @@ _security_logger = logging.getLogger("security")
 @api_router.post("/app-builder/generate")
 async def generate_app(request: AppBuilderRequest, authorization: str = Header(None)):
 
-    # ── Credit gate ────────────────────────────────────────────────────────
-    try:
-        from mini_credits import check_and_deduct as _deduct
-        _ok, _remaining = await _deduct(authorization, action_type="app_build")
-        if not _ok:
-            raise HTTPException(status_code=402, detail="out_of_credits")
-    except HTTPException:
-        raise
-    except Exception:
-        pass  # credit module unavailable — allow through
 
     _mode_addendum = {
         "quick":      "\nBUILD MODE: Quick prototype. Core features only. Prioritize working logic over polish.",
@@ -2644,15 +2627,6 @@ class SnippetCreate(BaseModel):
 @api_router.post("/code-review/analyze")
 async def review_code(request: CodeReviewRequest, authorization: str = Header(None)):
 
-    try:
-        from mini_credits import check_and_deduct as _deduct
-        _ok, _remaining = await _deduct(authorization, action_type="code_review")
-        if not _ok:
-            raise HTTPException(status_code=402, detail="out_of_credits")
-    except HTTPException:
-        raise
-    except Exception:
-        pass
 
     try:
         prompt = f"""Review this {request.language} code and provide:
@@ -3964,15 +3938,6 @@ Suggest 3-5 specific test cases that would improve coverage. Format as a numbere
 async def tester_generate_tests(request: TestRequest, authorization: str = Header(None)):
     """Generate test cases using AI"""
 
-    try:
-        from mini_credits import check_and_deduct as _deduct
-        _ok, _remaining = await _deduct(authorization, action_type="tester_generate")
-        if not _ok:
-            raise HTTPException(status_code=402, detail="out_of_credits")
-    except HTTPException:
-        raise
-    except Exception:
-        pass
 
     try:
         prompt = f"""Generate comprehensive test cases for this application:

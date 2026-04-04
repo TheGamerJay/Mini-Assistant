@@ -49,7 +49,11 @@ export function useChat() {
 
     try {
       const res = await api.chatStream(text, sessionId, history, imagesBase64, controller.signal, vibeMode, chatMode, userTier);
-      if (res.status === 402) throw new Error('out_of_credits');
+      if (res.status === 402) {
+        let reason = 'not_subscribed';
+        try { const d = await res.json(); reason = d.reason || reason; } catch {}
+        throw new Error(reason);
+      }
       if (res.status === 429) {
         let retryAfter = 30;
         try { const d = await res.json(); retryAfter = d.retry_after || retryAfter; } catch {}

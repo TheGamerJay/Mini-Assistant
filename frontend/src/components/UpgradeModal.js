@@ -1,420 +1,198 @@
 /**
  * UpgradeModal.js
- * High-converting plan upgrade modal — triggered globally from AppContext.
- * Shows a plan comparison with monthly/annual toggle, context-aware headline,
- * and direct Stripe checkout CTA buttons.
+ * Single-plan subscription modal (BYOK model).
+ * Shown when user lacks subscription or API key.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  X, Lock, Zap, Code2, Download, Github, Rocket, Users,
-  Check, Crown, Star, ArrowRight, Sparkles, Shield, Copy, Bookmark,
-} from 'lucide-react';
+import { X, Check, KeyRound, Sparkles, ArrowRight } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { startCheckout, getPriceId } from '../api/checkout';
+import { startCheckout, PRICE_IDS } from '../api/checkout';
 
-// ---------------------------------------------------------------------------
-// Plan data
-// ---------------------------------------------------------------------------
-const PLANS = [
-  {
-    id: 'standard',
-    name: 'Standard',
-    icon: Zap,
-    color: 'cyan',
-    monthlyPrice: 20,
-    annualTotal: 200,   // $200/yr = $16.67/mo
-    credits: 1000,
-    badge: null,
-    description: '1,000 credits per month for AI app building, chat, and code generation. Includes full access to core features with standard performance.',
-    features: [
-      { text: '1,000 Mini Credits / month', highlight: true },
-      { text: 'Full source code access (HTML, CSS, JS)' },
-      { text: 'Download as HTML & ZIP' },
-      { text: 'Push to GitHub' },
-      { text: 'Live preview for all builds' },
-      { text: 'Standard AI model priority' },
-      { text: 'Email support' },
-    ],
-    cta: 'Get Standard',
-  },
-  {
-    id: 'pro',
-    name: 'Pro',
-    icon: Crown,
-    color: 'violet',
-    monthlyPrice: 50,
-    annualTotal: 500,   // $500/yr = $41.67/mo
-    credits: 4000,
-    badge: 'Most Popular',
-    description: '4,000 credits per month with priority performance, advanced AI capabilities, and full access to app building, code generation, and export features.',
-    features: [
-      { text: '4,000 Mini Credits / month', highlight: true },
-      { text: 'Everything in Standard' },
-      { text: 'One-click deploy to Vercel', highlight: true },
-      { text: 'Full-stack project export' },
-      { text: 'Priority AI model access', highlight: true },
-      { text: 'Faster generation queue' },
-      { text: 'Priority support' },
-    ],
-    cta: 'Get Pro',
-  },
-  {
-    id: 'max',
-    name: 'Max',
-    icon: Users,
-    color: 'amber',
-    monthlyPrice: 100,
-    annualTotal: 1000,  // $1000/yr = $83.33/mo
-    credits: 10000,
-    badge: null,
-    description: '10,000 credits per month with maximum performance, fastest processing, and complete access to all features including advanced AI, exports, and deployment tools.',
-    features: [
-      { text: '10,000 Mini Credits / month', highlight: true },
-      { text: 'Everything in Pro' },
-      { text: 'Unlimited builds & exports' },
-      { text: 'Admin dashboard & usage analytics' },
-      { text: 'Dedicated support channel' },
-      { text: 'Custom onboarding' },
-    ],
-    cta: 'Get Max',
-  },
+const FEATURES = [
+  'Unlimited AI chat, code generation & app building',
+  'Full source code access (HTML, CSS, JS)',
+  'Download as HTML & ZIP',
+  'Push to GitHub',
+  'Live preview for all builds',
+  'Image generation via your API key',
+  'Priority support',
 ];
 
-// Reason → headline + subtext
-const REASON_COPY = {
-  code: {
-    headline: 'Unlock Your Full Source Code',
-    sub: "You've built something great. Now own it. Upgrade to view, edit, copy, and export your complete HTML, CSS, and JS.",
-    icon: Code2,
-  },
-  credits: {
-    headline: "You've used all your Mini Credits.",
-    sub: "You can continue by earning more through referrals, or upgrade for full access.",
-    extra: "You're close to finishing your project.",
-    icon: Zap,
-  },
-  export: {
-    headline: 'Export Your Project',
-    sub: "Download your app as a ZIP with structured files, ready for deployment. This feature is available on paid plans.",
-    icon: Download,
-  },
-  deploy: {
-    headline: 'Deploy to Vercel in One Click',
-    sub: "Paid plans unlock one-click Vercel deployment. Ship your app live in seconds.",
-    icon: Rocket,
-  },
-  github: {
-    headline: 'Push to GitHub',
-    sub: "Paid plans let you push directly to a GitHub repo — perfect for version control and collaboration.",
-    icon: Github,
-  },
-  save: {
-    headline: 'Save your project',
-    sub: "You've built a working project. Store it, manage it, and return anytime.",
-    icon: Bookmark,
-  },
-  generic: {
-    headline: 'Upgrade Mini Assistant',
-    sub: "Unlock the full power of Mini Assistant AI — source code, exports, deployments, and more credits.",
-    icon: Sparkles,
-  },
-};
-
-// ---------------------------------------------------------------------------
-// PlanCard
-// ---------------------------------------------------------------------------
-function PlanCard({ plan, annual, currentPlan, onSelect, checkoutLoading }) {
-  const Icon = plan.icon;
-  const monthlyEquiv = plan.annualTotal ? (plan.annualTotal / 12).toFixed(2) : null;
-  const isCurrentPlan = currentPlan === plan.id;
-  const isLoading = checkoutLoading === plan.id;
-
-  const colorMap = {
-    cyan:   { ring: 'ring-cyan-500/60',   bg: 'bg-cyan-500/10',   border: 'border-cyan-500/30',   btn: 'from-cyan-500 to-cyan-600',   text: 'text-cyan-400',   badge: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' },
-    violet: { ring: 'ring-violet-500/60', bg: 'bg-violet-500/10', border: 'border-violet-500/30', btn: 'from-violet-500 to-violet-600', text: 'text-violet-400', badge: 'bg-violet-500/20 text-violet-300 border-violet-500/30' },
-    amber:  { ring: 'ring-amber-500/60',  bg: 'bg-amber-500/10',  border: 'border-amber-500/30',  btn: 'from-amber-500 to-amber-600',  text: 'text-amber-400',  badge: 'bg-amber-500/20 text-amber-300 border-amber-500/30' },
-  };
-  const c = colorMap[plan.color];
-
-  return (
-    <div
-      className={`relative flex flex-col rounded-2xl border bg-[#111118] p-5 transition-all duration-200
-        ${plan.badge === 'Most Popular'
-          ? `border-violet-500/40 ring-1 ${c.ring} shadow-lg shadow-violet-900/20`
-          : 'border-white/10 hover:border-white/20'
-        }`}
-    >
-      {/* Badge */}
-      {plan.badge && (
-        <div className={`absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${c.badge}`}>
-          {plan.badge}
-        </div>
-      )}
-
-      {/* Header */}
-      <div className="flex items-center gap-2.5 mb-3">
-        <div className={`w-8 h-8 rounded-xl ${c.bg} border ${c.border} flex items-center justify-center flex-shrink-0`}>
-          <Icon className={`w-4 h-4 ${c.text}`} />
-        </div>
-        <div>
-          <p className="text-sm font-bold text-white">{plan.name}</p>
-          <p className="text-[10px] text-slate-500 leading-none mt-0.5">{plan.description}</p>
-        </div>
-      </div>
-
-      {/* Price */}
-      <div className="mb-4">
-        {annual && plan.annualTotal ? (
-          <>
-            <div className="flex items-end gap-1">
-              <span className="text-3xl font-black text-white">${plan.annualTotal}</span>
-              <span className="text-xs text-slate-500 mb-1">/year</span>
-            </div>
-            <p className="text-[10px] text-emerald-400 mt-0.5">
-              ${monthlyEquiv}/mo billed annually
-            </p>
-          </>
-        ) : (
-          <div className="flex items-end gap-1">
-            <span className="text-3xl font-black text-white">${plan.monthlyPrice}</span>
-            <span className="text-xs text-slate-500 mb-1">/mo</span>
-          </div>
-        )}
-        <p className={`text-[11px] font-semibold mt-1 ${c.text}`}>
-          {plan.credits.toLocaleString()} credits / month
-        </p>
-      </div>
-
-      {/* Features */}
-      <ul className="space-y-2 flex-1 mb-5">
-        {plan.features.map((f, i) => (
-          <li key={i} className="flex items-start gap-2">
-            <Check className={`w-3.5 h-3.5 flex-shrink-0 mt-0.5 ${f.highlight ? c.text : 'text-slate-500'}`} />
-            <span className={`text-[11px] leading-relaxed ${f.highlight ? 'text-slate-200 font-medium' : 'text-slate-500'}`}>
-              {f.text}
-            </span>
-          </li>
-        ))}
-      </ul>
-
-      {/* CTA */}
-      {isCurrentPlan ? (
-        <div className="w-full py-2.5 rounded-xl text-center text-xs font-semibold text-slate-500 bg-white/5 border border-white/10 cursor-default">
-          Current Plan
-        </div>
-      ) : (
-        <button
-          onClick={() => onSelect(plan)}
-          disabled={!!checkoutLoading}
-          className={`w-full py-2.5 rounded-xl text-white text-xs font-bold bg-gradient-to-r ${c.btn} hover:opacity-90 transition-all shadow-lg flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:cursor-wait`}
-        >
-          {isLoading
-            ? <><span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Redirecting…</>
-            : <>{plan.cta} <ArrowRight className="w-3 h-3" /></>
-          }
-        </button>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// UpgradeModal
-// ---------------------------------------------------------------------------
 export default function UpgradeModal() {
-  const { upgradeModalOpen, setUpgradeModalOpen, upgradeReason, plan: currentPlan, setPage, user } = useApp();
-  const [annual, setAnnual] = useState(true);
-  const [checkoutLoading, setCheckoutLoading] = useState(null);
-  const [referralCopied, setReferralCopied] = useState(false);
+  const { upgradeModalOpen, setUpgradeModalOpen, upgradeReason, isSubscribed, setPage } = useApp();
+  const [billing, setBilling]     = useState('monthly');
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState(null);
 
-  const copy = REASON_COPY[upgradeReason] || REASON_COPY.generic;
-  const HeadlineIcon = copy.icon;
-
-  const close = useCallback(() => {
-    setUpgradeModalOpen(false);
-    setCheckoutLoading(null);
-  }, [setUpgradeModalOpen]);
-
-  // Close on Escape
+  // Reset on open
   useEffect(() => {
-    if (!upgradeModalOpen) return;
-    const handler = (e) => { if (e.key === 'Escape') close(); };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [upgradeModalOpen, close]);
+    if (upgradeModalOpen) {
+      setError(null);
+      setLoading(false);
+    }
+  }, [upgradeModalOpen]);
 
-  // Clear loading state when user presses Back from Stripe (bfcache restore)
+  const close = useCallback(() => setUpgradeModalOpen(false), [setUpgradeModalOpen]);
+
+  const handleKeyDown = useCallback((e) => {
+    if (e.key === 'Escape') close();
+  }, [close]);
+
   useEffect(() => {
-    const handler = (e) => { if (e.persisted) setCheckoutLoading(null); };
-    window.addEventListener('pageshow', handler);
-    return () => window.removeEventListener('pageshow', handler);
-  }, []);
+    if (upgradeModalOpen) {
+      document.addEventListener('keydown', handleKeyDown);
+      return () => document.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [upgradeModalOpen, handleKeyDown]);
+
+  const handleSubscribe = async () => {
+    const priceId = billing === 'yearly' ? PRICE_IDS.yearly : PRICE_IDS.monthly;
+    if (!priceId) {
+      setError('Stripe is not configured yet. Please try again later.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      await startCheckout(priceId);
+    } catch (err) {
+      setError(err.message || 'Checkout failed. Please try again.');
+      setLoading(false);
+    }
+  };
+
+  const handleAddKey = () => {
+    close();
+    setPage('settings');
+  };
 
   if (!upgradeModalOpen) return null;
 
-  const handleSelect = async (plan) => {
-    const period = annual ? 'yearly' : 'monthly';
-    const priceId = await getPriceId(plan.id, period);
+  // If already subscribed but no key — show the key-add flow
+  const needsKey = isSubscribed && upgradeReason === 'no_api_key';
 
-    if (!priceId) {
-      // Price not configured — fall back to pricing page
-      close();
-      setPage('pricing');
-      return;
-    }
-
-    setCheckoutLoading(plan.id);
-    try {
-      await startCheckout(priceId);
-      // Tab navigates away on success — no need to clear loading
-    } catch (err) {
-      console.error('Stripe checkout error:', err);
-      setCheckoutLoading(null);
-      close();
-      setPage('pricing');
-    }
-  };
-
-  const handleViewAllPlans = () => {
-    close();
-    setPage('pricing');
-  };
-
-  const handleCopyReferral = () => {
-    const code = user?.referral_code;
-    if (!code) return;
-    const link = `${window.location.origin}?ref=${code}`;
-    navigator.clipboard.writeText(link).then(() => {
-      setReferralCopied(true);
-      setTimeout(() => setReferralCopied(false), 2500);
-    });
-  };
+  const monthlyPrice  = 20;
+  const yearlyMonthly = 17; // $200/yr
 
   return (
     <div
-      className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4 overflow-y-auto"
-      onClick={close}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      onClick={(e) => e.target === e.currentTarget && close()}
     >
-      <div
-        className="relative bg-[#0c0c14] border border-white/10 rounded-2xl w-full max-w-3xl shadow-2xl my-4"
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Close */}
-        <button
-          onClick={close}
-          className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-600 hover:text-slate-300 hover:bg-white/5 transition-colors z-10"
-        >
-          <X className="w-4 h-4" />
-        </button>
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
 
+      <div className="relative w-full max-w-md rounded-2xl bg-[#13131f] border border-white/10 shadow-2xl overflow-hidden">
         {/* Header */}
-        <div className="px-6 pt-6 pb-5 border-b border-white/[0.06]">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500/20 to-violet-500/20 border border-white/10 flex items-center justify-center flex-shrink-0">
-              <HeadlineIcon className="w-4 h-4 text-violet-400" />
-            </div>
-            <h2 className="text-lg font-bold text-white">{copy.headline}</h2>
-          </div>
-          {copy.extra && (
-            <p className="text-sm font-medium text-slate-300 mb-1">{copy.extra}</p>
-          )}
-          <p className="text-sm text-slate-400 leading-relaxed max-w-lg">{copy.sub}</p>
-        </div>
-
-        {/* Billing toggle */}
-        <div className="flex items-center justify-center gap-3 px-6 py-4">
-          <span className={`text-xs font-medium ${!annual ? 'text-slate-200' : 'text-slate-500'}`}>Monthly</span>
+        <div className="relative px-6 pt-6 pb-4 bg-gradient-to-br from-violet-500/10 to-cyan-500/10 border-b border-white/5">
           <button
-            onClick={() => setAnnual(v => !v)}
-            className={`relative w-11 h-6 rounded-full transition-colors ${annual ? 'bg-violet-600' : 'bg-white/10'}`}
-            aria-label="Toggle billing period"
+            onClick={close}
+            className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/10 transition-colors"
           >
-            <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${annual ? 'translate-x-5' : 'translate-x-0'}`} />
+            <X size={16} />
           </button>
-          <span className={`text-xs font-medium ${annual ? 'text-slate-200' : 'text-slate-500'}`}>
-            Annual
-          </span>
-          {annual && (
-            <span className="text-[10px] font-bold text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 px-2 py-0.5 rounded-full">
-              Save up to 17%
-            </span>
-          )}
-        </div>
-
-        {/* Plan cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 px-6 pb-3">
-          {PLANS.map(plan => (
-            <PlanCard
-              key={plan.id}
-              plan={plan}
-              annual={annual}
-              currentPlan={currentPlan}
-              onSelect={handleSelect}
-              checkoutLoading={checkoutLoading}
-            />
-          ))}
-        </div>
-        {upgradeReason === 'credits' && (
-          <p className="text-center text-[10px] text-slate-600 pb-4">Instant access after upgrade</p>
-        )}
-        {upgradeReason === 'save' && (
-          <p className="text-center text-[10px] text-slate-600 pb-4">Upgrade to keep your work.</p>
-        )}
-
-        {/* Referral path — shown when user is out of credits */}
-        {upgradeReason === 'credits' && user?.referral_code && (
-          <div className="mx-6 mb-4 rounded-xl border border-white/8 bg-white/[0.03] px-4 py-3 flex items-center gap-3">
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-slate-300">Invite a friend (+5 credits when they join and verify)</p>
-              <p className={`text-[10px] mt-0.5 transition-colors ${referralCopied ? 'text-emerald-500' : 'text-slate-600'}`}>
-                {referralCopied
-                  ? 'Link copied. Share it to earn 5 credits when they join.'
-                  : 'When a friend signs up and verifies their email, you both earn 5 bonus credits.'}
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center">
+              {needsKey ? <KeyRound size={18} className="text-white" /> : <Sparkles size={18} className="text-white" />}
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-white">
+                {needsKey ? 'Add your API key' : 'Unlock Mini Assistant'}
+              </h2>
+              <p className="text-[11px] text-slate-400">
+                {needsKey
+                  ? 'Your subscription is active — just add an Anthropic or OpenAI key to start.'
+                  : 'One plan. Bring your own key. Full access.'}
               </p>
             </div>
-            <button
-              onClick={handleCopyReferral}
-              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all
-                bg-white/5 hover:bg-white/10 border-white/10 text-slate-300"
-            >
-              <Copy className="w-3 h-3" />
-              {referralCopied ? 'Link copied!' : 'Copy referral link'}
-            </button>
-          </div>
-        )}
-
-        {/* Trust signals + free note */}
-        <div className="px-6 pb-6 space-y-4">
-          <div className="flex items-center justify-center gap-6 py-3 border-t border-white/[0.06]">
-            <div className="flex items-center gap-1.5">
-              <Shield className="w-3.5 h-3.5 text-slate-500" />
-              <span className="text-[10px] text-slate-500">Stripe-secured payments</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Star className="w-3.5 h-3.5 text-slate-500" />
-              <span className="text-[10px] text-slate-500">Cancel anytime</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Zap className="w-3.5 h-3.5 text-slate-500" />
-              <span className="text-[10px] text-slate-500">Instant access</span>
-            </div>
-          </div>
-
-          <div className="text-center">
-            <span className="text-xs text-slate-600">
-              Start with 5 Mini Credits after email verification.
-              Earn additional credits through referrals, or{' '}
-              <button
-                onClick={handleViewAllPlans}
-                className="text-cyan-500 hover:text-cyan-400 underline underline-offset-2"
-              >
-                view full plan details
-              </button>
-              .
-            </span>
           </div>
         </div>
+
+        {needsKey ? (
+          /* Key-add flow */
+          <div className="px-6 py-5">
+            <p className="text-sm text-slate-300 mb-4">
+              Mini Assistant uses <strong className="text-white">your own API key</strong> for all AI execution — no credits, no limits we control.
+            </p>
+            <ul className="space-y-2 mb-5">
+              {['Works with Anthropic (Claude) and OpenAI (GPT)', 'Key encrypted with AES-256-GCM — never logged', 'Remove or replace anytime from Settings'].map(f => (
+                <li key={f} className="flex items-start gap-2 text-sm text-slate-400">
+                  <Check size={14} className="text-emerald-400 mt-0.5 flex-shrink-0" />
+                  {f}
+                </li>
+              ))}
+            </ul>
+            <button
+              onClick={handleAddKey}
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-violet-600 to-cyan-600 text-white text-sm font-bold hover:opacity-90 transition-all flex items-center justify-center gap-2"
+            >
+              Go to Settings <ArrowRight size={14} />
+            </button>
+          </div>
+        ) : (
+          /* Subscribe flow */
+          <div className="px-6 py-5">
+            {/* Billing toggle */}
+            <div className="flex items-center justify-center gap-1 p-1 rounded-xl bg-white/5 mb-5">
+              {['monthly', 'yearly'].map((b) => (
+                <button
+                  key={b}
+                  onClick={() => setBilling(b)}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    billing === b
+                      ? 'bg-violet-600 text-white shadow'
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  {b === 'monthly' ? 'Monthly' : 'Yearly'}
+                  {b === 'yearly' && (
+                    <span className="ml-1.5 text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-full">
+                      Save 15%
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* Price */}
+            <div className="text-center mb-5">
+              <span className="text-4xl font-black text-white">
+                ${billing === 'yearly' ? yearlyMonthly : monthlyPrice}
+              </span>
+              <span className="text-slate-500 text-sm ml-1">/mo</span>
+              {billing === 'yearly' && (
+                <p className="text-[11px] text-slate-500 mt-0.5">Billed $200/year</p>
+              )}
+            </div>
+
+            {/* Features */}
+            <ul className="space-y-2 mb-5">
+              {FEATURES.map(f => (
+                <li key={f} className="flex items-start gap-2 text-sm text-slate-400">
+                  <Check size={13} className="text-emerald-400 mt-0.5 flex-shrink-0" />
+                  {f}
+                </li>
+              ))}
+            </ul>
+
+            {error && (
+              <p className="text-xs text-red-400 mb-3 text-center">{error}</p>
+            )}
+
+            <button
+              onClick={handleSubscribe}
+              disabled={loading}
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-violet-600 to-cyan-600 text-white text-sm font-bold hover:opacity-90 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {loading ? 'Redirecting…' : `Subscribe ${billing === 'yearly' ? 'Yearly' : 'Monthly'}`}
+              {!loading && <ArrowRight size={14} />}
+            </button>
+
+            <p className="text-[10px] text-slate-600 text-center mt-3">
+              Cancel anytime · Powered by Stripe · Bring your own API key after checkout
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -205,9 +205,7 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
   const [optimizer, setOptimizer]       = useState(null);
   const [loadingOptimizer, setLoadingOptimizer] = useState(false);
-  const [togglingId, setTogglingId]     = useState(null);
-  const [grantingId, setGrantingId]     = useState(null);
-  const [grantInput, setGrantInput]     = useState({}); // { [userId]: string }
+  const [togglingId, setTogglingId]         = useState(null);
   const [grantingImageId, setGrantingImageId] = useState(null);
   const [grantImageInput, setGrantImageInput] = useState({}); // { [userId]: string }
   const [activeTab, setActiveTab]       = useState('overview'); // 'overview' | 'users' | 'activity' | 'analytics' | 'xray' | 'repair' | 'logs' | 'health'
@@ -481,26 +479,6 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
     }
   }
 
-  async function handleGrantCredits(u) {
-    const raw = grantInput[u.id];
-    const credits = parseInt(raw, 10);
-    if (isNaN(credits) || credits < 0) {
-      toast.error('Enter a valid credit amount (0 or more).');
-      return;
-    }
-    setGrantingId(u.id);
-    try {
-      await api.adminSetCredits(u.id, credits);
-      setUsers(prev => prev.map(x => x.id === u.id ? { ...x, credits } : x));
-      setGrantInput(prev => ({ ...prev, [u.id]: '' }));
-      toast.success(`Set ${u.name}'s credits to ${credits}.`);
-    } catch (err) {
-      toast.error(err.message || 'Failed to set credits.');
-    } finally {
-      setGrantingId(null);
-    }
-  }
-
   async function handleGrantImages(u) {
     const raw = grantImageInput[u.id];
     const images = parseInt(raw, 10);
@@ -641,7 +619,7 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
                 <StatCard icon={UserPlus}      label="New This Week"       value={stats?.new_users_week}          color="emerald" />
                 <StatCard icon={MessageSquare} label="Chat Messages"       value={stats?.total_chat_messages}     color="violet" />
                 <StatCard icon={Image}         label="Images Generated"    value={stats?.total_images_generated}  color="blue" />
-                <StatCard icon={Zap}           label="Credits Remaining"   value={stats?.total_credits_remaining} sub="across all free users" color="amber" />
+                <StatCard icon={Zap}           label="Subscribers"         value={stats?.total_subscribers}       color="violet" />
                 <StatCard icon={Activity}      label="Total Activity"      value={stats?.total_activity_events}   color="slate" />
                 <StatCard icon={ThumbsUp}      label="Thumbs Up"           value={stats?.thumbs_up}               color="emerald" />
                 <StatCard icon={ThumbsDown}    label="Thumbs Down"         value={stats?.thumbs_down}             color="red" />
@@ -732,7 +710,7 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-white/5">
-                      {['User', 'Email', 'Auth', 'Role', 'Plan ✎', 'Credits', 'Grant Credits', 'Bonus Images', 'Grant Images', 'Campaign Lab', 'Joined', 'Actions'].map(h => (
+                      {['User', 'Email', 'Auth', 'Role', 'Plan ✎', 'Subscription', 'API Key', 'Bonus Images', 'Grant Images', 'Campaign Lab', 'Joined', 'Actions'].map(h => (
                         <th key={h} className="px-4 py-3 text-left text-[11px] font-mono uppercase tracking-widest text-slate-600 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -803,36 +781,18 @@ function AdminDashboard({ adminUser, onLogout, currentUserId, onRefreshSelf }) {
                           )}
                         </td>
 
-                        {/* Credits */}
+                        {/* Subscription status */}
                         <td className="px-4 py-3">
-                          <span className={`text-sm font-mono font-semibold ${
-                            u.plan && u.plan !== 'free' ? 'text-emerald-400' :
-                            u.credits > 5 ? 'text-slate-300' :
-                            u.credits > 0 ? 'text-amber-400' : 'text-red-400'
-                          }`}>
-                            {u.plan && u.plan !== 'free' ? '∞' : fmt(u.credits ?? 0)}
+                          <span className={`text-xs font-mono font-semibold ${u.is_subscribed ? 'text-emerald-400' : 'text-slate-600'}`}>
+                            {u.is_subscribed ? 'subscribed' : 'free'}
                           </span>
                         </td>
 
-                        {/* Grant credits input */}
+                        {/* API key status */}
                         <td className="px-4 py-3">
-                          <div className="flex items-center gap-1.5">
-                            <input
-                              type="number"
-                              min="0"
-                              placeholder="amount"
-                              value={grantInput[u.id] || ''}
-                              onChange={e => setGrantInput(prev => ({ ...prev, [u.id]: e.target.value }))}
-                              className="w-20 px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-slate-200 text-xs font-mono outline-none focus:border-cyan-500/40 transition-all"
-                            />
-                            <button
-                              disabled={grantingId === u.id || !grantInput[u.id]}
-                              onClick={() => handleGrantCredits(u)}
-                              className="px-2 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-[10px] font-mono hover:bg-cyan-500/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                              {grantingId === u.id ? '…' : 'Set'}
-                            </button>
-                          </div>
+                          <span className={`text-xs font-mono font-semibold ${u.api_key_verified ? 'text-emerald-400' : 'text-amber-400/60'}`}>
+                            {u.api_key_verified ? `✓ ${u.api_key_provider || 'verified'}` : 'no key'}
+                          </span>
                         </td>
 
                         {/* Bonus images current value */}
@@ -1853,7 +1813,7 @@ function XRayGrid({ data }) {
 // AdminPage — root export, handles auth state independently
 // ---------------------------------------------------------------------------
 export default function AdminPage() {
-  const { user, logout, setPage, refreshCredits } = useApp();
+  const { user, logout, setPage, refreshSubscription } = useApp();
   const [localAdmin, setLocalAdmin] = useState(null);
 
   // The effective admin is either the AppContext user (if already logged in as admin) or localAdmin
@@ -1892,7 +1852,7 @@ export default function AdminPage() {
   return (
     <>
       <Toaster richColors position="bottom-right" />
-      <AdminDashboard adminUser={effectiveUser} onLogout={handleLogout} currentUserId={user?.id} onRefreshSelf={refreshCredits} />
+      <AdminDashboard adminUser={effectiveUser} onLogout={handleLogout} currentUserId={user?.id} onRefreshSelf={refreshSubscription} />
       <button
         onClick={() => { setPage('chat'); try { window.history.pushState({}, '', '/'); } catch {} }}
         className="fixed bottom-4 left-4 flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-400 transition-colors"

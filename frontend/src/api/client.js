@@ -354,9 +354,29 @@ export const api = {
     }, 10000);
   },
 
-  /** Get current credit balance and plan. */
-  authCredits() {
-    return get(`${MAIN_API}/auth/credits`, 10000);
+  /** Get subscription + API key status. */
+  authSubscriptionStatus() {
+    return get(`${MAIN_API}/auth/subscription-status`, 10000);
+  },
+
+  /** Save (encrypt) user's API key. Does NOT verify it. */
+  authSaveApiKey(key) {
+    return post(`${MAIN_API}/auth/api-key`, { key }, 10000);
+  },
+
+  /** Get API key hint + verified status (never returns raw key). */
+  authGetApiKey() {
+    return get(`${MAIN_API}/auth/api-key`, 10000);
+  },
+
+  /** Test the stored API key against the provider. Sets api_key_verified on success. */
+  authTestApiKey() {
+    return post(`${MAIN_API}/auth/api-key/test`, {}, 20000);
+  },
+
+  /** Remove the stored API key and revoke verified status. */
+  authRemoveApiKey() {
+    return request(`${MAIN_API}/auth/api-key`, { method: 'DELETE' }, 10000);
   },
 
   /** Get personal usage dashboard stats + recent activity. */
@@ -423,11 +443,6 @@ export const api = {
   /** Delete a user and all their data — admin only */
   adminDeleteUser(userId) { return del(`${MAIN_API}/admin/users/${userId}`, 10000); },
 
-  /** Set a user's credit balance — admin only */
-  adminSetCredits(userId, credits) {
-    return request(`${MAIN_API}/admin/users/${userId}/credits`, { method: 'PATCH', body: JSON.stringify({ credits }) }, 10000);
-  },
-
   /** Set a user's bonus image allowance on top of their plan limit — admin only */
   adminSetImages(userId, images) {
     return request(`${MAIN_API}/admin/users/${userId}/images`, { method: 'PATCH', body: JSON.stringify({ images }) }, 10000);
@@ -490,10 +505,6 @@ export const api = {
     return request(`${MAIN_API}/share/${shareId}`, { method: 'DELETE' }, 10000);
   },
 
-  /** Get full credit breakdown for a user. */
-  stripeGetCredits(userId) {
-    return get(`${MAIN_API}/stripe/credits/${userId}`, 10000);
-  },
 
   // ── DB sync endpoints ───────────────────────────────────────────────────────
 

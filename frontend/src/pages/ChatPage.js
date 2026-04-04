@@ -305,29 +305,28 @@ function StreamingBubble({ text, existingCode }) {
   );
 }
 
-function OutOfCreditsCard({ onBuy, onUpgrade }) {
+function BlockedCard({ reason, onSubscribe, onAddKey }) {
+  const isNoKey = reason === 'no_api_key';
   return (
     <div className="flex items-start gap-3">
       <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center flex-shrink-0 mt-1">
         <Zap size={15} className="text-black" />
       </div>
       <div className="flex-1 max-w-lg rounded-2xl rounded-tl-sm border border-amber-500/20 bg-amber-500/5 p-4">
-        <p className="text-sm font-semibold text-amber-300 mb-0.5">You've used all your Mini Credits</p>
+        <p className="text-sm font-semibold text-amber-300 mb-0.5">
+          {isNoKey ? 'API key required' : 'Subscription required'}
+        </p>
         <p className="text-xs text-slate-400 mb-3">
-          Get more credits to keep building, or subscribe for unlimited access.
+          {isNoKey
+            ? 'Add your Anthropic or OpenAI API key in Settings to start building.'
+            : 'Subscribe to Mini Assistant to unlock AI chat and app building.'}
         </p>
         <div className="flex items-center gap-2 flex-wrap">
           <button
-            onClick={onBuy}
+            onClick={isNoKey ? onAddKey : onSubscribe}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold transition-all"
           >
-            <Zap size={11} /> + Get Credits
-          </button>
-          <button
-            onClick={onUpgrade}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-xs font-medium transition-all"
-          >
-            <Star size={11} /> View Plans
+            <Zap size={11} /> {isNoKey ? 'Add API Key' : 'Subscribe'}
           </button>
         </div>
       </div>
@@ -349,10 +348,9 @@ function ChatPage() {
     rateMessage,
     pinMessage,
     forkChat,
-    setPurchaseModalOpen,
     openUpgradeModal,
     isSubscribed,
-    plan,
+    canExecute,
     imageUsage,
     incrementImageUsage,
     modeChatIds,
@@ -701,7 +699,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
     const _isImgRequest = !imgs.length && (chatMode === 'image' || isImageIntent(text));
     if (_isImgRequest && !canGenerateImage(imageUsage)) {
       setImageLimitOpen(true);
-      toast.error(`Image limit reached (${imageUsage.used}/${imageUsage.limit}). Upgrade for more.`);
+      toast.error(`Image limit reached (${imageUsage.used}/${imageUsage.limit}).`);
       submittingRef.current = false;
       return;
     }
@@ -1051,20 +1049,24 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
       },
 
       onError(err) {
-        const isOutOfCredits = err.message === 'out_of_credits';
+        const isNotSubscribed = err.message === 'not_subscribed';
+        const isNoApiKey = err.message === 'no_api_key';
+        const isBlocked = isNotSubscribed || isNoApiKey;
         const isRateLimit = err.message?.startsWith('rate_limit:') || err.status === 429 || err.message?.includes('rate limit');
         const retryAfter = isRateLimit
           ? (err.message?.startsWith('rate_limit:') ? parseInt(err.message.split(':')[1], 10) : 30)
           : null;
         const withErr = [...nextMessages, {
           role: 'assistant', type: 'error',
-          content: isOutOfCredits
-            ? '⚡ You\'ve used all your Mini Credits. Subscribe to keep building.'
+          content: isNotSubscribed
+            ? 'A subscription is required to use Mini Assistant.'
+            : isNoApiKey
+            ? 'Please add your API key in Settings to continue.'
             : isRateLimit
             ? 'Hold on! Let me catch up…'
             : (err.message || 'Something went wrong.'),
           timestamp: Date.now(),
-          _outOfCredits: isOutOfCredits,
+          _blocked: isBlocked ? (isNoApiKey ? 'no_api_key' : 'not_subscribed') : undefined,
           _retryAfter: retryAfter,
         }];
         setMessages(withErr);
@@ -1074,7 +1076,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         submittingRef.current = false;
       },
     });
-  }, [activeChatId, chats, loading, messages, newChat, renameChat, send, sendStream, updateChatMessages, addImage, setPage, chatMode, vibeMode, imageUsage, isSubscribed, plan]);
+  }, [activeChatId, chats, loading, messages, newChat, renameChat, send, sendStream, updateChatMessages, addImage, setPage, chatMode, vibeMode, imageUsage, isSubscribed, canExecute]);
 
   const handleCancel = useCallback(() => {
     cancel(sessionIdRef.current);
@@ -1251,12 +1253,13 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         <div className="relative flex-1 overflow-hidden">
         <div ref={scrollContainerRef} className="h-full overflow-y-auto px-3 sm:px-6 md:px-10 lg:px-16 py-4 sm:py-6 space-y-4 sm:space-y-6">
           {messages.map((msg, idx) => {
-            if (msg._outOfCredits) {
+            if (msg._blocked) {
               return (
-                <OutOfCreditsCard
+                <BlockedCard
                   key={idx}
-                  onBuy={() => setPurchaseModalOpen(true)}
-                  onUpgrade={() => openUpgradeModal('credits')}
+                  reason={msg._blocked}
+                  onSubscribe={() => setPage('pricing')}
+                  onAddKey={() => setPage('settings')}
                 />
               );
             }

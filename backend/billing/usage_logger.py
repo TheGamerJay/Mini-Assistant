@@ -1,10 +1,11 @@
 """
-billing/usage_logger.py — CEO billing usage logger.
+billing/usage_logger.py — Execution activity logger (BYOK + subscription model).
 
-Every CEO-approved action logs here — approved AND blocked.
-No silent deductions. No missing billing logs.
+Every execution attempt logs here — approved and blocked.
+Used for analytics and chargeback defense.
+Credits removed from schema; credits_used param kept for call-site compat (always 0).
 
-Log destination: MongoDB activity_logs collection (same as mini_credits).
+Log destination: MongoDB activity_logs collection.
 Falls back gracefully if DB unavailable — never raises.
 
 LOG SCHEMA:
@@ -13,13 +14,12 @@ LOG SCHEMA:
     session_id:    str | None,
     action_type:   str,
     module_used:   str,
-    credits_used:  int,
-    status:        "approved" | "blocked" | "grace" | "error",
+    status:        "approved" | "blocked" | "error",
     block_reason:  str | None,
     duration_ms:   float | None,
     timestamp:     float,        # Unix timestamp
     month_key:     str,          # "YYYY-MM"
-    billing_layer: "ceo",        # identifies this as CEO billing log
+    billing_layer: "ceo",
   }
 """
 
@@ -62,7 +62,7 @@ async def log_usage(
             "session_id":   session_id,
             "action_type":  action_type,
             "module_used":  module_used,
-            "credits_used": credits_used,
+            # credits_used intentionally omitted — credit system retired 2026-04
             "status":       status,
             "block_reason": block_reason,
             "duration_ms":  duration_ms,
@@ -103,16 +103,8 @@ async def log_grace(
     session_id:  Optional[str],
     grace_left:  int,
 ) -> None:
-    """Log a grace-period chat message."""
-    await log_usage(
-        user_id      = user_id,
-        session_id   = session_id,
-        action_type  = "chat_basic",
-        module_used  = "general_chat",
-        credits_used = 0,
-        status       = "grace",
-        block_reason = f"grace_messages_remaining={grace_left}",
-    )
+    """RETIRED — no-op. Grace system removed."""
+    return
 
 
 # ---------------------------------------------------------------------------

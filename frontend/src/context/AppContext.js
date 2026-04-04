@@ -342,93 +342,42 @@ export function AppProvider({ children }) {
     return { id: payload.sub, name: payload.name, email: payload.email, role: payload.role };
   });
 
-  // ---- Credits ----
-  const [credits, setCredits] = useState(null); // null = loading
-  const [plan, setPlan]       = useState('free');
-  const [hasAdMode, setHasAdMode] = useState(false);
-  const isSubscribed = plan !== 'free';
-  const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
+  // ---- Subscription + BYOK state ----
+  const [isSubscribed,    setIsSubscribed]    = useState(false);
+  const [apiKeyVerified,  setApiKeyVerified]  = useState(false);
+  const [apiKeyHint,      setApiKeyHint]      = useState(null);
+  const [apiKeyProvider,  setApiKeyProvider]  = useState(null);
+  const [canExecute,      setCanExecute]      = useState(false);
+  const [hasAdMode,       setHasAdMode]       = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
-  // ---- Image usage (server-authoritative, separate from credits) ----
-  const [imageUsage, setImageUsage] = useState({ used: 0, limit: 2, resetsOn: null });
-
-  // Ref holds the BroadcastChannel so incrementImageUsage can post without
-  // being recreated every render.
-  const _imgSyncChannelRef = useRef(null);
-
-  // Set up BroadcastChannel (+ storage-event fallback for older browsers).
-  // Receiving a message from another tab immediately updates local count.
-  useEffect(() => {
-    let channel = null;
-    try {
-      channel = new BroadcastChannel('image_usage');
-      _imgSyncChannelRef.current = channel;
-      channel.onmessage = (e) => {
-        if (e.data?.used !== undefined) {
-          setImageUsage(prev => ({ ...prev, used: e.data.used }));
-        }
-      };
-    } catch {
-      _imgSyncChannelRef.current = null;
-    }
-
-    // Storage-event fallback: fires on other tabs even without BroadcastChannel.
-    const onStorage = (e) => {
-      if (e.key === 'ma_img_usage_bc') {
-        try {
-          const data = JSON.parse(e.newValue);
-          if (data?.used !== undefined) {
-            setImageUsage(prev => ({ ...prev, used: data.used }));
-          }
-        } catch {}
-      }
-    };
-    window.addEventListener('storage', onStorage);
-
-    return () => {
-      channel?.close();
-      _imgSyncChannelRef.current = null;
-      window.removeEventListener('storage', onStorage);
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Retry delays: first attempt at 1.5 s, then +2 s, then +5 s (max 3 attempts).
-  const _RESYNC_DELAYS = [1500, 2000, 5000];
+  // ---- Image usage (server-authoritative) ----
+  const [imageUsage, setImageUsage] = useState({ used: 0, limit: 999999, resetsOn: null });
 
   const incrementImageUsage = useCallback(() => {
-    // Optimistic update + broadcast to other tabs
-    let nextUsed;
-    setImageUsage(prev => {
-      nextUsed = prev.used + 1;
-      return { ...prev, used: nextUsed };
-    });
+    setImageUsage(prev => ({ ...prev, used: prev.used + 1 }));
+  }, []);
 
-    // Broadcast via BroadcastChannel
-    try { _imgSyncChannelRef.current?.postMessage({ used: nextUsed }); } catch {}
-    // Storage-event fallback for other tabs (and older browsers)
-    try { localStorage.setItem('ma_img_usage_bc', JSON.stringify({ used: nextUsed, t: Date.now() })); } catch {}
-
-    // Resilient resync — retry up to 2 times on network failure, silent (no UI)
-    let attempt = 0;
-    const trySync = () => {
-      api.authCredits()
-        .then(({ credits: c, plan: p, images_used, images_limit, images_resets_on }) => {
-          setCredits(c);
-          setPlan(p);
-          if (images_used !== undefined) {
-            setImageUsage({ used: images_used, limit: images_limit ?? 2, resetsOn: images_resets_on ?? null });
-          }
-        })
-        .catch(() => {
-          attempt += 1;
-          if (attempt < _RESYNC_DELAYS.length) {
-            setTimeout(trySync, _RESYNC_DELAYS[attempt]);
-          }
-        });
-    };
-    setTimeout(trySync, _RESYNC_DELAYS[0]);
+  const refreshSubscription = useCallback(() => {
+    api.authSubscriptionStatus()
+      .then((data) => {
+        setIsSubscribed(Boolean(data.is_subscribed));
+        setApiKeyVerified(Boolean(data.api_key_verified));
+        setApiKeyHint(data.api_key_hint || null);
+        setApiKeyProvider(data.api_key_provider || null);
+        setCanExecute(Boolean(data.can_execute));
+      })
+      .catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- Upgrade modal ----
+  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
+  const [upgradeReason,    setUpgradeReason]    = useState('generic');
+  const openUpgradeModal = useCallback((reason = 'generic') => {
+    setUpgradeReason(reason);
+    setUpgradeModalOpen(true);
+    trackEvent('upgrade_modal_opened', { trigger_type: reason });
+  }, []);
 
   // ---- Onboarding build prompt bridge ----
   // OnboardingModal sets this; AppBuilder reads + clears it to auto-fill + build
@@ -441,27 +390,6 @@ export function AppProvider({ children }) {
   const setPendingChatMode = useCallback((mode) => { _setPendingChatMode(mode); }, []);
   const clearPendingChatMode = useCallback(() => { _setPendingChatMode(null); }, []);
 
-  // ---- Global upgrade modal ----
-  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
-  const [upgradeReason, setUpgradeReason]       = useState('generic');
-  const openUpgradeModal = useCallback((reason = 'generic') => {
-    setUpgradeReason(reason);
-    setUpgradeModalOpen(true);
-    trackEvent('upgrade_modal_opened', { trigger_type: reason });
-    if (reason === 'credits') trackEvent('credits_exhausted', { trigger_type: reason });
-  }, []);
-
-  const refreshCredits = useCallback(() => {
-    api.authCredits().then(({ credits: c, plan: p, has_ad_mode, images_used, images_limit, images_resets_on }) => {
-      setCredits(c);
-      setPlan(p);
-      if (has_ad_mode !== undefined) setHasAdMode(Boolean(has_ad_mode));
-      if (images_used !== undefined) {
-        setImageUsage({ used: images_used, limit: images_limit ?? 2, resetsOn: images_resets_on ?? null });
-      }
-    }).catch(() => {});
-  }, []);
-
   // On mount: verify token with backend and refresh user object (including avatar).
   useEffect(() => {
     const token = getToken();
@@ -469,12 +397,14 @@ export function AppProvider({ children }) {
     api.authMe()
       .then((profile) => {
         _setUser((prev) => ({ ...prev, ...profile }));
-        if (profile.credits !== undefined) setCredits(profile.credits);
-        if (profile.plan !== undefined) setPlan(profile.plan);
+        if (profile.is_subscribed !== undefined) setIsSubscribed(Boolean(profile.is_subscribed));
+        if (profile.api_key_verified !== undefined) setApiKeyVerified(Boolean(profile.api_key_verified));
+        if (profile.api_key_hint !== undefined) setApiKeyHint(profile.api_key_hint || null);
+        if (profile.api_key_provider !== undefined) setApiKeyProvider(profile.api_key_provider || null);
+        if (profile.can_execute !== undefined) setCanExecute(Boolean(profile.can_execute));
         if (profile.has_ad_mode !== undefined) setHasAdMode(Boolean(profile.has_ad_mode));
         if (profile.avatar !== undefined) {
           _setAvatar(profile.avatar || null);
-          // Cache avatar locally so it survives backend restarts
           const uid = profile.id || getSessionId();
           if (uid) {
             if (profile.avatar) {
@@ -547,8 +477,8 @@ export function AppProvider({ children }) {
     api.dbGetTemplates()
       .then((data) => { if (data?.templates?.length) setPromptTemplates(data.templates); })
       .catch(() => {});
-    // Hydrate image usage from server so it survives page refreshes
-    refreshCredits();
+    // Hydrate subscription + key status from server
+    refreshSubscription();
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Persist per-user data to localStorage whenever it changes
@@ -625,7 +555,6 @@ export function AppProvider({ children }) {
     _initialTemplatesRef.current = true;
     // Reset modal state so it doesn't leak to next account
     setUpgradeModalOpen(false);
-    setPurchaseModalOpen(false);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loginWithGoogle = useCallback(async (credential) => {
@@ -1003,16 +932,16 @@ export function AppProvider({ children }) {
     loginWithGoogle,
     loginWithCredentials,
     register,
-    credits,
-    plan,
+    isSubscribed,
+    apiKeyVerified,
+    apiKeyHint,
+    apiKeyProvider,
+    canExecute,
     hasAdMode,
     setHasAdMode,
-    isSubscribed,
-    refreshCredits,
+    refreshSubscription,
     imageUsage,
     incrementImageUsage,
-    purchaseModalOpen,
-    setPurchaseModalOpen,
     mobileSidebarOpen,
     setMobileSidebarOpen,
     upgradeModalOpen,

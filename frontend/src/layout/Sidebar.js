@@ -551,10 +551,7 @@ function Sidebar() {
     addPromptTemplate,
     deletePromptTemplate,
     firePendingTemplate,
-    credits,
-    plan,
     isSubscribed,
-    setPurchaseModalOpen,
     mobileSidebarOpen,
     setMobileSidebarOpen,
     hasAdMode,
@@ -874,41 +871,18 @@ function Sidebar() {
 
       {/* ---- Bottom fixed area ---- */}
       <div className="flex-shrink-0 border-t border-white/5 px-2 py-3 space-y-1">
-        {/* Credits badge */}
-        {!isSubscribed && credits !== null && (
+        {/* Subscription status badge */}
+        {!isSubscribed && (
           <div
-            title={sidebarCollapsed ? `${credits} Mini Credits remaining` : undefined}
             className={`flex items-center gap-2 px-2 py-1.5 rounded-lg ${sidebarCollapsed ? 'justify-center' : ''}`}
           >
             <span className="text-[13px] flex-shrink-0">⚡</span>
             {!sidebarCollapsed && (
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between mb-0.5">
-                  <span className={`text-[11px] font-mono ${credits === 0 ? 'text-red-400' : credits <= 3 ? 'text-amber-400' : 'text-slate-400'}`}>
-                    {credits} Mini Credits
-                  </span>
-                  <button
-                    onClick={() => setPurchaseModalOpen(true)}
-                    className="text-[10px] text-cyan-400 font-medium bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/20 px-1.5 py-0.5 rounded transition-colors"
-                  >
-                    + Get Credits
-                  </button>
-                </div>
-                <div className="h-1 rounded-full bg-white/10 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all ${credits > 5 ? 'bg-cyan-500' : credits > 2 ? 'bg-amber-500' : 'bg-red-500'}`}
-                    style={{ width: `${Math.min(100, (credits / 10) * 100)}%` }}
-                  />
-                </div>
-              </div>
-            )}
-            {sidebarCollapsed && (
               <button
-                onClick={() => setPurchaseModalOpen(true)}
-                className="p-1 rounded hover:bg-cyan-500/10 text-cyan-500 hover:text-cyan-400 transition-colors"
-                title="Get Credits"
+                onClick={() => navTo('pricing')}
+                className="text-[11px] text-cyan-400 font-medium hover:text-cyan-300 transition-colors"
               >
-                <Zap size={11} />
+                Subscribe to unlock AI
               </button>
             )}
           </div>
@@ -916,7 +890,7 @@ function Sidebar() {
         {isSubscribed && (
           <div className={`flex items-center gap-2 px-2 py-1.5 rounded-lg ${sidebarCollapsed ? 'justify-center' : ''}`}>
             <span className="text-[13px] flex-shrink-0">✦</span>
-            {!sidebarCollapsed && <span className="text-[11px] font-mono text-cyan-400 capitalize">{plan}</span>}
+            {!sidebarCollapsed && <span className="text-[11px] font-mono text-cyan-400">Active</span>}
           </div>
         )}
 

@@ -144,68 +144,39 @@ function ActivityRow({ item }) {
 }
 
 // ---------------------------------------------------------------------------
-// CreditBar
+// SubscriptionPanel
 // ---------------------------------------------------------------------------
-function CreditBar({ credits, plan, isSubscribed, onBuyCredits, onTopUp, onUpgrade }) {
-  const planCfg = PLAN_CONFIG[plan] || PLAN_CONFIG.free;
-  const limit = planCfg.limit;
-  const pct = Math.min(100, (credits / limit) * 100);
-  const low = pct < 20;
-  const mid = pct >= 20 && pct < 50;
-  const barColor = isSubscribed
-    ? (low ? 'bg-amber-500' : 'bg-gradient-to-r from-cyan-500 to-violet-500')
-    : (low ? 'bg-red-500' : mid ? 'bg-amber-500' : 'bg-cyan-500');
-
+function SubscriptionPanel({ isSubscribed, apiKeyVerified, onManage, onGoSettings, onGoPlans }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-[#13131f] p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
-          <Zap size={14} className="text-amber-400" /> Credits &amp; Plan
-        </h2>
-        <span className={`text-[11px] font-mono font-semibold px-2.5 py-0.5 rounded-full border ${planCfg.bg} ${planCfg.color}`}>
-          {planCfg.label}
-        </span>
+      <h2 className="text-sm font-semibold text-slate-200 mb-4 flex items-center gap-2">
+        <Zap size={14} className="text-violet-400" /> Subscription & API Key
+      </h2>
+      <div className="grid grid-cols-2 gap-3 mb-4">
+        <div className={`rounded-xl border p-3 ${isSubscribed ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-amber-500/20 bg-amber-500/5'}`}>
+          <p className={`text-xs font-semibold mb-0.5 ${isSubscribed ? 'text-emerald-400' : 'text-amber-400'}`}>Subscription</p>
+          <p className="text-sm text-white font-bold">{isSubscribed ? 'Active' : 'Inactive'}</p>
+        </div>
+        <div className={`rounded-xl border p-3 ${apiKeyVerified ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-amber-500/20 bg-amber-500/5'}`}>
+          <p className={`text-xs font-semibold mb-0.5 ${apiKeyVerified ? 'text-emerald-400' : 'text-amber-400'}`}>API Key</p>
+          <p className="text-sm text-white font-bold">{apiKeyVerified ? 'Verified' : 'Not set'}</p>
+        </div>
       </div>
-
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-slate-400">Credits remaining</span>
-          <span className={`text-xl font-bold font-mono ${isSubscribed && !low ? 'text-cyan-400' : low ? 'text-amber-400' : mid ? 'text-amber-400' : 'text-white'}`}>
-            {fmt(credits)} <span className="text-slate-600 text-sm font-normal">/ {limit.toLocaleString()}</span>
-          </span>
-        </div>
-        <div className="h-2 rounded-full bg-white/10 overflow-hidden">
-          <div className={`h-full rounded-full transition-all duration-700 ${barColor}`} style={{ width: `${Math.max(2, pct)}%` }} />
-        </div>
-        <p className="text-[11px] text-slate-600">
-          1 credit = 1 chat · 3 credits = 1 image · 5 credits = 1 app build
-          {isSubscribed && ' · Credits reset monthly'}
-        </p>
-        <div className="flex flex-wrap gap-2 pt-1">
-          {isSubscribed ? (
-            <>
-              <button
-                onClick={onTopUp}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold transition-all"
-              >
-                <Zap size={12} /> Top-Up Credits
-              </button>
-              <button
-                onClick={onUpgrade}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-xs font-medium transition-all"
-              >
-                <TrendingUp size={12} /> Change Plan
-              </button>
-            </>
-          ) : (
-            <button
-              onClick={onUpgrade}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-cyan-600 hover:opacity-90 text-white text-xs font-bold transition-all"
-            >
-              <TrendingUp size={12} /> View Plans
-            </button>
-          )}
-        </div>
+      <div className="flex flex-wrap gap-2">
+        {isSubscribed ? (
+          <button onClick={onManage} className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-xs font-medium transition-all">
+            <TrendingUp size={12} /> Manage Billing
+          </button>
+        ) : (
+          <button onClick={onGoPlans} className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-cyan-600 hover:opacity-90 text-white text-xs font-bold transition-all">
+            <TrendingUp size={12} /> View Plans
+          </button>
+        )}
+        {!apiKeyVerified && (
+          <button onClick={onGoSettings} className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-300 text-xs font-medium transition-all">
+            Add API Key →
+          </button>
+        )}
       </div>
     </div>
   );
@@ -229,8 +200,8 @@ function MonthlyUsagePanel({ data }) {
       {/* Stats row */}
       <div className="grid grid-cols-3 gap-3 mb-6">
         <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-3 text-center">
-          <p className="text-lg font-bold text-white">{fmt(data?.credits_used_month ?? 0)}</p>
-          <p className="text-[10px] text-slate-500 mt-0.5">Credits used</p>
+          <p className="text-lg font-bold text-white">{fmt(data?.activity_this_month ?? data?.requests_this_month ?? 0)}</p>
+          <p className="text-[10px] text-slate-500 mt-0.5">Activity</p>
         </div>
         <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-3 text-center">
           <p className="text-lg font-bold text-white">{fmt(data?.requests_this_month ?? 0)}</p>
@@ -269,7 +240,7 @@ function MonthlyUsagePanel({ data }) {
 // Main component
 // ---------------------------------------------------------------------------
 export default function UserDashboard() {
-  const { user, avatar, credits, plan, isSubscribed, setPage, setPurchaseModalOpen, openUpgradeModal, getPrevPage } = useApp();
+  const { user, avatar, isSubscribed, apiKeyVerified, setPage, getPrevPage } = useApp();
   const [data, setData]           = useState(null);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState(null);
@@ -317,8 +288,6 @@ export default function UserDashboard() {
     });
   }, [referral]);
 
-  const planCfg = PLAN_CONFIG[plan] || PLAN_CONFIG.free;
-
   return (
     <div className="h-full overflow-y-auto">
       <div className="max-w-3xl mx-auto px-4 md:px-8 py-8 space-y-5">
@@ -354,14 +323,13 @@ export default function UserDashboard() {
           </button>
         </div>
 
-        {/* Plan + credits bar */}
-        <CreditBar
-          credits={data?.credits ?? credits ?? 0}
-          plan={data?.plan ?? plan}
+        {/* Subscription & key status */}
+        <SubscriptionPanel
           isSubscribed={data?.is_subscribed ?? isSubscribed}
-          onBuyCredits={() => setPage('pricing')}
-          onTopUp={() => setPurchaseModalOpen(true)}
-          onUpgrade={() => setPage('pricing')}
+          apiKeyVerified={data?.api_key_verified ?? apiKeyVerified}
+          onManage={handleManageBilling}
+          onGoSettings={() => setPage('settings')}
+          onGoPlans={() => setPage('pricing')}
         />
 
         {/* Monthly usage panel */}
@@ -384,11 +352,11 @@ export default function UserDashboard() {
           <div>
             <p className="text-[11px] text-slate-600 uppercase tracking-widest font-mono mb-3">All time</p>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              <StatCard icon={MessageSquare} label="Chats Sent"      value={data?.total_chats_sent}   color="cyan" />
-              <StatCard icon={Image}         label="Images Made"     value={data?.total_images_made}  color="violet" />
-              <StatCard icon={Zap}           label="Credits Used"    value={data?.total_credits_used} color="amber" />
-              <StatCard icon={Folder}        label="Saved Chats"     value={data?.saved_chats}        color="slate" />
-              <StatCard icon={TrendingUp}    label="Saved Images"    value={data?.saved_images}       color="slate" />
+              <StatCard icon={MessageSquare} label="Chats Sent"      value={data?.total_chats_sent}          color="cyan" />
+              <StatCard icon={Image}         label="Images Made"     value={data?.total_images_made}         color="violet" />
+              <StatCard icon={Activity}      label="Total Requests"  value={data?.total_activity_events}     color="amber" />
+              <StatCard icon={Folder}        label="Saved Chats"     value={data?.saved_chats}               color="slate" />
+              <StatCard icon={TrendingUp}    label="Saved Images"    value={data?.saved_images}              color="slate" />
               <StatCard icon={Calendar}      label="Member Since"    value={memberSince(data?.member_since)} color="slate" />
             </div>
           </div>

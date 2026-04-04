@@ -33,7 +33,6 @@ import AuthPage from './pages/AuthPage';
 import ProfilePage from './pages/ProfilePage';
 import AdminPage from './pages/AdminPage';
 import UserDashboard from './pages/UserDashboard';
-import PurchaseCreditsModal from './components/PurchaseCreditsModal';
 import UpgradeModal from './components/UpgradeModal';
 import MascotAssistant from './components/MascotAssistant';
 import PricingPage from './pages/PricingPage';
@@ -169,7 +168,7 @@ function pageTitle(page) {
 // AppShell — rendered inside AppProvider so it can use useApp()
 // ---------------------------------------------------------------------------
 function AppShell() {
-  const { page, setPage, getPrevPage, serverStatus, setServerStatus, purchaseModalOpen, setPurchaseModalOpen, refreshCredits, openUpgradeModal, logout } = useApp();
+  const { page, setPage, getPrevPage, serverStatus, setServerStatus, openUpgradeModal, logout } = useApp();
 
   // Session sleep / resume — Page Visibility API
   const [sessionResumed, setSessionResumed] = React.useState(false);
@@ -233,8 +232,6 @@ function AppShell() {
   useEffect(() => {
     const result = handleCheckoutReturn();
     if (result === 'success') {
-      // Refresh plan + credits from API immediately, then show success page
-      refreshCredits();
       setPage('checkout-success');
     } else if (result === 'cancelled' || result === 'portal_return') {
       setPage('pricing');
@@ -312,11 +309,6 @@ function AppShell() {
       {/* Settings modal overlays the whole shell */}
       {page === 'settings' && (
         <SettingsModal onClose={() => setPage(getPrevPage())} />
-      )}
-
-      {/* Purchase Credits modal — accessible from anywhere */}
-      {purchaseModalOpen && (
-        <PurchaseCreditsModal onClose={() => setPurchaseModalOpen(false)} />
       )}
 
       {/* Global upgrade modal — triggered from anywhere via openUpgradeModal() */}

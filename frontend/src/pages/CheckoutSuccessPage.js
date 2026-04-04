@@ -1,90 +1,22 @@
 /**
  * CheckoutSuccessPage.js
- * Post-checkout celebration page — shown after Stripe redirects back.
- * Refreshes user plan/credits, shows what's unlocked, then auto-navigates to chat.
+ * Post-checkout success page — shown after Stripe redirects back.
+ * Subscription confirmed → redirects to settings to add API key.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import {
-  Check, Zap, ArrowRight, Code2, Download, Github,
-  Rocket, Crown, Users, Star, Sparkles,
-} from 'lucide-react';
+import { Check, KeyRound, ArrowRight, Code2, Download, Github, Sparkles } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
-// ---------------------------------------------------------------------------
-// Per-plan unlock config
-// ---------------------------------------------------------------------------
-const PLAN_UNLOCKS = {
-  standard: {
-    name: 'Standard',
-    color: 'from-cyan-400 to-cyan-600',
-    textColor: 'text-cyan-400',
-    borderColor: 'border-cyan-500/30',
-    bgColor: 'bg-cyan-500/10',
-    icon: Zap,
-    tagline: 'Ready to build something real.',
-    features: [
-      { icon: Code2,    text: 'Full source code — view, copy, edit' },
-      { icon: Download, text: 'Download as HTML & ZIP' },
-      { icon: Github,   text: 'Push directly to GitHub' },
-      { icon: Zap,      text: '1,000 credits every month' },
-    ],
-  },
-  pro: {
-    name: 'Pro',
-    color: 'from-violet-400 to-violet-600',
-    textColor: 'text-violet-400',
-    borderColor: 'border-violet-500/30',
-    bgColor: 'bg-violet-500/10',
-    icon: Crown,
-    tagline: 'Ship faster than ever before.',
-    features: [
-      { icon: Rocket,   text: 'One-click deploy to Vercel' },
-      { icon: Code2,    text: 'Full-stack project export' },
-      { icon: Crown,    text: 'Priority AI model access' },
-      { icon: Zap,      text: '4,000 credits every month' },
-    ],
-  },
-  max: {
-    name: 'Max',
-    color: 'from-amber-400 to-amber-600',
-    textColor: 'text-amber-400',
-    borderColor: 'border-amber-500/30',
-    bgColor: 'bg-amber-500/10',
-    icon: Users,
-    tagline: 'The full power of Mini Assistant.',
-    features: [
-      { icon: Users,    text: 'Unlimited builds & exports' },
-      { icon: Zap,      text: '10,000 credits every month' },
-      { icon: Crown,    text: 'Dedicated support channel' },
-      { icon: Sparkles, text: 'Admin dashboard & usage analytics' },
-    ],
-  },
-  topup: {
-    name: 'Credits',
-    color: 'from-amber-400 to-amber-500',
-    textColor: 'text-amber-400',
-    borderColor: 'border-amber-500/30',
-    bgColor: 'bg-amber-500/10',
-    icon: Zap,
-    tagline: 'Topped up and ready to go.',
-    features: [
-      { icon: Zap,      text: 'Credits added instantly to your account' },
-      { icon: Star,     text: 'Never expire — use them any time' },
-      { icon: Code2,    text: 'Build, chat, generate images & more' },
-    ],
-  },
-};
-
-const AUTO_REDIRECT_SECS = 8;
-
-// ---------------------------------------------------------------------------
-// Confetti — pure CSS, no library
-// ---------------------------------------------------------------------------
-const CONFETTI_COLORS = [
-  '#7c3aed', '#06b6d4', '#f59e0b', '#10b981', '#f43f5e', '#8b5cf6',
+const FEATURES = [
+  { icon: Code2,     text: 'Full source code — view, copy, edit' },
+  { icon: Download,  text: 'Download as HTML & ZIP' },
+  { icon: Github,    text: 'Push directly to GitHub' },
+  { icon: Sparkles,  text: 'AI chat, image generation & more' },
 ];
-const CONFETTI_COUNT = 48;
+
+const CONFETTI_COLORS = ['#7c3aed', '#06b6d4', '#f59e0b', '#10b981', '#f43f5e'];
+const CONFETTI_COUNT  = 48;
 
 function Confetti() {
   const pieces = useRef(
@@ -99,7 +31,6 @@ function Confetti() {
       shape: Math.random() > 0.5 ? 'circle' : 'rect',
     }))
   );
-
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden z-0">
       <style>{`
@@ -113,16 +44,13 @@ function Confetti() {
         <div
           key={p.id}
           style={{
-            position: 'absolute',
-            left: `${p.left}%`,
-            top: 0,
+            position: 'absolute', left: `${p.left}%`, top: 0,
             width: p.shape === 'circle' ? p.size : p.size * 0.6,
             height: p.shape === 'circle' ? p.size : p.size * 1.4,
             backgroundColor: p.color,
             borderRadius: p.shape === 'circle' ? '50%' : '2px',
             animation: `confetti-fall ${p.duration}s ${p.delay}s ease-in forwards`,
-            transform: `rotate(${p.rotation}deg)`,
-            opacity: 0,
+            transform: `rotate(${p.rotation}deg)`, opacity: 0,
           }}
         />
       ))}
@@ -130,30 +58,24 @@ function Confetti() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Main page
-// ---------------------------------------------------------------------------
+const AUTO_REDIRECT_SECS = 10;
+
 export default function CheckoutSuccessPage() {
-  const { plan, credits, setPage, refreshCredits } = useApp();
+  const { setPage, refreshSubscription } = useApp();
   const [countdown, setCountdown] = useState(AUTO_REDIRECT_SECS);
-  const [loaded, setLoaded] = useState(false);
   const timerRef = useRef(null);
 
-  // Refresh credits/plan on mount so numbers are live
   useEffect(() => {
-    refreshCredits();
-    // Brief delay so the refresh resolves before we render
-    const t = setTimeout(() => setLoaded(true), 600);
-    return () => clearTimeout(t);
+    // Refresh subscription state so TopBar and gate reflect new status
+    refreshSubscription();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Countdown → auto-navigate
   useEffect(() => {
     timerRef.current = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
           clearInterval(timerRef.current);
-          setPage('chat');
+          setPage('settings');
           return 0;
         }
         return prev - 1;
@@ -162,65 +84,46 @@ export default function CheckoutSuccessPage() {
     return () => clearInterval(timerRef.current);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Detect plan key — if plan changed to a known upgrade, show that; else if topup, show topup
-  const isTopup = !['standard', 'pro', 'max'].includes(plan);
-  const planKey  = isTopup ? 'topup' : (plan || 'standard');
-  const cfg      = PLAN_UNLOCKS[planKey] || PLAN_UNLOCKS.standard;
-  const Icon     = cfg.icon;
-
-  const handleStart = () => {
-    clearInterval(timerRef.current);
-    setPage('chat');
-  };
-
-  const handleDashboard = () => {
-    clearInterval(timerRef.current);
-    setPage('dashboard');
-  };
+  const goSettings = () => { clearInterval(timerRef.current); setPage('settings'); };
+  const goChat     = () => { clearInterval(timerRef.current); setPage('chat');     };
 
   return (
     <div className="relative h-full overflow-y-auto bg-[#0b0b12] flex items-center justify-center px-4 py-12">
       <Confetti />
 
       <div className="relative z-10 w-full max-w-lg text-center">
-
-        {/* Icon burst */}
+        {/* Icon */}
         <div className="flex justify-center mb-6">
-          <div className={`w-20 h-20 rounded-3xl bg-gradient-to-br ${cfg.color} flex items-center justify-center shadow-2xl animate-[bounceIn_0.6s_ease-out]`}>
-            <Icon className="w-10 h-10 text-white" strokeWidth={1.5} />
+          <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center shadow-2xl animate-[bounceIn_0.6s_ease-out]">
+            <Check className="w-10 h-10 text-white" strokeWidth={2.5} />
           </div>
         </div>
 
-        {/* Headline */}
         <div className="mb-2">
-          <span className={`text-xs font-bold uppercase tracking-widest ${cfg.textColor}`}>
+          <span className="text-xs font-bold uppercase tracking-widest text-violet-400">
             Payment confirmed
           </span>
         </div>
         <h1 className="text-3xl sm:text-4xl font-black text-white mb-2 tracking-tight">
-          {isTopup ? 'Credits Added!' : `You're on ${cfg.name}!`}
+          You're subscribed!
         </h1>
-        <p className="text-slate-400 text-base mb-1">{cfg.tagline}</p>
-        {loaded && credits !== null && (
-          <p className={`text-sm font-semibold ${cfg.textColor} mb-6`}>
-            <Zap className="inline w-3.5 h-3.5 mr-1" />
-            {credits.toLocaleString()} credits available now
-          </p>
-        )}
+        <p className="text-slate-400 text-base mb-6">
+          One last step — add your API key to start building.
+        </p>
 
         {/* What's unlocked */}
-        <div className={`rounded-2xl border ${cfg.borderColor} ${cfg.bgColor} p-5 mb-6 text-left`}>
+        <div className="rounded-2xl border border-violet-500/30 bg-violet-500/10 p-5 mb-6 text-left">
           <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-3">
-            {isTopup ? 'What you got' : "What's unlocked"}
+            What's unlocked
           </p>
           <ul className="space-y-2.5">
-            {cfg.features.map(({ icon: FIcon, text }, i) => (
+            {FEATURES.map(({ icon: FIcon, text }, i) => (
               <li key={i} className="flex items-center gap-3">
-                <div className={`w-7 h-7 rounded-lg ${cfg.bgColor} border ${cfg.borderColor} flex items-center justify-center flex-shrink-0`}>
-                  <FIcon className={`w-3.5 h-3.5 ${cfg.textColor}`} />
+                <div className="w-7 h-7 rounded-lg bg-violet-500/10 border border-violet-500/30 flex items-center justify-center flex-shrink-0">
+                  <FIcon className="w-3.5 h-3.5 text-violet-400" />
                 </div>
                 <span className="text-sm text-slate-200">{text}</span>
-                <Check className={`w-4 h-4 ml-auto flex-shrink-0 ${cfg.textColor}`} />
+                <Check className="w-4 h-4 ml-auto flex-shrink-0 text-violet-400" />
               </li>
             ))}
           </ul>
@@ -229,35 +132,29 @@ export default function CheckoutSuccessPage() {
         {/* CTAs */}
         <div className="flex flex-col sm:flex-row gap-3 justify-center mb-6">
           <button
-            onClick={handleStart}
-            className={`flex items-center justify-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r ${cfg.color} text-white font-bold text-sm hover:opacity-90 transition-all shadow-lg`}
+            onClick={goSettings}
+            className="flex items-center justify-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-violet-600 to-cyan-600 text-white font-bold text-sm hover:opacity-90 transition-all shadow-lg"
           >
-            Start Building <ArrowRight className="w-4 h-4" />
+            <KeyRound className="w-4 h-4" /> Add API Key
           </button>
           <button
-            onClick={handleDashboard}
+            onClick={goChat}
             className="flex items-center justify-center gap-2 px-6 py-3 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 font-medium text-sm transition-all"
           >
-            View Dashboard
+            Go to Chat <ArrowRight className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Auto-redirect countdown */}
         <p className="text-xs text-slate-600">
-          Redirecting to chat in{' '}
+          Redirecting to settings in{' '}
           <span className="font-mono text-slate-400 font-bold">{countdown}s</span>
           {' '}—{' '}
-          <button
-            onClick={handleStart}
-            className="text-cyan-600 hover:text-cyan-400 underline underline-offset-2 transition-colors"
-          >
+          <button onClick={goSettings} className="text-cyan-600 hover:text-cyan-400 underline underline-offset-2 transition-colors">
             go now
           </button>
         </p>
-
       </div>
 
-      {/* Inline bounce animation */}
       <style>{`
         @keyframes bounceIn {
           0%   { transform: scale(0.3); opacity: 0; }
