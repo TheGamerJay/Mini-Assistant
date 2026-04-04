@@ -2708,23 +2708,29 @@ async def chat_stream(req: ChatRequest, request: Request):
             logger.warning("Phase1 failed in stream endpoint: %s", _e)
             execution_intent = None
 
-        # ── UI image mode is a hard override — user explicitly clicked the button ──
-        # chat_mode="image" or "image_edit" = user pressed the image mode button.
-        # This is explicit user intent, not a hint. Always route to image generation.
-        # For all other modes (chat, build) the CEO decides and cannot be overridden.
+        # ── Image mode resolution ─────────────────────────────────────────────
+        # chat_mode="image" = user clicked the image button.
+        # Rule: only upgrade to image_generation when CEO found no specific intent.
+        # If CEO detected a concrete non-image intent (web_search, coding, planning, etc.)
+        # that intent stands — the user may be asking a question while in image mode.
+        # CEO's generic normal_chat in image mode → image_generation (user is describing).
         _req_chat_mode = getattr(req, "chat_mode", None)
+        _ceo_intent    = phase1_plan.intent if phase1_plan else None
+
         if _req_chat_mode in ("image", "image_edit"):
             if _req_chat_mode == "image_edit" or (_req_chat_mode == "image" and bool(req.image_base64)):
                 execution_intent = "image_edit"
-            else:
+            elif _ceo_intent in (None, "normal_chat") or execution_intent is None:
+                # CEO found nothing specific — treat as image generation
                 execution_intent = "image_generation"
+            # else: CEO found web_search / coding / planning / etc. — let it handle
         elif execution_intent is None:
             # CEO had no answer — use UI mode hint as fallback
             if _req_chat_mode == "build":
                 execution_intent = "app_builder"
             else:
                 execution_intent = "chat"
-        # CEO decision stands for all non-image modes
+        # CEO decision stands for all non-image modes and specific non-image intents
 
         logger.info(
             "[CEO] stream: chat_mode=%s execution_intent=%s (FINAL — no overrides below)",
