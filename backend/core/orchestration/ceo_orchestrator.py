@@ -346,6 +346,15 @@ async def resume_after_approval(
     state.final_status = "complete"
     state.end_time     = time.perf_counter()
 
+    # Save confirmed fix to repair memory library
+    if approved:
+        _auto_save_repair(
+            problem  = approved.get("issue", state.goal)[:200],
+            solution = approved.get("proposed_fix", "Doctor fix applied")[:200],
+            steps    = approved.get("fix_steps", [])[:10],
+            category = "build_pipeline",
+        )
+
     return {
         "status":       "success",
         "orchestrated": True,
@@ -356,6 +365,53 @@ async def resume_after_approval(
         "elapsed_ms":   state.elapsed_ms(),
         **build_result["_raw"],
     }
+
+
+# ---------------------------------------------------------------------------
+# Repair memory: auto-save confirmed solutions
+# ---------------------------------------------------------------------------
+
+def _auto_save_repair(
+    problem:   str,
+    solution:  str,
+    steps:     list[str],
+    category:  str = "build_pipeline",
+) -> None:
+    """
+    CEO saves a confirmed fix to the repair memory library.
+    Called ONLY after a solution has been verified (Hands + Vision passed).
+    Never called on partial fixes or unverified outcomes.
+    """
+    try:
+        from core.repair_memory.repair_store import save_repair, slug_exists, increment_success
+        from core.repair_memory.repair_search import search
+
+        # Check if a very similar problem already exists — if so, increment success count
+        matches = search(category, problem, top_n=1)
+        if matches and matches[0]["similarity_score"] >= 0.75:
+            existing_slug = matches[0]["_slug"]
+            if increment_success(category, existing_slug):
+                log.info(
+                    "repair_memory: incremented existing record slug=%s (similarity=%.2f)",
+                    existing_slug, matches[0]["similarity_score"],
+                )
+                return
+
+        # New problem — save fresh record
+        slug = problem[:60].lower().replace(" ", "-")
+        record = save_repair(
+            category       = category,
+            problem_slug   = slug,
+            problem_name   = problem[:200],
+            solution_name  = solution[:200],
+            solution_steps = steps[:10],
+        )
+        log.info(
+            "repair_memory: saved new solution slug=%s category=%s",
+            slug, category,
+        )
+    except Exception as exc:
+        log.warning("repair_memory: auto-save failed (non-fatal) — %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -469,6 +525,7 @@ async def stream_builder_task(
         if not hands_ok and hands_issues:
             yield _status("ceo", f"Hands found issues — sending back to Builder: {hands_issues[0]}")
             yield _status("builder", "Fixing issues…")
+            _fix_start_len = len(reply_text)
             async for chunk in _stream_fix(
                 original_html = _built_html,
                 issues        = hands_issues,
@@ -484,8 +541,19 @@ async def stream_builder_task(
                     except Exception:
                         pass
                 yield chunk
-            yield _status("ceo", "Hands re-checking after fix…")
             _built_html = _extract_html(reply_text) or _built_html
+            # Re-verify after fix
+            yield _status("ceo", "Hands re-checking after fix…")
+            _hands_ok2, _ = await _hands_qa(_built_html, message, api_key)
+            if _hands_ok2:
+                # Solution confirmed — save to repair memory library
+                _auto_save_repair(
+                    problem  = f"Build failed QA: {'; '.join(hands_issues[:2])}",
+                    solution = f"Builder fix resolved: {message[:80]}",
+                    steps    = hands_issues[:5],
+                    category = "build_pipeline",
+                )
+                yield _status("ceo", "Fix verified and saved to repair library.")
         else:
             yield _status("ceo", "Hands: all checks passed.")
 
