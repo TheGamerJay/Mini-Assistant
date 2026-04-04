@@ -38,6 +38,26 @@ _MAX_RETRIES_PER_BRAIN = 3
 # Brain call entry points (all called by CEO Orchestrator only)
 # ---------------------------------------------------------------------------
 
+async def call_planner(
+    decision: dict[str, Any],
+    memory:   dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Route to Planner Brain. Returns BrainResult with structured build plan.
+    Called by CEO only. Planner never calls back — returns plan to CEO.
+    """
+    t0 = time.perf_counter()
+    try:
+        from core.modules.planner import execute
+        raw = await execute(decision, memory, {})
+    except Exception as exc:
+        log.error("brain_router: planner failed — %s", exc, exc_info=True)
+        return _fail_result("planner", str(exc), "builder")
+
+    elapsed = round((time.perf_counter() - t0) * 1000, 1)
+    return _wrap_planner(raw, elapsed)
+
+
 async def call_builder(
     decision:    dict[str, Any],
     memory:      dict[str, Any],
@@ -169,6 +189,23 @@ async def call_doctor(
 # ---------------------------------------------------------------------------
 # BrainResult wrappers
 # ---------------------------------------------------------------------------
+
+def _wrap_planner(raw: dict[str, Any], elapsed_ms: float) -> dict[str, Any]:
+    has_error = raw.get("type") == "error" or raw.get("status") == "error"
+    status    = "fail" if has_error else "success"
+    return {
+        "status":                status,
+        "summary":               raw.get("summary", "Plan created."),
+        "confidence":            _parse_confidence(raw.get("confidence", "medium")),
+        "evidence":              raw.get("steps", [])[:5],
+        "affected_files":        [],
+        "proposed_fix":          "",
+        "recommended_next_step": "builder" if status == "success" else "ask_user",
+        "_raw":                  raw,
+        "_brain":                "planner",
+        "_elapsed_ms":           elapsed_ms,
+    }
+
 
 def _wrap_builder(raw: dict[str, Any], elapsed_ms: float) -> dict[str, Any]:
     files = raw.get("files", [])

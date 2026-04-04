@@ -24,12 +24,15 @@ Output: structured orchestration result for chat_endpoint to return.
 
 from __future__ import annotations
 
+import json as _json
 import logging
+import os
+import re as _re
 import time
-from typing import Any, Optional
+from typing import Any, AsyncGenerator, Optional
 
 from .state_manager import OrchestrationState, StepRecord, get_or_create
-from .brain_router import call_builder, call_hands, call_vision, call_doctor
+from .brain_router import call_builder, call_hands, call_vision, call_doctor, call_planner
 from .approval_gate import request_approval, build_approval_message
 
 log = logging.getLogger("ceo_router.orchestrator")
@@ -353,6 +356,457 @@ async def resume_after_approval(
         "elapsed_ms":   state.elapsed_ms(),
         **build_result["_raw"],
     }
+
+
+# ---------------------------------------------------------------------------
+# Streaming CEO build loop — for the /api/chat/stream endpoint
+# ---------------------------------------------------------------------------
+
+async def stream_builder_task(
+    *,
+    session_id:          str,
+    message:             str,
+    history:             list,          # [{role, content}]
+    has_prior_code:      bool,
+    prior_code:          str | None,
+    api_key:             str,
+    vibe_mode:           bool  = False,
+    build_history_turns: int   = 0,
+    is_explicit_rebuild: bool  = False,
+    has_images:          bool  = False,
+    all_images:          list  | None = None,
+    lessons:             str   = "",
+    user_prefs:          str   = "",
+    memory_search:       str   = "",
+    memory:              dict  | None = None,
+) -> AsyncGenerator[str, None]:
+    """
+    CEO-controlled streaming build pipeline.
+
+    Yields SSE strings ready for the client:
+      data: {"brain": "ceo|planner|builder|hands|eyes", "status": "..."}\\n\\n
+      data: {"t": "..."}\\n\\n   ← code tokens from Builder Brain
+      data: {"done": true, "mode_used": "build", ...}\\n\\n
+
+    Flow:
+      CEO → [clarify?] → CEO → Planner → CEO → Builder (stream) →
+      CEO → Hands → CEO → Eyes → CEO → [retry?] → CEO → done
+    """
+    _memory = memory or {}
+    all_images = all_images or []
+
+    # ── CEO: start ────────────────────────────────────────────────────────────
+    yield _status("ceo", "Analyzing your request…")
+
+    # ── Requirements phase (first build, no images, no vibe mode) ─────────────
+    _is_fresh_first = (
+        not has_prior_code
+        and not is_explicit_rebuild
+        and not has_images
+        and not vibe_mode
+        and build_history_turns == 0
+    )
+    if _is_fresh_first:
+        yield _status("ceo", "Gathering requirements before building…")
+        async for chunk in _stream_requirements(message, history, api_key, lessons, user_prefs, memory_search):
+            yield chunk
+        return  # endpoint yields done event
+
+    # ── CEO → Planner Brain ───────────────────────────────────────────────────
+    yield _status("planner", "Creating build plan…")
+    plan_decision = {"message": message, "api_key": api_key}
+    plan_result   = await call_planner(plan_decision, _memory)
+
+    if plan_result["status"] == "success":
+        plan_raw  = plan_result["_raw"]
+        plan_desc = plan_raw.get("title") or plan_raw.get("summary") or message[:60]
+        yield _status("ceo", f"Plan approved: {plan_desc}. Sending to Builder…")
+    else:
+        # Planner failed — CEO skips plan and sends directly to Builder
+        yield _status("ceo", "Planning skipped — building directly…")
+
+    # ── CEO → Builder Brain (streaming) ───────────────────────────────────────
+    yield _status("builder", "Writing code…")
+    reply_text = ""
+
+    async for chunk in _stream_build(
+        message          = message,
+        history          = history,
+        api_key          = api_key,
+        has_prior_code   = has_prior_code,
+        prior_code       = prior_code,
+        vibe_mode        = vibe_mode,
+        is_explicit_rebuild = is_explicit_rebuild,
+        has_images       = has_images,
+        all_images       = all_images,
+        build_history_turns = build_history_turns,
+        plan_result      = plan_result,
+        lessons          = lessons,
+        user_prefs       = user_prefs,
+        memory_search    = memory_search,
+    ):
+        if chunk.startswith("data: "):
+            try:
+                d = _json.loads(chunk[6:].split("\n")[0])
+                if "t" in d:
+                    reply_text += d["t"]
+            except Exception:
+                pass
+        yield chunk
+
+    # ── CEO → Hands Brain (functional QA) ─────────────────────────────────────
+    _built_html = _extract_html(reply_text)
+    _do_hands_qa = (
+        bool(_built_html)
+        and not vibe_mode          # vibe mode: speed over QA
+        and build_history_turns > 0  # skip on requirements turn
+    )
+
+    if _do_hands_qa:
+        yield _status("hands", "Testing functionality…")
+        hands_ok, hands_issues = await _hands_qa(_built_html, message, api_key)
+
+        if not hands_ok and hands_issues:
+            yield _status("ceo", f"Hands found issues — sending back to Builder: {hands_issues[0]}")
+            yield _status("builder", "Fixing issues…")
+            async for chunk in _stream_fix(
+                original_html = _built_html,
+                issues        = hands_issues,
+                message       = message,
+                api_key       = api_key,
+                lessons       = lessons,
+            ):
+                if chunk.startswith("data: "):
+                    try:
+                        d = _json.loads(chunk[6:].split("\n")[0])
+                        if "t" in d:
+                            reply_text += d["t"]
+                    except Exception:
+                        pass
+                yield chunk
+            yield _status("ceo", "Hands re-checking after fix…")
+            _built_html = _extract_html(reply_text) or _built_html
+        else:
+            yield _status("ceo", "Hands: all checks passed.")
+
+    # ── CEO → Eyes Brain (visual QA) ──────────────────────────────────────────
+    _do_eyes_qa = _do_hands_qa  # same gate: only on full builds
+    if _do_eyes_qa and _built_html:
+        yield _status("eyes", "Inspecting visual output…")
+        eyes_ok, eyes_notes = await _eyes_qa(_built_html, message, api_key)
+        if not eyes_ok and eyes_notes:
+            yield _status("ceo", f"Eyes flagged visual issues: {eyes_notes[0]}")
+        else:
+            yield _status("ceo", "Eyes: visual output approved.")
+
+    # ── CEO: final approval ────────────────────────────────────────────────────
+    yield _status("ceo", "Build complete. Delivering to you.")
+    # Endpoint handles the done event — do not yield it here
+
+
+# ---------------------------------------------------------------------------
+# Internal streaming helpers — called by CEO only
+# ---------------------------------------------------------------------------
+
+async def _stream_requirements(
+    message:      str,
+    history:      list,
+    api_key:      str,
+    lessons:      str,
+    user_prefs:   str,
+    memory_search: str,
+) -> AsyncGenerator[str, None]:
+    """Stream the requirements-gathering response (first build turn)."""
+    try:
+        from image_system.api.brains.knowledge_base import requirements_prompt
+        sys_prompt = requirements_prompt()
+    except ImportError:
+        sys_prompt = (
+            "You are an expert app builder. When a user asks you to build something for the "
+            "first time, ask exactly 3 short focused questions to clarify requirements before building. "
+            "End with: 'Ready to build once you answer!'"
+        )
+    if lessons:
+        sys_prompt += lessons
+    if user_prefs:
+        sys_prompt += user_prefs
+    if memory_search:
+        sys_prompt += "\n\n" + memory_search
+
+    msgs = _build_messages(history, message, [])
+    async for chunk in _anthropic_stream(api_key, sys_prompt, msgs, think_budget=0, max_tokens=1024):
+        yield chunk
+
+
+async def _stream_build(
+    *,
+    message:          str,
+    history:          list,
+    api_key:          str,
+    has_prior_code:   bool,
+    prior_code:       str | None,
+    vibe_mode:        bool,
+    is_explicit_rebuild: bool,
+    has_images:       bool,
+    all_images:       list,
+    build_history_turns: int,
+    plan_result:      dict,
+    lessons:          str,
+    user_prefs:       str,
+    memory_search:    str,
+) -> AsyncGenerator[str, None]:
+    """Stream the main build — patch mode or fresh build."""
+    try:
+        from image_system.api.brains.knowledge_base import (
+            fresh_build_prompt, patch_prompt,
+        )
+    except ImportError:
+        fresh_build_prompt = lambda: "You are an expert web developer. Build complete, working HTML/CSS/JS apps."
+        patch_prompt       = lambda: "You are an expert web developer. Apply surgical patches to the existing code. Output the complete updated file."
+
+    _is_patch = has_prior_code and not is_explicit_rebuild and not has_images
+
+    if _is_patch:
+        sys_prompt = patch_prompt()
+    else:
+        sys_prompt = fresh_build_prompt()
+
+    # Inject plan into system prompt when fresh build has a plan
+    if not _is_patch and plan_result.get("status") == "success":
+        raw = plan_result["_raw"]
+        plan_block = (
+            f"\n\n## BUILD PLAN (from Planner Brain — approved by CEO)\n"
+            f"Title: {raw.get('title', '')}\n"
+            f"Tech stack: {raw.get('tech_stack', 'HTML/CSS/JS')}\n"
+            f"Components: {', '.join(raw.get('components', []))}\n"
+            f"Steps: {' → '.join(raw.get('steps', []))}\n"
+            f"Constraints: {'; '.join(raw.get('constraints', []))}\n"
+        )
+        sys_prompt += plan_block
+
+    if lessons:
+        sys_prompt += lessons
+    if user_prefs:
+        sys_prompt += user_prefs
+    if memory_search:
+        sys_prompt += "\n\n" + memory_search
+
+    # Inject current code for patch mode
+    msgs = _build_messages(history, message, all_images)
+    if _is_patch and prior_code and msgs:
+        _last_user = msgs[-1] if msgs[-1]["role"] == "user" else None
+        if _last_user and isinstance(_last_user["content"], str):
+            _last_user["content"] = (
+                f"[CURRENT CODE]\n```html\n{prior_code}\n```\n\n"
+                f"[USER REQUEST]\n{_last_user['content']}"
+            )
+
+    _is_patch_or_debug = _is_patch
+    _think_budget = 16000 if _is_patch_or_debug else 5000
+    _max_tokens   = 24000 if _is_patch_or_debug else 14000
+
+    async for chunk in _anthropic_stream(api_key, sys_prompt, msgs, _think_budget, _max_tokens):
+        yield chunk
+
+
+async def _stream_fix(
+    *,
+    original_html: str,
+    issues:        list[str],
+    message:       str,
+    api_key:       str,
+    lessons:       str,
+) -> AsyncGenerator[str, None]:
+    """CEO sends Builder a fix request with exact Hands failure evidence."""
+    try:
+        from image_system.api.brains.knowledge_base import patch_prompt
+        sys_prompt = patch_prompt()
+    except ImportError:
+        sys_prompt = "You are an expert web developer. Fix the issues listed and output the complete corrected file."
+
+    if lessons:
+        sys_prompt += lessons
+    sys_prompt += "\n\n## YOUR TASK: FIX ALL ISSUES\nFix every issue listed. Output the complete fixed HTML."
+
+    issues_text = "\n".join(f"- {i}" for i in issues[:5])
+    user_content = (
+        f"[ORIGINAL REQUEST]\n{message}\n\n"
+        f"[ISSUES TO FIX — from Hands Brain]\n{issues_text}\n\n"
+        f"[CURRENT CODE]\n```html\n{original_html}\n```\n\n"
+        "Fix all issues and return the complete updated HTML file."
+    )
+    msgs = [{"role": "user", "content": user_content}]
+
+    async for chunk in _anthropic_stream(api_key, sys_prompt, msgs, think_budget=8000, max_tokens=24000):
+        yield chunk
+
+
+async def _anthropic_stream(
+    api_key:      str,
+    system:       str,
+    messages:     list,
+    think_budget: int,
+    max_tokens:   int = 14000,
+) -> AsyncGenerator[str, None]:
+    """Thin wrapper around Anthropic streaming. Yields SSE data strings."""
+    import asyncio
+    try:
+        import anthropic
+        client = anthropic.AsyncAnthropic(api_key=api_key)
+
+        _kwargs: dict[str, Any] = {
+            "model":      "claude-sonnet-4-6",
+            "max_tokens": max_tokens,
+            "system":     system,
+            "messages":   messages,
+        }
+        if think_budget > 0:
+            _kwargs["thinking"] = {"type": "enabled", "budget_tokens": think_budget}
+            _kwargs["extra_headers"] = {"anthropic-beta": "interleaved-thinking-2025-05-14"}
+
+        _last_ping = asyncio.get_event_loop().time()
+        async with client.messages.stream(**_kwargs) as stream:
+            async for token in stream.text_stream:
+                _now = asyncio.get_event_loop().time()
+                if _now - _last_ping > 8:
+                    yield ": ping\n\n"
+                    _last_ping = _now
+                yield f"data: {_json.dumps({'t': token})}\n\n"
+
+    except Exception as exc:
+        log.error("stream_builder_task._anthropic_stream failed — %s", exc)
+        yield f"data: {_json.dumps({'t': f'⚠️ Builder error: {exc}'})}\n\n"
+
+
+async def _hands_qa(html: str, original_request: str, api_key: str) -> tuple[bool, list[str]]:
+    """
+    Hands Brain: functional test of generated HTML.
+    Uses Claude Haiku to check buttons, interactions, logic.
+    Returns (pass, [issues]).
+    """
+    _HANDS_SYS = """You are the Hands Brain — functional QA specialist.
+Inspect this HTML for broken functionality ONLY. Do NOT comment on style.
+
+Check:
+- Buttons with no onclick or broken event listeners
+- Forms with no submit handler
+- JavaScript errors (syntax, undefined variables, missing functions)
+- Interactive elements that won't work
+
+Return JSON only:
+{
+  "pass": true | false,
+  "issues": ["specific issue 1", "specific issue 2"]
+}
+Return {"pass": true, "issues": []} if everything works."""
+
+    prompt = (
+        f"[ORIGINAL REQUEST]\n{original_request}\n\n"
+        f"[CODE TO TEST]\n```html\n{html[:8000]}\n```\n\n"
+        "Test for broken functionality. Return JSON."
+    )
+    try:
+        import anthropic
+        client = anthropic.AsyncAnthropic(api_key=api_key)
+        resp = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=512,
+            system=_HANDS_SYS,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = resp.content[0].text.strip() if resp.content else ""
+        m = _re.search(r"\{[\s\S]+\}", raw)
+        if m:
+            d = _json.loads(m.group(0))
+            return bool(d.get("pass", True)), d.get("issues", [])
+    except Exception as exc:
+        log.warning("hands_qa failed — %s", exc)
+    return True, []   # on error, pass through
+
+
+async def _eyes_qa(html: str, original_request: str, api_key: str) -> tuple[bool, list[str]]:
+    """
+    Eyes Brain: visual / layout inspection of generated HTML.
+    Uses Claude Haiku to check layout, style, responsiveness.
+    Returns (pass, [notes]).
+    """
+    _EYES_SYS = """You are the Eyes Brain — visual QA specialist.
+Inspect this HTML for visual / layout problems ONLY. Do NOT check logic.
+
+Check:
+- Missing layout structure (no container, broken grid, elements overlapping)
+- Invisible text (white on white, etc.)
+- Elements completely missing from what was requested
+- Broken responsive structure
+
+Return JSON only:
+{
+  "pass": true | false,
+  "notes": ["visual issue 1", "visual issue 2"]
+}
+Minor style preferences are NOT issues. Only flag actual visual failures."""
+
+    prompt = (
+        f"[ORIGINAL REQUEST]\n{original_request}\n\n"
+        f"[CODE TO INSPECT]\n```html\n{html[:8000]}\n```\n\n"
+        "Inspect for visual failures. Return JSON."
+    )
+    try:
+        import anthropic
+        client = anthropic.AsyncAnthropic(api_key=api_key)
+        resp = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=512,
+            system=_EYES_SYS,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = resp.content[0].text.strip() if resp.content else ""
+        m = _re.search(r"\{[\s\S]+\}", raw)
+        if m:
+            d = _json.loads(m.group(0))
+            return bool(d.get("pass", True)), d.get("notes", [])
+    except Exception as exc:
+        log.warning("eyes_qa failed — %s", exc)
+    return True, []
+
+
+def _extract_html(text: str) -> str | None:
+    """Extract HTML from Builder stream output."""
+    fence = _re.search(r"```(?:html)?\s*\n([\s\S]+?)```", text)
+    if fence:
+        return fence.group(1).strip()
+    raw = _re.search(r"(<!DOCTYPE\s+html[\s\S]+)", text, _re.I)
+    if raw:
+        return raw.group(1).strip()
+    return None
+
+
+def _build_messages(history: list, message: str, images: list) -> list[dict]:
+    """Build Claude message list from history + current message + images."""
+    msgs = []
+    for h in history:
+        role    = h.get("role") if isinstance(h, dict) else getattr(h, "role", "")
+        content = h.get("content") if isinstance(h, dict) else getattr(h, "content", "")
+        if role in ("user", "assistant") and content and str(content).strip():
+            msgs.append({"role": role, "content": str(content)})
+
+    # Current user message with optional images
+    if images:
+        parts: list[Any] = []
+        for b64 in images[:4]:
+            mt = "image/png" if b64.startswith("iVBOR") else "image/jpeg"
+            parts.append({"type": "image", "source": {"type": "base64", "media_type": mt, "data": b64}})
+        parts.append({"type": "text", "text": message})
+        msgs.append({"role": "user", "content": parts})
+    else:
+        msgs.append({"role": "user", "content": message})
+
+    return msgs
+
+
+def _status(brain: str, msg: str) -> str:
+    """Yield a CEO status SSE event — shown in the UI as a brain activity indicator."""
+    return f"data: {_json.dumps({'brain': brain, 'status': msg})}\n\n"
 
 
 # ---------------------------------------------------------------------------

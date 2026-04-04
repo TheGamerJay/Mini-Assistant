@@ -3047,10 +3047,71 @@ async def chat_stream(req: ChatRequest, request: Request):
                     except Exception:
                         pass
 
+        elif _use_claude and _is_build_intent:
+            # ── CEO-orchestrated build pipeline ──────────────────────────────
+            # Single entry point: CEO → Planner → Builder → Hands → Eyes.
+            # This route is thin — all build logic lives in the CEO orchestrator.
+            _is_explicit_rebuild = bool(_REBUILD_KW.search(effective_msg))
+
+            # Extract current HTML for patch mode (from full history, not truncated window)
+            _latest_html_patch = None
+            if _has_prior_code:
+                for _ph in reversed(_effective_history):
+                    if _ph.role == "assistant" and _ph.content:
+                        _fm = _re.search(r'```html\s*\n([\s\S]+?)```', _ph.content)
+                        if _fm:
+                            _latest_html_patch = _fm.group(1).strip()
+                            break
+                        _rm = _re.search(r'(<!DOCTYPE\s+html[\s\S]+)', _ph.content, _re.I)
+                        if _rm:
+                            _latest_html_patch = _rm.group(1).strip()
+                            break
+
+            try:
+                from core.orchestration.ceo_orchestrator import stream_builder_task as _ceo_build
+                _hist_dicts = [
+                    {"role": h.role, "content": h.content or ""}
+                    for h in _effective_history
+                    if getattr(h, "role", "") in ("user", "assistant") and getattr(h, "content", "")
+                ]
+                async for _ceo_event in _ceo_build(
+                    session_id          = session_id,
+                    message             = effective_msg,
+                    history             = _hist_dicts,
+                    has_prior_code      = _has_prior_code,
+                    prior_code          = _latest_html_patch,
+                    api_key             = _api_key_claude,
+                    vibe_mode           = bool(getattr(req, "vibe_mode", False)),
+                    build_history_turns = _build_history_turns,
+                    is_explicit_rebuild = _is_explicit_rebuild,
+                    has_images          = _has_images,
+                    all_images          = all_images,
+                    lessons             = _lessons_for_prompt() if _LESSONS_LOADED else "",
+                    user_prefs          = _user_prefs_for_prompt() if _USER_MEMORY_LOADED else "",
+                    memory_search       = _memory_search(effective_msg, session_id),
+                    memory              = {},
+                ):
+                    # Forward all events except internal done signals (endpoint handles done)
+                    if _ceo_event.startswith("data: ") and '"done"' not in _ceo_event:
+                        try:
+                            _cd = _json.loads(_ceo_event[6:].split("\n")[0])
+                            if "t" in _cd:
+                                reply_text += _cd["t"]
+                        except Exception:
+                            pass
+                        yield _ceo_event
+                    elif _ceo_event.startswith(": "):  # keep-alive pings
+                        yield _ceo_event
+            except Exception as _ceo_err:
+                logger.error("[CEO] build orchestrator failed — %s", _ceo_err, exc_info=True)
+                _err_txt = f"⚠️ Build pipeline error: {_ceo_err}"
+                reply_text = _err_txt
+                yield f"data: {_json.dumps({'t': _err_txt})}\n\n"
+
         elif _use_claude and (_is_build_intent or all_images or _is_code_intent):
             # ── Claude-powered stream ─────────────────────────────────────────
-            # Routes: text builds, image analysis, code debugging → Claude API.
-            # Local models stay for simple chat (cost control).
+            # Routes: image analysis, code debugging → Claude API.
+            # Build tasks are handled by the CEO orchestrator branch above.
 
             # Convert history to Claude message format — send everything, full content.
             # Quality over token cost: Claude needs the full conversation + full code
