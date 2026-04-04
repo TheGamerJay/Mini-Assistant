@@ -491,6 +491,67 @@ async def classify_intent_with_llm(message: str) -> str:
         return "normal_chat"
 
 
+async def classify_intent_with_context(message: str, history: list) -> tuple[str, float]:
+    """
+    CEO second-pass classifier: uses full conversation history to resolve ambiguity.
+
+    Called after Phase 1 returned low-confidence normal_chat. Sends the last
+    N conversation turns + current message to Claude Haiku so it can pick up
+    context signals (prior code, prior images, topic continuity, etc.).
+
+    Returns (intent, confidence) where confidence is 0.0–1.0.
+    'normal_chat' with confidence < 0.80 = still genuinely uncertain → ask user.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return "normal_chat", 0.0
+
+    # Build a compact history summary (last 6 turns max)
+    history_lines: list[str] = []
+    for h in (history or [])[-6:]:
+        role    = h.get("role") if isinstance(h, dict) else getattr(h, "role", "")
+        content = h.get("content") if isinstance(h, dict) else getattr(h, "content", "")
+        if role in ("user", "assistant") and content:
+            tag  = "User" if role == "user" else "Assistant"
+            snip = str(content)[:200].replace("\n", " ")
+            history_lines.append(f"{tag}: {snip}")
+
+    context_block = "\n".join(history_lines) if history_lines else "(no prior conversation)"
+
+    system = (
+        _CLASSIFIER_PROMPT.rstrip()
+        + "\n\nYou also have the recent conversation below. Use it to resolve ambiguity.\n"
+        "After the intent, output a confidence score 0-100 on the same line, space-separated.\n"
+        "Example: app_builder 91\n"
+        "If the context does not help, output: normal_chat 40\n\n"
+        f"[CONVERSATION HISTORY]\n{context_block}"
+    )
+
+    try:
+        import anthropic as _am
+        client = _am.AsyncAnthropic(api_key=api_key)
+        resp = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=20,
+            system=system,
+            messages=[{"role": "user", "content": message[:2000]}],
+        )
+        raw   = resp.content[0].text.strip().lower() if resp.content else ""
+        parts = raw.split()
+        intent = parts[0] if parts and parts[0] in _VALID_LLM_INTENTS else "normal_chat"
+        try:
+            confidence = min(float(parts[1]) / 100.0, 1.0) if len(parts) > 1 else 0.5
+        except (ValueError, IndexError):
+            confidence = 0.5
+        log.info(
+            "CEO context classifier: %r → %s (conf=%.2f)", message[:60], intent, confidence
+        )
+        return intent, confidence
+    except Exception as exc:
+        log.warning("CEO context classifier failed: %s", exc)
+        return "normal_chat", 0.0
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def plan(

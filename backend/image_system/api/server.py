@@ -2716,6 +2716,10 @@ async def chat_stream(req: ChatRequest, request: Request):
         _req_chat_mode = getattr(req, "chat_mode", None)
         _ceo_intent    = phase1_plan.intent if phase1_plan else None
         _ceo_conf      = phase1_plan.confidence if phase1_plan else 1.0
+        # CEO confidence escalation ladder:
+        # 1. Phase 1 low-confidence normal_chat → try context-aware second pass
+        # 2. Context pass still uncertain → ask user ONE focused question
+        # CEO never asks about coding mechanics — only about what the user WANTS to do.
         _needs_clarify = (
             _ceo_intent == "normal_chat"
             and _ceo_conf <= 0.72
@@ -2725,16 +2729,43 @@ async def chat_stream(req: ChatRequest, request: Request):
             and not bool(req.images_base64)
         )
         if _needs_clarify:
-            logger.info("[CEO] uncertain (conf=%.2f) — asking clarification", _ceo_conf)
+            # ── Step 1: CEO tries context-aware self-resolution ───────────────
+            logger.info("[CEO] uncertain (conf=%.2f) — attempting context-aware classification", _ceo_conf)
+            try:
+                from mini_assistant.phase1.intent_planner import (
+                    classify_intent_with_context as _ctx_classify,
+                    INTENT_TO_EXECUTION,
+                )
+                _hist_for_ctx = [
+                    {"role": h.role, "content": h.content or ""}
+                    for h in _effective_history
+                    if getattr(h, "role", "") in ("user", "assistant") and getattr(h, "content", "")
+                ]
+                _ctx_intent, _ctx_conf = await _ctx_classify(effective_msg, _hist_for_ctx)
+                logger.info("[CEO] context classifier → %s (conf=%.2f)", _ctx_intent, _ctx_conf)
+
+                if _ctx_intent != "normal_chat" or _ctx_conf >= 0.80:
+                    # Context resolved it — update routing and proceed without asking
+                    execution_intent = INTENT_TO_EXECUTION.get(_ctx_intent, "chat")
+                    _ceo_intent      = _ctx_intent
+                    _needs_clarify   = False
+                    logger.info("[CEO] self-resolved via context → %s", execution_intent)
+            except Exception as _ctx_err:
+                logger.warning("[CEO] context classifier failed — %s", _ctx_err)
+
+        if _needs_clarify:
+            # ── Step 2: CEO asks user — only reached after self-resolution failed ──
+            logger.info("[CEO] still uncertain after context pass — asking user")
             try:
                 import anthropic as _clr_am
                 _clr_ac = _clr_am.AsyncAnthropic(api_key=_api_key_claude)
                 _clr_sys = (
-                    "You are the CEO of Mini Assistant. You must understand the user's intent "
-                    "before routing their request. Ask ONE short, friendly clarifying question. "
-                    "Be specific — name the actual possibilities you're choosing between "
-                    "(e.g. generate an image, build an app, search the web, or have a chat). "
-                    "Keep it to 1-2 sentences. No lists. No options with letters/numbers."
+                    "You are the CEO of Mini Assistant. You need to understand what the user "
+                    "wants so you can route their request correctly. Ask ONE short, friendly "
+                    "clarifying question about what they want to DO — not how to do it. "
+                    "Name the specific possibilities (e.g. generate an image, build an app, "
+                    "search for something, or just chat). Keep it to 1-2 sentences. "
+                    "Never ask about coding details or technical implementation."
                 )
                 _clr_msgs = [{"role": "user", "content": effective_msg}]
                 async with _clr_ac.messages.stream(
@@ -2748,11 +2779,9 @@ async def chat_stream(req: ChatRequest, request: Request):
                         yield f"data: {_json.dumps({'t': _clr_tok})}\n\n"
             except Exception as _clr_err:
                 logger.warning("[CEO] clarification stream failed — %s", _clr_err)
-                # Fall through to normal routing if clarification fails
-                _needs_clarify = False
+                _needs_clarify = False  # Fall through to normal routing
 
             if _needs_clarify:
-                # Save clarification as assistant turn so next message has context
                 try:
                     save_message(session_id, "user", effective_msg)
                     save_message(session_id, "assistant", reply_text)
