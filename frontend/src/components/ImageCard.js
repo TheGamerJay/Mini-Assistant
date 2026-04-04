@@ -24,7 +24,7 @@ function ImageCard({ image_base64, prompt, route_result, generation_time_ms, ret
   const handleDownload = () => {
     if (!image_base64) return;
     const link = document.createElement('a');
-    link.href = `data:image/png;base64,${image_base64}`;
+    link.href = image_base64.startsWith('data:') ? image_base64 : `data:image/png;base64,${image_base64}`;
     link.download = `mini-assistant-${Date.now()}.png`;
     link.click();
   };
@@ -180,7 +180,7 @@ function ImageCard({ image_base64, prompt, route_result, generation_time_ms, ret
       {image_base64 && (
         <div className="flex items-center justify-center overflow-hidden" style={{ minHeight: 80 }}>
           <img
-            src={`data:image/png;base64,${image_base64}`}
+            src={image_base64.startsWith('data:') ? image_base64 : `data:image/png;base64,${image_base64}`}
             alt={prompt || 'Generated image'}
             className="w-full object-contain transition-transform duration-300"
             style={{ transform: `rotate(${rotation}deg)` }}
