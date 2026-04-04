@@ -6,7 +6,8 @@
  * with existing tool components that import it directly from this file.
  */
 
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect } from 'react';
+import ErrorBoundary from './components/ErrorBoundary';
 import { handleCheckoutReturn } from './api/checkout';
 import axios from 'axios';
 import { Toaster } from 'sonner';
@@ -53,7 +54,6 @@ import CreationRecordInfo from './pages/creation/CreationRecordInfo';
 import AdModePage from './pages/AdMode/AdModePage';
 
 // Existing tool components (kept for backward compat via 'tool-X' pages)
-import Dashboard from './pages/Dashboard';
 import ChatInterface from './components/Chat/ChatInterface';
 import VoiceControl from './components/Voice/VoiceControl';
 import FileExplorer from './components/Files/FileExplorer';
@@ -169,7 +169,7 @@ function pageTitle(page) {
 // AppShell — rendered inside AppProvider so it can use useApp()
 // ---------------------------------------------------------------------------
 function AppShell() {
-  const { page, setPage, getPrevPage, serverStatus, setServerStatus, purchaseModalOpen, setPurchaseModalOpen, upgradeModalOpen, setUpgradeModalOpen, refreshCredits, openUpgradeModal, logout } = useApp();
+  const { page, setPage, getPrevPage, serverStatus, setServerStatus, purchaseModalOpen, setPurchaseModalOpen, refreshCredits, openUpgradeModal, logout } = useApp();
 
   // Session sleep / resume — Page Visibility API
   const [sessionResumed, setSessionResumed] = React.useState(false);
@@ -209,6 +209,15 @@ function AppShell() {
     window.addEventListener('ma:unauthorized', handler);
     return () => window.removeEventListener('ma:unauthorized', handler);
   }, [logout]);
+
+  // Cross-tab logout — if another tab clears ma_token, reload this tab too
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === 'ma_token' && !e.newValue) window.location.reload();
+    };
+    window.addEventListener('storage', handler);
+    return () => window.removeEventListener('storage', handler);
+  }, []);
 
   // Capture referral code from URL and persist to localStorage
   useEffect(() => {
@@ -255,9 +264,9 @@ function AppShell() {
 
   // Render current page content
   const renderContent = () => {
-    if (page === 'chat') return <ChatPage />;
+    if (page === 'chat') return <ErrorBoundary><ChatPage /></ErrorBoundary>;
     // App Builder is unified into Chat workspace — redirect
-    if (page === 'tool-appbuilder') { setPage('chat'); return <ChatPage />; }
+    if (page === 'tool-appbuilder') { setPage('chat'); return <ErrorBoundary><ChatPage /></ErrorBoundary>; }
     if (page === 'checkout-success') return <CheckoutSuccessPage />;
     if (page === 'images') return <ImagePage />;
     if (page === 'community') return <CommunityPage />;
@@ -285,7 +294,7 @@ function AppShell() {
     }
 
     // Fallback
-    return <ChatPage />;
+    return <ErrorBoundary><ChatPage /></ErrorBoundary>;
   };
 
   return (
@@ -366,11 +375,13 @@ function AuthGate() {
     return <VerifyEmailPage token={verifyToken} />;
   }
 
-  // Admin page handles its own auth — render standalone outside of AppShell
+  // Admin page — only render if user is confirmed admin (prevents layout flash)
   if (page === 'admin') {
+    if (!user) return null;
+    if (user.role !== 'admin') { setPage('chat'); return null; }
     return (
       <>
-        <AdminPage />
+        <ErrorBoundary><AdminPage /></ErrorBoundary>
         <Toaster {...toasterProps} />
       </>
     );

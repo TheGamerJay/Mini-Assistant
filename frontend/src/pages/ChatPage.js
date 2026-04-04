@@ -808,9 +808,14 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
           // Always show full image in Preview panel (persisted)
           setPreviewImage(data.image_base64);
           setRightPanelOpen(true);
-          savePreviewImage(chatId, data.image_base64);
-          updateChatPreviewImage(chatId, data.image_base64);
+          try {
+            await savePreviewImage(chatId, data.image_base64);
+            updateChatPreviewImage(chatId, data.image_base64);
+          } catch (_) {
+            toast.error('Image saved to session only — browser storage full.');
+          }
           chatThumb = await makeThumbnail(data.image_base64);
+          if (!chatThumb) chatThumb = data.image_base64;
           await addImage(chatThumb, text, data.image_base64);
           incrementImageUsage();
           // Track artifact for follow-up edit auto-binding (Phase 5)
@@ -913,9 +918,14 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
             if (isImg) {
               setPreviewImage(data.image_base64);
               setRightPanelOpen(true);
-              savePreviewImage(chatIdRef_local, data.image_base64);
-              updateChatPreviewImage(chatIdRef_local, data.image_base64);
+              try {
+                await savePreviewImage(chatIdRef_local, data.image_base64);
+                updateChatPreviewImage(chatIdRef_local, data.image_base64);
+              } catch (_) {
+                toast.error('Image saved to session only — browser storage full.');
+              }
               chatThumb2 = await makeThumbnail(data.image_base64);
+              if (!chatThumb2) chatThumb2 = data.image_base64;
               await addImage(chatThumb2, text, data.image_base64);
               incrementImageUsage();
               lastArtifactRef.current = { type: 'image', base64: data.image_base64, prompt: text };

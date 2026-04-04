@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(head -20 grep -rn \"ad-mode\\\\|AdMode\\\\|ad_mode\" \"c:/Users/jaaye/OneDrive/Desktop/Mini Assistant/frontend/src/pages/AdminPage.js\")",
+      "Bash(head -30 grep -n \"Ad Mode\\\\|Generate Ads\\\\|Ad Variants\\\\|Ad Performance\" \"c:/Users/jaaye/OneDrive/Desktop/Mini Assistant/frontend/src/pages/AdMode/AdModeOverview.js\")",
+      "Bash(head -20 grep -n \"Generate Ads\\\\|Ad Variants\\\\|Ad Performance\\\\|Ad Mode\" \"c:/Users/jaaye/OneDrive/Desktop/Mini Assistant/frontend/src/pages/AdMode/AdModeGenerate.js\")",
+      "Bash(head -20 grep -n \"sidebar\\\\|nav\\\\|menu\\\\|ad.mode\\\\|campaign\" \"c:/Users/jaaye/OneDrive/Desktop/Mini Assistant/frontend/src/App.js\")",
+      "Bash(head -20 grep -n \"ad.mode\\\\|Ad Mode\\\\|adMode\" \"c:/Users/jaaye/OneDrive/Desktop/Mini Assistant/frontend/src/pages/PricingPage.js\")",
+      "Bash(head -20 grep -n \"Ad Mode\\\\|AI Ad Generator\" \"c:/Users/jaaye/OneDrive/Desktop/Mini Assistant/frontend/src/layout/Sidebar.js\")",
+      "Bash(head -20 grep -n \"ad.mode\\\\|ad_mode\\\\|campaign\" \"c:/Users/jaaye/OneDrive/Desktop/Mini Assistant/backend/server.py\")",
+      "Bash(python3 -c \":*)",
+      "Bash(node -e \"const fs=require\\(''fs''\\); const c=fs.readFileSync\\(''c:/Users/jaaye/OneDrive/Desktop/Mini Assistant/frontend/src/App.js'',''utf8''\\); const idx=c.indexOf\\(''ad-mode''\\); console.log\\(JSON.stringify\\(c.slice\\(idx-10,idx+60\\)\\)\\);\")",
+      "Bash(node -e \":*)",
+      "Bash(grep -rn \"mode.*chat\\\\|mode.*image\\\\|mode.*build\\\\|mode.*edit\\\\|ModeSelector\\\\|modeSelect\\\\|setMode\\\\|activeMode\" 'c:/Users/jaaye/OneDrive/Desktop/Mini Assistant/frontend/src' --include=*.js -l)",
+      "Bash(head -20 find 'c:/Users/jaaye/OneDrive/Desktop/Mini Assistant/frontend/src' -name useChat*)",
+      "Bash(head -10 grep -n \"stream.*route\\\\|@.*stream\\\\|@.*chat\\\\b\\\\|/stream\\\\b\" \"c:/Users/jaaye/OneDrive/Desktop/Mini Assistant/backend/server.py\")",
+      "Bash(find 'c:\\\\Users\\\\jaaye\\\\OneDrive\\\\Desktop\\\\Mini Assistant' -type d -name *[Aa]d* -o -type d -name *[Cc]ampaign*)",
+      "Bash(python -c \":*)",
+      "Bash(grep -rn \"xray\\\\|repair_memory\\\\|analytics_service\" backend/ --include=*.py -l)",
+      "Bash(ls \"c:\\\\Users\\\\jaaye\\\\OneDrive\\\\Desktop\\\\Mini Assistant\\\\backend\\\\xray\"\" 2>/dev/null || echo \"empty \")",
+      "Bash(find 'c:/Users/jaaye/OneDrive/Desktop/Mini Assistant/backend' -name mini_credits*)",
+      "Bash(python -m pytest backend/ -x -q)",
+      "Bash(grep -r \"501\\\\|NotImplemented\\\\|raise.*Error\\\\|TODO\\\\|FIXME\" 'c:/Users/jaaye/OneDrive/Desktop/Mini Assistant/backend' --include=*.py)",
+      "Bash(grep -r \"process\\\\.env\\\\|os\\\\.environ\" 'c:/Users/jaaye/OneDrive/Desktop/Mini Assistant/frontend/src' --include=*.js)",
+      "Bash(grep -r \"process\\\\.env\\\\|os\\\\.environ\" 'c:/Users/jaaye/OneDrive/Desktop/Mini Assistant/backend' --include=*.py)",
+      "Bash(grep -r \"405\\\\|404\\\\|501\\\\|not found\\\\|Not Implemented\" 'c:/Users/jaaye/OneDrive/Desktop/Mini Assistant/backend' --include=*.py)",
+      "Bash(grep -r \"return null\\\\|return undefined\\\\|render.*nothing\" 'c:/Users/jaaye/OneDrive/Desktop/Mini Assistant/frontend/src/components' --include=*.js)",
+      "Bash(find 'c:/Users/jaaye/OneDrive/Desktop/Mini Assistant/backend' -name *.py -path */backend/* ! -path */.venv/* ! -path */__pycache__/* -type f)",
+      "Bash(grep -n \"page === ''admin''\\\\|isAdmin\\\\|user.*admin\\\\|admin.*role\" frontend/src/App.js)",
+      "Bash(grep -n \"TODO\\\\|FIXME\\\\|HACK\\\\|NotImplementedError\\\\|pass$\\\\|placeholder\\\\|coming soon\\\\|not implemented\" backend/server.py)",
+      "Bash(grep -v \"node_modules\\\\|//.*console\")"
+    ],
+    "additionalDirectories": [
+      "\\tmp",
+      "c:\\Users\\jaaye\\OneDrive\\Desktop\\Mini Assistant\\backend"
+    ]
+  }
+}

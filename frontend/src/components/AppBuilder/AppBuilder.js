@@ -789,8 +789,6 @@ const AppBuilder = () => {
     // ── CONTROL GATE — classify before any API call ──────────────────────────
     const chosenAction = classifyBuilderAction(instruction);
     const writeAllowed = chosenAction === 'edit_existing_artifact';
-    console.log('[Builder Gate]', { chosenAction, writeAllowed, instruction: instruction.slice(0, 80) });
-
     if (!writeAllowed) {
       setEditInput('');
       setEditHistory(prev => [...prev,

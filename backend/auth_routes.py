@@ -54,7 +54,12 @@ def _get_db():
 # ---------------------------------------------------------------------------
 # JWT / password config
 # ---------------------------------------------------------------------------
-JWT_SECRET = os.environ.get("JWT_SECRET", "mini_assistant_jwt_secret_2025")
+JWT_SECRET = os.environ.get("JWT_SECRET")
+if not JWT_SECRET:
+    raise RuntimeError(
+        "JWT_SECRET environment variable is not set. "
+        "Refusing to start — all tokens would be signed with a public key."
+    )
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_DAYS = 30
 

@@ -41,9 +41,10 @@ FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 if not stripe.api_key:
     log.warning("SECURITY: STRIPE_SECRET_KEY is not set — Stripe endpoints will return 503")
 if not STRIPE_WEBHOOK_SECRET:
-    log.warning(
-        "SECURITY: STRIPE_WEBHOOK_SECRET is not set — webhook signature verification DISABLED. "
-        "Set this in production immediately."
+    raise RuntimeError(
+        "STRIPE_WEBHOOK_SECRET environment variable is not set. "
+        "Refusing to start — webhook signature verification would be disabled, "
+        "allowing forged Stripe events."
     )
 
 def _price_env(key: str, fallback: str) -> str:

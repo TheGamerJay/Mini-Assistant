@@ -364,6 +364,27 @@ async def _on_startup():
         except Exception as _ue_err:
             logging.warning("user_events index warning (non-fatal): %s", _ue_err)
 
+    # ── Critical env var validation ─────────────────────────────────────────
+    # These must be set in production. Fail fast so Railway surface the error
+    # clearly rather than letting the app run in a degraded / insecure state.
+    import os as _os
+    _REQUIRED_ENV = {
+        "JWT_SECRET":             "JWT signing key — tokens would be forgeable without it",
+        "STRIPE_WEBHOOK_SECRET":  "Stripe webhook verification — forged events possible without it",
+        "STRIPE_SECRET_KEY":      "Stripe API key — billing endpoints will 503 without it",
+        "ANTHROPIC_API_KEY":      "Claude API key — chat will 503 without it",
+        "MONGO_URL":              "MongoDB connection — all persistence will fail without it",
+    }
+    _missing = [k for k, _ in _REQUIRED_ENV.items() if not _os.environ.get(k)]
+    if _missing:
+        for _k in _missing:
+            logging.critical("STARTUP BLOCKED — missing required env var: %s (%s)", _k, _REQUIRED_ENV[_k])
+        raise RuntimeError(
+            f"Server refused to start. Missing required environment variables: {', '.join(_missing)}. "
+            "Set them in your Railway / deployment environment and redeploy."
+        )
+    logging.info("✓ All required environment variables present")
+
     # Start safety background maintenance tasks + run startup security checks
     try:
         import safety as _safety   # noqa: PLC0415

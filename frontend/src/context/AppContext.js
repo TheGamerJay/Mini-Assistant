@@ -23,6 +23,7 @@ export { fullImageMap as imageFullMap };
  * Apply this BEFORE triggering any image generation flow.
  */
 export function canGenerateImage(imageUsage) {
+  if (!imageUsage) return false;
   return imageUsage.used < imageUsage.limit;
 }
 
