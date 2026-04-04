@@ -77,7 +77,7 @@ INTENT_TO_EXECUTION: dict[str, str] = {
     "debugging":                "coding",
     "planning":                 "chat",                    # research brain in chat mode
     "file_analysis":            "chat",                    # scanner + research brain
-    "app_builder":              "chat",                    # App Builder UI handles this
+    "app_builder":              "app_builder",              # CEO routes directly to build pipeline
     "3d_asset_generation":      "chat",                    # Phase 9 — not yet implemented
     "3d_character_generation":  "chat",                    # Phase 9 — not yet implemented
 }
