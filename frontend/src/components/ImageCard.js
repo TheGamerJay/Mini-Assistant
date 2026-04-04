@@ -178,11 +178,11 @@ function ImageCard({ image_base64, prompt, route_result, generation_time_ms, ret
   return (
     <div className="rounded-xl overflow-hidden border border-violet-500/20 bg-black/40 max-w-md">
       {image_base64 && (
-        <div className="flex items-center justify-center overflow-hidden" style={{ minHeight: 80 }}>
+        <div className="flex items-center justify-center overflow-hidden" style={{ minHeight: 80, maxHeight: 320 }}>
           <img
             src={image_base64.startsWith('data:') ? image_base64 : `data:image/png;base64,${image_base64}`}
             alt={prompt || 'Generated image'}
-            className="w-full object-contain transition-transform duration-300"
+            className="max-w-full max-h-80 object-contain transition-transform duration-300"
             style={{ transform: `rotate(${rotation}deg)` }}
           />
         </div>

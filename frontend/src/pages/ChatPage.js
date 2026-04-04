@@ -821,11 +821,11 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
           try { localStorage.setItem('lastArtifact', JSON.stringify({ chatId, prompt: text })); } catch (_) {}
         }
 
-        // Phase 7: Post image directly in chat as a visual artifact (thumbnail keeps storage small)
+        // Phase 7: Post image directly in chat — full quality for crisp display
         const assistantMsg = isImg
           ? {
               role: 'assistant', type: 'image',
-              image_base64: chatThumb, prompt: text, content: text,
+              image_base64: data.image_base64, prompt: text, content: text,
               route_result: data.route_result || null,
               generation_time_ms: data.generation_time_ms || null,
               model_used: data.model_used || null,
@@ -933,7 +933,7 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
             const assistantMsg = isImg
               ? {
                   role: 'assistant', type: 'image',
-                  image_base64: chatThumb2, prompt: text, content: text,
+                  image_base64: data.image_base64, prompt: text, content: text,
                   route_result: data.route_result || null,
                   generation_time_ms: data.generation_time_ms || null,
                   model_used: data.model_used || null, memory_stored: data.memory_stored || [],
