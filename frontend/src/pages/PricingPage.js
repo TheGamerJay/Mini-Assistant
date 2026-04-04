@@ -21,9 +21,9 @@ const FEATURES = [
   { icon: KeyRound, text: 'Works with Anthropic & OpenAI keys' },
 ];
 
-const MONTHLY_PRICE  = 20;
-const YEARLY_TOTAL   = 200;
-const YEARLY_MONTHLY = (YEARLY_TOTAL / 12).toFixed(2); // 16.67
+const MONTHLY_PRICE   = 20;
+const YEARLY_TOTAL    = 200;
+const YEARLY_SAVE_PCT = ((1 - YEARLY_TOTAL / (MONTHLY_PRICE * 12)) * 100).toFixed(2); // 16.67%
 
 export default function PricingPage() {
   const { isSubscribed, setPage } = useApp();
@@ -96,7 +96,7 @@ export default function PricingPage() {
                 {b === 'monthly' ? 'Monthly' : 'Yearly'}
                 {b === 'yearly' && (
                   <span className="ml-2 text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-full">
-                    Save 15%
+                    Save {YEARLY_SAVE_PCT}%
                   </span>
                 )}
               </button>
@@ -110,12 +110,12 @@ export default function PricingPage() {
           <div className="px-8 pt-8 pb-6 text-center border-b border-white/5">
             <div className="flex items-end justify-center gap-1 mb-1">
               <span className="text-5xl font-black text-white">
-                ${billing === 'yearly' ? YEARLY_MONTHLY : MONTHLY_PRICE}
+                ${billing === 'yearly' ? YEARLY_TOTAL : MONTHLY_PRICE}
               </span>
-              <span className="text-slate-500 mb-2">/mo</span>
+              <span className="text-slate-500 mb-2">{billing === 'yearly' ? '/year' : '/mo'}</span>
             </div>
             {billing === 'yearly' && (
-              <p className="text-sm text-slate-500">Billed ${YEARLY_TOTAL}/year</p>
+              <p className="text-sm text-slate-500">Save {YEARLY_SAVE_PCT}% vs monthly</p>
             )}
           </div>
 
