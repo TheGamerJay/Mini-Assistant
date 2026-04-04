@@ -2708,15 +2708,70 @@ async def chat_stream(req: ChatRequest, request: Request):
             logger.warning("Phase1 failed in stream endpoint: %s", _e)
             execution_intent = None
 
+        # ── CEO clarification gate ────────────────────────────────────────────
+        # When CEO is genuinely uncertain (low confidence + normal_chat + no clear
+        # UI mode signal), ask the user one focused question rather than guessing.
+        # Conditions: intent=normal_chat AND confidence≤0.72 AND message≥25 chars
+        # AND no strong UI signal (image/build mode clicked).
+        _req_chat_mode = getattr(req, "chat_mode", None)
+        _ceo_intent    = phase1_plan.intent if phase1_plan else None
+        _ceo_conf      = phase1_plan.confidence if phase1_plan else 1.0
+        _needs_clarify = (
+            _ceo_intent == "normal_chat"
+            and _ceo_conf <= 0.72
+            and len(effective_msg.strip()) >= 25
+            and _req_chat_mode not in ("image", "image_edit", "build")
+            and not bool(req.image_base64)
+            and not bool(req.images_base64)
+        )
+        if _needs_clarify:
+            logger.info("[CEO] uncertain (conf=%.2f) — asking clarification", _ceo_conf)
+            try:
+                import anthropic as _clr_am
+                _clr_ac = _clr_am.AsyncAnthropic(api_key=_api_key_claude)
+                _clr_sys = (
+                    "You are the CEO of Mini Assistant. You must understand the user's intent "
+                    "before routing their request. Ask ONE short, friendly clarifying question. "
+                    "Be specific — name the actual possibilities you're choosing between "
+                    "(e.g. generate an image, build an app, search the web, or have a chat). "
+                    "Keep it to 1-2 sentences. No lists. No options with letters/numbers."
+                )
+                _clr_msgs = [{"role": "user", "content": effective_msg}]
+                async with _clr_ac.messages.stream(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=120,
+                    system=_clr_sys,
+                    messages=_clr_msgs,
+                ) as _clr_stream:
+                    async for _clr_tok in _clr_stream.text_stream:
+                        reply_text += _clr_tok
+                        yield f"data: {_json.dumps({'t': _clr_tok})}\n\n"
+            except Exception as _clr_err:
+                logger.warning("[CEO] clarification stream failed — %s", _clr_err)
+                # Fall through to normal routing if clarification fails
+                _needs_clarify = False
+
+            if _needs_clarify:
+                # Save clarification as assistant turn so next message has context
+                try:
+                    save_message(session_id, "user", effective_msg)
+                    save_message(session_id, "assistant", reply_text)
+                except Exception:
+                    pass
+                meta = {
+                    "reply": reply_text, "session_id": session_id,
+                    "model_used": "claude-haiku-4-5-20251001",
+                    "mode_used": "chat", "route_result": {"intent": "clarification"},
+                }
+                yield f"data: {_json.dumps({'done': True, 'meta': meta})}\n\n"
+                return
+
         # ── Image mode resolution ─────────────────────────────────────────────
         # chat_mode="image" = user clicked the image button.
         # Rule: only upgrade to image_generation when CEO found no specific intent.
         # If CEO detected a concrete non-image intent (web_search, coding, planning, etc.)
         # that intent stands — the user may be asking a question while in image mode.
         # CEO's generic normal_chat in image mode → image_generation (user is describing).
-        _req_chat_mode = getattr(req, "chat_mode", None)
-        _ceo_intent    = phase1_plan.intent if phase1_plan else None
-
         if _req_chat_mode in ("image", "image_edit"):
             if _req_chat_mode == "image_edit" or (_req_chat_mode == "image" and bool(req.image_base64)):
                 execution_intent = "image_edit"
