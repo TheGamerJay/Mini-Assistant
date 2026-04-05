@@ -555,12 +555,28 @@ async def stream_builder_task(
         hands_ok, hands_issues = await _hands_qa(_built_html, message, api_key)
 
         if not hands_ok and hands_issues:
-            yield _status("ceo", f"Hands found issues — sending back to Builder: {hands_issues[0]}")
+            # ── CEO checks repair library before sending to Builder ───────────
+            _repair_hint = ""
+            try:
+                _lib_matches = _search_repair_memory(
+                    "; ".join(hands_issues[:2]), "build_pipeline"
+                )
+                if _lib_matches and _lib_matches[0]["similarity_score"] >= 0.50:
+                    _top = _lib_matches[0]
+                    _repair_hint = (
+                        f"Repair library match ({_top['confidence_level']} confidence): "
+                        f"{_top['solution_name']} — Steps: {'; '.join(_top['solution_steps'][:3])}"
+                    )
+                    yield _status("ceo", f"Found past solution in library: {_top['solution_name']}")
+            except Exception:
+                pass
+
+            yield _status("ceo", f"Hands found issues — sending to Builder: {hands_issues[0]}")
             yield _status("builder", "Fixing issues…")
             _fix_start_len = len(reply_text)
             async for chunk in _stream_fix(
                 original_html = _built_html,
-                issues        = hands_issues,
+                issues        = hands_issues + ([_repair_hint] if _repair_hint else []),
                 message       = message,
                 api_key       = api_key,
                 lessons       = lessons,
