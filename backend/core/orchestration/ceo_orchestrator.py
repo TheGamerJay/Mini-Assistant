@@ -418,32 +418,58 @@ async def _ceo_approve_and_save(
         log.warning("repair_memory: CEO approval check failed — not saving (%s)", exc)
         return
 
-    # CEO approved — now save
+    # CEO approved — score confidence then upsert (never duplicate, always keep best)
     try:
-        from core.repair_memory.repair_store import save_repair, increment_success
+        import anthropic as _sc_am
+        _sc_client = _sc_am.AsyncAnthropic(api_key=api_key)
+        _score_prompt = (
+            f"Problem: {problem}\n"
+            f"Solution: {solution}\n"
+            f"Steps: {'; '.join(steps[:5])}\n\n"
+            "Rate the confidence that this solution will fix the same problem in future builds.\n"
+            "Output ONLY a number 0-100 (e.g. 82). Nothing else."
+        )
+        _sc_resp = await _sc_client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=5,
+            system="You are the CEO. Score this solution's reusability 0-100.",
+            messages=[{"role": "user", "content": _score_prompt}],
+        )
+        _raw_score = _sc_resp.content[0].text.strip() if _sc_resp.content else "50"
+        try:
+            new_confidence = min(float(_raw_score) / 100.0, 1.0)
+        except ValueError:
+            new_confidence = 0.5
+        log.info("repair_memory: CEO scored new solution confidence=%.2f", new_confidence)
+    except Exception as exc:
+        log.warning("repair_memory: confidence scoring failed — using 0.5 (%s)", exc)
+        new_confidence = 0.5
+
+    try:
+        from core.repair_memory.repair_store import upsert_repair
         from core.repair_memory.repair_search import search
 
+        # Use existing slug if a similar record exists, otherwise derive from problem
         matches = search(category, problem, top_n=1)
-        if matches and matches[0]["similarity_score"] >= 0.75:
-            existing_slug = matches[0]["_slug"]
-            if increment_success(category, existing_slug):
-                log.info(
-                    "repair_memory: CEO-approved increment slug=%s (similarity=%.2f)",
-                    existing_slug, matches[0]["similarity_score"],
-                )
-                return
+        if matches and matches[0]["similarity_score"] >= 0.60:
+            slug = matches[0]["_slug"]
+        else:
+            slug = problem[:60].lower().replace(" ", "-")
 
-        slug = problem[:60].lower().replace(" ", "-")
-        save_repair(
-            category       = category,
-            problem_slug   = slug,
-            problem_name   = problem[:200],
-            solution_name  = solution[:200],
-            solution_steps = steps[:10],
+        _, action = upsert_repair(
+            category        = category,
+            problem_slug    = slug,
+            problem_name    = problem[:200],
+            solution_name   = solution[:200],
+            solution_steps  = steps[:10],
+            new_confidence  = new_confidence,
         )
-        log.info("repair_memory: CEO-approved save slug=%s category=%s", slug, category)
+        log.info(
+            "repair_memory: upsert action=%s slug=%s confidence=%.2f",
+            action, slug, new_confidence,
+        )
     except Exception as exc:
-        log.warning("repair_memory: save failed (non-fatal) — %s", exc)
+        log.warning("repair_memory: upsert failed (non-fatal) — %s", exc)
 
 
 # ---------------------------------------------------------------------------

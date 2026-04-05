@@ -97,6 +97,74 @@ def save_repair(
     return record
 
 
+def upsert_repair(
+    category:        str,
+    problem_slug:    str,
+    problem_name:    str,
+    solution_name:   str,
+    solution_steps:  list[str],
+    new_confidence:  float = 0.5,
+) -> tuple[dict[str, Any], str]:
+    """
+    Save or upgrade a repair record — never creates duplicates.
+
+    Logic:
+      - If no existing record: save fresh.
+      - If existing record exists:
+          - new confidence > existing (normalised from success_count): replace.
+          - new confidence <= existing: keep existing, increment success_count.
+
+    Returns (record, action) where action is 'created' | 'upgraded' | 'kept'.
+    """
+    if category not in ALLOWED_CATEGORIES:
+        raise ValueError(f"Invalid repair category: '{category}'.")
+
+    slug = _slugify(problem_slug)
+    path = _path(category, slug)
+
+    if not path.exists():
+        record = {
+            "problem_name":   problem_name,
+            "category":       category,
+            "solution_name":  solution_name,
+            "solution_steps": solution_steps,
+            "success_count":  1,
+            "confidence":     round(new_confidence, 3),
+            "last_used":      _now(),
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write(path, record)
+        log.info("repair_store: created slug=%s category=%s", slug, category)
+        return record, "created"
+
+    existing = _read(path)
+    existing_conf = existing.get("confidence", 0.0)
+
+    if new_confidence > existing_conf:
+        # New solution is more confident — upgrade
+        existing["solution_name"]  = solution_name
+        existing["solution_steps"] = solution_steps
+        existing["confidence"]     = round(new_confidence, 3)
+        existing["last_used"]      = _now()
+        existing["success_count"]  = existing.get("success_count", 1) + 1
+        _write(path, existing)
+        log.info(
+            "repair_store: upgraded slug=%s conf %.3f→%.3f",
+            slug, existing_conf, new_confidence,
+        )
+        return existing, "upgraded"
+    else:
+        # Existing is better — just bump success count
+        existing["success_count"] = existing.get("success_count", 1) + 1
+        existing["last_used"]     = _now()
+        _write(path, existing)
+        log.info(
+            "repair_store: kept existing slug=%s (existing_conf=%.3f >= new_conf=%.3f)",
+            slug, existing_conf, new_confidence,
+        )
+        return existing, "kept"
+
+
 def load_repair(category: str, problem_slug: str) -> Optional[dict[str, Any]]:
     """Load a specific repair record by category and slug. Returns None if not found."""
     slug = _slugify(problem_slug)
