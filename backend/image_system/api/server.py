@@ -1108,6 +1108,61 @@ async def startup_event():
 
 
 # ---------------------------------------------------------------------------
+# Access gate helper
+# ---------------------------------------------------------------------------
+
+async def _check_access(auth_header: str | None) -> None:
+    """
+    Raise HTTPException when the request should be blocked.
+
+    Rules (in order):
+      1. No/invalid token         → 401 unauthenticated (non-fatal: pass through)
+      2. Not subscribed           → 402 not_subscribed
+      3. No verified API key      → 403 no_api_key
+      4. Admin                    → always allowed
+
+    Designed to be called at the top of every execution endpoint.
+    Non-fatal DB errors are silently swallowed so infra issues never block users.
+    """
+    if not db:
+        return  # No DB available — can't gate, pass through
+    try:
+        from mini_credits import _decode_bearer as _gk_dec  # type: ignore
+        payload = _gk_dec(auth_header)
+        if not payload:
+            return  # Unauthenticated — let downstream auth handle it
+        uid  = payload.get("sub")
+        user = await db["users"].find_one(
+            {"id": uid},
+            {"is_subscribed": 1, "role": 1, "plan": 1,
+             "api_key_anthropic_verified": 1, "api_key_openai_verified": 1,
+             "api_key_verified": 1},
+        )
+        if not user:
+            return
+        # Admins bypass all checks
+        if user.get("role") == "admin" or user.get("plan") == "admin":
+            return
+        # Gate 1: subscription required
+        if not user.get("is_subscribed", False):
+            raise HTTPException(
+                status_code=402,
+                detail="not_subscribed",
+            )
+        # Gate 2: at least one verified API key required
+        from billing.access_gate import _has_any_verified_key as _gk_has_key  # type: ignore
+        if not _gk_has_key(user):
+            raise HTTPException(
+                status_code=403,
+                detail="no_api_key",
+            )
+    except HTTPException:
+        raise
+    except Exception as _gate_err:
+        logger.debug("_check_access: non-fatal error — %s", _gate_err)
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
@@ -1396,8 +1451,10 @@ async def generate_image(req: GenerateRequest, request: Request):
     2. Generate via DALL-E 3 (standard or hd quality).
     3. Return image_base64 + metadata.
     """
-    # Image generation never deducts credits — images and credits are separate systems.
     auth_header = request.headers.get("authorization")
+
+    # ── Subscription + API key gate ─────────────────────────────────────────
+    await _check_access(auth_header)
 
     # ── Email verification gate ─────────────────────────────────────────────
     try:
@@ -1412,20 +1469,6 @@ async def generate_image(req: GenerateRequest, request: Request):
         raise
     except Exception as _ev_err:
         logger.warning("generate: email verification check failed (non-fatal) — %s", _ev_err)
-
-    # ── Image limit gate ────────────────────────────────────────────────────
-    try:
-        from mini_credits import check_image_limit as _chk_img
-        _img_ok, _img_used, _img_limit, _ = await _chk_img(auth_header)
-        if not _img_ok:
-            raise HTTPException(
-                status_code=403,
-                detail=f"image_limit_reached:{_img_used}/{_img_limit}",
-            )
-    except HTTPException:
-        raise
-    except Exception as _il_err:
-        logger.warning("generate: image limit check failed (non-fatal) — %s", _il_err)
 
     from ..utils.prompt_safety import validate as ps_validate
     from ..services.dalle_client import DalleClient
@@ -1616,6 +1659,9 @@ async def chat(req: ChatRequest, request: Request):
     Slash commands (/fix, /image, /code, etc.) override intent detection.
     Phase 2 adds CEO posture, Manager session context, and Supervisor task tracking.
     """
+    # ── Subscription + API key gate ─────────────────────────────────────────
+    await _check_access(request.headers.get("authorization"))
+
     from ..utils.prompt_safety import validate as ps_validate
     # Images never deduct credits — only deduct for text chat requests.
     if not getattr(req, "image_base64", None):
@@ -2645,42 +2691,32 @@ async def chat_stream(req: ChatRequest, request: Request):
         # the frontend connection while we wait for routing + Ollama.
         yield ": keepalive\n\n"
 
-        # ── New user API key gate ─────────────────────────────────────────────
-        # Stream a friendly onboarding message instead of silently failing later
-        # when the user has no verified API key configured yet.
+        # ── Subscription + API key gate (SSE) ────────────────────────────────
+        # _check_access raises HTTPException — catch and stream friendly message.
+        # not_subscribed → tell them to subscribe
+        # no_api_key     → guide them to Settings → API Keys
         try:
-            from mini_credits import _decode_bearer as _gk_dec
-            _gk_auth    = request.headers.get("authorization")
-            _gk_payload = _gk_dec(_gk_auth)
-            if _gk_payload:
-                _gk_uid  = _gk_payload.get("sub")
-                _gk_user = await db["users"].find_one(
-                    {"id": _gk_uid},
-                    {"api_key_anthropic_verified": 1, "api_key_openai_verified": 1,
-                     "api_key_verified": 1, "role": 1, "plan": 1}
-                ) if db else None
-                if _gk_user:
-                    from billing.access_gate import _has_any_verified_key as _gk_has_key
-                    _gk_is_admin = (
-                        _gk_user.get("role") == "admin"
-                        or _gk_user.get("plan") == "admin"
-                    )
-                    if not _gk_is_admin and not _gk_has_key(_gk_user):
-                        _onboard = (
-                            "**Welcome to Mini Assistant!** 👋\n\n"
-                            "Before you can start chatting and building, you need to connect "
-                            "your API key. It only takes a minute.\n\n"
-                            "**Get started:**\n"
-                            "1. Open **Settings** (top-right corner)\n"
-                            "2. Go to the **API Keys** tab\n"
-                            "3. Paste your **Anthropic** or **OpenAI** key and click **Save & Verify**\n\n"
-                            "Your key is encrypted and never shared. Once verified, you're all set!"
-                        )
-                        yield f"data: {_json.dumps({'t': _onboard})}\n\n"
-                        yield f"data: {_json.dumps({'done': True, 'meta': {'mode_used': 'chat', 'intent': 'onboarding'}})}\n\n"
-                        return
-        except Exception as _gk_err:
-            logger.debug("API key gate: non-fatal check failed — %s", _gk_err)
+            await _check_access(request.headers.get("authorization"))
+        except HTTPException as _gate_exc:
+            if _gate_exc.status_code == 402 or _gate_exc.detail == "not_subscribed":
+                _block_msg = (
+                    "**Subscribe to unlock Mini Assistant** 🚀\n\n"
+                    "You're currently on the free plan — subscribe to start chatting, "
+                    "building apps, and generating images.\n\n"
+                    "Click **Subscribe** in the top-right corner to get started."
+                )
+            else:
+                _block_msg = (
+                    "**Almost there — add your API key to get started** 🔑\n\n"
+                    "Your account is active! You just need to connect your AI provider key:\n\n"
+                    "1. Open **Settings** (top-right corner)\n"
+                    "2. Go to the **API Keys** tab\n"
+                    "3. Paste your **Anthropic** or **OpenAI** key and click **Save & Verify**\n\n"
+                    "Your key is encrypted and never shared."
+                )
+            yield f"data: {_json.dumps({'t': _block_msg})}\n\n"
+            yield f"data: {_json.dumps({'done': True, 'meta': {'mode_used': 'chat', 'intent': 'onboarding'}})}\n\n"
+            return
 
         effective_msg = clean_message
         phase1_plan = None

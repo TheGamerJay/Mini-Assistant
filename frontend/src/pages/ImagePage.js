@@ -78,7 +78,12 @@ function ImagePage() {
 
       setResults((prev) => [{ ...data, prompt: activePrompt, _id: crypto.randomUUID() }, ...prev]);
     } catch (err) {
-      if (err.name !== 'AbortError') {
+      if (err.name === 'AbortError') return;
+      if (err.status === 402 || err.message === 'not_subscribed') {
+        toast.error('Subscribe to generate images — click Subscribe in the top-right corner.', { duration: 6000 });
+      } else if (err.status === 403 && (err.message === 'no_api_key' || String(err.message).includes('no_api_key'))) {
+        toast.error('Add your API key first — open Settings → API Keys.', { duration: 6000 });
+      } else {
         toast.error('Generation failed: ' + (err.message || 'Unknown error'));
         setResults((prev) => [{
           _id: crypto.randomUUID(),
