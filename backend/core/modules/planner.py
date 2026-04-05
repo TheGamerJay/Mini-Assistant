@@ -77,7 +77,10 @@ async def execute(
         if stack:
             ctx_hint = f"\n\nProject context — existing stack: {stack}"
 
+    repo_ctx = decision.get("repo_context", "")
     user_prompt = f"Create a build plan for:\n{message}{ctx_hint}"
+    if repo_ctx:
+        user_prompt += f"\n\n{repo_ctx}"
 
     try:
         import anthropic

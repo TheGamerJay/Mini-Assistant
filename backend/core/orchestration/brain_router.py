@@ -143,6 +143,27 @@ async def call_vision(
     return _wrap_vision(raw, elapsed)
 
 
+async def call_github_brain(
+    decision: dict[str, Any],
+    memory:   dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Route to GitHub Brain for repo/code inspection. Returns BrainResult.
+    CEO calls this when a GitHub URL or user code is detected.
+    Brain reads files and returns a structured report — CEO never reads files directly.
+    """
+    t0 = time.perf_counter()
+    try:
+        from core.modules.github_brain import execute
+        raw = await execute(decision, memory, {})
+    except Exception as exc:
+        log.error("brain_router: github_brain failed — %s", exc, exc_info=True)
+        return _fail_result("github_brain", str(exc), "ask_user")
+
+    elapsed = round((time.perf_counter() - t0) * 1000, 1)
+    return _wrap_github_brain(raw, elapsed)
+
+
 async def call_doctor(
     issue:        str,
     evidence:     list[str],
@@ -300,6 +321,37 @@ def _wrap_doctor(raw: dict[str, Any], elapsed_ms: float) -> dict[str, Any]:
         "recommended_next_step": "ask_user",   # CEO presents to user for approval
         "_raw":                  raw,
         "_brain":                "doctor",
+        "_elapsed_ms":           elapsed_ms,
+    }
+
+
+def _wrap_github_brain(raw: dict[str, Any], elapsed_ms: float) -> dict[str, Any]:
+    has_error  = raw.get("status") == "error"
+    status     = "fail" if has_error else "success"
+    features   = raw.get("existing_features", [])
+    stack      = raw.get("tech_stack", [])
+    files      = raw.get("relevant_files", [])
+    evidence   = (
+        [f"Tech stack: {', '.join(stack)}"] if stack else []
+    ) + (
+        [f"Features found: {', '.join(features[:6])}"] if features else []
+    ) + (
+        [f"Files read: {len(files)}"]
+    )
+
+    return {
+        "status":                status,
+        "summary":               (
+            raw.get("error") if has_error
+            else f"Repo inspected: {raw.get('project_type', 'unknown')} — {raw.get('file_tree_summary', '')}"
+        ),
+        "confidence":            0.0 if has_error else 0.85,
+        "evidence":              evidence,
+        "affected_files":        [f["path"] for f in files],
+        "proposed_fix":          "",
+        "recommended_next_step": "ask_user" if has_error else "planner",
+        "_raw":                  raw,
+        "_brain":                "github_brain",
         "_elapsed_ms":           elapsed_ms,
     }
 

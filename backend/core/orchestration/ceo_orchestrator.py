@@ -32,7 +32,7 @@ import time
 from typing import Any, AsyncGenerator, Optional
 
 from .state_manager import OrchestrationState, StepRecord, get_or_create
-from .brain_router import call_builder, call_hands, call_vision, call_doctor, call_planner
+from .brain_router import call_builder, call_hands, call_vision, call_doctor, call_planner, call_github_brain
 from .approval_gate import request_approval, build_approval_message
 
 log = logging.getLogger("ceo_router.orchestrator")
@@ -512,6 +512,40 @@ async def stream_builder_task(
     # ── CEO: start ────────────────────────────────────────────────────────────
     yield _status("ceo", "Analyzing your request…")
 
+    # ── CEO → GitHub Brain: repo inspection (if URL or repo context detected) ─
+    # CEO detects the need, delegates inspection to GitHub Brain, and receives
+    # a structured report. CEO never reads files directly.
+    _repo_context_str  = ""
+    _repo_report: Optional[dict] = _memory.get("repo_report")  # session-level cache
+
+    _detected_url = _detect_github_url(message)
+    if _detected_url and not _repo_report:
+        yield _status("scanner", f"Inspecting repository: {_detected_url}…")
+        _gh_decision = {
+            "github_url": _detected_url,
+            "focus":      message,
+            "api_key_gh": _memory.get("github_token", ""),
+        }
+        _gh_result = await call_github_brain(_gh_decision, _memory)
+        if _gh_result["status"] == "success":
+            _repo_report = _gh_result["_raw"]
+            _memory["repo_report"] = _repo_report   # cache for this session
+            _stack   = ", ".join(_repo_report.get("tech_stack", []))
+            _feat    = ", ".join(_repo_report.get("existing_features", [])[:6])
+            _targets = ", ".join(_repo_report.get("recommended_patch_targets", [])[:4])
+            yield _status(
+                "ceo",
+                f"Repo scanned — {_repo_report.get('project_type', 'unknown')} | "
+                f"Stack: {_stack or 'unknown'} | "
+                f"Features: {_feat or 'none detected'}",
+            )
+        else:
+            yield _status("ceo", f"Repo scan failed ({_gh_result['summary']}) — proceeding with description only.")
+
+    # Build repo context string to inject into Planner + Builder
+    if _repo_report:
+        _repo_context_str = _format_repo_context(_repo_report)
+
     # ── Requirements phase (first build, no images, no vibe mode) ─────────────
     _is_fresh_first = (
         not has_prior_code
@@ -519,6 +553,7 @@ async def stream_builder_task(
         and not has_images
         and not vibe_mode
         and build_history_turns == 0
+        and not _repo_report   # skip requirements Q&A when we already have the repo
     )
     if _is_fresh_first:
         yield _status("ceo", "Gathering requirements before building…")
@@ -529,6 +564,8 @@ async def stream_builder_task(
     # ── CEO → Planner Brain ───────────────────────────────────────────────────
     yield _status("planner", "Creating build plan…")
     plan_decision = {"message": message, "api_key": api_key}
+    if _repo_context_str:
+        plan_decision["repo_context"] = _repo_context_str
     plan_result   = await call_planner(plan_decision, _memory)
 
     if plan_result["status"] == "success":
@@ -558,6 +595,7 @@ async def stream_builder_task(
         lessons          = lessons,
         user_prefs       = user_prefs,
         memory_search    = memory_search,
+        repo_context     = _repo_context_str,
     ):
         if chunk.startswith("data: "):
             try:
@@ -696,6 +734,7 @@ async def _stream_build(
     lessons:          str,
     user_prefs:       str,
     memory_search:    str,
+    repo_context:     str = "",
 ) -> AsyncGenerator[str, None]:
     """Stream the main build — patch mode or fresh build."""
     try:
@@ -726,6 +765,8 @@ async def _stream_build(
         )
         sys_prompt += plan_block
 
+    if repo_context:
+        sys_prompt += repo_context   # always inject first — highest priority context
     if lessons:
         sys_prompt += lessons
     if user_prefs:
@@ -980,6 +1021,67 @@ def _search_repair_memory(issue: str, intent: str) -> list[dict]:
     except Exception as exc:
         log.warning("orchestrator: repair memory search failed — %s", exc)
         return []
+
+
+_GITHUB_URL_RE = _re.compile(
+    r"https?://github\.com/[\w.\-]+/[\w.\-]+(?:\.git)?",
+    _re.I,
+)
+
+
+def _detect_github_url(text: str) -> str:
+    """Return the first GitHub URL found in the text, or empty string."""
+    m = _GITHUB_URL_RE.search(text)
+    return m.group(0).rstrip("/").rstrip(".git") if m else ""
+
+
+def _format_repo_context(report: dict) -> str:
+    """
+    Format the GitHub Brain's structured report into a concise context block
+    that CEO injects into Planner and Builder system prompts.
+    """
+    repo     = report.get("repo", "unknown")
+    ptype    = report.get("project_type", "unknown")
+    stack    = ", ".join(report.get("tech_stack", [])) or "unknown"
+    features = ", ".join(report.get("existing_features", []))
+    entries  = ", ".join(report.get("entry_points", [])[:5])
+    targets  = report.get("recommended_patch_targets", [])
+    dupes    = report.get("duplicate_candidates", [])
+    files    = report.get("relevant_files", [])
+    tree     = report.get("file_tree_summary", "")
+
+    lines = [
+        "\n\n## REPO INSPECTION REPORT (from GitHub Brain — approved by CEO)",
+        f"Repo: {repo}  |  Type: {ptype}  |  Stack: {stack}",
+    ]
+    if entries:
+        lines.append(f"Entry points: {entries}")
+    if features:
+        lines.append(f"Existing features: {features}")
+    if targets:
+        lines.append("Recommended patch targets (modify these — do NOT recreate):")
+        for t in targets[:6]:
+            lines.append(f"  - {t}")
+    if dupes:
+        lines.append("Duplicate risk (avoid adding more of these):")
+        for d in dupes[:3]:
+            lines.append(f"  - {d['concern']}: {', '.join(d['files'][:3])}")
+    if files:
+        lines.append(f"Key files inspected ({len(files)} total):")
+        for f in files[:10]:
+            purpose  = f.get("purpose", "")
+            snippet  = f.get("snippet", "")[:120].replace("\n", " ")
+            lines.append(f"  [{f['path']}] {purpose}")
+            if snippet:
+                lines.append(f"    → {snippet}")
+    if tree:
+        lines.append(f"Tree: {tree}")
+    lines.append(
+        "\nCEO INSTRUCTION TO BUILDER: Study the above before writing any code. "
+        "Patch existing files where possible. Do NOT recreate files that already exist. "
+        "Match the project's existing stack, patterns, and naming conventions exactly."
+    )
+    return "\n".join(lines)
 
 
 def _needs_input_response(state: OrchestrationState, message: str) -> dict[str, Any]:
