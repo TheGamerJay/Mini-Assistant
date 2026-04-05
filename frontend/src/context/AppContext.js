@@ -568,6 +568,7 @@ export function AppProvider({ children }) {
     _initialTemplatesRef.current = true;
     // Reset modal state so it doesn't leak to next account
     setUpgradeModalOpen(false);
+    try { localStorage.removeItem('ma_active_page'); } catch {}
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loginWithGoogle = useCallback(async (credential) => {

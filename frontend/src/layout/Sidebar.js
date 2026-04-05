@@ -69,6 +69,7 @@ const TOOLS = [
   { id: 'railway', label: 'Railway', icon: Train },
   { id: 'database', label: 'DB Designer', icon: Layers },
   { id: 'git', label: 'Git & GitHub', icon: GitBranch },
+  { id: 'repoinspector', label: 'GitHub Brain', icon: Brain },
   { id: 'packages', label: 'Packages', icon: Package },
   { id: 'env', label: 'Env Vars', icon: Code },
   { id: 'snippets', label: 'Snippets', icon: BookMarked },

@@ -16,7 +16,7 @@ import { useApp } from '../context/AppContext';
 const MODES = [
   {
     id: 'chat',
-    label: 'Chat Mode',
+    label: 'Think',
     icon: '💬',
     tagline: 'Ask anything. Learn anything.',
     description: 'Research, explain, plan, brainstorm — your AI thinking partner.',
@@ -32,7 +32,7 @@ const MODES = [
   },
   {
     id: 'build',
-    label: 'Build Mode',
+    label: 'Build',
     icon: '⚡',
     tagline: 'Describe it. See it built.',
     description: 'Turn any idea into a fully working interactive app — no code needed.',
@@ -48,7 +48,7 @@ const MODES = [
   },
   {
     id: 'image',
-    label: 'Image Mode',
+    label: 'Create Image',
     icon: '🎨',
     tagline: 'Imagine it. See it rendered.',
     description: 'Generate stunning visuals from any description in seconds.',
@@ -69,11 +69,11 @@ const MODES = [
 // ---------------------------------------------------------------------------
 const getSuggestions = (lastTopic) => {
   if (!lastTopic) return [
-    'Draw a shonen anime warrior with power aura',
-    'Build me a simple calculator app',
-    'Explain async/await with examples',
-    'Generate a realistic portrait photo',
-    'Write a Python web scraper',
+    'Build a calculator app with UI and logic',
+    'Scrape a website with Python',
+    'Generate a cinematic fantasy image',
+    'Edit this image and remove the background',
+    'Explain this code step by step',
   ];
   const t = lastTopic.toLowerCase();
   if (/code|python|function|debug|script|javascript|typescript|api/.test(t)) return [
@@ -273,7 +273,7 @@ function HomeHero({ onSubmit, loading, lastTopic, chatMode = null, onChatModeCha
             onChatModeChange={handleSelectMode}
           />
           <p className="text-center mt-3 text-[11px] font-mono text-slate-700">
-            Powered by Mini Assistant AI
+            Mini Assistant AI · Built to think. Designed to execute.
           </p>
         </div>
       </div>
@@ -296,10 +296,10 @@ function HomeHero({ onSubmit, loading, lastTopic, chatMode = null, onChatModeCha
       {/* Heading */}
       <div className="text-center space-y-2">
         <h1 className="text-4xl md:text-5xl font-semibold text-slate-100 tracking-tight">
-          What's on your mind today?
+          Give it a task. It executes.
         </h1>
         <p className="text-sm text-slate-500">
-          Chat With Your Mini Assistant
+          AI that thinks, builds, and creates images
         </p>
       </div>
 
@@ -307,7 +307,7 @@ function HomeHero({ onSubmit, loading, lastTopic, chatMode = null, onChatModeCha
       <div className="w-full max-w-2xl">
         <ChatInput variant="home" onSubmit={onSubmit} loading={loading} chatMode={chatMode} onChatModeChange={onChatModeChange} />
         <p className="text-center mt-3 text-xs font-mono text-slate-700">
-          Powered by Mini Assistant AI
+          Mini Assistant AI · Built to think. Designed to execute.
         </p>
       </div>
 

@@ -1166,6 +1166,38 @@ async def _check_access(auth_header: str | None) -> None:
 # Endpoints
 # ---------------------------------------------------------------------------
 
+class RepoInspectRequest(BaseModel):
+    github_url: str
+    focus:      str  = ""
+    api_key_gh: str  = ""
+
+
+@app.post("/api/repo/inspect")
+async def repo_inspect(req: RepoInspectRequest, request: Request):
+    """
+    CEO delegates GitHub repo inspection to GitHub Brain.
+    CEO receives the structured report — never reads files directly.
+    Returns the report to the frontend (and stores in session memory).
+    """
+    await _check_access(request.headers.get("authorization"))
+    try:
+        from core.orchestration.brain_router import call_github_brain
+        decision = {
+            "github_url": req.github_url,
+            "focus":      req.focus,
+            "api_key_gh": req.api_key_gh,
+        }
+        result = await call_github_brain(decision, {})
+        if result["status"] == "fail":
+            raise HTTPException(status_code=422, detail=result["summary"])
+        return result["_raw"]
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("repo_inspect: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.post("/api/extract-text")
 async def extract_text(file: UploadFile = File(...)):
     """Extract text from an uploaded PDF or plain-text file."""

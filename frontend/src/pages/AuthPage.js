@@ -282,6 +282,7 @@ function LoginForm({ onSwitchToSignup }) {
 
   return (
     <div className="space-y-4">
+      <p className="text-xs text-center text-slate-500">Start instantly with Google</p>
       <GoogleButton />
       <OrDivider />
     <form onSubmit={handleLogin} className="space-y-4">
@@ -313,7 +314,7 @@ function LoginForm({ onSwitchToSignup }) {
         className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-600 text-white text-sm font-medium hover:from-cyan-400 hover:to-violet-500 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
       >
         {loading && <Loader2 size={14} className="animate-spin" />}
-        {loading ? 'Signing in…' : 'Sign In'}
+        {loading ? 'Signing in…' : 'Continue'}
       </button>
       <div className="flex items-center justify-between text-xs">
         <button type="button" onClick={() => setForgotStep('email')}
@@ -395,6 +396,7 @@ function SignupForm({ onSwitchToLogin }) {
         </div>
       )}
       <div className="space-y-4">
+        <p className="text-xs text-center text-slate-500">Start instantly with Google</p>
         <GoogleButton />
         <OrDivider />
       </div>
@@ -442,7 +444,7 @@ function SignupForm({ onSwitchToLogin }) {
 
         {/* Security question for password recovery */}
         <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-slate-400">Security Question <span className="text-slate-600">(for password recovery)</span></label>
+          <label className="text-xs font-medium text-slate-400">Account recovery <span className="text-slate-600">(optional)</span></label>
           <select
             value={securityQuestion}
             onChange={e => setSecurityQuestion(e.target.value)}
@@ -499,7 +501,7 @@ function SignupForm({ onSwitchToLogin }) {
           className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-600 text-white text-sm font-medium hover:from-cyan-400 hover:to-violet-500 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {loading && <Loader2 size={14} className="animate-spin" />}
-          {loading ? 'Creating account…' : 'Create Account'}
+          {loading ? 'Creating account…' : 'Get Started'}
         </button>
         <p className="text-center text-xs text-slate-500">
           Already have an account?{' '}
@@ -534,7 +536,7 @@ export default function AuthPage() {
               onError={e => { e.target.style.display = 'none'; }} />
           </div>
           <h1 className="text-2xl font-bold text-white tracking-tight">Mini Assistant</h1>
-          <p className="text-sm text-slate-500 mt-1">Your AI-powered development workspace</p>
+          <p className="text-sm text-slate-500 mt-1">Give it a task. It executes.</p>
         </div>
 
         {/* Card */}
@@ -564,7 +566,7 @@ export default function AuthPage() {
         </div>
 
         <p className="text-center text-[11px] text-slate-700 mt-6">
-          Mini Assistant · AI Workspace · v1.0
+          Mini Assistant AI · Built to think. Designed to execute.
         </p>
       </div>
     </div>

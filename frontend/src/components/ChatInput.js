@@ -601,7 +601,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
               <>
                 {/* Chat */}
                 <span
-                  title={chatMode === 'chat' ? 'Chat — confirmed' : predictedMode === 'chat' ? 'Chat — predicted' : 'Chat'}
+                  title={chatMode === 'chat' ? 'Think — confirmed' : predictedMode === 'chat' ? 'Think — predicted' : 'Think'}
                   className={`flex-shrink-0 p-2.5 rounded-xl transition-all duration-300 mb-0.5 cursor-default select-none
                     ${modeStyle('chat', chatMode, predictedMode, { confirmed: 'bg-gradient-to-br from-blue-500 to-indigo-600', predicted: 'bg-blue-500/30', shadow: 'shadow-blue-500/40', ring: 'ring-blue-400' })}`}
                 >
@@ -609,7 +609,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
                 </span>
                 {/* Image Generate */}
                 <span
-                  title={chatMode === 'image' ? 'Image — confirmed' : predictedMode === 'image' ? 'Image — predicted' : 'Image'}
+                  title={chatMode === 'image' ? 'Create Image — confirmed' : predictedMode === 'image' ? 'Create Image — predicted' : 'Create Image'}
                   className={`flex-shrink-0 p-2.5 rounded-xl transition-all duration-300 mb-0.5 cursor-default select-none
                     ${modeStyle('image', chatMode, predictedMode, { confirmed: 'bg-gradient-to-br from-pink-500 to-rose-600', predicted: 'bg-pink-500/30', shadow: 'shadow-pink-500/40', ring: 'ring-pink-400' })}`}
                 >
@@ -617,7 +617,7 @@ function ChatInput({ onSubmit, loading = false, variant = 'chat', placeholder, c
                 </span>
                 {/* Image Edit */}
                 <span
-                  title={chatMode === 'image_edit' ? 'Image Edit — confirmed' : predictedMode === 'image_edit' ? 'Image Edit — predicted' : 'Image Edit'}
+                  title={chatMode === 'image_edit' ? 'Edit Image — confirmed' : predictedMode === 'image_edit' ? 'Edit Image — predicted' : 'Edit Image'}
                   className={`flex-shrink-0 p-2.5 rounded-xl transition-all duration-300 mb-0.5 cursor-default select-none
                     ${modeStyle('image_edit', chatMode, predictedMode, { confirmed: 'bg-gradient-to-br from-amber-500 to-orange-600', predicted: 'bg-amber-500/30', shadow: 'shadow-amber-500/40', ring: 'ring-amber-400' })}`}
                 >

@@ -8,11 +8,11 @@ import { Sparkles, Image, Target, TrendingUp, Download, Lock, ArrowRight } from 
 import { useApp } from '../../context/AppContext';
 
 const FEATURES = [
-  { icon: Sparkles, text: 'AI-generated ad copy — hooks, headlines, CTAs' },
-  { icon: Image,    text: 'DALL·E 3 ad images matched to your brand' },
-  { icon: Target,   text: 'Multiple ad angles: emotional, benefit, curiosity, urgency' },
-  { icon: TrendingUp, text: 'Brand profile generation from your business info' },
-  { icon: Download, text: 'Download creatives ready for ads manager' },
+  { icon: Sparkles, text: 'Ad copy that converts — hooks, headlines, CTAs' },
+  { icon: Image,    text: 'On-brand ad visuals generated instantly' },
+  { icon: Target,   text: 'Multiple ad angles that drive clicks' },
+  { icon: TrendingUp, text: 'Auto-generate your brand profile' },
+  { icon: Download, text: 'Download ads ready to launch' },
 ];
 
 export default function AdModeLocked() {
@@ -28,11 +28,10 @@ export default function AdModeLocked() {
             <Lock size={11} /> Add-On Required
           </div>
           <h1 className="text-3xl font-bold text-slate-100 mb-3 leading-tight">
-            Campaign Lab
+            From idea to high-converting ads — instantly
           </h1>
           <p className="text-slate-400 text-base leading-relaxed max-w-md mx-auto">
-            Create high-converting ads in seconds — powered by AI.
-            Included as an add-on with your Mini Assistant subscription.
+            Built into your Mini Assistant workspace
           </p>
         </div>
 
@@ -58,7 +57,7 @@ export default function AdModeLocked() {
           onClick={() => setPage('pricing')}
           className="w-full py-3 rounded-2xl bg-gradient-to-r from-violet-600 to-cyan-600 text-white text-sm font-bold hover:opacity-90 transition-all flex items-center justify-center gap-2 shadow-lg mb-3"
         >
-          View Plans <ArrowRight size={14} />
+          Start Creating Ads → <ArrowRight size={14} />
         </button>
         <p className="text-center text-[11px] text-slate-600">
           Cancel anytime · Powered by Stripe

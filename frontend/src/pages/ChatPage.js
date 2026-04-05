@@ -361,7 +361,7 @@ function BlockedCard({ reason, onSubscribe, onAddKey }) {
       bg: 'bg-slate-500/5',
       accent: 'text-slate-300',
       heading: "Something went sideways",
-      body: "I hit an unexpected snag on my end. This is temporary — give it another try. If it keeps happening, check that your API key is valid in Settings.",
+      body: "I hit an unexpected snag on my end. This is temporary — give it another try.",
       steps: null,
       cta: 'Try Again',
       ctaStyle: 'bg-white/8 hover:bg-white/12 text-slate-200 border border-white/10',
@@ -1549,11 +1549,11 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
               onSubmit={handleSubmit}
               loading={loading}
               placeholder={
-                chatMode === 'image'      ? '🎨 Create New Image — describe what you want to generate…' :
-                chatMode === 'image_edit' ? '✏️ Edit Existing Image — attach your image and describe the change…' :
-                chatMode === 'build'      ? '🔨 Build Mode — describe the app you want built…' :
+                chatMode === 'image'      ? 'Describe what to generate...' :
+                chatMode === 'image_edit' ? 'Upload and describe what to edit...' :
+                chatMode === 'build'      ? 'Build an app, tool, or feature...' :
                 rightPanelOpen ? 'Describe changes or chat…' :
-                'Message Mini Assistant…'
+                'Ask or plan anything...'
               }
               chatMode={chatMode}
               onChatModeChange={handleModeChange}

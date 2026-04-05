@@ -62,6 +62,7 @@ import CodebaseSearch from './components/Search/CodebaseSearch';
 import ProjectProfiles from './components/Profiles/ProjectProfiles';
 import CodeReview from './components/CodeReview/CodeReview';
 import GitIntegration from './components/Git/GitIntegration';
+import RepoInspector from './components/Git/RepoInspector';
 import CodeRunner from './components/CodeRunner/CodeRunner';
 import APITester from './components/APITester/APITester';
 import DatabaseDesigner from './components/DatabaseDesigner/DatabaseDesigner';
@@ -128,6 +129,7 @@ const TOOL_PAGES = {
   'tool-railway': { component: RailwayManager, title: 'Railway' },
   'tool-database': { component: DatabaseDesigner, title: 'DB Designer' },
   'tool-git': { component: GitIntegration, title: 'Git & GitHub' },
+  'tool-repoinspector': { component: RepoInspector, title: 'GitHub Brain' },
   'tool-packages': { component: PackageManager, title: 'Packages' },
   'tool-env': { component: EnvManager, title: 'Env Vars' },
   'tool-snippets': { component: SnippetLibrary, title: 'Snippets' },
