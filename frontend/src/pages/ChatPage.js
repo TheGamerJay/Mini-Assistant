@@ -306,29 +306,101 @@ function StreamingBubble({ text, existingCode }) {
 }
 
 function BlockedCard({ reason, onSubscribe, onAddKey }) {
-  const isNoKey = reason === 'no_api_key';
+  const configs = {
+    not_subscribed: {
+      icon: '🚀',
+      gradient: 'from-violet-500 to-cyan-500',
+      border: 'border-violet-500/25',
+      bg: 'bg-violet-500/5',
+      accent: 'text-violet-300',
+      heading: "Let's get you set up!",
+      body: "Mini Assistant is ready to build apps, generate images, and chat — you just need an active subscription to unlock everything.",
+      steps: [
+        "Click Subscribe below",
+        "Pick a plan that works for you",
+        "Come back and ask me anything",
+      ],
+      cta: 'Subscribe Now',
+      ctaStyle: 'bg-gradient-to-r from-violet-500 to-cyan-500 hover:from-violet-400 hover:to-cyan-400 text-white',
+      ctaAction: 'subscribe',
+    },
+    no_api_key: {
+      icon: '🔑',
+      gradient: 'from-cyan-500 to-blue-500',
+      border: 'border-cyan-500/25',
+      bg: 'bg-cyan-500/5',
+      accent: 'text-cyan-300',
+      heading: "One quick step and you're in!",
+      body: "You're subscribed — great! Now just connect your AI provider key. It takes about 30 seconds and your key is encrypted and never shared.",
+      steps: [
+        "Open Settings (top-right corner)",
+        "Go to the API Keys tab",
+        "Paste your Anthropic or OpenAI key → Save & Verify",
+      ],
+      cta: 'Open Settings',
+      ctaStyle: 'bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white',
+      ctaAction: 'key',
+    },
+    rate_limit: {
+      icon: '⏱️',
+      gradient: 'from-amber-500 to-orange-500',
+      border: 'border-amber-500/25',
+      bg: 'bg-amber-500/5',
+      accent: 'text-amber-300',
+      heading: "Hold on — catching up!",
+      body: "You're moving fast! I need a few seconds to catch my breath. Try again in a moment and I'll be right with you.",
+      steps: null,
+      cta: null,
+      ctaStyle: '',
+      ctaAction: null,
+    },
+    server_error: {
+      icon: '⚡',
+      gradient: 'from-slate-500 to-slate-600',
+      border: 'border-slate-500/25',
+      bg: 'bg-slate-500/5',
+      accent: 'text-slate-300',
+      heading: "Something went sideways",
+      body: "I hit an unexpected snag on my end. This is temporary — give it another try. If it keeps happening, check that your API key is valid in Settings.",
+      steps: null,
+      cta: 'Try Again',
+      ctaStyle: 'bg-white/8 hover:bg-white/12 text-slate-200 border border-white/10',
+      ctaAction: 'retry',
+    },
+  };
+
+  const cfg = configs[reason] || configs.server_error;
+
   return (
     <div className="flex items-start gap-3">
-      <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center flex-shrink-0 mt-1">
-        <Zap size={15} className="text-black" />
+      <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${cfg.gradient} flex items-center justify-center flex-shrink-0 mt-1 text-sm`}>
+        {cfg.icon}
       </div>
-      <div className="flex-1 max-w-lg rounded-2xl rounded-tl-sm border border-amber-500/20 bg-amber-500/5 p-4">
-        <p className="text-sm font-semibold text-amber-300 mb-0.5">
-          {isNoKey ? 'API key required' : 'Subscription required'}
-        </p>
-        <p className="text-xs text-slate-400 mb-3">
-          {isNoKey
-            ? 'Add your Anthropic or OpenAI API key in Settings to start building.'
-            : 'Subscribe to Mini Assistant to unlock AI chat and app building.'}
-        </p>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={isNoKey ? onAddKey : onSubscribe}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold transition-all"
-          >
-            <Zap size={11} /> {isNoKey ? 'Add API Key' : 'Subscribe'}
-          </button>
-        </div>
+      <div className={`flex-1 max-w-lg rounded-2xl rounded-tl-sm border ${cfg.border} ${cfg.bg} p-4`}>
+        <p className={`text-sm font-semibold ${cfg.accent} mb-1`}>{cfg.heading}</p>
+        <p className="text-xs text-slate-400 leading-relaxed mb-3">{cfg.body}</p>
+        {cfg.steps && (
+          <ol className="mb-3 space-y-1">
+            {cfg.steps.map((s, i) => (
+              <li key={i} className="flex items-start gap-2 text-xs text-slate-400">
+                <span className={`flex-shrink-0 w-4 h-4 rounded-full bg-gradient-to-br ${cfg.gradient} text-white flex items-center justify-center text-[9px] font-bold mt-0.5`}>
+                  {i + 1}
+                </span>
+                {s}
+              </li>
+            ))}
+          </ol>
+        )}
+        {cfg.cta && cfg.ctaAction && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={cfg.ctaAction === 'subscribe' ? onSubscribe : cfg.ctaAction === 'key' ? onAddKey : undefined}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${cfg.ctaStyle}`}
+            >
+              {cfg.cta}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -847,13 +919,14 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
         setStreamActive(false);
       } catch (err) {
         setStreamActive(false);
-        const _isRL = err.status === 429 || err.message?.includes('rate limit');
+        const _isRL   = err.status === 429 || err.message?.includes('rate limit');
+        const _isSub  = err.status === 402 || err.message === 'not_subscribed';
+        const _isKey  = err.status === 403 || err.message === 'no_api_key';
         const withErr = [...nextMessages, {
           role: 'assistant', type: 'error',
-          content: _isRL
-            ? 'Hold on! Let me catch up — try again in a few seconds.'
-            : (err.message || 'Something went wrong.'),
+          content: 'blocked',
           timestamp: Date.now(),
+          _blocked: _isSub ? 'not_subscribed' : _isKey ? 'no_api_key' : _isRL ? 'rate_limit' : 'server_error',
         }];
         setMessages(withErr);
         updateChatMessages(chatId, withErr);
@@ -952,9 +1025,13 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
             updateChatMessages(chatIdRef_local, withA);
             setStreamActive(false);
           } catch (err) {
+            const _isSub = err.status === 402 || err.message === 'not_subscribed';
+            const _isKey = err.status === 403 || err.message === 'no_api_key';
+            const _isRL  = err.status === 429 || err.message?.includes('rate limit');
             const withErr = [...nextMessages, {
               role: 'assistant', type: 'error',
-              content: err.message || 'Something went wrong.', timestamp: Date.now(),
+              content: 'blocked', timestamp: Date.now(),
+              _blocked: _isSub ? 'not_subscribed' : _isKey ? 'no_api_key' : _isRL ? 'rate_limit' : 'server_error',
             }];
             setMessages(withErr);
             updateChatMessages(chatIdRef_local, withErr);
@@ -1049,8 +1126,8 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
       },
 
       onError(err) {
-        const isNotSubscribed = err.message === 'not_subscribed';
-        const isNoApiKey = err.message === 'no_api_key';
+        const isNotSubscribed = err.message === 'not_subscribed' || err.status === 402;
+        const isNoApiKey = err.message === 'no_api_key' || (err.status === 403 && err.message?.includes('no_api_key'));
         const isBlocked = isNotSubscribed || isNoApiKey;
         const isRateLimit = err.message?.startsWith('rate_limit:') || err.status === 429 || err.message?.includes('rate limit');
         const retryAfter = isRateLimit
@@ -1058,15 +1135,11 @@ strong{color:#7dd3fc;display:block;margin-bottom:4px;font-size:12px}
           : null;
         const withErr = [...nextMessages, {
           role: 'assistant', type: 'error',
-          content: isNotSubscribed
-            ? 'A subscription is required to use Mini Assistant.'
-            : isNoApiKey
-            ? 'Please add your API key in Settings to continue.'
-            : isRateLimit
-            ? 'Hold on! Let me catch up…'
-            : (err.message || 'Something went wrong.'),
+          content: 'blocked',   // content unused when _blocked is set — BlockedCard renders instead
           timestamp: Date.now(),
-          _blocked: isBlocked ? (isNoApiKey ? 'no_api_key' : 'not_subscribed') : undefined,
+          _blocked: isBlocked
+            ? (isNoApiKey ? 'no_api_key' : 'not_subscribed')
+            : isRateLimit ? 'rate_limit' : 'server_error',
           _retryAfter: retryAfter,
         }];
         setMessages(withErr);

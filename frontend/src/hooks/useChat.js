@@ -54,12 +54,22 @@ export function useChat() {
         try { const d = await res.json(); reason = d.reason || reason; } catch {}
         throw new Error(reason);
       }
+      if (res.status === 403) {
+        let reason = 'no_api_key';
+        try { const d = await res.json(); reason = d.detail || d.reason || reason; } catch {}
+        throw new Error(reason);
+      }
       if (res.status === 429) {
         let retryAfter = 30;
         try { const d = await res.json(); retryAfter = d.retry_after || retryAfter; } catch {}
         throw new Error(`rate_limit:${retryAfter}`);
       }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        // Treat all other non-200s as a soft error, not a raw HTTP code
+        let detail = '';
+        try { const d = await res.json(); detail = d.detail || d.message || ''; } catch {}
+        throw new Error(detail || 'server_error');
+      }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
