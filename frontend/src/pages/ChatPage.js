@@ -373,8 +373,9 @@ function BlockedCard({ reason, onSubscribe, onAddKey }) {
 
   return (
     <div className="flex items-start gap-3">
-      <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${cfg.gradient} flex items-center justify-center flex-shrink-0 mt-1 text-sm`}>
-        {cfg.icon}
+      <div className="w-10 h-10 rounded-xl bg-[#0d0d18] flex items-center justify-center overflow-hidden flex-shrink-0 mt-1 border border-violet-500/20">
+        <img src="/mascot.png?v=2" alt="Mini Assistant" className="w-full h-full object-contain"
+          onError={e => { e.target.style.display = 'none'; }} />
       </div>
       <div className={`flex-1 max-w-lg rounded-2xl rounded-tl-sm border ${cfg.border} ${cfg.bg} p-4`}>
         <p className={`text-sm font-semibold ${cfg.accent} mb-1`}>{cfg.heading}</p>
