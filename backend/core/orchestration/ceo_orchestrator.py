@@ -32,8 +32,21 @@ import time
 from typing import Any, AsyncGenerator, Optional
 
 from .state_manager import OrchestrationState, StepRecord, get_or_create
-from .brain_router import call_builder, call_hands, call_vision, call_doctor, call_planner, call_github_brain
+from .brain_router import (
+    call_builder, call_hands, call_vision, call_doctor, call_planner,
+    call_github_brain, gateway_dispatch, call_hands_html, call_eyes_html,
+)
 from .approval_gate import request_approval, build_approval_message
+from .task_model import task_registry
+from .stage_machine import (
+    transition as _sm_transition,
+    InvalidTransitionError,
+    GatewayViolationError,
+    RetryLimitExceededError,
+    check_retry_limit,
+    is_terminal,
+    stage_info as _stage_info,
+)
 
 log = logging.getLogger("ceo_router.orchestrator")
 
@@ -59,54 +72,124 @@ async def execute_builder_task(
     state      = get_or_create(session_id, goal, complexity)
     state.current_step = "orchestration_started"
 
-    log.info("orchestrator: started session=%s complexity=%s", session_id, complexity)
+    # ── Task lifecycle: create or retrieve Task for this session ──────────────
+    task = task_registry.get_by_session(session_id)
+    if task is None or is_terminal(task):
+        task = task_registry.create(session_id, goal)
+    task.set_status("in_progress")
 
-    # ── Step 1: Build loop ─────────────────────────────────────────────────────
+    log.info(
+        "orchestrator: started session=%s complexity=%s task=%s %s",
+        session_id, complexity, task.id, _stage_info(task),
+    )
+
+    # ── Stage: input → planning ───────────────────────────────────────────────
+    try:
+        _sm_transition(task, "planning", "CEO routing to Planner", brain="ceo")
+        plan_result = await gateway_dispatch("planner", task, decision, memory)
+        if plan_result["status"] == "success":
+            # Inject plan into decision for Builder
+            plan_raw   = plan_result["_raw"]
+            decision   = {
+                **decision,
+                "_plan": plan_raw,
+                "message": (
+                    f"{goal}\n\nBuild plan (from Planner, approved by CEO):\n"
+                    + "\n".join(f"- {s}" for s in plan_raw.get("steps", []))
+                ),
+            }
+    except (InvalidTransitionError, GatewayViolationError) as e:
+        log.warning("orchestrator: stage gate on planning — %s", e)
+        # Non-fatal: proceed to build without a plan
+
+    # ── Stage: planning → building ────────────────────────────────────────────
+    try:
+        _sm_transition(task, "building", "CEO routing to Builder", brain="ceo")
+    except InvalidTransitionError as e:
+        log.warning("orchestrator: cannot enter building stage — %s", e)
+
     build_result = await _build_loop(state, decision, memory, web_results)
 
     if build_result["status"] == "fail" and state.get_retry("builder") >= _MAX_BUILD_RETRIES:
+        try:
+            _sm_transition(task, "repair", "Build failed — escalating to Doctor", brain="ceo")
+        except InvalidTransitionError:
+            pass
         return await _escalate_to_doctor(
             state, decision, memory,
             issue    = build_result["summary"],
             evidence = build_result["evidence"],
+            task     = task,
         )
 
     if build_result["status"] == "fail":
+        try:
+            _sm_transition(task, "failed", "Build failed — needs more input", brain="ceo")
+        except InvalidTransitionError:
+            pass
         return _needs_input_response(state, "Builder could not complete the task. More details needed.")
 
-    # ── Step 2: Functional QA loop (Hands) ────────────────────────────────────
+    # ── Stage: building → qa_hands ────────────────────────────────────────────
+    try:
+        _sm_transition(task, "qa_hands", "Build succeeded — routing to Hands QA", brain="ceo")
+    except InvalidTransitionError as e:
+        log.warning("orchestrator: cannot enter qa_hands — %s", e)
+
     hands_result = await _qa_loop(
         state, "hands", build_result, decision, memory,
         call_fn = call_hands,
     )
 
     if hands_result["status"] == "fail":
+        try:
+            _sm_transition(task, "repair", "Hands QA failed — escalating to Doctor", brain="ceo")
+        except InvalidTransitionError:
+            pass
         return await _escalate_to_doctor(
             state, decision, memory,
             issue    = hands_result["summary"],
             evidence = hands_result["evidence"],
+            task     = task,
         )
 
-    # ── Step 3: Visual QA loop (Vision) — only for full_system / frontend ─────
+    # ── Stage: qa_hands → qa_vision (only for frontend output) ───────────────
     if _has_visual_output(build_result):
+        try:
+            _sm_transition(task, "qa_vision", "Hands passed — routing to Visual QA", brain="ceo")
+        except InvalidTransitionError as e:
+            log.warning("orchestrator: cannot enter qa_vision — %s", e)
+
         vision_result = await _qa_loop(
             state, "vision", build_result, decision, memory,
             call_fn = call_vision,
         )
         if vision_result["status"] == "fail":
+            try:
+                _sm_transition(task, "repair", "Vision QA failed — escalating to Doctor", brain="ceo")
+            except InvalidTransitionError:
+                pass
             return await _escalate_to_doctor(
                 state, decision, memory,
                 issue    = vision_result["summary"],
                 evidence = vision_result["evidence"],
+                task     = task,
             )
 
-    # ── Step 4: Finalize ───────────────────────────────────────────────────────
+    # ── Stage: → done ──────────────────────────────────────────────────────────
+    try:
+        _sm_transition(task, "done", "All QA passed — task complete", brain="ceo")
+    except InvalidTransitionError as e:
+        log.warning("orchestrator: cannot enter done stage — %s", e)
+
     state.current_step  = "complete"
     state.final_status  = "complete"
     state.final_result  = build_result["_raw"]
     state.end_time      = time.perf_counter()
 
-    log.info("orchestrator: complete session=%s elapsed_ms=%.0f", session_id, state.elapsed_ms())
+    log.info(
+        "orchestrator: complete session=%s elapsed_ms=%.0f task=%s",
+        session_id, state.elapsed_ms(), task.id,
+    )
 
     return {
         "status":       "success",
@@ -115,6 +198,7 @@ async def execute_builder_task(
         "brains_used":  state.brains_used(),
         "steps":        len(state.evidence_history),
         "elapsed_ms":   state.elapsed_ms(),
+        "task":         task.summary_dict(),
         **build_result["_raw"],
     }
 
@@ -222,6 +306,7 @@ async def _escalate_to_doctor(
     memory:   dict[str, Any],
     issue:    str,
     evidence: list[str],
+    task:     Any = None,
 ) -> dict[str, Any]:
     """
     Route to Doctor for diagnosis, then surface approval request to user via CEO.
@@ -509,6 +594,13 @@ async def stream_builder_task(
     _memory = memory or {}
     all_images = all_images or []
 
+    # ── Task lifecycle: create Task and enter input stage ─────────────────────
+    _task = task_registry.get_by_session(session_id)
+    if _task is None or is_terminal(_task):
+        _task = task_registry.create(session_id, message)
+    _task.set_status("in_progress")
+    # Task starts in "input" stage — no transition needed
+
     # ── CEO: start ────────────────────────────────────────────────────────────
     yield _status("ceo", "Analyzing your request…")
 
@@ -566,7 +658,14 @@ async def stream_builder_task(
     plan_decision = {"message": message, "api_key": api_key}
     if _repo_context_str:
         plan_decision["repo_context"] = _repo_context_str
-    plan_result   = await call_planner(plan_decision, _memory)
+
+    # Stage: input → planning
+    try:
+        _sm_transition(_task, "planning", "CEO routing to Planner Brain", brain="ceo")
+    except (InvalidTransitionError, GatewayViolationError) as _e:
+        log.warning("stream: stage gate on planning — %s", _e)
+
+    plan_result   = await gateway_dispatch("planner", _task, plan_decision, _memory)
 
     if plan_result["status"] == "success":
         plan_raw  = plan_result["_raw"]
@@ -579,6 +678,12 @@ async def stream_builder_task(
     # ── CEO → Builder Brain (streaming) ───────────────────────────────────────
     yield _status("builder", "Writing code…")
     reply_text = ""
+
+    # Stage: planning → building
+    try:
+        _sm_transition(_task, "building", "Plan approved — CEO routing to Builder Brain", brain="ceo")
+    except (InvalidTransitionError, GatewayViolationError) as _e:
+        log.warning("stream: stage gate on building — %s", _e)
 
     async for chunk in _stream_build(
         message          = message,
@@ -616,7 +721,17 @@ async def stream_builder_task(
 
     if _do_hands_qa:
         yield _status("hands", "Testing functionality…")
-        hands_ok, hands_issues = await _hands_qa(_built_html, message, api_key)
+
+        # Stage: building → qa_hands
+        try:
+            _sm_transition(_task, "qa_hands", "Build complete — CEO routing to Hands QA", brain="ceo")
+        except (InvalidTransitionError, GatewayViolationError) as _e:
+            log.warning("stream: stage gate on qa_hands — %s", _e)
+
+        # Use standardised BrainResult wrapper (consistent with non-streaming path)
+        _hands_result = await call_hands_html(_built_html, message, api_key)
+        hands_ok      = _hands_result["status"] == "success"
+        hands_issues  = _hands_result["evidence"]
 
         if not hands_ok and hands_issues:
             # ── CEO checks repair library before sending to Builder ───────────
@@ -673,11 +788,28 @@ async def stream_builder_task(
     _do_eyes_qa = _do_hands_qa  # same gate: only on full builds
     if _do_eyes_qa and _built_html:
         yield _status("eyes", "Inspecting visual output…")
-        eyes_ok, eyes_notes = await _eyes_qa(_built_html, message, api_key)
+
+        # Stage: qa_hands → qa_vision
+        try:
+            _sm_transition(_task, "qa_vision", "Hands passed — CEO routing to Eyes QA", brain="ceo")
+        except (InvalidTransitionError, GatewayViolationError) as _e:
+            log.warning("stream: stage gate on qa_vision — %s", _e)
+
+        # Use standardised BrainResult wrapper (consistent with non-streaming path)
+        _eyes_result = await call_eyes_html(_built_html, message, api_key)
+        eyes_ok      = _eyes_result["status"] == "success"
+        eyes_notes   = _eyes_result["evidence"]
+
         if not eyes_ok and eyes_notes:
             yield _status("ceo", f"Eyes flagged visual issues: {eyes_notes[0]}")
         else:
             yield _status("ceo", "Eyes: visual output approved.")
+
+    # ── CEO: task done ─────────────────────────────────────────────────────────
+    try:
+        _sm_transition(_task, "done", "All QA passed — CEO delivering to user", brain="ceo")
+    except (InvalidTransitionError, GatewayViolationError) as _e:
+        log.warning("stream: stage gate on done — %s", _e)
 
     # ── CEO: final approval ────────────────────────────────────────────────────
     yield _status("ceo", "Build complete. Delivering to you.")

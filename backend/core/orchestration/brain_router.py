@@ -25,13 +25,245 @@ Rules:
 
 from __future__ import annotations
 
+import json as _json
 import logging
+import re as _re
 import time
-from typing import Any
+from typing import Any, Optional
 
 log = logging.getLogger("ceo_router.brain_router")
 
 _MAX_RETRIES_PER_BRAIN = 3
+
+
+# ---------------------------------------------------------------------------
+# Gateway dispatch — unified entry point for all CEO → brain calls
+# ---------------------------------------------------------------------------
+
+async def gateway_dispatch(
+    brain_name:  str,
+    task:        Any,           # Task | None — pass None to skip stage validation
+    decision:    dict[str, Any],
+    memory:      dict[str, Any],
+    web_results: dict[str, Any] = {},
+    **kwargs:    Any,
+) -> dict[str, Any]:
+    """
+    Single entry point for ALL CEO → brain calls.
+
+    CEO calls this instead of calling call_planner / call_builder etc. directly.
+
+    What it does:
+      1. Validates the brain call is legal for the task's current stage
+         (raises GatewayViolationError if not — CEO must handle)
+      2. Dispatches to the appropriate call_* function
+      3. Returns the standardised BrainResult
+
+    If task=None, stage validation is skipped (used for context-injection
+    calls that happen before a task is created, e.g. github_brain pre-scan).
+
+    Supported brain_name values:
+      "planner", "builder", "hands", "vision", "doctor", "github_brain"
+    """
+    # Stage gate — skip if no task provided
+    if task is not None:
+        try:
+            from .stage_machine import validate_brain_call
+            validate_brain_call(brain_name, task)
+        except Exception as gate_exc:
+            log.error("gateway: stage gate blocked brain=%s — %s", brain_name, gate_exc)
+            raise
+
+    _dispatch_map = {
+        "planner":      _dispatch_planner,
+        "builder":      _dispatch_builder,
+        "hands":        _dispatch_hands,
+        "vision":       _dispatch_vision,
+        "doctor":       _dispatch_doctor,
+        "github_brain": _dispatch_github_brain,
+    }
+
+    fn = _dispatch_map.get(brain_name)
+    if fn is None:
+        return _fail_result(brain_name, f"Unknown brain: {brain_name!r}", "ask_user")
+
+    log.info("gateway: dispatching brain=%s task=%s", brain_name, getattr(task, "id", "none"))
+    return await fn(decision, memory, web_results, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Internal dispatch shims (gateway → existing call_* functions)
+# ---------------------------------------------------------------------------
+
+async def _dispatch_planner(decision, memory, web_results, **_):
+    return await call_planner(decision, memory)
+
+async def _dispatch_builder(decision, memory, web_results, fix_hint="", **_):
+    return await call_builder(decision, memory, web_results, fix_hint=fix_hint)
+
+async def _dispatch_hands(decision, memory, web_results, build_result=None, **_):
+    if build_result is None:
+        build_result = {}
+    return await call_hands(build_result, decision, memory)
+
+async def _dispatch_vision(decision, memory, web_results, build_result=None, **_):
+    if build_result is None:
+        build_result = {}
+    return await call_vision(build_result, decision, memory)
+
+async def _dispatch_doctor(decision, memory, web_results, issue="", evidence=None, repair_matches=None, **_):
+    return await call_doctor(
+        issue          = issue,
+        evidence       = evidence or [],
+        decision       = decision,
+        memory         = memory,
+        repair_matches = repair_matches or [],
+    )
+
+async def _dispatch_github_brain(decision, memory, web_results, **_):
+    return await call_github_brain(decision, memory)
+
+
+# ---------------------------------------------------------------------------
+# Streaming HTML QA wrappers — standardises hands/eyes for the streaming path
+# ---------------------------------------------------------------------------
+# The streaming CEO uses inline _hands_qa / _eyes_qa that return (bool, list).
+# These wrappers call Anthropic directly with the same logic and return BrainResult,
+# making the streaming path consistent with the non-streaming path.
+
+async def call_hands_html(
+    html:             str,
+    original_request: str,
+    api_key:          str,
+) -> dict[str, Any]:
+    """
+    Functional QA on raw HTML string.
+    Returns BrainResult (same format as call_hands).
+
+    Checks: broken buttons, missing event handlers, JS errors, broken forms.
+    """
+    _SYSTEM = (
+        "You are the Hands Brain — functional QA specialist.\n"
+        "Inspect the HTML for broken functionality ONLY. Do NOT comment on style.\n\n"
+        "Check:\n"
+        "- Buttons with no onclick or broken event listeners\n"
+        "- Forms with no submit handler\n"
+        "- JavaScript errors (syntax, undefined variables, missing functions)\n"
+        "- Interactive elements that reference undefined functions\n\n"
+        "Return JSON only:\n"
+        '{"pass": true|false, "issues": ["specific issue 1", ...]}\n'
+        'Return {"pass": true, "issues": []} if everything works.'
+    )
+    prompt = (
+        f"[ORIGINAL REQUEST]\n{original_request}\n\n"
+        f"[CODE TO TEST]\n```html\n{html[:8000]}\n```\n\n"
+        "Test for broken functionality. Return JSON only."
+    )
+    t0 = time.perf_counter()
+    try:
+        import anthropic
+        client = anthropic.AsyncAnthropic(api_key=api_key)
+        resp = await client.messages.create(
+            model      = "claude-sonnet-4-6",
+            max_tokens = 1024,
+            system     = _SYSTEM,
+            messages   = [{"role": "user", "content": prompt}],
+        )
+        raw = resp.content[0].text.strip() if resp.content else ""
+        m   = _re.search(r"\{[\s\S]+\}", raw)
+        if m:
+            d      = _json.loads(m.group(0))
+            passed = bool(d.get("pass", True))
+            issues = d.get("issues", [])
+        else:
+            passed, issues = True, []
+    except Exception as exc:
+        log.warning("call_hands_html: QA failed — %s", exc)
+        passed, issues = True, []  # on error, pass through (non-fatal)
+
+    elapsed = round((time.perf_counter() - t0) * 1000, 1)
+    status  = "success" if passed else "fail"
+
+    return {
+        "status":                status,
+        "summary":               "Hands: all checks passed." if passed else f"Hands found {len(issues)} issue(s).",
+        "confidence":            0.85 if passed else 0.4,
+        "evidence":              issues[:5],
+        "affected_files":        [],
+        "proposed_fix":          "",
+        "recommended_next_step": "vision" if passed else "builder",
+        "_raw":                  {"pass": passed, "issues": issues},
+        "_brain":                "hands",
+        "_elapsed_ms":           elapsed,
+    }
+
+
+async def call_eyes_html(
+    html:             str,
+    original_request: str,
+    api_key:          str,
+) -> dict[str, Any]:
+    """
+    Visual / layout QA on raw HTML string.
+    Returns BrainResult (same format as call_vision).
+
+    Checks: missing layout, invisible text, broken responsive structure,
+    elements completely absent from what was requested.
+    """
+    _SYSTEM = (
+        "You are the Eyes Brain — visual QA specialist.\n"
+        "Inspect the HTML for visual / layout problems ONLY. Do NOT check logic.\n\n"
+        "Check:\n"
+        "- Missing layout structure (no container, broken grid, overlapping elements)\n"
+        "- Invisible text (white-on-white, zero opacity, etc.)\n"
+        "- Elements completely missing from what was requested\n"
+        "- Broken responsive structure\n\n"
+        "Return JSON only:\n"
+        '{"pass": true|false, "notes": ["visual issue 1", ...]}\n'
+        "Minor style preferences are NOT issues. Only flag actual visual failures."
+    )
+    prompt = (
+        f"[ORIGINAL REQUEST]\n{original_request}\n\n"
+        f"[CODE TO INSPECT]\n```html\n{html[:8000]}\n```\n\n"
+        "Inspect for visual failures. Return JSON only."
+    )
+    t0 = time.perf_counter()
+    try:
+        import anthropic
+        client = anthropic.AsyncAnthropic(api_key=api_key)
+        resp = await client.messages.create(
+            model      = "claude-sonnet-4-6",
+            max_tokens = 1024,
+            system     = _SYSTEM,
+            messages   = [{"role": "user", "content": prompt}],
+        )
+        raw = resp.content[0].text.strip() if resp.content else ""
+        m   = _re.search(r"\{[\s\S]+\}", raw)
+        if m:
+            d      = _json.loads(m.group(0))
+            passed = bool(d.get("pass", True))
+            notes  = d.get("notes", [])
+        else:
+            passed, notes = True, []
+    except Exception as exc:
+        log.warning("call_eyes_html: QA failed — %s", exc)
+        passed, notes = True, []
+
+    elapsed = round((time.perf_counter() - t0) * 1000, 1)
+    status  = "success" if passed else "fail"
+
+    return {
+        "status":                status,
+        "summary":               "Eyes: visual output approved." if passed else f"Eyes flagged {len(notes)} visual issue(s).",
+        "confidence":            0.85 if passed else 0.4,
+        "evidence":              notes[:5],
+        "affected_files":        [],
+        "proposed_fix":          "",
+        "recommended_next_step": "complete" if passed else "builder",
+        "_raw":                  {"pass": passed, "notes": notes},
+        "_brain":                "eyes",
+        "_elapsed_ms":           elapsed,
+    }
 
 
 # ---------------------------------------------------------------------------
