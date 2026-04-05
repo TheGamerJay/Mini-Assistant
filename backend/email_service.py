@@ -45,8 +45,8 @@ def _build_verify_html(name: str, verify_url: str) -> str:
             Verify your email, {first} ✉️
           </h1>
           <p style="margin:0 0 24px;font-size:14px;color:#94a3b8;line-height:1.7;text-align:center;">
-            Click the button below to confirm your email address and receive your
-            5 free credits to get started — valid for 7 days.
+            Click the button below to confirm your email address and activate
+            your Mini Assistant AI account.
           </p>
           <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
             <tr><td align="center">
@@ -139,7 +139,7 @@ def _build_html(name: str) -> str:
               <p style="margin:0 0 24px;font-size:15px;color:#94a3b8;
                         line-height:1.7;text-align:center;">
                 Your Mini Assistant AI account is ready.<br />
-                Build apps, chat with AI, generate images, and ship — all in one place.
+                Build apps, generate images, and ship — powered by your own AI key.
               </p>
 
               <!-- Feature highlights -->
@@ -155,17 +155,17 @@ def _build_html(name: str) -> str:
                     <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
                       <tr>
                         <td style="padding:5px 0;font-size:13px;color:#cbd5e1;">
-                          <span style="color:#06b6d4;margin-right:10px;">✓</span>Chat with Claude AI
+                          <span style="color:#06b6d4;margin-right:10px;">✓</span>Chat with Claude AI (Opus &amp; Sonnet)
                         </td>
                       </tr>
                       <tr>
                         <td style="padding:5px 0;font-size:13px;color:#cbd5e1;">
-                          <span style="color:#06b6d4;margin-right:10px;">✓</span>Generate images instantly
+                          <span style="color:#06b6d4;margin-right:10px;">✓</span>Generate images instantly with DALL·E
                         </td>
                       </tr>
                       <tr>
                         <td style="padding:5px 0;font-size:13px;color:#cbd5e1;">
-                          <span style="color:#06b6d4;margin-right:10px;">✓</span>Build & deploy full apps
+                          <span style="color:#06b6d4;margin-right:10px;">✓</span>Build &amp; deploy full apps
                         </td>
                       </tr>
                       <tr>
@@ -178,17 +178,34 @@ def _build_html(name: str) -> str:
                 </tr>
               </table>
 
-              <!-- Credits callout -->
+              <!-- Get started callout -->
               <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
                      style="margin-bottom:28px;">
                 <tr>
                   <td style="background:rgba(6,182,212,0.08);border:1px solid rgba(6,182,212,0.25);
-                             border-radius:12px;padding:14px 18px;">
-                    <p style="margin:0;font-size:13px;color:#ffffff;font-weight:700;">
-                      ⚡ You have 5 free credits to start
+                             border-radius:12px;padding:16px 18px;">
+                    <p style="margin:0 0 10px;font-size:13px;color:#ffffff;font-weight:700;">
+                      🔑 One step to unlock everything
                     </p>
-                    <p style="margin:4px 0 0;font-size:11px;color:#64748b;">
-                      1 chat = 1 credit · 1 image = 3 credits · Credits valid 7 days. Upgrade for up to 10,000/month.
+                    <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+                      <tr>
+                        <td style="padding:3px 0;font-size:12px;color:#94a3b8;">
+                          <span style="color:#06b6d4;margin-right:8px;font-weight:700;">1</span>Open <strong style="color:#e2e8f0;">Settings → API Keys</strong>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:3px 0;font-size:12px;color:#94a3b8;">
+                          <span style="color:#06b6d4;margin-right:8px;font-weight:700;">2</span>Paste your <strong style="color:#e2e8f0;">Anthropic</strong> or <strong style="color:#e2e8f0;">OpenAI</strong> key
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:3px 0;font-size:12px;color:#94a3b8;">
+                          <span style="color:#06b6d4;margin-right:8px;font-weight:700;">3</span>Click <strong style="color:#e2e8f0;">Save &amp; Verify</strong> — you're done
+                        </td>
+                      </tr>
+                    </table>
+                    <p style="margin:10px 0 0;font-size:11px;color:#64748b;">
+                      Your key is encrypted and never shared. You only pay your provider directly — no markups.
                     </p>
                   </td>
                 </tr>
@@ -198,11 +215,11 @@ def _build_html(name: str) -> str:
               <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
                 <tr>
                   <td align="center">
-                    <a href="{PRICING_URL}"
+                    <a href="{FRONTEND}/settings"
                        style="display:inline-block;background:linear-gradient(135deg,#06b6d4,#7c3aed);
                               color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;
                               padding:14px 36px;border-radius:12px;letter-spacing:0.2px;">
-                      View Plans &amp; Upgrade →
+                      Add Your API Key →
                     </a>
                   </td>
                 </tr>

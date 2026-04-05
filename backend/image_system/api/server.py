@@ -2645,6 +2645,43 @@ async def chat_stream(req: ChatRequest, request: Request):
         # the frontend connection while we wait for routing + Ollama.
         yield ": keepalive\n\n"
 
+        # ── New user API key gate ─────────────────────────────────────────────
+        # Stream a friendly onboarding message instead of silently failing later
+        # when the user has no verified API key configured yet.
+        try:
+            from mini_credits import _decode_bearer as _gk_dec
+            _gk_auth    = request.headers.get("authorization")
+            _gk_payload = _gk_dec(_gk_auth)
+            if _gk_payload:
+                _gk_uid  = _gk_payload.get("sub")
+                _gk_user = await db["users"].find_one(
+                    {"id": _gk_uid},
+                    {"api_key_anthropic_verified": 1, "api_key_openai_verified": 1,
+                     "api_key_verified": 1, "role": 1, "plan": 1}
+                ) if db else None
+                if _gk_user:
+                    from billing.access_gate import _has_any_verified_key as _gk_has_key
+                    _gk_is_admin = (
+                        _gk_user.get("role") == "admin"
+                        or _gk_user.get("plan") == "admin"
+                    )
+                    if not _gk_is_admin and not _gk_has_key(_gk_user):
+                        _onboard = (
+                            "**Welcome to Mini Assistant!** 👋\n\n"
+                            "Before you can start chatting and building, you need to connect "
+                            "your API key. It only takes a minute.\n\n"
+                            "**Get started:**\n"
+                            "1. Open **Settings** (top-right corner)\n"
+                            "2. Go to the **API Keys** tab\n"
+                            "3. Paste your **Anthropic** or **OpenAI** key and click **Save & Verify**\n\n"
+                            "Your key is encrypted and never shared. Once verified, you're all set!"
+                        )
+                        yield f"data: {_json.dumps({'t': _onboard})}\n\n"
+                        yield f"data: {_json.dumps({'done': True, 'meta': {'mode_used': 'chat', 'intent': 'onboarding'}})}\n\n"
+                        return
+        except Exception as _gk_err:
+            logger.debug("API key gate: non-fatal check failed — %s", _gk_err)
+
         effective_msg = clean_message
         phase1_plan = None
         execution_intent = "chat"
