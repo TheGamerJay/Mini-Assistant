@@ -100,7 +100,8 @@ function tokenize(code, lang) {
 function AppBuilderCard({ code }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
-  const { isSubscribed } = useApp();
+  const { isSubscribed: _isSubscribed, isAdmin } = useApp();
+  const isSubscribed = _isSubscribed || isAdmin;
   const lines = code.split('\n');
   const lineCount = lines.length;
 

@@ -9,12 +9,14 @@ import { toast } from 'sonner';
 import { useApp } from '../context/AppContext';
 
 export default function UsageLimitBanner() {
-  const { isSubscribed, apiKeyVerified, page, openUpgradeModal } = useApp();
+  const { isSubscribed, isAdmin, apiKeyVerified, page, openUpgradeModal } = useApp();
   const shownRef = useRef({ noSub: false, noKey: false });
 
   useEffect(() => {
     // Skip on billing/settings pages — user is already aware
     if (page === 'pricing' || page === 'dashboard' || page === 'settings') return;
+    // Admins bypass all subscription gates
+    if (isAdmin) return;
 
     if (!isSubscribed && !shownRef.current.noSub) {
       shownRef.current.noSub = true;
@@ -37,7 +39,7 @@ export default function UsageLimitBanner() {
         },
       });
     }
-  }, [isSubscribed, apiKeyVerified, page, openUpgradeModal]);
+  }, [isSubscribed, isAdmin, apiKeyVerified, page, openUpgradeModal]);
 
   return null;
 }

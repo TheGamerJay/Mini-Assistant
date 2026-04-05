@@ -23,23 +23,24 @@ const TABS = [
 ];
 
 export default function AdModePage() {
-  const { hasAdMode, user } = useApp();
+  const { hasAdMode, isAdmin, user } = useApp();
+  const canAccess = hasAdMode || isAdmin;
   const [tab, setTab]           = useState('overview');
   const [campaigns, setCampaigns] = useState([]);
   const [profile, setProfile]   = useState(null);
 
   // Pre-load campaigns and profile status for the Overview
   useEffect(() => {
-    if (!hasAdMode) return;
+    if (!canAccess) return;
     api.adModeGetCampaigns()
       .then(({ campaigns: c }) => setCampaigns(c))
       .catch(() => {});
     api.adModeGetProfile()
       .then(({ profile: p }) => setProfile(p))
       .catch(() => {});
-  }, [hasAdMode]);
+  }, [canAccess]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!hasAdMode) {
+  if (!canAccess) {
     return <AdModeLocked />;
   }
 

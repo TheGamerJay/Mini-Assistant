@@ -194,7 +194,8 @@ function LockedCodeView({ code, onUpgrade }) {
 }
 
 const AppBuilder = () => {
-  const { isSubscribed, openUpgradeModal, pendingBuildPrompt, clearPendingBuildPrompt } = useApp();
+  const { isSubscribed: _isSubscribed, isAdmin, openUpgradeModal, pendingBuildPrompt, clearPendingBuildPrompt } = useApp();
+  const isSubscribed = _isSubscribed || isAdmin;
   const setShowUpgradeModal = (open) => { if (open) openUpgradeModal('code'); };
   // showUpgradeModal is now global — this local alias keeps existing call-sites working
   const showUpgradeModal = false; // modal is rendered globally in App.js

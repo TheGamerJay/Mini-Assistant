@@ -1312,7 +1312,8 @@ const TABS = [
 
 function RightPanel({ messages = [], streamingText = null, open, onClose, previewImage = null, onClearImage, activeTab = null, sessionId = null, onFixedHtml = null, onRestoreCode = null, onDebugSummary = null, onBuildScreenshot = null, libraryPreviewId = null, onSaveToLibrary = null }) {
   const [tab, setTab] = useState('preview');
-  const { isSubscribed } = useApp();
+  const { isSubscribed: _isSubscribed, isAdmin } = useApp();
+  const isSubscribed = _isSubscribed || isAdmin;
   const codeBlocks = useMemo(() => getLatestCode(messages, streamingText), [messages, streamingText]);
 
   // Auto-switch to preview when a new image arrives

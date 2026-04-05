@@ -946,6 +946,7 @@ export function AppProvider({ children }) {
     loginWithGoogle,
     loginWithCredentials,
     register,
+    isAdmin: user?.role === 'admin',
     isSubscribed,
     apiKeyVerified,
     apiKeyHint,

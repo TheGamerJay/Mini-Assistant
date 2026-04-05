@@ -422,8 +422,9 @@ function ChatPage() {
     pinMessage,
     forkChat,
     openUpgradeModal,
-    isSubscribed,
-    canExecute,
+    isSubscribed: _isSubscribed,
+    isAdmin,
+    canExecute: _canExecute,
     imageUsage,
     incrementImageUsage,
     modeChatIds,
@@ -432,6 +433,9 @@ function ChatPage() {
     setLibraryPreview,
     deleteImage,
   } = useApp();
+
+  const isSubscribed = _isSubscribed || isAdmin;
+  const canExecute   = _canExecute   || isAdmin;
 
   const handleExport = useCallback((format = 'md') => {
     const chat = chats.find(c => c.id === activeChatId);

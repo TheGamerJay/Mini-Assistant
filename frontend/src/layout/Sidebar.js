@@ -553,6 +553,7 @@ function Sidebar() {
     deletePromptTemplate,
     firePendingTemplate,
     isSubscribed,
+    isAdmin,
     mobileSidebarOpen,
     setMobileSidebarOpen,
     hasAdMode,
@@ -709,7 +710,7 @@ function Sidebar() {
         {/* Campaign Lab */}
         <button
           onClick={() => navTo('ad-mode')}
-          title={hasAdMode ? 'Campaign Lab — Create high-converting campaigns' : 'Campaign Lab — Upgrade to unlock'}
+          title={(hasAdMode || isAdmin) ? 'Campaign Lab — Create high-converting campaigns' : 'Campaign Lab — Upgrade to unlock'}
           className={`w-full flex items-center gap-2 rounded-lg px-2 py-2 mb-1 text-xs transition-colors
             ${page === 'ad-mode'
               ? 'bg-violet-500/10 border border-violet-500/20 text-violet-300'
@@ -872,7 +873,7 @@ function Sidebar() {
       {/* ---- Bottom fixed area ---- */}
       <div className="flex-shrink-0 border-t border-white/5 px-2 py-3 space-y-1">
         {/* Subscription status badge */}
-        {!isSubscribed && (
+        {!isSubscribed && !isAdmin && (
           <div
             className={`flex items-center gap-2 px-2 py-1.5 rounded-lg ${sidebarCollapsed ? 'justify-center' : ''}`}
           >
@@ -887,10 +888,10 @@ function Sidebar() {
             )}
           </div>
         )}
-        {isSubscribed && (
+        {(isSubscribed || isAdmin) && (
           <div className={`flex items-center gap-2 px-2 py-1.5 rounded-lg ${sidebarCollapsed ? 'justify-center' : ''}`}>
             <span className="text-[13px] flex-shrink-0">✦</span>
-            {!sidebarCollapsed && <span className="text-[11px] font-mono text-cyan-400">Active</span>}
+            {!sidebarCollapsed && <span className="text-[11px] font-mono text-cyan-400">{isAdmin ? 'Admin' : 'Active'}</span>}
           </div>
         )}
 

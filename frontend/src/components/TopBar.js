@@ -19,7 +19,8 @@ import AvatarMedia from './AvatarMedia';
 // StatusChip — shows subscription + API key state
 // ---------------------------------------------------------------------------
 function StatusChip() {
-  const { isSubscribed, apiKeyVerified, setPage } = useApp();
+  const { isSubscribed: _isSubscribed, isAdmin, apiKeyVerified, setPage } = useApp();
+  const isSubscribed = _isSubscribed || isAdmin;
 
   if (!isSubscribed) {
     return (
@@ -204,7 +205,8 @@ function MenuItem({ icon: Icon, label, onClick, hint }) {
 // TopBar
 // ---------------------------------------------------------------------------
 function TopBar() {
-  const { setPage, serverStatus, setServerStatus, theme, toggleTheme, user, logout, avatar, setMobileSidebarOpen, isSubscribed, openUpgradeModal } = useApp(); // openUpgradeModal kept for ProfileMenu
+  const { setPage, serverStatus, setServerStatus, theme, toggleTheme, user, logout, avatar, setMobileSidebarOpen, isSubscribed: _isSubscribed2, isAdmin: _isAdmin2, openUpgradeModal } = useApp(); // openUpgradeModal kept for ProfileMenu
+  const isSubscribed = _isSubscribed2 || _isAdmin2;
   const [profileOpen, setProfileOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
