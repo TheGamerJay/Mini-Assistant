@@ -477,7 +477,7 @@ async def classify_intent_with_llm(message: str) -> str:
         import anthropic as _am
         client = _am.AsyncAnthropic(api_key=api_key)
         resp = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model="claude-sonnet-4-6",
             max_tokens=20,
             system=_CLASSIFIER_PROMPT,
             messages=[{"role": "user", "content": message[:2000]}],
@@ -531,7 +531,7 @@ async def classify_intent_with_context(message: str, history: list) -> tuple[str
         import anthropic as _am
         client = _am.AsyncAnthropic(api_key=api_key)
         resp = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model="claude-sonnet-4-6",
             max_tokens=20,
             system=system,
             messages=[{"role": "user", "content": message[:2000]}],

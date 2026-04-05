@@ -34,7 +34,7 @@ from typing import Any
 
 log = logging.getLogger("ceo_router.modules.doctor")
 
-_ANTHROPIC_MODEL = "claude-sonnet-4-6"
+_ANTHROPIC_MODEL = "claude-opus-4-6"
 
 
 async def execute(

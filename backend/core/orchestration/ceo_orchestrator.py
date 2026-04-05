@@ -404,7 +404,7 @@ async def _ceo_approve_and_save(
             "Answer with ONLY: yes or no"
         )
         resp = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model="claude-sonnet-4-6",
             max_tokens=5,
             system="You are the CEO. Approve or reject saving this fix to the repair library.",
             messages=[{"role": "user", "content": _approve_prompt}],
@@ -430,7 +430,7 @@ async def _ceo_approve_and_save(
             "Output ONLY a number 0-100 (e.g. 82). Nothing else."
         )
         _sc_resp = await _sc_client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model="claude-sonnet-4-6",
             max_tokens=5,
             system="You are the CEO. Score this solution's reusability 0-100.",
             messages=[{"role": "user", "content": _score_prompt}],
@@ -797,7 +797,7 @@ async def _anthropic_stream(
         client = anthropic.AsyncAnthropic(api_key=api_key)
 
         _kwargs: dict[str, Any] = {
-            "model":      "claude-sonnet-4-6",
+            "model":      "claude-opus-4-6",
             "max_tokens": max_tokens,
             "system":     system,
             "messages":   messages,
@@ -851,8 +851,8 @@ Return {"pass": true, "issues": []} if everything works."""
         import anthropic
         client = anthropic.AsyncAnthropic(api_key=api_key)
         resp = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=512,
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
             system=_HANDS_SYS,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -897,8 +897,8 @@ Minor style preferences are NOT issues. Only flag actual visual failures."""
         import anthropic
         client = anthropic.AsyncAnthropic(api_key=api_key)
         resp = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=512,
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
             system=_EYES_SYS,
             messages=[{"role": "user", "content": prompt}],
         )

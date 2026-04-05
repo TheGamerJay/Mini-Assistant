@@ -23,9 +23,9 @@ logger = logging.getLogger(__name__)
 
 _MAX_FIX_LOOPS  = 2
 _VISION_MODEL   = "claude-sonnet-4-6"
-_BUILD_MODEL    = "claude-sonnet-4-6"
-_REVIEW_MODEL   = "claude-haiku-4-5-20251001"  # cheaper — review is a simple task
-_FIX_MODEL      = "claude-sonnet-4-6"
+_BUILD_MODEL    = "claude-opus-4-6"
+_REVIEW_MODEL   = "claude-sonnet-4-6"  # thorough review
+_FIX_MODEL      = "claude-opus-4-6"
 
 try:
     import anthropic as _anthropic_lib

@@ -2769,8 +2769,8 @@ async def chat_stream(req: ChatRequest, request: Request):
                 )
                 _clr_msgs = [{"role": "user", "content": effective_msg}]
                 async with _clr_ac.messages.stream(
-                    model="claude-haiku-4-5-20251001",
-                    max_tokens=120,
+                    model="claude-sonnet-4-6",
+                    max_tokens=160,
                     system=_clr_sys,
                     messages=_clr_msgs,
                 ) as _clr_stream:
@@ -2789,7 +2789,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                     pass
                 meta = {
                     "reply": reply_text, "session_id": session_id,
-                    "model_used": "claude-haiku-4-5-20251001",
+                    "model_used": "claude-sonnet-4-6",
                     "mode_used": "chat", "route_result": {"intent": "clarification"},
                 }
                 yield f"data: {_json.dumps({'done': True, 'meta': meta})}\n\n"
@@ -2865,8 +2865,13 @@ async def chat_stream(req: ChatRequest, request: Request):
         # that would match normal conversation ("how does", "why does", etc.)
         _is_code_intent = _has_code_in_msg or execution_intent == "coding" or bool(_CODE_ERRORS.search(effective_msg))
 
-        # All tasks use Claude claude-sonnet-4-6 — no local models
-        _active_model = "claude-sonnet-4-6"
+        # Model routing: Opus for deep work, Sonnet for everything else
+        # Opus 4.6: build, patch, debug — tasks that need the deepest reasoning
+        # Sonnet 4.6: chat, web search, research, image analysis — great quality, faster
+        if execution_intent in ("app_builder", "coding") or _is_code_intent or _is_build_intent:
+            _active_model = "claude-opus-4-6"
+        else:
+            _active_model = "claude-sonnet-4-6"
         logger.info("[MODEL ROUTER] stream/%s → Claude %s", execution_intent, _active_model)
 
         # ── Real-time weather injection ───────────────────────────────────────
@@ -3364,7 +3369,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                 _max_out = 24000 if _is_patch_or_debug else 14000
 
                 async with _ac.messages.stream(
-                    model="claude-sonnet-4-6",
+                    model=_active_model,
                     max_tokens=_max_out,
                     thinking={"type": "enabled", "budget_tokens": _think_budget},
                     system=_c_sys,
@@ -3414,10 +3419,10 @@ async def chat_stream(req: ChatRequest, request: Request):
                         import anthropic as _rev_am
                         _rev_client = _rev_am.AsyncAnthropic(api_key=_api_key_claude)
 
-                        # Non-streaming Haiku review — raised to 1024 tokens for thorough checks
+                        # Non-streaming Sonnet review — thorough self-review before delivery
                         _rev_content = "[USER REQUEST]\n" + effective_msg + "\n\n[GENERATED CODE]\n```html\n" + _rev_html + "\n```"
                         _rev_resp = await _rev_client.messages.create(
-                            model="claude-haiku-4-5-20251001",
+                            model="claude-sonnet-4-6",
                             max_tokens=1024,
                             system=_kb_review() + """
 
@@ -3465,7 +3470,7 @@ If all pass: PASS.
                             )
                             try:
                                 async with _rev_client.messages.stream(
-                                    model="claude-sonnet-4-6",
+                                    model="claude-opus-4-6",
                                     max_tokens=16000,
                                     thinking={"type": "enabled", "budget_tokens": 8000},
                                     system=_fix_sys,
@@ -4089,7 +4094,7 @@ Do not explain. Do not add commentary. Just ALL_CLEAR or a ```css block."""
         import anthropic as _am
         _ac = _am.AsyncAnthropic(api_key=_api_key)
         resp = await _ac.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model="claude-sonnet-4-6",
             max_tokens=16000,
             system=system_prompt,
             messages=[{"role": "user", "content": user_content}],

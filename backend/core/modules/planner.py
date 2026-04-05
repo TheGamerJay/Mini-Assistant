@@ -32,7 +32,7 @@ from typing import Any
 
 log = logging.getLogger("ceo_router.modules.planner")
 
-_MODEL = "claude-haiku-4-5-20251001"   # Fast, cheap — planning only
+_MODEL = "claude-sonnet-4-6"       # Sonnet for better structured plans
 
 _SYSTEM = """You are the Planner Brain. Your ONLY job: create a structured build plan.
 

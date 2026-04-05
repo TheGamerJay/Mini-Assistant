@@ -39,7 +39,7 @@ def _sync_ai_call(
         client = anthropic.Anthropic(api_key=ant_key)
         kw = {"system": system_prompt} if system_prompt else {}
         msgs = [{"role": "user", "content": user_content}]
-        msg = client.messages.create(model="claude-sonnet-4-6", max_tokens=4096, messages=msgs, **kw)
+        msg = client.messages.create(model="claude-opus-4-6", max_tokens=8192, messages=msgs, **kw)
         return msg.content[0].text
 
     if oai_key:

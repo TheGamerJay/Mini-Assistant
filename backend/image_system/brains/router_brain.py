@@ -37,7 +37,7 @@ VALID_INTENTS = {
     INTENT_IMAGE_EDIT, INTENT_IMAGE_ANALYSIS, INTENT_PLANNING,
 }
 
-_ROUTER_MODEL = "gpt-4o-mini"
+_ROUTER_MODEL = "gpt-4o"
 
 
 class RouterBrain:

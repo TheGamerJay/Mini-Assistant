@@ -53,7 +53,7 @@ ad_mode_router = APIRouter(tags=["ad-mode"])
 # Constants
 # ---------------------------------------------------------------------------
 
-CLAUDE_MODEL       = "claude-sonnet-4-6"
+CLAUDE_MODEL       = "claude-opus-4-6"
 DALLE_IMAGE_MODEL  = os.environ.get("OPENAI_IMAGE_MODEL", "dall-e-3")
 DALLE_IMAGE_SIZE   = "1024x1024"
 FRONTEND_URL       = os.environ.get("FRONTEND_URL", "http://localhost:3000")

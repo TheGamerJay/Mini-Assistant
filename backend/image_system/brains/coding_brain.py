@@ -14,7 +14,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-_CODING_MODEL = "claude-sonnet-4-6"
+_CODING_MODEL = "claude-opus-4-6"
 
 
 class CodingBrain:
