@@ -31,6 +31,9 @@ import re as _re
 import time
 from typing import Any, Optional
 
+# Re-export so callers that do `from .brain_router import GatewayViolationError` keep working
+from .stage_machine import GatewayViolationError  # noqa: F401
+
 log = logging.getLogger("ceo_router.brain_router")
 
 _MAX_RETRIES_PER_BRAIN = 3
@@ -42,7 +45,7 @@ _MAX_RETRIES_PER_BRAIN = 3
 
 async def gateway_dispatch(
     brain_name:  str,
-    task:        Any,           # Task | None — pass None to skip stage validation
+    task:        Any,           # Task — REQUIRED. task=None is no longer accepted.
     decision:    dict[str, Any],
     memory:      dict[str, Any],
     web_results: dict[str, Any] = {},
@@ -51,28 +54,33 @@ async def gateway_dispatch(
     """
     Single entry point for ALL CEO → brain calls.
 
-    CEO calls this instead of calling call_planner / call_builder etc. directly.
+    CEO always passes a Task. The task=None bypass no longer exists:
+    context-injection brains (github_brain, file_scanner, web_prefetch) must
+    be called from context_ingestion stage, which requires a Task to be created
+    first. This removes the loophole where pre-task calls skipped all validation.
 
     What it does:
-      1. Validates the brain call is legal for the task's current stage
-         (raises GatewayViolationError if not — CEO must handle)
-      2. Dispatches to the appropriate call_* function
-      3. Returns the standardised BrainResult
-
-    If task=None, stage validation is skipped (used for context-injection
-    calls that happen before a task is created, e.g. github_brain pre-scan).
+      1. Validates task is not None (hard error if missing)
+      2. Validates the brain call is legal for the task's current stage
+         (raises GatewayViolationError — always HARD_FAIL, CEO must not swallow)
+      3. Dispatches to the appropriate call_* function
+      4. Returns the standardised BrainResult
 
     Supported brain_name values:
-      "planner", "builder", "hands", "vision", "doctor", "github_brain"
+      "planner", "builder", "hands", "vision", "doctor",
+      "github_brain", "file_scanner", "web_prefetch"
     """
-    # Stage gate — skip if no task provided
-    if task is not None:
-        try:
-            from .stage_machine import validate_brain_call
-            validate_brain_call(brain_name, task)
-        except Exception as gate_exc:
-            log.error("gateway: stage gate blocked brain=%s — %s", brain_name, gate_exc)
-            raise
+    # task=None is a hard error — context brains must have a task in context_ingestion
+    if task is None:
+        raise GatewayViolationError(
+            "gateway_dispatch: task=None is not allowed. "
+            "Create a Task and transition to 'context_ingestion' before calling "
+            f"brain={brain_name!r}. The task=None bypass has been removed."
+        )
+
+    # Stage gate — always enforced
+    from .stage_machine import validate_brain_call, GatewayViolationError as _GVE
+    validate_brain_call(brain_name, task)   # raises GatewayViolationError on violation
 
     _dispatch_map = {
         "planner":      _dispatch_planner,
@@ -81,13 +89,17 @@ async def gateway_dispatch(
         "vision":       _dispatch_vision,
         "doctor":       _dispatch_doctor,
         "github_brain": _dispatch_github_brain,
+        "file_scanner": _dispatch_github_brain,   # same shim — future dedicated module
+        "web_prefetch": _dispatch_github_brain,   # same shim — future dedicated module
     }
 
     fn = _dispatch_map.get(brain_name)
     if fn is None:
+        # Unknown brain — pass through (forward compat)
+        log.warning("gateway: unknown brain=%r — not in dispatch map, returning fail_result", brain_name)
         return _fail_result(brain_name, f"Unknown brain: {brain_name!r}", "ask_user")
 
-    log.info("gateway: dispatching brain=%s task=%s", brain_name, getattr(task, "id", "none"))
+    log.info("gateway: dispatching brain=%s task=%s stage=%s", brain_name, task.id, task.current_stage)
     return await fn(decision, memory, web_results, **kwargs)
 
 

@@ -35,17 +35,23 @@ from .state_manager import OrchestrationState, StepRecord, get_or_create
 from .brain_router import (
     call_builder, call_hands, call_vision, call_doctor, call_planner,
     call_github_brain, gateway_dispatch, call_hands_html, call_eyes_html,
+    GatewayViolationError,
 )
-from .approval_gate import request_approval, build_approval_message
+from .approval_gate import (
+    request_approval, build_approval_message,
+    assert_approved, ApprovalRequiredError,
+    RISKY_ACTION_TYPES, is_risky,
+)
 from .task_model import task_registry
 from .stage_machine import (
     transition as _sm_transition,
     InvalidTransitionError,
-    GatewayViolationError,
     RetryLimitExceededError,
+    ViolationSeverity,
     check_retry_limit,
     is_terminal,
     stage_info as _stage_info,
+    emit_audit,
 )
 
 log = logging.getLogger("ceo_router.orchestrator")
@@ -72,7 +78,7 @@ async def execute_builder_task(
     state      = get_or_create(session_id, goal, complexity)
     state.current_step = "orchestration_started"
 
-    # ── Task lifecycle: create or retrieve Task for this session ──────────────
+    # ── Task lifecycle: always create a fresh Task for each execution ─────────
     task = task_registry.get_by_session(session_id)
     if task is None or is_terminal(task):
         task = task_registry.create(session_id, goal)
@@ -83,38 +89,94 @@ async def execute_builder_task(
         session_id, complexity, task.id, _stage_info(task),
     )
 
-    # ── Stage: input → planning ───────────────────────────────────────────────
+    # ── Stage: input → context_ingestion (if github URL present) ─────────────
+    # context_ingestion is the ONLY valid stage for github_brain.
+    # CEO transitions here explicitly, calls the brain, then moves to planning.
+    _repo_context_str = ""
+    _detected_url     = _detect_github_url(goal)
+    if _detected_url:
+        try:
+            _sm_transition(
+                task, "context_ingestion",
+                "GitHub URL detected — CEO entering context ingestion before planning",
+                brain="ceo",
+            )
+        except InvalidTransitionError as exc:
+            # Hard-fail: terminal or QA-bypass violation → stop immediately
+            if exc.severity == ViolationSeverity.HARD_FAIL:
+                _sm_transition(task, "failed", str(exc), brain="ceo")
+                return _error_response(state, f"Stage machine blocked context ingestion: {exc}", {})
+            # Soft-warn: re-entry or compat issue → skip context ingestion, continue
+
+        else:
+            # Successfully entered context_ingestion — call github_brain via gateway
+            _gh_decision = {
+                "github_url": _detected_url,
+                "focus":      goal,
+                "api_key_gh": memory.get("github_token", ""),
+            }
+            try:
+                _gh_result = await gateway_dispatch("github_brain", task, _gh_decision, memory)
+                if _gh_result["status"] == "success":
+                    _repo_report: Optional[dict] = _gh_result["_raw"]
+                    memory["repo_report"] = _repo_report
+                    _repo_context_str = _format_repo_context(_repo_report)
+                    log.info("orchestrator: github_brain OK — repo context injected into planner")
+            except GatewayViolationError as gve:
+                # Hard-fail: brain called from wrong stage → mark failed and abort
+                _sm_transition(task, "failed", str(gve), brain="ceo")
+                return _error_response(state, f"Gateway violation in context ingestion: {gve}", {})
+
+    # ── Stage: (context_ingestion | input) → planning ────────────────────────
     try:
-        _sm_transition(task, "planning", "CEO routing to Planner", brain="ceo")
-        plan_result = await gateway_dispatch("planner", task, decision, memory)
+        _sm_transition(task, "planning", "CEO routing to Planner Brain", brain="ceo")
+    except InvalidTransitionError as exc:
+        if exc.severity == ViolationSeverity.HARD_FAIL:
+            _sm_transition(task, "failed", str(exc), brain="ceo")
+            return _error_response(state, f"Stage machine blocked planning: {exc}", {})
+        # Soft-warn: skip planning, build directly
+
+    plan_decision = {**decision}
+    if _repo_context_str:
+        plan_decision["repo_context"] = _repo_context_str
+
+    try:
+        plan_result = await gateway_dispatch("planner", task, plan_decision, memory)
         if plan_result["status"] == "success":
-            # Inject plan into decision for Builder
-            plan_raw   = plan_result["_raw"]
-            decision   = {
+            plan_raw  = plan_result["_raw"]
+            decision  = {
                 **decision,
-                "_plan": plan_raw,
+                "_plan":   plan_raw,
                 "message": (
                     f"{goal}\n\nBuild plan (from Planner, approved by CEO):\n"
                     + "\n".join(f"- {s}" for s in plan_raw.get("steps", []))
                 ),
             }
-    except (InvalidTransitionError, GatewayViolationError) as e:
-        log.warning("orchestrator: stage gate on planning — %s", e)
-        # Non-fatal: proceed to build without a plan
+            if _repo_context_str:
+                decision["repo_context"] = _repo_context_str
+    except GatewayViolationError as gve:
+        # Planner called from wrong stage — hard-fail
+        _sm_transition(task, "failed", str(gve), brain="ceo")
+        return _error_response(state, f"Gateway violation calling Planner: {gve}", {})
 
     # ── Stage: planning → building ────────────────────────────────────────────
     try:
-        _sm_transition(task, "building", "CEO routing to Builder", brain="ceo")
-    except InvalidTransitionError as e:
-        log.warning("orchestrator: cannot enter building stage — %s", e)
+        _sm_transition(task, "building", "CEO routing to Builder Brain", brain="ceo")
+    except InvalidTransitionError as exc:
+        if exc.severity == ViolationSeverity.HARD_FAIL:
+            _sm_transition(task, "failed", str(exc), brain="ceo")
+            return _error_response(state, f"Stage machine blocked building: {exc}", {})
 
     build_result = await _build_loop(state, decision, memory, web_results)
 
     if build_result["status"] == "fail" and state.get_retry("builder") >= _MAX_BUILD_RETRIES:
+        # Retry limit hit — hard-fail path → Doctor
         try:
-            _sm_transition(task, "repair", "Build failed — escalating to Doctor", brain="ceo")
-        except InvalidTransitionError:
-            pass
+            _sm_transition(task, "repair", "Build retry limit reached — escalating to Doctor", brain="ceo")
+        except InvalidTransitionError as exc:
+            if exc.severity == ViolationSeverity.HARD_FAIL:
+                _sm_transition(task, "failed", str(exc), brain="ceo")
+                return _error_response(state, str(exc), {})
         return await _escalate_to_doctor(
             state, decision, memory,
             issue    = build_result["summary"],
@@ -124,7 +186,7 @@ async def execute_builder_task(
 
     if build_result["status"] == "fail":
         try:
-            _sm_transition(task, "failed", "Build failed — needs more input", brain="ceo")
+            _sm_transition(task, "failed", "Build failed — needs more detail", brain="ceo")
         except InvalidTransitionError:
             pass
         return _needs_input_response(state, "Builder could not complete the task. More details needed.")
@@ -132,19 +194,20 @@ async def execute_builder_task(
     # ── Stage: building → qa_hands ────────────────────────────────────────────
     try:
         _sm_transition(task, "qa_hands", "Build succeeded — routing to Hands QA", brain="ceo")
-    except InvalidTransitionError as e:
-        log.warning("orchestrator: cannot enter qa_hands — %s", e)
+    except InvalidTransitionError as exc:
+        if exc.severity == ViolationSeverity.HARD_FAIL:
+            _sm_transition(task, "failed", str(exc), brain="ceo")
+            return _error_response(state, f"Stage machine blocked qa_hands: {exc}", {})
 
-    hands_result = await _qa_loop(
-        state, "hands", build_result, decision, memory,
-        call_fn = call_hands,
-    )
+    hands_result = await _qa_loop(state, "hands", build_result, decision, memory, call_fn=call_hands)
 
     if hands_result["status"] == "fail":
         try:
             _sm_transition(task, "repair", "Hands QA failed — escalating to Doctor", brain="ceo")
-        except InvalidTransitionError:
-            pass
+        except InvalidTransitionError as exc:
+            if exc.severity == ViolationSeverity.HARD_FAIL:
+                _sm_transition(task, "failed", str(exc), brain="ceo")
+                return _error_response(state, str(exc), {})
         return await _escalate_to_doctor(
             state, decision, memory,
             issue    = hands_result["summary"],
@@ -152,22 +215,24 @@ async def execute_builder_task(
             task     = task,
         )
 
-    # ── Stage: qa_hands → qa_vision (only for frontend output) ───────────────
+    # ── Stage: qa_hands → qa_vision (frontend output only) ───────────────────
     if _has_visual_output(build_result):
         try:
             _sm_transition(task, "qa_vision", "Hands passed — routing to Visual QA", brain="ceo")
-        except InvalidTransitionError as e:
-            log.warning("orchestrator: cannot enter qa_vision — %s", e)
+        except InvalidTransitionError as exc:
+            if exc.severity == ViolationSeverity.HARD_FAIL:
+                _sm_transition(task, "failed", str(exc), brain="ceo")
+                return _error_response(state, f"Stage machine blocked qa_vision: {exc}", {})
 
-        vision_result = await _qa_loop(
-            state, "vision", build_result, decision, memory,
-            call_fn = call_vision,
-        )
+        vision_result = await _qa_loop(state, "vision", build_result, decision, memory, call_fn=call_vision)
+
         if vision_result["status"] == "fail":
             try:
                 _sm_transition(task, "repair", "Vision QA failed — escalating to Doctor", brain="ceo")
-            except InvalidTransitionError:
-                pass
+            except InvalidTransitionError as exc:
+                if exc.severity == ViolationSeverity.HARD_FAIL:
+                    _sm_transition(task, "failed", str(exc), brain="ceo")
+                    return _error_response(state, str(exc), {})
             return await _escalate_to_doctor(
                 state, decision, memory,
                 issue    = vision_result["summary"],
@@ -175,23 +240,17 @@ async def execute_builder_task(
                 task     = task,
             )
 
-    # ── Stage: → done ──────────────────────────────────────────────────────────
+    # ── Stage: qa_vision → finalize ───────────────────────────────────────────
+    # finalize is where CEO assembles the response. No brain is active here.
     try:
-        _sm_transition(task, "done", "All QA passed — task complete", brain="ceo")
-    except InvalidTransitionError as e:
-        log.warning("orchestrator: cannot enter done stage — %s", e)
+        _sm_transition(task, "finalize", "All QA passed — CEO assembling final response", brain="ceo")
+    except InvalidTransitionError as exc:
+        if exc.severity == ViolationSeverity.HARD_FAIL:
+            _sm_transition(task, "failed", str(exc), brain="ceo")
+            return _error_response(state, f"Stage machine blocked finalize: {exc}", {})
 
-    state.current_step  = "complete"
-    state.final_status  = "complete"
-    state.final_result  = build_result["_raw"]
-    state.end_time      = time.perf_counter()
-
-    log.info(
-        "orchestrator: complete session=%s elapsed_ms=%.0f task=%s",
-        session_id, state.elapsed_ms(), task.id,
-    )
-
-    return {
+    state.current_step = "finalizing"
+    final_response = {
         "status":       "success",
         "orchestrated": True,
         "summary":      build_result["summary"],
@@ -201,6 +260,25 @@ async def execute_builder_task(
         "task":         task.summary_dict(),
         **build_result["_raw"],
     }
+
+    # ── Stage: finalize → done ────────────────────────────────────────────────
+    try:
+        _sm_transition(task, "done", "Response assembled — task complete", brain="ceo")
+    except InvalidTransitionError as exc:
+        if exc.severity == ViolationSeverity.HARD_FAIL:
+            log.error("orchestrator: finalize → done blocked (hard) — %s", exc)
+            # Response is already assembled — return it but log the anomaly.
+            # This should never happen in practice (finalize → done is valid).
+
+    state.final_status = "complete"
+    state.final_result = build_result["_raw"]
+    state.end_time     = time.perf_counter()
+
+    log.info(
+        "orchestrator: complete session=%s elapsed_ms=%.0f task=%s",
+        session_id, state.elapsed_ms(), task.id,
+    )
+    return final_response
 
 
 # ---------------------------------------------------------------------------
@@ -348,35 +426,46 @@ async def _escalate_to_doctor(
 
     if doctor_result["status"] == "fail":
         state.final_status = "failed"
+        if task is not None:
+            try:
+                _sm_transition(task, "failed", "Doctor could not diagnose — giving up", brain="ceo")
+            except InvalidTransitionError:
+                pass
         return _error_response(state, "Doctor could not diagnose the issue.", doctor_result)
 
-    # Doctor succeeded — create approval request
+    # Doctor succeeded — gate the fix behind approval (action_type="doctor_fix")
     fix_steps = doctor_result["_raw"].get("files_updated", [])
     approval  = request_approval(
         session_id     = state.session_id,
+        action_type    = "doctor_fix",          # expanded approval catalog
         module         = "builder",
         issue          = issue,
         proposed_fix   = doctor_result.get("proposed_fix", ""),
-        fix_steps      = [step.get("description", "") for step in (fix_steps if isinstance(fix_steps, list) else [])],
+        fix_steps      = [s.get("description", "") for s in (fix_steps if isinstance(fix_steps, list) else [])],
         affected_files = doctor_result.get("affected_files", []),
         severity       = "medium",
     )
     state.set_approval_pending(approval)
     state.final_status = "needs_approval"
+    if task is not None:
+        task.set_status("needs_approval")
+        task_registry.update(task)
 
     return {
-        "status":           "needs_approval",
-        "orchestrated":     True,
-        "summary":          f"Doctor found an issue. CEO needs your approval before applying a fix.",
-        "issue":            issue,
-        "diagnosis":        doctor_result["_raw"].get("root_cause", ""),
-        "proposed_fix":     doctor_result.get("proposed_fix", ""),
-        "approval_message": build_approval_message(approval),
-        "approval_id":      approval["proposal_id"],
-        "brains_used":      state.brains_used(),
-        "steps":            len(state.evidence_history),
-        "elapsed_ms":       state.elapsed_ms(),
+        "status":             "needs_approval",
+        "orchestrated":       True,
+        "summary":            "Doctor found an issue. CEO needs your approval before applying a fix.",
+        "issue":              issue,
+        "diagnosis":          doctor_result["_raw"].get("root_cause", ""),
+        "proposed_fix":       doctor_result.get("proposed_fix", ""),
+        "action_type":        "doctor_fix",
+        "approval_message":   build_approval_message(approval),
+        "approval_id":        approval["proposal_id"],
+        "brains_used":        state.brains_used(),
+        "steps":              len(state.evidence_history),
+        "elapsed_ms":         state.elapsed_ms(),
         "repair_memory_used": state.repair_memory_used,
+        "task":               task.summary_dict() if task is not None else {},
     }
 
 
@@ -398,6 +487,11 @@ async def resume_after_approval(
 
     state = get_or_create(session_id, decision.get("message", ""), decision.get("complexity", "simple"))
 
+    # ── Hard gate: assert approval exists before touching anything ─────────────
+    # assert_approved raises ApprovalRequiredError if approval is missing or rejected.
+    # This MUST NOT be wrapped in a try/except that swallows the error.
+    assert_approved(session_id, "doctor_fix")
+
     # Get the most recent approved proposal
     history = get_history(session_id)
     approved = next((h for h in reversed(history) if h["status"] == "approved"), None)
@@ -408,7 +502,7 @@ async def resume_after_approval(
     if approved.get("fix_steps"):
         fix_hint += f"\nSteps: {'; '.join(approved['fix_steps'][:5])}"
 
-    log.info("orchestrator: resuming after approval session=%s", session_id)
+    log.info("orchestrator: resuming after approval session=%s action_type=doctor_fix", session_id)
 
     # Re-build with approved fix
     build_result = await _build_loop(state, decision, memory, web_results, fix_hint=fix_hint)
@@ -594,12 +688,12 @@ async def stream_builder_task(
     _memory = memory or {}
     all_images = all_images or []
 
-    # ── Task lifecycle: create Task and enter input stage ─────────────────────
+    # ── Task lifecycle: create Task (always fresh per stream call) ────────────
     _task = task_registry.get_by_session(session_id)
     if _task is None or is_terminal(_task):
         _task = task_registry.create(session_id, message)
     _task.set_status("in_progress")
-    # Task starts in "input" stage — no transition needed
+    # Task starts in "input" stage — no transition needed yet
 
     # ── CEO: start ────────────────────────────────────────────────────────────
     yield _status("ceo", "Analyzing your request…")
@@ -613,26 +707,51 @@ async def stream_builder_task(
     _detected_url = _detect_github_url(message)
     if _detected_url and not _repo_report:
         yield _status("scanner", f"Inspecting repository: {_detected_url}…")
-        _gh_decision = {
-            "github_url": _detected_url,
-            "focus":      message,
-            "api_key_gh": _memory.get("github_token", ""),
-        }
-        _gh_result = await call_github_brain(_gh_decision, _memory)
-        if _gh_result["status"] == "success":
-            _repo_report = _gh_result["_raw"]
-            _memory["repo_report"] = _repo_report   # cache for this session
-            _stack   = ", ".join(_repo_report.get("tech_stack", []))
-            _feat    = ", ".join(_repo_report.get("existing_features", [])[:6])
-            _targets = ", ".join(_repo_report.get("recommended_patch_targets", [])[:4])
-            yield _status(
-                "ceo",
-                f"Repo scanned — {_repo_report.get('project_type', 'unknown')} | "
-                f"Stack: {_stack or 'unknown'} | "
-                f"Features: {_feat or 'none detected'}",
+
+        # ── Stage: input → context_ingestion ─────────────────────────────────
+        # github_brain is ONLY valid in context_ingestion stage.
+        # Transition HARD-fails if already past context window (e.g. mid-build).
+        _ctx_ok = False
+        try:
+            _sm_transition(
+                _task, "context_ingestion",
+                "GitHub URL detected — entering context ingestion before planning",
+                brain="ceo",
             )
-        else:
-            yield _status("ceo", f"Repo scan failed ({_gh_result['summary']}) — proceeding with description only.")
+            _ctx_ok = True
+        except InvalidTransitionError as _ctx_exc:
+            if _ctx_exc.severity == ViolationSeverity.HARD_FAIL:
+                yield _status("ceo", f"Context ingestion blocked (stage violation) — proceeding without repo scan.")
+                log.error("stream: context_ingestion hard-fail — %s", _ctx_exc)
+            # Soft-warn: skip gracefully
+
+        if _ctx_ok:
+            _gh_decision = {
+                "github_url": _detected_url,
+                "focus":      message,
+                "api_key_gh": _memory.get("github_token", ""),
+            }
+            try:
+                # gateway_dispatch enforces BRAIN_STAGE_MAP — github_brain is only
+                # valid in context_ingestion, which we just entered above
+                _gh_result = await gateway_dispatch("github_brain", _task, _gh_decision, _memory)
+                if _gh_result["status"] == "success":
+                    _repo_report = _gh_result["_raw"]
+                    _memory["repo_report"] = _repo_report
+                    _stack   = ", ".join(_repo_report.get("tech_stack", []))
+                    _feat    = ", ".join(_repo_report.get("existing_features", [])[:6])
+                    yield _status(
+                        "ceo",
+                        f"Repo scanned — {_repo_report.get('project_type', 'unknown')} | "
+                        f"Stack: {_stack or 'unknown'} | "
+                        f"Features: {_feat or 'none detected'}",
+                    )
+                else:
+                    yield _status("ceo", f"Repo scan failed ({_gh_result['summary']}) — proceeding with description only.")
+            except GatewayViolationError as _gve:
+                # Hard-fail: github_brain called from wrong stage — audit already emitted
+                yield _status("ceo", "Repo scan blocked by gateway — proceeding without repo context.")
+                log.error("stream: github_brain gateway violation — %s", _gve)
 
     # Build repo context string to inject into Planner + Builder
     if _repo_report:
@@ -659,13 +778,24 @@ async def stream_builder_task(
     if _repo_context_str:
         plan_decision["repo_context"] = _repo_context_str
 
-    # Stage: input → planning
+    # Stage: (context_ingestion | input) → planning
     try:
         _sm_transition(_task, "planning", "CEO routing to Planner Brain", brain="ceo")
-    except (InvalidTransitionError, GatewayViolationError) as _e:
-        log.warning("stream: stage gate on planning — %s", _e)
+    except InvalidTransitionError as _e:
+        if _e.severity == ViolationSeverity.HARD_FAIL:
+            # Terminal or QA-bypass: surface the block as a status message then abort
+            yield _status("ceo", f"Stage violation entering planning — aborting.")
+            log.error("stream: planning hard-fail — %s", _e)
+            return
+        # Soft-warn: log and continue without transition
+        log.warning("stream: planning soft-warn — %s", _e)
 
-    plan_result   = await gateway_dispatch("planner", _task, plan_decision, _memory)
+    try:
+        plan_result = await gateway_dispatch("planner", _task, plan_decision, _memory)
+    except GatewayViolationError as _gve:
+        yield _status("ceo", "Planner blocked by gateway — building without plan.")
+        log.error("stream: planner gateway violation — %s", _gve)
+        plan_result = {"status": "fail", "_raw": {}, "summary": str(_gve), "evidence": []}
 
     if plan_result["status"] == "success":
         plan_raw  = plan_result["_raw"]
@@ -682,8 +812,12 @@ async def stream_builder_task(
     # Stage: planning → building
     try:
         _sm_transition(_task, "building", "Plan approved — CEO routing to Builder Brain", brain="ceo")
-    except (InvalidTransitionError, GatewayViolationError) as _e:
-        log.warning("stream: stage gate on building — %s", _e)
+    except InvalidTransitionError as _e:
+        if _e.severity == ViolationSeverity.HARD_FAIL:
+            yield _status("ceo", "Stage violation entering building — aborting.")
+            log.error("stream: building hard-fail — %s", _e)
+            return
+        log.warning("stream: building soft-warn — %s", _e)
 
     async for chunk in _stream_build(
         message          = message,
@@ -725,8 +859,12 @@ async def stream_builder_task(
         # Stage: building → qa_hands
         try:
             _sm_transition(_task, "qa_hands", "Build complete — CEO routing to Hands QA", brain="ceo")
-        except (InvalidTransitionError, GatewayViolationError) as _e:
-            log.warning("stream: stage gate on qa_hands — %s", _e)
+        except InvalidTransitionError as _e:
+            if _e.severity == ViolationSeverity.HARD_FAIL:
+                yield _status("ceo", "Stage violation entering qa_hands — aborting.")
+                log.error("stream: qa_hands hard-fail — %s", _e)
+                return
+            log.warning("stream: qa_hands soft-warn — %s", _e)
 
         # Use standardised BrainResult wrapper (consistent with non-streaming path)
         _hands_result = await call_hands_html(_built_html, message, api_key)
@@ -792,8 +930,12 @@ async def stream_builder_task(
         # Stage: qa_hands → qa_vision
         try:
             _sm_transition(_task, "qa_vision", "Hands passed — CEO routing to Eyes QA", brain="ceo")
-        except (InvalidTransitionError, GatewayViolationError) as _e:
-            log.warning("stream: stage gate on qa_vision — %s", _e)
+        except InvalidTransitionError as _e:
+            if _e.severity == ViolationSeverity.HARD_FAIL:
+                yield _status("ceo", "Stage violation entering qa_vision — aborting.")
+                log.error("stream: qa_vision hard-fail — %s", _e)
+                return
+            log.warning("stream: qa_vision soft-warn — %s", _e)
 
         # Use standardised BrainResult wrapper (consistent with non-streaming path)
         _eyes_result = await call_eyes_html(_built_html, message, api_key)
@@ -805,13 +947,28 @@ async def stream_builder_task(
         else:
             yield _status("ceo", "Eyes: visual output approved.")
 
-    # ── CEO: task done ─────────────────────────────────────────────────────────
+    # ── Stage: qa_vision → finalize ────────────────────────────────────────────
+    # finalize = CEO assembling response — no brain active here
     try:
-        _sm_transition(_task, "done", "All QA passed — CEO delivering to user", brain="ceo")
-    except (InvalidTransitionError, GatewayViolationError) as _e:
-        log.warning("stream: stage gate on done — %s", _e)
+        _sm_transition(_task, "finalize", "All QA passed — CEO assembling final response", brain="ceo")
+    except InvalidTransitionError as _e:
+        if _e.severity == ViolationSeverity.HARD_FAIL:
+            yield _status("ceo", "Stage violation entering finalize.")
+            log.error("stream: finalize hard-fail — %s", _e)
+            return
+        log.warning("stream: finalize soft-warn — %s", _e)
 
-    # ── CEO: final approval ────────────────────────────────────────────────────
+    # ── Stage: finalize → done ─────────────────────────────────────────────────
+    try:
+        _sm_transition(_task, "done", "Response assembled — task complete", brain="ceo")
+    except InvalidTransitionError as _e:
+        if _e.severity == ViolationSeverity.HARD_FAIL:
+            log.error("stream: finalize→done hard-fail — %s", _e)
+            # Anomalous but non-recoverable here — let done event still fire
+        else:
+            log.warning("stream: finalize→done soft-warn — %s", _e)
+
+    # ── CEO: deliver ───────────────────────────────────────────────────────────
     yield _status("ceo", "Build complete. Delivering to you.")
     # Endpoint handles the done event — do not yield it here
 
